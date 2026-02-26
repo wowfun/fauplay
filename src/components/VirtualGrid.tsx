@@ -7,6 +7,7 @@ interface VirtualGridProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
   onFileClick: (file: FileItem) => void
+  onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
 }
 
@@ -14,23 +15,25 @@ const CARD_WIDTH = 160
 const CARD_HEIGHT = 180
 const GAP = 16
 
-export function VirtualGrid({ files, rootHandle, onFileClick, onDirectoryClick }: VirtualGridProps) {
+export function VirtualGrid({ files, rootHandle, onFileClick, onFileDoubleClick, onDirectoryClick }: VirtualGridProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
+    const container = containerRef.current
+    if (!container) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
         setDimensions({
-          width: containerRef.current.offsetWidth,
-          height: containerRef.current.offsetHeight,
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
         })
       }
-    }
+    })
 
-    updateDimensions()
-    window.addEventListener('resize', updateDimensions)
-    return () => window.removeEventListener('resize', updateDimensions)
+    observer.observe(container)
+    return () => observer.disconnect()
   }, [])
 
   const columnCount = useMemo(() => {
@@ -84,6 +87,11 @@ export function VirtualGrid({ files, rootHandle, onFileClick, onDirectoryClick }
                     onDirectoryClick(file.name)
                   } else {
                     onFileClick(file)
+                  }
+                }}
+                onDoubleClick={() => {
+                  if (file.kind === 'file' && onFileDoubleClick) {
+                    onFileDoubleClick(file)
                   }
                 }}
               />

@@ -3,6 +3,8 @@ const THUMBNAIL_SIZE = 180
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
 
+const thumbnailCache = new Map<string, string>()
+
 export function isImageFile(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   return IMAGE_EXTENSIONS.includes(ext)
@@ -19,12 +21,26 @@ export function isMediaFile(name: string): boolean {
 
 export async function generateThumbnail(
   file: File,
-  type: 'image' | 'video'
+  type: 'image' | 'video',
+  filePath?: string
 ): Promise<string> {
-  if (type === 'video') {
-    return generateVideoThumbnail(file)
+  if (filePath) {
+    const cached = thumbnailCache.get(filePath)
+    if (cached) return cached
   }
-  return generateImageThumbnail(file)
+
+  let url: string
+  if (type === 'video') {
+    url = await generateVideoThumbnail(file)
+  } else {
+    url = await generateImageThumbnail(file)
+  }
+
+  if (filePath) {
+    thumbnailCache.set(filePath, url)
+  }
+
+  return url
 }
 
 async function generateImageThumbnail(file: File): Promise<string> {

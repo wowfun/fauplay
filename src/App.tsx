@@ -1,10 +1,15 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { FolderOpen, Loader2 } from 'lucide-react'
 import { useFileSystem } from '@/hooks/useFileSystem'
 import { FileGrid } from '@/components/FileGrid'
 import { Toolbar } from '@/components/Toolbar'
 import { PreviewModal } from '@/components/PreviewModal'
+import { PreviewPane } from '@/components/PreviewPane'
 import type { FileItem, FilterState } from '@/types'
+
+const MIN_PANE_WIDTH_RATIO = 0.15
+const MAX_PANE_WIDTH_RATIO = 0.75
+const DEFAULT_PANE_WIDTH_RATIO = 0.4
 
 const defaultFilter: FilterState = {
   search: '',
@@ -27,8 +32,12 @@ function App() {
   } = useFileSystem()
 
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
+  const [showPreviewPane, setShowPreviewPane] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   const filteredFiles = useMemo(() => {
     return filterFiles(files, filter)
@@ -71,8 +80,19 @@ function App() {
     navigateToDirectory(dirName)
   }, [navigateToDirectory])
 
-  const handlePreview = useCallback((file: FileItem) => {
-    setPreviewFile(file)
+  const handleFileClick = useCallback((file: FileItem) => {
+    if (file.kind === 'directory') {
+      navigateToDirectory(file.name)
+    } else {
+      setSelectedFile(file)
+      setShowPreviewPane(true)
+    }
+  }, [navigateToDirectory])
+
+  const handleFileDoubleClick = useCallback((file: FileItem) => {
+    if (file.kind === 'file') {
+      setPreviewFile(file)
+    }
   }, [])
 
   const handleClosePreview = useCallback(() => {
@@ -82,6 +102,10 @@ function App() {
       setPreviewUrl(null)
     }
   }, [previewUrl])
+
+  const handleClosePane = useCallback(() => {
+    setShowPreviewPane(false)
+  }, [])
 
   if (!rootHandle) {
     return (
@@ -134,18 +158,58 @@ function App() {
         </div>
       )}
 
-      {isLoading ? (
-        <div className="flex-1 flex items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        <FileGrid
-          files={filteredFiles}
-          rootHandle={rootHandle}
-          onFileClick={handlePreview}
-          onDirectoryClick={handleDirectoryClick}
-        />
-      )}
+      <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
+        {isLoading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <FileGrid
+            files={filteredFiles}
+            rootHandle={rootHandle}
+            onFileClick={handleFileClick}
+            onFileDoubleClick={handleFileDoubleClick}
+            onDirectoryClick={handleDirectoryClick}
+          />
+        )}
+
+        {showPreviewPane && (
+          <div 
+            ref={contentRef}
+            className="flex-shrink-0 h-full relative overflow-hidden" 
+            style={{ width: `${paneWidthRatio * 100}%` }}
+          >
+            <div
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 bg-transparent transition-colors z-10"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const startX = e.clientX
+                const startRatio = paneWidthRatio
+
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const containerWidth = contentRef.current?.parentElement?.offsetWidth || window.innerWidth
+                  const delta = (startX - moveEvent.clientX) / containerWidth
+                  const newRatio = startRatio + delta
+                  setPaneWidthRatio(Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, newRatio)))
+                }
+
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove)
+                  document.removeEventListener('mouseup', handleMouseUp)
+                }
+
+                document.addEventListener('mousemove', handleMouseMove)
+                document.addEventListener('mouseup', handleMouseUp)
+              }}
+            />
+            <PreviewPane
+              file={selectedFile}
+              rootHandle={rootHandle}
+              onClose={handleClosePane}
+            />
+          </div>
+        )}
+      </div>
 
       {previewFile && previewUrl && (
         <PreviewModal

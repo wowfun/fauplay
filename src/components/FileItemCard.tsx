@@ -8,6 +8,7 @@ interface FileItemCardProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   onClick: () => void
+  onDoubleClick?: () => void
 }
 
 async function getFileFromPath(
@@ -30,7 +31,7 @@ async function getFileFromPath(
   }
 }
 
-export function FileItemCard({ file, rootHandle, onClick }: FileItemCardProps) {
+export function FileItemCard({ file, rootHandle, onClick, onDoubleClick }: FileItemCardProps) {
   const isDir = file.kind === 'directory'
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -56,7 +57,7 @@ export function FileItemCard({ file, rootHandle, onClick }: FileItemCardProps) {
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (!fileObj || cancelled) return
 
-        const url = await generateThumbnail(fileObj, mediaType)
+        const url = await generateThumbnail(fileObj, mediaType, file.path)
 
         if (!cancelled) {
           setThumbnailUrl(url)
@@ -95,6 +96,7 @@ export function FileItemCard({ file, rootHandle, onClick }: FileItemCardProps) {
   return (
     <div
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className={cn(
         "flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
         "hover:bg-accent/50"
