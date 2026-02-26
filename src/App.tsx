@@ -141,6 +141,7 @@ function App() {
       ) : (
         <FileGrid
           files={filteredFiles}
+          rootHandle={rootHandle}
           onFileClick={handlePreview}
           onDirectoryClick={handleDirectoryClick}
         />
