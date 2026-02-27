@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2 } from 'lucide-react'
 import { getMediaType } from '@/lib/thumbnail'
+import { ensureRootPath, revealInSystemExplorer } from '@/lib/reveal'
 import type { FileItem } from '@/types'
 
 interface PreviewPaneProps {
@@ -33,6 +34,8 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isRevealing, setIsRevealing] = useState(false)
+  const [revealError, setRevealError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
@@ -122,6 +125,23 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
     })
   }
 
+  const handleRevealInExplorer = async () => {
+    if (file.kind !== 'file') return
+    const rootLabel = rootHandle?.name || 'current-folder'
+    const rootPath = ensureRootPath(rootLabel)
+    if (!rootPath) return
+
+    try {
+      setRevealError(null)
+      setIsRevealing(true)
+      await revealInSystemExplorer(file.path, rootPath)
+    } catch (err) {
+      setRevealError((err as Error).message || '打开资源管理器失败')
+    } finally {
+      setIsRevealing(false)
+    }
+  }
+
   return (
     <div
       className="flex flex-col h-full bg-card border-l border-border"
@@ -175,6 +195,17 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
       </div>
 
       <div className="p-4 border-t border-border space-y-2">
+        <button
+          type="button"
+          onClick={() => void handleRevealInExplorer()}
+          disabled={isRevealing}
+          className="w-full rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+        >
+          {isRevealing ? '正在打开资源管理器...' : '在文件资源管理器中显示'}
+        </button>
+        {revealError && (
+          <p className="text-xs text-destructive">{revealError}</p>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">大小</span>
           <span>{formatSize(file.size)}</span>

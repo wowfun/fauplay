@@ -14,6 +14,7 @@
 - 右侧预览面板（单击文件）
 - 全屏预览弹窗（双击文件）
 - 键盘导航（方向键、PageUp/PageDown、Enter、Esc）
+- 可选本地集成：在 Windows 文件资源管理器中定位当前文件（WSL helper）
 
 ## 技术栈
 
@@ -38,6 +39,12 @@ npm install
 npm run dev
 ```
 
+### 启动资源管理器定位 helper（可选）
+
+```bash
+npm run reveal-helper
+```
+
 ### 构建生产版本
 
 ```bash
@@ -50,6 +57,11 @@ npm run build
 2. 在浏览器弹出的授权窗口中选择要浏览的文件夹
 3. 开始浏览图片和视频
 4. 快捷键列表见 [`docs/shortcuts.md`](docs/shortcuts.md)
+5. 常见问题排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)
+6. 若需“在文件资源管理器中显示”：
+   - 在 WSL 中启动 `npm run reveal-helper`
+   - 在预览面板点击“在文件资源管理器中显示”
+   - 首次使用时输入当前已选目录的系统绝对路径（按目录名称保存到浏览器本地存储）
 
 ## 浏览器兼容性
 
