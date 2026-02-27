@@ -117,27 +117,32 @@ export function VirtualGrid({
 
       let nextIndex = -1
       const currentIndex = getCurrentIndex()
+      const key = event.key.toLowerCase()
 
-      switch (event.key) {
-        case 'ArrowRight':
+      switch (key) {
+        case 'arrowright':
+        case 'd':
           nextIndex = Math.min(files.length - 1, currentIndex + 1)
           break
-        case 'ArrowLeft':
+        case 'arrowleft':
+        case 'a':
           nextIndex = Math.max(0, currentIndex - 1)
           break
-        case 'ArrowDown':
+        case 'arrowdown':
+        case 's':
           nextIndex = Math.min(files.length - 1, currentIndex + columnCount)
           break
-        case 'ArrowUp':
+        case 'arrowup':
+        case 'w':
           nextIndex = Math.max(0, currentIndex - columnCount)
           break
-        case 'PageDown':
+        case 'pagedown':
           nextIndex = Math.min(files.length - 1, currentIndex + pageSize)
           break
-        case 'PageUp':
+        case 'pageup':
           nextIndex = Math.max(0, currentIndex - pageSize)
           break
-        case 'Enter':
+        case 'enter':
           event.preventDefault()
           if (files[currentIndex].kind === 'directory') {
             onDirectoryClick(files[currentIndex].name)

@@ -13,7 +13,7 @@
 - 目录导航（进入子目录、返回上级）
 - 右侧预览面板（单击文件）
 - 全屏预览弹窗（双击文件）
-- 键盘导航（方向键、PageUp/PageDown、Enter、Esc）
+- 键盘导航（方向键、W/A/S/D、PageUp/PageDown、Enter、Esc）
 - 可选本地集成：在 Windows 文件资源管理器中定位当前文件（WSL helper）
 
 ## 技术栈

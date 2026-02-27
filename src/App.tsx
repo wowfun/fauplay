@@ -98,8 +98,11 @@ function App() {
     } else {
       setSelectedFile(file)
       setShowPreviewPane(true)
+      if (previewFile) {
+        setPreviewFile(file)
+      }
     }
-  }, [navigateToDirectory])
+  }, [navigateToDirectory, previewFile])
 
   const handleFileDoubleClick = useCallback((file: FileItem) => {
     if (file.kind === 'file') {
