@@ -11,7 +11,7 @@ export interface DirectoryHandle {
   name: string
   kind: 'directory'
   getFile(): Promise<File>
-  getDirectory(name: string, options?: FileSystemGetDirectoryOptions): Promise<DirectoryHandle>
+  getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<DirectoryHandle>
   values(): AsyncIterableIterator<FileSystemHandle>
 }
 

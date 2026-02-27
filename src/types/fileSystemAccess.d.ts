@@ -11,10 +11,14 @@ declare global {
   interface FileSystemDirectoryHandle extends FileSystemHandle {
     kind: 'directory'
     name: string
-    getFile(name: string): Promise<FileSystemFileHandle>
-    getDirectory(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle>
+    getFileHandle(name: string, options?: FileSystemGetFileOptions): Promise<FileSystemFileHandle>
+    getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle>
     values(): AsyncIterableIterator<FileSystemHandle>
     entries(): AsyncIterableIterator<[string, FileSystemHandle]>
+  }
+
+  interface FileSystemGetFileOptions {
+    create?: boolean
   }
 
   interface FileSystemGetDirectoryOptions {

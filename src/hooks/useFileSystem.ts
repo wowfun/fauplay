@@ -2,8 +2,16 @@ import { useState, useCallback } from 'react'
 import type { FileItem, FilterState } from '@/types'
 import { openDirectory, readDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
 
+function withBasePath(items: FileItem[], basePath: string): FileItem[] {
+  if (!basePath) return items
+  return items.map((item) => ({
+    ...item,
+    path: `${basePath}/${item.path}`,
+  }))
+}
+
 export function useFileSystem() {
-  const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
+  const [rootHandle, setRootHandle] = useState<any>(null)
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
@@ -25,7 +33,7 @@ export function useFileSystem() {
 
       const result = await readDirectory(handle, false)
       const allItems = [...result.directories, ...result.files]
-      setFiles(allItems)
+      setFiles(withBasePath(allItems, ''))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -40,19 +48,32 @@ export function useFileSystem() {
     setError(null)
 
     try {
-      const pathParts = currentPath ? currentPath.split('/') : []
-      pathParts.push(dirName)
-
-      let current: FileSystemHandle = rootHandle
-      for (const part of pathParts) {
-        current = await (current as FileSystemDirectoryHandle).getDirectory(part)
+      let current: any = rootHandle
+      
+      if (currentPath) {
+        const pathParts = currentPath.split('/')
+        for (const part of pathParts) {
+          const opts: any = { mode: 'read' }
+          const permission = await (current as any).queryPermission(opts)
+          if (permission === 'prompt') {
+            await (current as any).requestPermission(opts)
+          }
+          current = await current.getDirectoryHandle(part)
+        }
       }
 
-      const handle = current as FileSystemDirectoryHandle
-      const result = await readDirectory(handle, false)
+      const opts: any = { mode: 'read' }
+      const permission = await current.queryPermission(opts)
+      if (permission === 'prompt') {
+        await current.requestPermission(opts)
+      }
+      
+      const subDir = await current.getDirectoryHandle(dirName)
+      const result = await readDirectory(subDir, false)
       const allItems = [...result.directories, ...result.files]
-      setFiles(allItems)
-      setCurrentPath(pathParts.join('/'))
+      const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
+      setFiles(withBasePath(allItems, nextPath))
+      setCurrentPath(nextPath)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -72,18 +93,18 @@ export function useFileSystem() {
 
       if (pathParts.length === 0) {
         const result = await readDirectory(rootHandle, false)
-        setFiles([...result.directories, ...result.files])
+        setFiles(withBasePath([...result.directories, ...result.files], ''))
         setCurrentPath('')
       } else {
-        let current: FileSystemHandle = rootHandle
+        let current: any = rootHandle
         for (const part of pathParts) {
-          current = await (current as FileSystemDirectoryHandle).getDirectory(part)
+          current = await current.getDirectoryHandle(part)
         }
 
-        const handle = current as FileSystemDirectoryHandle
-        const result = await readDirectory(handle, false)
-        setFiles([...result.directories, ...result.files])
-        setCurrentPath(pathParts.join('/'))
+        const result = await readDirectory(current, false)
+        const nextPath = pathParts.join('/')
+        setFiles(withBasePath([...result.directories, ...result.files], nextPath))
+        setCurrentPath(nextPath)
       }
     } catch (err) {
       setError((err as Error).message)

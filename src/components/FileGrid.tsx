@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { VirtualGrid } from './VirtualGrid'
 import type { FileItem } from '@/types'
 
@@ -9,7 +10,7 @@ interface FileGridProps {
   onDirectoryClick: (dirName: string) => void
 }
 
-export function FileGrid({ files, rootHandle, onFileClick, onFileDoubleClick, onDirectoryClick }: FileGridProps) {
+function FileGridImpl({ files, rootHandle, onFileClick, onFileDoubleClick, onDirectoryClick }: FileGridProps) {
   return (
     <VirtualGrid
       files={files}
@@ -20,3 +21,5 @@ export function FileGrid({ files, rootHandle, onFileClick, onFileDoubleClick, on
     />
   )
 }
+
+export const FileGrid = memo(FileGridImpl)

@@ -51,7 +51,7 @@ function App() {
           let current: FileSystemHandle = rootHandle
 
           for (let i = 0; i < pathParts.length - 1; i++) {
-            current = await (current as FileSystemDirectoryHandle).getDirectory(pathParts[i])
+            current = await (current as FileSystemDirectoryHandle).getDirectoryHandle(pathParts[i])
           }
 
           const fileName = pathParts[pathParts.length - 1]

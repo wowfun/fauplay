@@ -78,8 +78,7 @@ export async function readDirectory(
 
       if (recursive) {
         const dirHandleEntry = entry as FileSystemDirectoryHandle
-        const subDir = await dirHandleEntry.getDirectory(entry.name)
-        const subResult = await readDirectory(subDir, true)
+        const subResult = await readDirectory(dirHandleEntry, true)
         files.push(...subResult.files.map(f => ({
           ...f,
           path: `${entry.name}/${f.path}`,
@@ -105,7 +104,7 @@ export async function getFileUrl(handle: FileSystemDirectoryHandle, filePath: st
       const file = await fileHandle.getFile()
       return URL.createObjectURL(file)
     } else {
-      current = await (current as FileSystemDirectoryHandle).getDirectory(part)
+      current = await (current as FileSystemDirectoryHandle).getDirectoryHandle(part)
     }
   }
 
