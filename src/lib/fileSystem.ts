@@ -70,15 +70,22 @@ export async function readDirectory(
         })
       }
     } else if (entry.kind === 'directory') {
+      const directoryHandle = entry as FileSystemDirectoryHandle
+      let isEmpty = true
+      for await (const _ of directoryHandle.values()) {
+        isEmpty = false
+        break
+      }
+
       directories.push({
         name: entry.name,
         path: entry.name,
         kind: 'directory',
+        isEmpty,
       })
 
       if (recursive) {
-        const dirHandleEntry = entry as FileSystemDirectoryHandle
-        const subResult = await readDirectory(dirHandleEntry, true)
+        const subResult = await readDirectory(directoryHandle, true)
         files.push(...subResult.files.map(f => ({
           ...f,
           path: `${entry.name}/${f.path}`,
@@ -109,4 +116,27 @@ export async function getFileUrl(handle: FileSystemDirectoryHandle, filePath: st
   }
 
   throw new Error('Invalid file path')
+}
+
+export async function getDirectoryItemCount(
+  rootHandle: FileSystemDirectoryHandle,
+  dirPath: string,
+  limit: number = 100
+): Promise<number> {
+  const pathParts = dirPath.split('/').filter(Boolean)
+  let current: FileSystemDirectoryHandle = rootHandle
+
+  for (const part of pathParts) {
+    current = await current.getDirectoryHandle(part)
+  }
+
+  let count = 0
+  for await (const _ of current.values()) {
+    count += 1
+    if (count >= limit) {
+      return count
+    }
+  }
+
+  return count
 }

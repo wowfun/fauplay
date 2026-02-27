@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getMediaType, generateThumbnail } from '@/lib/thumbnail'
+import { getDirectoryItemCount } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 
 interface FileItemCardProps {
@@ -36,6 +37,7 @@ export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleCli
   const isDir = file.kind === 'directory'
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [directoryItemCount, setDirectoryItemCount] = useState<number | null>(null)
 
   useEffect(() => {
     if (!rootHandle || isDir) {
@@ -79,6 +81,34 @@ export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleCli
     }
   }, [rootHandle, file.path, file.name, isDir])
 
+  useEffect(() => {
+    if (!rootHandle || !isDir) {
+      setDirectoryItemCount(null)
+      return
+    }
+
+    let cancelled = false
+
+    const loadDirectoryItemCount = async () => {
+      try {
+        const count = await getDirectoryItemCount(rootHandle, file.path)
+        if (!cancelled) {
+          setDirectoryItemCount(count)
+        }
+      } catch {
+        if (!cancelled) {
+          setDirectoryItemCount(null)
+        }
+      }
+    }
+
+    loadDirectoryItemCount()
+
+    return () => {
+      cancelled = true
+    }
+  }, [rootHandle, isDir, file.path])
+
   const getIcon = () => {
     if (isDir) return <FolderOpen className="w-12 h-12 text-yellow-500" />
     if (thumbnailUrl) return null
@@ -106,7 +136,7 @@ export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleCli
         "focus-visible:outline-none focus-visible:bg-accent/70 focus-visible:ring-1 focus-visible:ring-primary/40"
       )}
     >
-      <div className="w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">
+      <div className="relative w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
@@ -117,6 +147,11 @@ export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleCli
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         ) : (
           getIcon()
+        )}
+        {isDir && directoryItemCount !== null && (
+          <span className="absolute right-1 top-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-secondary-foreground">
+            {directoryItemCount > 99 ? '99+' : directoryItemCount}
+          </span>
         )}
       </div>
       <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>

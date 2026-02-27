@@ -2,6 +2,7 @@ export interface FileItem {
   name: string
   path: string
   kind: 'file' | 'directory'
+  isEmpty?: boolean
   size?: number
   lastModified?: Date
   mimeType?: string
@@ -31,6 +32,7 @@ export type SortOrder = 'asc' | 'desc'
 export interface FilterState {
   search: string
   type: 'all' | 'image' | 'video'
+  hideEmptyFolders: boolean
   sortBy: SortBy
   sortOrder: SortOrder
 }

@@ -116,6 +116,10 @@ export function useFileSystem() {
   const filterFiles = useCallback((files: FileItem[], filter: FilterState): FileItem[] => {
     let result = [...files]
 
+    if (filter.hideEmptyFolders) {
+      result = result.filter(f => f.kind === 'file' || !f.isEmpty)
+    }
+
     if (filter.search) {
       const search = filter.search.toLowerCase()
       result = result.filter(f => f.name.toLowerCase().includes(search))

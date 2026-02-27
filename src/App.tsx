@@ -14,6 +14,7 @@ const DEFAULT_PANE_WIDTH_RATIO = 0.4
 const defaultFilter: FilterState = {
   search: '',
   type: 'all',
+  hideEmptyFolders: true,
   sortBy: 'name',
   sortOrder: 'asc',
 }
