@@ -10,7 +10,13 @@ interface FileGridProps {
   onDirectoryClick: (dirName: string) => void
 }
 
-function FileGridImpl({ files, rootHandle, onFileClick, onFileDoubleClick, onDirectoryClick }: FileGridProps) {
+function FileGridImpl({
+  files,
+  rootHandle,
+  onFileClick,
+  onFileDoubleClick,
+  onDirectoryClick,
+}: FileGridProps) {
   return (
     <VirtualGrid
       files={files}

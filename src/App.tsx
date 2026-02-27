@@ -18,6 +18,17 @@ const defaultFilter: FilterState = {
   sortOrder: 'asc',
 }
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    target.isContentEditable
+  )
+}
+
 function App() {
   const {
     rootHandle,
@@ -106,6 +117,68 @@ function App() {
   const handleClosePane = useCallback(() => {
     setShowPreviewPane(false)
   }, [])
+
+  useEffect(() => {
+    if (filteredFiles.length === 0) {
+      setSelectedFile(null)
+      return
+    }
+    if (!selectedFile) return
+    const stillExists = filteredFiles.some((item) => item.path === selectedFile.path)
+    if (!stillExists) {
+      setSelectedFile(filteredFiles[0])
+      setShowPreviewPane(filteredFiles[0].kind === 'file')
+    }
+  }, [filteredFiles, selectedFile])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      const isTyping = isTypingTarget(event.target)
+      const key = event.key.toLowerCase()
+
+      // Ctrl/Cmd + O: open folder picker
+      if ((event.ctrlKey || event.metaKey) && key === 'o') {
+        event.preventDefault()
+        void selectDirectory()
+        return
+      }
+
+      // Ignore most global shortcuts while user is typing
+      if (isTyping) return
+
+      // Backspace: navigate up one level
+      if (event.key === 'Backspace' && currentPath) {
+        event.preventDefault()
+        void navigateUp()
+        return
+      }
+
+      // Escape: close modal first, then side preview pane
+      if (event.key === 'Escape') {
+        if (previewFile) {
+          event.preventDefault()
+          handleClosePreview()
+          return
+        }
+        if (showPreviewPane) {
+          event.preventDefault()
+          handleClosePane()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    selectDirectory,
+    navigateUp,
+    currentPath,
+    previewFile,
+    showPreviewPane,
+    handleClosePreview,
+    handleClosePane,
+  ])
 
   if (!rootHandle) {
     return (

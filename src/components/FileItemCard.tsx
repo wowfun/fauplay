@@ -7,6 +7,7 @@ import type { FileItem } from '@/types'
 interface FileItemCardProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
+  itemIndex: number
   onClick: () => void
   onDoubleClick?: () => void
 }
@@ -31,7 +32,7 @@ async function getFileFromPath(
   }
 }
 
-export function FileItemCard({ file, rootHandle, onClick, onDoubleClick }: FileItemCardProps) {
+export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleClick }: FileItemCardProps) {
   const isDir = file.kind === 'directory'
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -94,12 +95,15 @@ export function FileItemCard({ file, rootHandle, onClick, onDoubleClick }: FileI
   }
 
   return (
-    <div
+    <button
+      type="button"
+      data-grid-index={itemIndex}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       className={cn(
-        "flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
-        "hover:bg-accent/50"
+        "w-full min-w-0 flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
+        "hover:bg-accent/50",
+        "focus-visible:outline-none focus-visible:bg-accent/70 focus-visible:ring-1 focus-visible:ring-primary/40"
       )}
     >
       <div className="w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">
@@ -115,7 +119,7 @@ export function FileItemCard({ file, rootHandle, onClick, onDoubleClick }: FileI
           getIcon()
         )}
       </div>
-      <span className="text-sm text-center line-clamp-2 w-full" title={file.name}>
+      <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>
         {file.name}
       </span>
       {!isDir && (
@@ -123,6 +127,6 @@ export function FileItemCard({ file, rootHandle, onClick, onDoubleClick }: FileI
           {formatSize(file.size)}
         </span>
       )}
-    </div>
+    </button>
   )
 }

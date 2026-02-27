@@ -4,20 +4,22 @@
 
 ## 功能特性
 
-- 📁 文件夹浏览 - 选择本地文件夹进行浏览
-- 🖼️ 图片预览 - 支持常见图片格式（jpg, png, gif, webp, bmp, svg）
-- 🎬 视频播放 - 支持常见视频格式（mp4, webm, mov, avi）
-- 🔍 搜索筛选 - 按文件名搜索、按类型筛选
-- 🎞️ 幻灯片播放 - 自动播放图片，支持键盘控制
-- 🌙 暗色主题 - 护眼设计
-- ⌨️ 快捷键支持 - 流畅的键盘操作
+- 文件夹授权与浏览（基于 File System Access API）
+- 网格视图 + 虚拟列表（`react-window`）
+- 图片/视频缩略图生成（无持久化缓存，刷新后重新生成）
+- 搜索、类型筛选、排序（名称/日期/大小）
+- 目录导航（进入子目录、返回上级）
+- 右侧预览面板（单击文件）
+- 全屏预览弹窗（双击文件）
 
 ## 技术栈
 
 - React 18 + TypeScript
 - Vite
 - Tailwind CSS
-- shadcn/ui
+- react-window
+- lucide-react
+- clsx + tailwind-merge（`cn`）
 
 ## 快速开始
 
@@ -47,12 +49,16 @@ npm run build
 
 ## 浏览器兼容性
 
-- Chrome 94+
-- Edge 94+
-- Firefox 111+
-- Opera 80+
+- Chrome / Edge / Opera（推荐，支持 `showDirectoryPicker`）
+- Firefox / Safari：兼容性受限，部分能力不可用
 
-> 注意：iOS Safari 暂不支持 File System Access API
+> 注意：本项目依赖 File System Access API，移动端浏览器支持普遍较弱。
+
+## 当前未实现
+
+- 幻灯片播放
+- 完整键盘快捷键体系（当前仅部分按键行为）
+- 主题切换 UI（仅提供样式变量基础）
 
 ## 项目结构
 

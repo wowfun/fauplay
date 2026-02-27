@@ -33,15 +33,23 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const currentUrlRef = useRef<string | null>(null)
+
+  const replacePreviewUrl = useCallback((nextUrl: string | null) => {
+    if (currentUrlRef.current) {
+      URL.revokeObjectURL(currentUrlRef.current)
+    }
+    currentUrlRef.current = nextUrl
+    setPreviewUrl(nextUrl)
+  }, [])
 
   useEffect(() => {
     if (!file || !rootHandle) {
-      setPreviewUrl(null)
+      replacePreviewUrl(null)
       return
     }
 
     let cancelled = false
-    let objectUrl: string | null = null
 
     const loadFile = async () => {
       setIsLoading(true)
@@ -51,10 +59,12 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (!fileObj || cancelled) return
 
-        objectUrl = URL.createObjectURL(fileObj)
-        if (!cancelled) {
-          setPreviewUrl(objectUrl)
+        const nextUrl = URL.createObjectURL(fileObj)
+        if (cancelled) {
+          URL.revokeObjectURL(nextUrl)
+          return
         }
+        replacePreviewUrl(nextUrl)
       } catch (err) {
         if (!cancelled) {
           setError((err as Error).message)
@@ -70,11 +80,16 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
 
     return () => {
       cancelled = true
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
+    }
+  }, [file, rootHandle, replacePreviewUrl])
+
+  useEffect(() => {
+    return () => {
+      if (currentUrlRef.current) {
+        URL.revokeObjectURL(currentUrlRef.current)
       }
     }
-  }, [file, rootHandle])
+  }, [])
 
   if (!file) {
     return (

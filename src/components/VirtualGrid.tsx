@@ -1,5 +1,6 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { FixedSizeGrid as Grid } from 'react-window'
+import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileItemCard } from './FileItemCard'
 import type { FileItem } from '@/types'
 
@@ -15,8 +16,16 @@ const CARD_WIDTH = 160
 const CARD_HEIGHT = 180
 const GAP = 16
 
-export function VirtualGrid({ files, rootHandle, onFileClick, onFileDoubleClick, onDirectoryClick }: VirtualGridProps) {
+export function VirtualGrid({
+  files,
+  rootHandle,
+  onFileClick,
+  onFileDoubleClick,
+  onDirectoryClick,
+}: VirtualGridProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<FixedSizeGridType>(null)
+  const selectedIndexRef = useRef(0)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
   useEffect(() => {
@@ -44,6 +53,112 @@ export function VirtualGrid({ files, rootHandle, onFileClick, onFileDoubleClick,
     return Math.ceil(files.length / columnCount)
   }, [files.length, columnCount])
 
+  const pageSize = useMemo(() => {
+    const visibleRows = Math.max(1, Math.floor(dimensions.height / (CARD_HEIGHT + GAP)))
+    return visibleRows * columnCount
+  }, [dimensions.height, columnCount])
+
+  useEffect(() => {
+    if (files.length === 0) {
+      selectedIndexRef.current = 0
+      return
+    }
+    selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
+  }, [files])
+
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable
+      )
+    }
+
+    const focusItem = (index: number) => {
+      const clampedIndex = Math.max(0, Math.min(files.length - 1, index))
+      selectedIndexRef.current = clampedIndex
+      const targetFile = files[clampedIndex]
+
+      gridRef.current?.scrollToItem({
+        rowIndex: Math.floor(clampedIndex / columnCount),
+        columnIndex: clampedIndex % columnCount,
+        align: 'smart',
+      })
+
+      requestAnimationFrame(() => {
+        const element = containerRef.current?.querySelector<HTMLButtonElement>(
+          `[data-grid-index="${clampedIndex}"]`
+        )
+        element?.focus({ preventScroll: true })
+      })
+
+      // Keep preview pane in sync with keyboard selection for files.
+      if (targetFile.kind === 'file') {
+        onFileClick(targetFile)
+      }
+    }
+
+    const getCurrentIndex = () => {
+      const active = document.activeElement as HTMLElement | null
+      const rawIndex = active?.dataset?.gridIndex
+      if (rawIndex === undefined) {
+        return selectedIndexRef.current
+      }
+      const index = Number(rawIndex)
+      return Number.isNaN(index) ? selectedIndexRef.current : index
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (files.length === 0 || isTypingTarget(event.target)) return
+
+      let nextIndex = -1
+      const currentIndex = getCurrentIndex()
+
+      switch (event.key) {
+        case 'ArrowRight':
+          nextIndex = Math.min(files.length - 1, currentIndex + 1)
+          break
+        case 'ArrowLeft':
+          nextIndex = Math.max(0, currentIndex - 1)
+          break
+        case 'ArrowDown':
+          nextIndex = Math.min(files.length - 1, currentIndex + columnCount)
+          break
+        case 'ArrowUp':
+          nextIndex = Math.max(0, currentIndex - columnCount)
+          break
+        case 'PageDown':
+          nextIndex = Math.min(files.length - 1, currentIndex + pageSize)
+          break
+        case 'PageUp':
+          nextIndex = Math.max(0, currentIndex - pageSize)
+          break
+        case 'Enter':
+          event.preventDefault()
+          if (files[currentIndex].kind === 'directory') {
+            onDirectoryClick(files[currentIndex].name)
+          } else if (onFileDoubleClick) {
+            onFileDoubleClick(files[currentIndex])
+          } else {
+            onFileClick(files[currentIndex])
+          }
+          return
+        default:
+          return
+      }
+
+      event.preventDefault()
+      if (nextIndex >= 0) focusItem(nextIndex)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [files, columnCount, pageSize, onDirectoryClick, onFileDoubleClick, onFileClick])
+
   if (files.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -55,6 +170,7 @@ export function VirtualGrid({ files, rootHandle, onFileClick, onFileDoubleClick,
   return (
     <div ref={containerRef} className="flex-1 overflow-hidden">
       <Grid
+        ref={gridRef}
         columnCount={columnCount}
         columnWidth={CARD_WIDTH + GAP}
         height={dimensions.height}
@@ -82,7 +198,9 @@ export function VirtualGrid({ files, rootHandle, onFileClick, onFileDoubleClick,
               <FileItemCard
                 file={file}
                 rootHandle={rootHandle}
+                itemIndex={index}
                 onClick={() => {
+                  selectedIndexRef.current = index
                   if (file.kind === 'directory') {
                     onDirectoryClick(file.name)
                   } else {
