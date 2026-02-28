@@ -10,6 +10,7 @@ interface PreviewModalProps {
 
 export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
   const [isPlaying, setIsPlaying] = useState(false)
+  const [playbackError, setPlaybackError] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -29,6 +30,7 @@ export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
 
   useEffect(() => {
     setIsPlaying(false)
+    setPlaybackError(false)
   }, [file])
 
   const isImage = /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(file.name)
@@ -62,14 +64,22 @@ export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
         )}
 
         {isVideo && (
-          <video
-            src={fileUrl}
-            controls
-            autoPlay={isPlaying}
-            className="max-w-full max-h-[90vh]"
-          >
-            您的浏览器不支持视频播放
-          </video>
+          <div className="max-w-full">
+            <video
+              src={fileUrl}
+              controls
+              autoPlay={isPlaying}
+              className="max-w-full max-h-[90vh]"
+              onError={() => setPlaybackError(true)}
+            >
+              您的浏览器不支持视频播放
+            </video>
+            {playbackError && (
+              <p className="text-xs text-white/80 mt-2 text-center">
+                当前浏览器可能不支持该视频编码（AVI 更常见），建议转码为 MP4(H.264/AAC)。
+              </p>
+            )}
+          </div>
         )}
 
         <div className="text-center text-white mt-4">

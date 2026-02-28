@@ -6,9 +6,24 @@ interface ToolbarProps {
   onFilterChange: (filter: FilterState) => void
   currentPath: string
   onNavigateUp: () => void
+  totalCount: number
+  imageCount: number
+  videoCount: number
 }
 
-export function Toolbar({ filter, onFilterChange, currentPath, onNavigateUp }: ToolbarProps) {
+function formatCount(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
+
+export function Toolbar({
+  filter,
+  onFilterChange,
+  currentPath,
+  onNavigateUp,
+  totalCount,
+  imageCount,
+  videoCount,
+}: ToolbarProps) {
   return (
     <div className="flex items-center gap-4 p-4 border-b border-border">
       {currentPath && (
@@ -50,7 +65,8 @@ export function Toolbar({ filter, onFilterChange, currentPath, onNavigateUp }: T
           }`}
         >
           <Files className="w-4 h-4" />
-          全部
+          <span>全部</span>
+          <span className="text-xs opacity-80">({formatCount(totalCount)})</span>
         </button>
         <button
           onClick={() => onFilterChange({ ...filter, type: 'image' })}
@@ -59,7 +75,8 @@ export function Toolbar({ filter, onFilterChange, currentPath, onNavigateUp }: T
           }`}
         >
           <Image className="w-4 h-4" />
-          图片
+          <span>图片</span>
+          <span className="text-xs opacity-80">({formatCount(imageCount)})</span>
         </button>
         <button
           onClick={() => onFilterChange({ ...filter, type: 'video' })}
@@ -68,7 +85,8 @@ export function Toolbar({ filter, onFilterChange, currentPath, onNavigateUp }: T
           }`}
         >
           <Video className="w-4 h-4" />
-          视频
+          <span>视频</span>
+          <span className="text-xs opacity-80">({formatCount(videoCount)})</span>
         </button>
       </div>
 

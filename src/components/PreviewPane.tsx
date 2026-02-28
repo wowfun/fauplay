@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2 } from 'lucide-react'
+import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2, FolderOpen, Play } from 'lucide-react'
 import { getMediaType } from '@/lib/thumbnail'
-import { ensureRootPath, revealInSystemExplorer } from '@/lib/reveal'
+import { createObjectUrlForFile } from '@/lib/fileSystem'
+import { ensureRootPath, openWithSystemDefaultApp, revealInSystemExplorer } from '@/lib/reveal'
 import type { FileItem } from '@/types'
 
 interface PreviewPaneProps {
@@ -34,7 +35,10 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [playbackError, setPlaybackError] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
+  const [isOpening, setIsOpening] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
   const [revealError, setRevealError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
 
@@ -57,12 +61,13 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
     const loadFile = async () => {
       setIsLoading(true)
       setError(null)
+      setPlaybackError(false)
 
       try {
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (!fileObj || cancelled) return
 
-        const nextUrl = URL.createObjectURL(fileObj)
+        const nextUrl = createObjectUrlForFile(fileObj, file.name)
         if (cancelled) {
           URL.revokeObjectURL(nextUrl)
           return
@@ -107,24 +112,6 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
   const isImage = getMediaType(file.name) === 'image'
   const isVideo = getMediaType(file.name) === 'video'
 
-  const formatSize = (bytes?: number) => {
-    if (!bytes) return '未知'
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  const formatDate = (date?: Date) => {
-    if (!date) return '未知'
-    return date.toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
   const handleRevealInExplorer = async () => {
     if (file.kind !== 'file') return
     const rootLabel = rootHandle?.name || 'current-folder'
@@ -142,6 +129,23 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
     }
   }
 
+  const handleOpenWithSystemPlayer = async () => {
+    if (file.kind !== 'file') return
+    const rootLabel = rootHandle?.name || 'current-folder'
+    const rootPath = ensureRootPath(rootLabel)
+    if (!rootPath) return
+
+    try {
+      setOpenError(null)
+      setIsOpening(true)
+      await openWithSystemDefaultApp(file.path, rootPath)
+    } catch (err) {
+      setOpenError((err as Error).message || '打开系统播放器失败')
+    } finally {
+      setIsOpening(false)
+    }
+  }
+
   return (
     <div
       className="flex flex-col h-full bg-card border-l border-border"
@@ -156,63 +160,77 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
         </button>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
-        {isLoading ? (
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        ) : error ? (
-          <div className="text-destructive text-sm text-center">
-            <p>加载失败</p>
-            <p className="text-xs mt-1">{error}</p>
-          </div>
-        ) : previewUrl && isImage ? (
-          <img
-            src={previewUrl}
-            alt={file.name}
-            className="max-w-full"
-            style={{ maxHeight: 'calc(100vh - 250px)', height: 'auto' }}
-          />
-        ) : previewUrl && isVideo ? (
-          <video
-            src={previewUrl}
-            controls
-            className="max-w-full"
-            style={{ maxHeight: 'calc(100vh - 250px)' }}
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex flex-col items-center gap-2 py-3 px-2 border-r border-border">
+          <button
+            type="button"
+            onClick={() => void handleRevealInExplorer()}
+            disabled={isRevealing}
+            className="p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
+            title="在文件资源管理器中显示"
           >
-            您的浏览器不支持视频播放
-          </video>
-        ) : (
-          <div className="flex flex-col items-center text-muted-foreground">
-            {isImage ? (
-              <ImageIcon className="w-16 h-16 mb-2" />
-            ) : isVideo ? (
-              <VideoIcon className="w-16 h-16 mb-2" />
-            ) : (
-              <File className="w-16 h-16 mb-2" />
-            )}
-            <p className="text-sm">无法预览此文件</p>
+            <FolderOpen className="w-4 h-4" />
+          </button>
+          {isVideo && (
+            <button
+              type="button"
+              onClick={() => void handleOpenWithSystemPlayer()}
+              disabled={isOpening}
+              className="p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
+              title="用系统默认播放器打开"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+          )}
+          <div className="mt-auto space-y-1 text-[10px] text-destructive text-center">
+            {openError && <p>{openError}</p>}
+            {revealError && <p>{revealError}</p>}
           </div>
-        )}
-      </div>
-
-      <div className="p-4 border-t border-border space-y-2">
-        <button
-          type="button"
-          onClick={() => void handleRevealInExplorer()}
-          disabled={isRevealing}
-          className="w-full rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
-        >
-          {isRevealing ? '正在打开资源管理器...' : '在文件资源管理器中显示'}
-        </button>
-        {revealError && (
-          <p className="text-xs text-destructive">{revealError}</p>
-        )}
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">大小</span>
-          <span>{formatSize(file.size)}</span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">修改时间</span>
-          <span>{formatDate(file.lastModified)}</span>
+
+        <div className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
+          {isLoading ? (
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          ) : error ? (
+            <div className="text-destructive text-sm text-center">
+              <p>加载失败</p>
+              <p className="text-xs mt-1">{error}</p>
+            </div>
+          ) : previewUrl && isImage ? (
+            <img
+              src={previewUrl}
+              alt={file.name}
+              className="max-w-full max-h-full"
+              style={{ height: 'auto' }}
+            />
+          ) : previewUrl && isVideo ? (
+            <div className="w-full max-w-full flex flex-col items-center">
+              <video
+                src={previewUrl}
+                controls
+                className="max-w-full max-h-full"
+                onError={() => setPlaybackError(true)}
+              >
+                您的浏览器不支持视频播放
+              </video>
+              {playbackError && (
+                <p className="mt-2 text-xs text-muted-foreground text-center">
+                  当前浏览器可能不支持该视频的编码格式（尤其常见于 AVI）。建议转码为 MP4(H.264/AAC) 后再播放。
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center text-muted-foreground">
+              {isImage ? (
+                <ImageIcon className="w-16 h-16 mb-2" />
+              ) : isVideo ? (
+                <VideoIcon className="w-16 h-16 mb-2" />
+              ) : (
+                <File className="w-16 h-16 mb-2" />
+              )}
+              <p className="text-sm">无法预览此文件</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

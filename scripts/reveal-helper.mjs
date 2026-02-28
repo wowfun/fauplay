@@ -49,7 +49,6 @@ async function revealInExplorer(rootPath, relativePath) {
   const targetPath = joinTargetPath(rootPath, relativePath)
   const windowsPath = await toWindowsPath(targetPath)
   try {
-    // Matches the form verified in WSL shell:
     // explorer.exe /select, "X:\\path\\to\\file.ext"
     await new Promise((resolve, reject) => {
       const child = spawn('explorer.exe', ['/select,', windowsPath], {
@@ -78,6 +77,44 @@ async function revealInExplorer(rootPath, relativePath) {
   }
 }
 
+async function openWithSystemDefaultApp(rootPath, relativePath) {
+  if (!rootPath || !relativePath) {
+    throw new Error('rootPath and relativePath are required')
+  }
+
+  if (hasUnsafeSegment(relativePath)) {
+    throw new Error('relativePath contains unsafe segments')
+  }
+
+  const targetPath = joinTargetPath(rootPath, relativePath)
+  const windowsPath = await toWindowsPath(targetPath)
+  try {
+    // explorer.exe <filePath> opens file with system-associated app.
+    await new Promise((resolve, reject) => {
+      const child = spawn('explorer.exe', [windowsPath], {
+        stdio: 'ignore',
+      })
+
+      child.once('error', reject)
+      child.once('spawn', resolve)
+    })
+  } catch (error) {
+    const message = `${error?.message || ''}\n${error?.stderr || ''}`
+    const interopLikelyDisabled =
+      message.includes('MZ') ||
+      message.includes('No such device') ||
+      message.includes('Syntax error: newline unexpected')
+
+    if (interopLikelyDisabled) {
+      throw new Error(
+        'WSL Windows interop seems disabled. Enable it in /etc/wsl.conf: [interop] enabled=true, then run "wsl --shutdown" from Windows and reopen WSL.'
+      )
+    }
+
+    throw new Error(message || 'Failed to open explorer')
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   setCorsHeaders(res)
 
@@ -87,7 +124,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  if (req.method !== 'POST' || req.url !== '/reveal') {
+  if (req.method !== 'POST' || (req.url !== '/reveal' && req.url !== '/open')) {
     res.statusCode = 404
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify({ ok: false, error: 'Not found' }))
@@ -102,7 +139,11 @@ const server = http.createServer(async (req, res) => {
   req.on('end', async () => {
     try {
       const payload = JSON.parse(body || '{}')
-      await revealInExplorer(payload.rootPath, payload.relativePath)
+      if (req.url === '/open') {
+        await openWithSystemDefaultApp(payload.rootPath, payload.relativePath)
+      } else {
+        await revealInExplorer(payload.rootPath, payload.relativePath)
+      }
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({ ok: true }))

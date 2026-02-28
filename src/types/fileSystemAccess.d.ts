@@ -15,6 +15,8 @@ declare global {
     getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle>
     values(): AsyncIterableIterator<FileSystemHandle>
     entries(): AsyncIterableIterator<[string, FileSystemHandle]>
+    queryPermission(descriptor?: FileSystemPermissionDescriptor): Promise<PermissionState>
+    requestPermission(descriptor?: FileSystemPermissionDescriptor): Promise<PermissionState>
   }
 
   interface FileSystemGetFileOptions {
@@ -34,6 +36,10 @@ declare global {
   interface FileSystemHandle {
     kind: 'file' | 'directory'
     name: string
+  }
+
+  interface FileSystemPermissionDescriptor {
+    mode?: 'read' | 'readwrite'
   }
 }
 

@@ -1,4 +1,5 @@
 const REVEAL_HELPER_URL = 'http://127.0.0.1:3210/reveal'
+const OPEN_HELPER_URL = 'http://127.0.0.1:3210/open'
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
 
 type RootPathMap = Record<string, string>
@@ -55,6 +56,27 @@ export async function revealInSystemExplorer(relativePath: string, rootPath: str
     const result = await response.json().catch(() => ({ ok: false, error: 'Invalid response' }))
     if (!response.ok || !result.ok) {
       throw new Error(result.error || 'Failed to reveal file')
+    }
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+export async function openWithSystemDefaultApp(relativePath: string, rootPath: string): Promise<void> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000)
+
+  try {
+    const response = await fetch(OPEN_HELPER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rootPath, relativePath }),
+      signal: controller.signal,
+    })
+
+    const result = await response.json().catch(() => ({ ok: false, error: 'Invalid response' }))
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || 'Failed to open file')
     }
   } finally {
     window.clearTimeout(timeoutId)

@@ -36,6 +36,25 @@ export function getMimeType(name: string): string {
   return mimeTypes[ext] || 'application/octet-stream'
 }
 
+export function createObjectUrlForFile(file: File, fallbackName?: string): string {
+  if (file.type) {
+    return URL.createObjectURL(file)
+  }
+
+  const inferredName = fallbackName || file.name
+  const inferredMimeType = getMimeType(inferredName)
+  if (inferredMimeType === 'application/octet-stream') {
+    return URL.createObjectURL(file)
+  }
+
+  const typedFile = new File([file], inferredName, {
+    type: inferredMimeType,
+    lastModified: file.lastModified,
+  })
+
+  return URL.createObjectURL(typedFile)
+}
+
 export async function openDirectory(): Promise<FileSystemDirectoryHandle | null> {
   try {
     const handle = await window.showDirectoryPicker()
@@ -109,7 +128,7 @@ export async function getFileUrl(handle: FileSystemDirectoryHandle, filePath: st
     if (part.includes('.')) {
       const fileHandle = await (current as FileSystemDirectoryHandle).getFileHandle(part)
       const file = await fileHandle.getFile()
-      return URL.createObjectURL(file)
+      return createObjectUrlForFile(file, part)
     } else {
       current = await (current as FileSystemDirectoryHandle).getDirectoryHandle(part)
     }

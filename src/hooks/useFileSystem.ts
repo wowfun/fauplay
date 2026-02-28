@@ -11,7 +11,7 @@ function withBasePath(items: FileItem[], basePath: string): FileItem[] {
 }
 
 export function useFileSystem() {
-  const [rootHandle, setRootHandle] = useState<any>(null)
+  const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
@@ -48,21 +48,21 @@ export function useFileSystem() {
     setError(null)
 
     try {
-      let current: any = rootHandle
+      let current: FileSystemDirectoryHandle = rootHandle
       
       if (currentPath) {
         const pathParts = currentPath.split('/')
         for (const part of pathParts) {
-          const opts: any = { mode: 'read' }
-          const permission = await (current as any).queryPermission(opts)
+          const opts: FileSystemPermissionDescriptor = { mode: 'read' }
+          const permission = await current.queryPermission(opts)
           if (permission === 'prompt') {
-            await (current as any).requestPermission(opts)
+            await current.requestPermission(opts)
           }
           current = await current.getDirectoryHandle(part)
         }
       }
 
-      const opts: any = { mode: 'read' }
+      const opts: FileSystemPermissionDescriptor = { mode: 'read' }
       const permission = await current.queryPermission(opts)
       if (permission === 'prompt') {
         await current.requestPermission(opts)
@@ -96,7 +96,7 @@ export function useFileSystem() {
         setFiles(withBasePath([...result.directories, ...result.files], ''))
         setCurrentPath('')
       } else {
-        let current: any = rootHandle
+        let current: FileSystemDirectoryHandle = rootHandle
         for (const part of pathParts) {
           current = await current.getDirectoryHandle(part)
         }
