@@ -161,7 +161,7 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        <div className="flex flex-col items-center gap-2 py-3 px-2 border-r border-border">
+        <div className="w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r border-border">
           <button
             type="button"
             onClick={() => void handleRevealInExplorer()}
@@ -188,47 +188,57 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
+        <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden">
           {isLoading ? (
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            <div className="w-full h-full flex items-center justify-center p-4">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            </div>
           ) : error ? (
-            <div className="text-destructive text-sm text-center">
-              <p>加载失败</p>
-              <p className="text-xs mt-1">{error}</p>
+            <div className="w-full h-full flex items-center justify-center p-4">
+              <div className="text-destructive text-sm text-center">
+                <p>加载失败</p>
+                <p className="text-xs mt-1">{error}</p>
+              </div>
             </div>
           ) : previewUrl && isImage ? (
-            <img
-              src={previewUrl}
-              alt={file.name}
-              className="max-w-full max-h-full"
-              style={{ height: 'auto' }}
-            />
+            <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
+              <img
+                src={previewUrl}
+                alt={file.name}
+                className="block w-auto h-auto max-w-full max-h-[85vh] object-contain"
+              />
+            </div>
           ) : previewUrl && isVideo ? (
-            <div className="w-full max-w-full flex flex-col items-center">
+            <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
               <video
                 src={previewUrl}
                 controls
-                className="max-w-full max-h-full"
+                className="block w-auto h-auto max-w-full max-h-[85vh] object-contain"
                 onError={() => setPlaybackError(true)}
               >
                 您的浏览器不支持视频播放
               </video>
-              {playbackError && (
-                <p className="mt-2 text-xs text-muted-foreground text-center">
-                  当前浏览器可能不支持该视频的编码格式（尤其常见于 AVI）。建议转码为 MP4(H.264/AAC) 后再播放。
-                </p>
-              )}
             </div>
           ) : (
-            <div className="flex flex-col items-center text-muted-foreground">
-              {isImage ? (
-                <ImageIcon className="w-16 h-16 mb-2" />
-              ) : isVideo ? (
-                <VideoIcon className="w-16 h-16 mb-2" />
-              ) : (
-                <File className="w-16 h-16 mb-2" />
-              )}
-              <p className="text-sm">无法预览此文件</p>
+            <div className="w-full h-full flex items-center justify-center p-4">
+              <div className="flex flex-col items-center text-muted-foreground">
+                {isImage ? (
+                  <ImageIcon className="w-16 h-16 mb-2" />
+                ) : isVideo ? (
+                  <VideoIcon className="w-16 h-16 mb-2" />
+                ) : (
+                  <File className="w-16 h-16 mb-2" />
+                )}
+                <p className="text-sm">无法预览此文件</p>
+              </div>
+            </div>
+          )}
+
+          {playbackError && isVideo && (
+            <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/55 px-3 py-2">
+              <p className="text-xs text-white text-center">
+                当前浏览器可能不支持该视频的编码格式（尤其常见于 AVI）。建议转码为 MP4(H.264/AAC) 后再播放。
+              </p>
             </div>
           )}
         </div>

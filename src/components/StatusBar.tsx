@@ -30,7 +30,7 @@ export function StatusBar({ visibleFiles, selectedFile }: StatusBarProps) {
   const showMeta = selectedFile?.kind === 'file'
 
   return (
-    <div className="flex items-center gap-4 px-4 h-8 border-t border-border text-xs text-muted-foreground">
+    <div className="flex-shrink-0 flex items-center gap-4 px-4 h-8 border-t border-border text-xs text-muted-foreground">
       <span className="whitespace-nowrap">可见: {visibleCount}</span>
       <span className="whitespace-nowrap">已选: {selectedCount}</span>
       {showMeta && (

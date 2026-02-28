@@ -201,7 +201,7 @@ function App() {
 
   if (!rootHandle) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-8">
+      <div className="h-screen bg-background flex flex-col items-center justify-center p-8 overflow-hidden">
         <div className="text-center max-w-md">
           <h1 className="text-4xl font-bold mb-4">Fauplay</h1>
           <p className="text-muted-foreground mb-8">
@@ -236,7 +236,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <Toolbar
         filter={filter}
         onFilterChange={setFilter}
