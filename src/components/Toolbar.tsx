@@ -1,4 +1,4 @@
-import { Search, ArrowUpDown, Image, Video, Files, ChevronLeft } from 'lucide-react'
+import { Search, ArrowUpDown, Image, Video, Files, ChevronLeft, Rows3 } from 'lucide-react'
 import type { FilterState } from '@/types'
 
 interface ToolbarProps {
@@ -6,6 +6,8 @@ interface ToolbarProps {
   onFilterChange: (filter: FilterState) => void
   currentPath: string
   onNavigateUp: () => void
+  isFlattenView: boolean
+  onToggleFlattenView: () => void
   totalCount: number
   imageCount: number
   videoCount: number
@@ -20,6 +22,8 @@ export function Toolbar({
   onFilterChange,
   currentPath,
   onNavigateUp,
+  isFlattenView,
+  onToggleFlattenView,
   totalCount,
   imageCount,
   videoCount,
@@ -98,6 +102,17 @@ export function Toolbar({
         title="隐藏空文件夹"
       >
         隐藏空文件夹
+      </button>
+
+      <button
+        onClick={onToggleFlattenView}
+        className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
+          isFlattenView ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+        }`}
+        title="平铺显示当前目录及其子目录中的所有文件"
+      >
+        <Rows3 className="w-4 h-4" />
+        <span>平铺视图</span>
       </button>
 
       <select

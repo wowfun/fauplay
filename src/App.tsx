@@ -37,11 +37,13 @@ function App() {
     rootHandle,
     files,
     currentPath,
+    isFlattenView,
     isLoading,
     error,
     selectDirectory,
     navigateToDirectory,
     navigateUp,
+    setFlattenView,
     filterFiles,
   } = useFileSystem()
 
@@ -242,6 +244,10 @@ function App() {
         onFilterChange={setFilter}
         currentPath={currentPath}
         onNavigateUp={navigateUp}
+        isFlattenView={isFlattenView}
+        onToggleFlattenView={() => {
+          void setFlattenView(!isFlattenView)
+        }}
         totalCount={totalCount}
         imageCount={imageCount}
         videoCount={videoCount}
@@ -262,6 +268,7 @@ function App() {
           <FileGrid
             files={filteredFiles}
             rootHandle={rootHandle}
+            selectedFilePath={selectedFile?.path}
             onFileClick={handleFileClick}
             onFileDoubleClick={handleFileDoubleClick}
             onDirectoryClick={handleDirectoryClick}

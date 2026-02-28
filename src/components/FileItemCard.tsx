@@ -9,6 +9,7 @@ interface FileItemCardProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   itemIndex: number
+  isSelected?: boolean
   onClick: () => void
   onDoubleClick?: () => void
 }
@@ -33,7 +34,14 @@ async function getFileFromPath(
   }
 }
 
-export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleClick }: FileItemCardProps) {
+export function FileItemCard({
+  file,
+  rootHandle,
+  itemIndex,
+  isSelected = false,
+  onClick,
+  onDoubleClick,
+}: FileItemCardProps) {
   const isDir = file.kind === 'directory'
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -133,7 +141,8 @@ export function FileItemCard({ file, rootHandle, itemIndex, onClick, onDoubleCli
       className={cn(
         "w-full min-w-0 flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
         "hover:bg-accent/50",
-        "focus-visible:outline-none focus-visible:bg-accent/70 focus-visible:ring-1 focus-visible:ring-primary/40"
+        "focus-visible:outline-none focus-visible:bg-accent/70 focus-visible:ring-1 focus-visible:ring-primary/40",
+        isSelected && "bg-accent/70 ring-1 ring-primary/40"
       )}
     >
       <div className="relative w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">

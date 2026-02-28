@@ -7,6 +7,7 @@ import type { FileItem } from '@/types'
 interface VirtualGridProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
+  selectedFilePath?: string | null
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
@@ -19,6 +20,7 @@ const GAP = 16
 export function VirtualGrid({
   files,
   rootHandle,
+  selectedFilePath,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
@@ -204,6 +206,7 @@ export function VirtualGrid({
                 file={file}
                 rootHandle={rootHandle}
                 itemIndex={index}
+                isSelected={file.kind === 'file' && file.path === selectedFilePath}
                 onClick={() => {
                   selectedIndexRef.current = index
                   if (file.kind === 'directory') {
