@@ -1,14 +1,28 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { FileItem } from '@/types'
 
 interface PreviewModalProps {
   file: FileItem
   fileUrl: string
   onClose: () => void
+  autoPlayOnOpen?: boolean
+  canPrev: boolean
+  canNext: boolean
+  onPrev: () => void
+  onNext: () => void
 }
 
-export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
+export function PreviewModal({
+  file,
+  fileUrl,
+  onClose,
+  autoPlayOnOpen = false,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+}: PreviewModalProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -29,9 +43,10 @@ export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
   }, [onClose, file.name])
 
   useEffect(() => {
-    setIsPlaying(false)
+    const isVideoFile = /\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)
+    setIsPlaying(autoPlayOnOpen && isVideoFile)
     setPlaybackError(false)
-  }, [file])
+  }, [file, autoPlayOnOpen])
 
   const isImage = /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(file.name)
   const isVideo = /\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)
@@ -49,6 +64,32 @@ export function PreviewModal({ file, fileUrl, onClose }: PreviewModalProps) {
         className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
       >
         <X className="w-6 h-6 text-white" />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onPrev()
+        }}
+        disabled={!canPrev}
+        className="absolute left-0 top-0 bottom-0 z-10 w-16 disabled:pointer-events-none disabled:opacity-0 hover:bg-white/10 transition-colors"
+        title="上一个文件"
+      >
+        <span className="sr-only">上一个文件</span>
+        {canPrev && <ChevronLeft className="mx-auto h-8 w-8 text-white" />}
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onNext()
+        }}
+        disabled={!canNext}
+        className="absolute right-0 top-0 bottom-0 z-10 w-16 disabled:pointer-events-none disabled:opacity-0 hover:bg-white/10 transition-colors"
+        title="下一个文件"
+      >
+        <span className="sr-only">下一个文件</span>
+        {canNext && <ChevronRight className="mx-auto h-8 w-8 text-white" />}
       </button>
 
       <div

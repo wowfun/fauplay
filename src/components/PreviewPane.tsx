@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2, FolderOpen, Play } from 'lucide-react'
+import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2, FolderOpen, Play, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getMediaType } from '@/lib/thumbnail'
 import { createObjectUrlForFile } from '@/lib/fileSystem'
 import { ensureRootPath, openWithSystemDefaultApp, revealInSystemExplorer } from '@/lib/reveal'
@@ -9,6 +9,11 @@ interface PreviewPaneProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
   onClose: () => void
+  onOpenFullscreen: () => void
+  canPrev: boolean
+  canNext: boolean
+  onPrev: () => void
+  onNext: () => void
 }
 
 async function getFileFromPath(
@@ -31,7 +36,16 @@ async function getFileFromPath(
   }
 }
 
-export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
+export function PreviewPane({
+  file,
+  rootHandle,
+  onClose,
+  onOpenFullscreen,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+}: PreviewPaneProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -189,6 +203,27 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
         </div>
 
         <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={!canPrev}
+            className="absolute left-0 top-0 bottom-0 z-10 w-14 disabled:pointer-events-none disabled:opacity-0 hover:bg-black/10 transition-colors"
+            title="上一个文件"
+          >
+            <span className="sr-only">上一个文件</span>
+            {canPrev && <ChevronLeft className="mx-auto h-6 w-6 text-white drop-shadow" />}
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={!canNext}
+            className="absolute right-0 top-0 bottom-0 z-10 w-14 disabled:pointer-events-none disabled:opacity-0 hover:bg-black/10 transition-colors"
+            title="下一个文件"
+          >
+            <span className="sr-only">下一个文件</span>
+            {canNext && <ChevronRight className="mx-auto h-6 w-6 text-white drop-shadow" />}
+          </button>
+
           {isLoading ? (
             <div className="w-full h-full flex items-center justify-center p-4">
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -206,6 +241,7 @@ export function PreviewPane({ file, rootHandle, onClose }: PreviewPaneProps) {
                 src={previewUrl}
                 alt={file.name}
                 className="block w-auto h-auto max-w-full max-h-[85vh] object-contain"
+                onDoubleClick={onOpenFullscreen}
               />
             </div>
           ) : previewUrl && isVideo ? (

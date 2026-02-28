@@ -50,6 +50,7 @@ function App() {
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
+  const [previewAutoPlayOnOpen, setPreviewAutoPlayOnOpen] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const [showPreviewPane, setShowPreviewPane] = useState(false)
@@ -69,6 +70,57 @@ function App() {
     () => files.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
     [files]
   )
+  const mediaFiles = useMemo(
+    () =>
+      filteredFiles.filter(
+        (file): file is FileItem => file.kind === 'file' && (isImageFile(file.name) || isVideoFile(file.name))
+      ),
+    [filteredFiles]
+  )
+  const mediaIndexByPath = useMemo(() => {
+    const indexMap = new Map<string, number>()
+    mediaFiles.forEach((file, index) => {
+      indexMap.set(file.path, index)
+    })
+    return indexMap
+  }, [mediaFiles])
+
+  const getMediaIndex = useCallback(
+    (file: FileItem | null) => {
+      if (!file || file.kind !== 'file') return -1
+      return mediaIndexByPath.get(file.path) ?? -1
+    },
+    [mediaIndexByPath]
+  )
+
+  const navigateMediaFromPane = useCallback((direction: 'prev' | 'next') => {
+    const currentIndex = getMediaIndex(selectedFile)
+    if (currentIndex < 0) return
+
+    const targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= mediaFiles.length) return
+
+    const nextFile = mediaFiles[targetIndex]
+    setSelectedFile(nextFile)
+    setShowPreviewPane(true)
+  }, [getMediaIndex, selectedFile, mediaFiles])
+
+  const navigateMediaFromModal = useCallback((direction: 'prev' | 'next') => {
+    const currentIndex = getMediaIndex(previewFile)
+    if (currentIndex < 0) return
+
+    const targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= mediaFiles.length) return
+
+    const nextFile = mediaFiles[targetIndex]
+    setPreviewAutoPlayOnOpen(false)
+    setPreviewFile(nextFile)
+    setSelectedFile(nextFile)
+    setShowPreviewPane(true)
+  }, [getMediaIndex, previewFile, mediaFiles])
+
+  const selectedMediaIndex = getMediaIndex(selectedFile)
+  const previewMediaIndex = getMediaIndex(previewFile)
 
   useEffect(() => {
     if (previewFile && rootHandle) {
@@ -123,12 +175,14 @@ function App() {
 
   const handleFileDoubleClick = useCallback((file: FileItem) => {
     if (file.kind === 'file') {
+      setPreviewAutoPlayOnOpen(isVideoFile(file.name))
       setPreviewFile(file)
     }
   }, [])
 
   const handleClosePreview = useCallback(() => {
     setPreviewFile(null)
+    setPreviewAutoPlayOnOpen(false)
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl)
       setPreviewUrl(null)
@@ -138,6 +192,13 @@ function App() {
   const handleClosePane = useCallback(() => {
     setShowPreviewPane(false)
   }, [])
+
+  const handleOpenFullscreenFromPane = useCallback(() => {
+    if (selectedFile?.kind === 'file') {
+      setPreviewAutoPlayOnOpen(isVideoFile(selectedFile.name))
+      setPreviewFile(selectedFile)
+    }
+  }, [selectedFile])
 
   useEffect(() => {
     if (filteredFiles.length === 0) {
@@ -308,6 +369,11 @@ function App() {
               file={selectedFile}
               rootHandle={rootHandle}
               onClose={handleClosePane}
+              onOpenFullscreen={handleOpenFullscreenFromPane}
+              canPrev={selectedMediaIndex > 0}
+              canNext={selectedMediaIndex >= 0 && selectedMediaIndex < mediaFiles.length - 1}
+              onPrev={() => navigateMediaFromPane('prev')}
+              onNext={() => navigateMediaFromPane('next')}
             />
           </div>
         )}
@@ -323,6 +389,11 @@ function App() {
           file={previewFile}
           fileUrl={previewUrl}
           onClose={handleClosePreview}
+          autoPlayOnOpen={previewAutoPlayOnOpen}
+          canPrev={previewMediaIndex > 0}
+          canNext={previewMediaIndex >= 0 && previewMediaIndex < mediaFiles.length - 1}
+          onPrev={() => navigateMediaFromModal('prev')}
+          onNext={() => navigateMediaFromModal('next')}
         />
       )}
     </div>
