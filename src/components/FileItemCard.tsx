@@ -136,13 +136,14 @@ export function FileItemCard({
     <button
       type="button"
       data-grid-index={itemIndex}
+      data-grid-selected={isSelected ? 'true' : 'false'}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       className={cn(
         "w-full min-w-0 flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
         "hover:bg-accent/50",
-        "focus-visible:outline-none focus-visible:bg-accent/70 focus-visible:ring-1 focus-visible:ring-primary/40",
-        isSelected && "bg-accent/70 ring-1 ring-primary/40"
+        "focus:outline-none focus:bg-accent/70 focus:ring-1 focus:ring-primary/40",
+        "data-[grid-selected=true]:bg-accent/70 data-[grid-selected=true]:ring-1 data-[grid-selected=true]:ring-primary/40"
       )}
     >
       <div className="relative w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">

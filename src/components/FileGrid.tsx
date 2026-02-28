@@ -5,7 +5,6 @@ import type { FileItem } from '@/types'
 interface FileGridProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
-  selectedFilePath?: string | null
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
@@ -14,7 +13,6 @@ interface FileGridProps {
 function FileGridImpl({
   files,
   rootHandle,
-  selectedFilePath,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
@@ -23,7 +21,6 @@ function FileGridImpl({
     <VirtualGrid
       files={files}
       rootHandle={rootHandle}
-      selectedFilePath={selectedFilePath}
       onFileClick={onFileClick}
       onFileDoubleClick={onFileDoubleClick}
       onDirectoryClick={onDirectoryClick}

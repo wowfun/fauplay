@@ -1,9 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X, File, Image as ImageIcon, Video as VideoIcon, Loader2, FolderOpen, Play, ChevronLeft, ChevronRight } from 'lucide-react'
-import { getMediaType } from '@/lib/thumbnail'
+import { X } from 'lucide-react'
 import { createObjectUrlForFile } from '@/lib/fileSystem'
-import { ensureRootPath, openWithSystemDefaultApp, revealInSystemExplorer } from '@/lib/reveal'
 import type { FileItem } from '@/types'
+import { PreviewContent } from '@/components/PreviewContent'
 
 interface PreviewPaneProps {
   file: FileItem | null
@@ -49,11 +48,6 @@ export function PreviewPane({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [playbackError, setPlaybackError] = useState(false)
-  const [isRevealing, setIsRevealing] = useState(false)
-  const [isOpening, setIsOpening] = useState(false)
-  const [openError, setOpenError] = useState<string | null>(null)
-  const [revealError, setRevealError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
@@ -75,7 +69,6 @@ export function PreviewPane({
     const loadFile = async () => {
       setIsLoading(true)
       setError(null)
-      setPlaybackError(false)
 
       try {
         const fileObj = await getFileFromPath(rootHandle, file.path)
@@ -123,43 +116,6 @@ export function PreviewPane({
     )
   }
 
-  const isImage = getMediaType(file.name) === 'image'
-  const isVideo = getMediaType(file.name) === 'video'
-
-  const handleRevealInExplorer = async () => {
-    if (file.kind !== 'file') return
-    const rootLabel = rootHandle?.name || 'current-folder'
-    const rootPath = ensureRootPath(rootLabel)
-    if (!rootPath) return
-
-    try {
-      setRevealError(null)
-      setIsRevealing(true)
-      await revealInSystemExplorer(file.path, rootPath)
-    } catch (err) {
-      setRevealError((err as Error).message || '打开资源管理器失败')
-    } finally {
-      setIsRevealing(false)
-    }
-  }
-
-  const handleOpenWithSystemPlayer = async () => {
-    if (file.kind !== 'file') return
-    const rootLabel = rootHandle?.name || 'current-folder'
-    const rootPath = ensureRootPath(rootLabel)
-    if (!rootPath) return
-
-    try {
-      setOpenError(null)
-      setIsOpening(true)
-      await openWithSystemDefaultApp(file.path, rootPath)
-    } catch (err) {
-      setOpenError((err as Error).message || '打开系统播放器失败')
-    } finally {
-      setIsOpening(false)
-    }
-  }
-
   return (
     <div
       className="flex flex-col h-full bg-card border-l border-border"
@@ -174,111 +130,18 @@ export function PreviewPane({
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 flex">
-        <div className="w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r border-border">
-          <button
-            type="button"
-            onClick={() => void handleRevealInExplorer()}
-            disabled={isRevealing}
-            className="p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
-            title="在文件资源管理器中显示"
-          >
-            <FolderOpen className="w-4 h-4" />
-          </button>
-          {isVideo && (
-            <button
-              type="button"
-              onClick={() => void handleOpenWithSystemPlayer()}
-              disabled={isOpening}
-              className="p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50"
-              title="用系统默认播放器打开"
-            >
-              <Play className="w-4 h-4" />
-            </button>
-          )}
-          <div className="mt-auto space-y-1 text-[10px] text-destructive text-center">
-            {openError && <p>{openError}</p>}
-            {revealError && <p>{revealError}</p>}
-          </div>
-        </div>
-
-        <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden">
-          <button
-            type="button"
-            onClick={onPrev}
-            disabled={!canPrev}
-            className="absolute left-0 top-0 bottom-0 z-10 w-14 disabled:pointer-events-none disabled:opacity-0 hover:bg-black/10 transition-colors"
-            title="上一个文件"
-          >
-            <span className="sr-only">上一个文件</span>
-            {canPrev && <ChevronLeft className="mx-auto h-6 w-6 text-white drop-shadow" />}
-          </button>
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!canNext}
-            className="absolute right-0 top-0 bottom-0 z-10 w-14 disabled:pointer-events-none disabled:opacity-0 hover:bg-black/10 transition-colors"
-            title="下一个文件"
-          >
-            <span className="sr-only">下一个文件</span>
-            {canNext && <ChevronRight className="mx-auto h-6 w-6 text-white drop-shadow" />}
-          </button>
-
-          {isLoading ? (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : error ? (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              <div className="text-destructive text-sm text-center">
-                <p>加载失败</p>
-                <p className="text-xs mt-1">{error}</p>
-              </div>
-            </div>
-          ) : previewUrl && isImage ? (
-            <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
-              <img
-                src={previewUrl}
-                alt={file.name}
-                className="block w-auto h-auto max-w-full max-h-[85vh] object-contain"
-                onDoubleClick={onOpenFullscreen}
-              />
-            </div>
-          ) : previewUrl && isVideo ? (
-            <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
-              <video
-                src={previewUrl}
-                controls
-                className="block w-auto h-auto max-w-full max-h-[85vh] object-contain"
-                onError={() => setPlaybackError(true)}
-              >
-                您的浏览器不支持视频播放
-              </video>
-            </div>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              <div className="flex flex-col items-center text-muted-foreground">
-                {isImage ? (
-                  <ImageIcon className="w-16 h-16 mb-2" />
-                ) : isVideo ? (
-                  <VideoIcon className="w-16 h-16 mb-2" />
-                ) : (
-                  <File className="w-16 h-16 mb-2" />
-                )}
-                <p className="text-sm">无法预览此文件</p>
-              </div>
-            </div>
-          )}
-
-          {playbackError && isVideo && (
-            <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/55 px-3 py-2">
-              <p className="text-xs text-white text-center">
-                当前浏览器可能不支持该视频的编码格式（尤其常见于 AVI）。建议转码为 MP4(H.264/AAC) 后再播放。
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+      <PreviewContent
+        file={file}
+        rootHandle={rootHandle}
+        previewUrl={previewUrl}
+        isLoading={isLoading}
+        error={error}
+        canPrev={canPrev}
+        canNext={canNext}
+        onPrev={onPrev}
+        onNext={onNext}
+        onOpenFullscreen={onOpenFullscreen}
+      />
     </div>
   )
 }

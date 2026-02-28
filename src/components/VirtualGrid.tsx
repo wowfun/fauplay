@@ -7,7 +7,6 @@ import type { FileItem } from '@/types'
 interface VirtualGridProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
-  selectedFilePath?: string | null
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
@@ -20,7 +19,6 @@ const GAP = 16
 export function VirtualGrid({
   files,
   rootHandle,
-  selectedFilePath,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
@@ -28,7 +26,26 @@ export function VirtualGrid({
   const containerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<FixedSizeGridType>(null)
   const selectedIndexRef = useRef(0)
+  const selectedPathRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+
+  const markSelectedElement = (index: number, path: string) => {
+    selectedIndexRef.current = index
+    selectedPathRef.current = path
+
+    const container = containerRef.current
+    if (!container) return
+
+    const prev = container.querySelector<HTMLButtonElement>('[data-grid-selected="true"]')
+    if (prev) {
+      prev.setAttribute('data-grid-selected', 'false')
+    }
+
+    const next = container.querySelector<HTMLButtonElement>(`[data-grid-index="${index}"]`)
+    if (next) {
+      next.setAttribute('data-grid-selected', 'true')
+    }
+  }
 
   useEffect(() => {
     const container = containerRef.current
@@ -63,9 +80,28 @@ export function VirtualGrid({
   useEffect(() => {
     if (files.length === 0) {
       selectedIndexRef.current = 0
+      selectedPathRef.current = null
       return
     }
-    selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
+    const selectedPath = selectedPathRef.current
+    if (selectedPath) {
+      const selectedIndexByPath = files.findIndex((item) => item.path === selectedPath)
+      if (selectedIndexByPath >= 0) {
+        selectedIndexRef.current = selectedIndexByPath
+      } else {
+        selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
+        selectedPathRef.current = files[selectedIndexRef.current]?.path ?? null
+      }
+    } else {
+      selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
+    }
+
+    const path = selectedPathRef.current
+    if (!path) return
+
+    requestAnimationFrame(() => {
+      markSelectedElement(selectedIndexRef.current, path)
+    })
   }, [files])
 
   useEffect(() => {
@@ -82,8 +118,8 @@ export function VirtualGrid({
 
     const focusItem = (index: number) => {
       const clampedIndex = Math.max(0, Math.min(files.length - 1, index))
-      selectedIndexRef.current = clampedIndex
       const targetFile = files[clampedIndex]
+      markSelectedElement(clampedIndex, targetFile.path)
 
       gridRef.current?.scrollToItem({
         rowIndex: Math.floor(clampedIndex / columnCount),
@@ -206,9 +242,9 @@ export function VirtualGrid({
                 file={file}
                 rootHandle={rootHandle}
                 itemIndex={index}
-                isSelected={file.kind === 'file' && file.path === selectedFilePath}
+                isSelected={file.path === selectedPathRef.current}
                 onClick={() => {
-                  selectedIndexRef.current = index
+                  markSelectedElement(index, file.path)
                   if (file.kind === 'directory') {
                     onDirectoryClick(file.name)
                   } else {

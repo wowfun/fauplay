@@ -329,7 +329,6 @@ function App() {
           <FileGrid
             files={filteredFiles}
             rootHandle={rootHandle}
-            selectedFilePath={selectedFile?.path}
             onFileClick={handleFileClick}
             onFileDoubleClick={handleFileDoubleClick}
             onDirectoryClick={handleDirectoryClick}
@@ -387,6 +386,7 @@ function App() {
       {previewFile && previewUrl && (
         <PreviewModal
           file={previewFile}
+          rootHandle={rootHandle}
           fileUrl={previewUrl}
           onClose={handleClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}

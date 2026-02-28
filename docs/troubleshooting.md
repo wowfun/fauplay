@@ -77,12 +77,14 @@ npm run reveal-helper
 ### 排查点
 
 1. 是否让顶层状态驱动整个网格重渲（例如把选中态放在 `App` 并向下透传）  
-2. 是否在网格中使用了高频 `setState` 触发整块重绘  
-3. 是否把选中高亮改为 focus 驱动，减少 React 状态变更
+2. 是否在网格中对选中态使用了高频 `setState`（键盘移动时每步都触发重渲）  
+3. 选中高亮是否依赖 DOM 属性（`data-grid-selected`）而非 React 选中状态
 
 ### 建议
 
-- 优先让网格选择逻辑在网格内部处理，并尽量使用焦点态而非全局选中态。
+- 选择逻辑保留在 `VirtualGrid` 内部，不向 `App` 透传 `selectedPath`。
+- 使用 `ref + DOM attribute` 方式更新选中态：仅更新前后两个卡片的 `data-grid-selected`，避免整网格重渲。
+- 卡片样式通过 `data-[grid-selected=true]:...` 控制，保证失焦后仍保留高亮且不闪烁。
 
 ## 5) 预览窗格媒体高度超出可见区域
 
