@@ -21,7 +21,7 @@
 - 预览自动播放（侧边与全屏一致）：图片按间隔切换、视频播放结束后切换、末尾循环
 - 键盘导航与预览快捷键（方向键、W/A/S/D、PageUp/PageDown、Enter、Esc、P、R、[、]）
 - 快捷键配置集中管理（`src/config/shortcuts.ts`）
-- 可选本地集成：在 Windows 文件资源管理器中定位当前文件（WSL helper）
+- 可选本地集成：通过本地能力网关在 Windows 文件资源管理器中定位/打开文件（兼容旧 helper 路由）
 
 ## 技术栈
 
@@ -46,10 +46,22 @@ npm install
 npm run dev
 ```
 
-### 启动资源管理器定位 helper（可选）
+### 启动本地能力网关（可选）
+
+```bash
+npm run gateway
+```
+
+### 启动资源管理器定位 helper（兼容命令）
 
 ```bash
 npm run reveal-helper
+```
+
+### 启动旧版 helper（仅排障时使用）
+
+```bash
+npm run reveal-helper:legacy
 ```
 
 ### 构建生产版本
@@ -66,9 +78,16 @@ npm run build
 4. 快捷键列表见 [`docs/shortcuts.md`](docs/shortcuts.md)
 5. 常见问题排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)
 6. 若需“在文件资源管理器中显示”：
-   - 在 WSL 中启动 `npm run reveal-helper`
+   - 在 WSL 中启动 `npm run gateway`（或兼容命令 `npm run reveal-helper`）
    - 在预览面板点击“在文件资源管理器中显示”
    - 首次使用时输入当前已选目录的系统绝对路径（按目录名称保存到浏览器本地存储）
+
+## 网关自测
+
+```bash
+curl -s http://127.0.0.1:3210/v1/health
+curl -s http://127.0.0.1:3210/v1/capabilities
+```
 
 ## 浏览器兼容性
 
@@ -81,6 +100,13 @@ npm run build
 
 - 更多快捷键动作扩展（当前已支持配置驱动的核心导航与预览快捷键）
 - 主题切换 UI（仅提供样式变量基础）
+
+## 架构文档
+
+- 架构总览：[`specs/000-architecture/spec.md`](specs/000-architecture/spec.md)
+- 接口契约：[`specs/000-architecture/interfaces.md`](specs/000-architecture/interfaces.md)
+- 演进路线：[`specs/000-architecture/roadmap.md`](specs/000-architecture/roadmap.md)
+- 架构待办：[`specs/000-architecture/todo.md`](specs/000-architecture/todo.md)
 
 ## 项目结构
 

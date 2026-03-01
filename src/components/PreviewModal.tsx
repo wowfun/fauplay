@@ -10,6 +10,8 @@ interface PreviewModalProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   fileUrl: string
+  canRevealInExplorer: boolean
+  canOpenWithSystemPlayer: boolean
   onClose: () => void
   autoPlayOnOpen?: boolean
   canPrev: boolean
@@ -30,6 +32,8 @@ export function PreviewModal({
   file,
   rootHandle,
   fileUrl,
+  canRevealInExplorer,
+  canOpenWithSystemPlayer,
   onClose,
   autoPlayOnOpen = false,
   canPrev,
@@ -129,6 +133,8 @@ export function PreviewModal({
         <PreviewContent
           file={file}
           rootHandle={rootHandle}
+          canRevealInExplorer={canRevealInExplorer}
+          canOpenWithSystemPlayer={canOpenWithSystemPlayer}
           previewUrl={fileUrl}
           isLoading={false}
           error={null}

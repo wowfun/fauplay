@@ -7,6 +7,8 @@ import { PreviewContent } from '@/components/PreviewContent'
 interface PreviewPaneProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
+  canRevealInExplorer: boolean
+  canOpenWithSystemPlayer: boolean
   onClose: () => void
   onOpenFullscreen: () => void
   canPrev: boolean
@@ -46,6 +48,8 @@ async function getFileFromPath(
 export function PreviewPane({
   file,
   rootHandle,
+  canRevealInExplorer,
+  canOpenWithSystemPlayer,
   onClose,
   onOpenFullscreen,
   canPrev,
@@ -190,6 +194,8 @@ export function PreviewPane({
       <PreviewContent
         file={file}
         rootHandle={rootHandle}
+        canRevealInExplorer={canRevealInExplorer}
+        canOpenWithSystemPlayer={canOpenWithSystemPlayer}
         previewUrl={previewUrl}
         isLoading={isLoading}
         error={error}

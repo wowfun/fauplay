@@ -11,6 +11,7 @@ import type { FileItem, FilterState } from '@/types'
 import { StatusBar } from '@/components/StatusBar'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { useGatewayCapabilities } from '@/hooks/useGatewayCapabilities'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
@@ -71,6 +72,7 @@ function App() {
   const fileGridRef = useRef<FileGridHandle>(null)
   const previewUrlRef = useRef<string | null>(null)
   const autoPlayTimerRef = useRef<number | null>(null)
+  const { supportsAction } = useGatewayCapabilities()
 
   const filteredFiles = useMemo(() => {
     return filterFiles(files, filter)
@@ -260,6 +262,8 @@ function App() {
     !autoPlayPausedByVisibility &&
     activeMediaIndex >= 0 &&
     mediaFiles.length > 1
+  const supportsRevealAction = supportsAction('system.reveal')
+  const supportsOpenDefaultAction = supportsAction('system.openDefault')
 
   useEffect(() => {
     if (previewFile && rootHandle) {
@@ -718,6 +722,8 @@ function App() {
             <PreviewPane
               file={selectedFile}
               rootHandle={rootHandle}
+              canRevealInExplorer={supportsRevealAction}
+              canOpenWithSystemPlayer={supportsOpenDefaultAction}
               onClose={handleClosePane}
               onOpenFullscreen={handleOpenFullscreenFromPane}
               canPrev={canPrevFromPane}
@@ -747,6 +753,8 @@ function App() {
           file={previewFile}
           rootHandle={rootHandle}
           fileUrl={previewUrl}
+          canRevealInExplorer={supportsRevealAction}
+          canOpenWithSystemPlayer={supportsOpenDefaultAction}
           onClose={handleClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}
           canPrev={canPrevFromModal}

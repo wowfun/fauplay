@@ -16,6 +16,8 @@ import type { FileItem } from '@/types'
 interface PreviewContentProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
+  canRevealInExplorer?: boolean
+  canOpenWithSystemPlayer?: boolean
   previewUrl: string | null
   isLoading: boolean
   error: string | null
@@ -33,6 +35,8 @@ interface PreviewContentProps {
 export function PreviewContent({
   file,
   rootHandle,
+  canRevealInExplorer = true,
+  canOpenWithSystemPlayer = true,
   previewUrl,
   isLoading,
   error,
@@ -68,6 +72,7 @@ export function PreviewContent({
   const iconClass = isFullscreen ? 'mx-auto h-6 w-6 text-white' : 'mx-auto h-6 w-6 text-white drop-shadow'
   const emptyTextClass = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
   const errorTextClass = isFullscreen ? 'text-red-300' : 'text-destructive'
+  const showActionRail = canRevealInExplorer || (isVideo && canOpenWithSystemPlayer)
 
   useEffect(() => {
     setPlaybackError(false)
@@ -111,32 +116,36 @@ export function PreviewContent({
 
   return (
     <div className="flex-1 min-h-0 flex">
-      <div className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r ${panelBorderClass}`}>
-        <button
-          type="button"
-          onClick={() => void handleRevealInExplorer()}
-          disabled={isRevealing || !rootHandle}
-          className={railButtonClass}
-          title="在文件资源管理器中显示"
-        >
-          <FolderOpen className="w-4 h-4" />
-        </button>
-        {isVideo && (
-          <button
-            type="button"
-            onClick={() => void handleOpenWithSystemPlayer()}
-            disabled={isOpening || !rootHandle}
-            className={railButtonClass}
-            title="用系统默认播放器打开"
-          >
-            <Play className="w-4 h-4" />
-          </button>
-        )}
-        <div className={`mt-auto space-y-1 text-[10px] text-center ${errorTextClass}`}>
-          {openError && <p>{openError}</p>}
-          {revealError && <p>{revealError}</p>}
+      {showActionRail && (
+        <div className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r ${panelBorderClass}`}>
+          {canRevealInExplorer && (
+            <button
+              type="button"
+              onClick={() => void handleRevealInExplorer()}
+              disabled={isRevealing || !rootHandle}
+              className={railButtonClass}
+              title="在文件资源管理器中显示"
+            >
+              <FolderOpen className="w-4 h-4" />
+            </button>
+          )}
+          {isVideo && canOpenWithSystemPlayer && (
+            <button
+              type="button"
+              onClick={() => void handleOpenWithSystemPlayer()}
+              disabled={isOpening || !rootHandle}
+              className={railButtonClass}
+              title="用系统默认播放器打开"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+          )}
+          <div className={`mt-auto space-y-1 text-[10px] text-center ${errorTextClass}`}>
+            {openError && <p>{openError}</p>}
+            {revealError && <p>{revealError}</p>}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden">
         {isLoading ? (

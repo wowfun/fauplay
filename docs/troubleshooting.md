@@ -38,10 +38,36 @@ wsl --shutdown
 explorer.exe .
 ```
 
-4. 重新启动 helper：
+4. 重新启动网关（兼容命令同名）：
 
 ```bash
-npm run reveal-helper
+npm run gateway
+```
+
+## 1.1) 网关端口被占用（`EADDRINUSE`）
+
+### 现象
+
+- 启动 `npm run gateway` 时报错：`listen EADDRINUSE: address already in use 127.0.0.1:3210`
+- 或 `curl /v1/health` 返回非网关响应（例如旧 helper 返回 `Not found`）
+
+### 原因
+
+- 本机已有其他进程占用 `3210` 端口（常见于旧版 helper 或重复启动实例）。
+
+### 解决
+
+1. 检查占用进程：
+
+```bash
+ss -ltnp | rg 3210
+```
+
+2. 结束旧进程后重启：
+
+```bash
+kill <PID>
+npm run gateway
 ```
 
 ## 2) 选择文件夹后无法进入子目录

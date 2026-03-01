@@ -1,12 +1,5 @@
 ---
-doc_id: 001-slide
-doc_type: product-spec
-status: active
-created: 2026-03-01
-last_reviewed: 2026-03-01
-owner: fauplay
-related_docs:
-  temporary_plan: specs/001-slide/plan.md
+updated: 2026-03-01
 ---
 
 # 001 Slide - 自动播放产品规范
