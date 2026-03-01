@@ -78,42 +78,72 @@ async function openWithSystemDefaultApp(rootPath, relativePath) {
   await launchExplorer([windowsPath], 'Failed to open explorer')
 }
 
-export function createRevealPlugin() {
+export function createRevealMcpServer() {
   return {
-    manifest: {
-      id: 'builtin.reveal',
-      name: 'Builtin Reveal Plugin',
-      version: '0.1.0',
-      actions: [
+    async listTools() {
+      return [
         {
-          actionId: 'system.reveal',
-          title: '在文件资源管理器中显示',
-          mutation: false,
-          scopes: ['file'],
+          name: 'system.reveal',
+          description: '在文件资源管理器中显示',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              rootPath: { type: 'string' },
+              relativePath: { type: 'string' },
+            },
+            required: ['rootPath', 'relativePath'],
+            additionalProperties: false,
+          },
+          annotations: {
+            title: '在文件资源管理器中显示',
+            mutation: false,
+            scopes: ['file'],
+          },
         },
         {
-          actionId: 'system.openDefault',
-          title: '用系统默认应用打开',
-          mutation: false,
-          scopes: ['file'],
+          name: 'system.openDefault',
+          description: '用系统默认应用打开',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              rootPath: { type: 'string' },
+              relativePath: { type: 'string' },
+            },
+            required: ['rootPath', 'relativePath'],
+            additionalProperties: false,
+          },
+          annotations: {
+            title: '用系统默认应用打开',
+            mutation: false,
+            scopes: ['file'],
+          },
         },
-      ],
+      ]
     },
-    async execute(req) {
-      const rootPath = req?.payload?.rootPath
-      const relativePath = req?.payload?.relativePath ?? req?.context?.selectedPaths?.[0]
 
-      if (req.actionId === 'system.reveal') {
+    async callTool(name, args) {
+      const rootPath = args?.rootPath
+      const relativePath = args?.relativePath
+
+      if (!rootPath || !relativePath) {
+        const error = new Error('rootPath and relativePath are required')
+        error.code = 'MCP_INVALID_PARAMS'
+        throw error
+      }
+
+      if (name === 'system.reveal') {
         await revealInExplorer(rootPath, relativePath)
         return { ok: true }
       }
 
-      if (req.actionId === 'system.openDefault') {
+      if (name === 'system.openDefault') {
         await openWithSystemDefaultApp(rootPath, relativePath)
         return { ok: true }
       }
 
-      throw new Error(`Unsupported actionId: ${req.actionId}`)
+      const error = new Error(`Unsupported tool: ${name}`)
+      error.code = 'MCP_TOOL_NOT_FOUND'
+      throw error
     },
   }
 }

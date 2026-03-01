@@ -6,7 +6,7 @@ updated: 2026-03-01
 
 ## 1. 目标
 
-以最小风险将当前纯前端形态逐步演进为：Web App + Local Capability Gateway + Backend Plugins。  
+以最小风险将当前纯前端形态逐步演进为：Web App + Local Capability Gateway（MCP Host）+ MCP Server Plugins。  
 每个里程碑都要求可回退（Rollback）并保持现有主流程可用。
 
 ## 2. 里程碑
@@ -21,55 +21,56 @@ updated: 2026-03-01
 
 交付项：
 - 建立网关基础进程与路由。
-- 落地 `health` 与 `capabilities` 接口。
+- 落地 `health` 与 MCP 单端点（`/v1/mcp`）骨架。
 - 建立共享契约（contracts）与错误码骨架。
 
 验收口径：
 - 前端可探测网关在线状态。
-- 前端可读取动作清单并完成能力显示。
-- 网关可返回 `health/capabilities` 结构化响应。
+- 前端可读取工具清单并完成能力显示。
+- 网关可返回 `health/tools/list` 结构化响应。
 
-## M2 - reveal/open 插件化
+## M2 - reveal/open MCP 工具化
 
 交付项：
-- 将 `reveal-helper` 功能迁移为内置插件（Builtin Plugin）。
-- 前端改为通过动作分发器调用 `system.reveal` / `system.openDefault`。
+- 将 `reveal-helper` 功能迁移为内置 MCP 工具。
+- 前端改为通过工具分发器调用 `system.reveal` / `system.openDefault`。
 - 保留无网关降级行为。
 
 验收口径：
 - 用户行为与当前版本一致，不退化。
 - 网关离线时主浏览与预览流程不受影响。
-- 预览动作可按能力动态显示。
+- 预览动作可按工具发现结果动态显示。
 
 ## M3 - 首个变更类能力（批量重命名）
 
 交付项：
-- 新增批量重命名插件动作。
-- 实现 `plan -> commit` 双阶段流程。
+- 新增批量重命名 MCP 工具。
+- 使用单工具 + `confirm` 参数落地 dry-run/commit。
 - 返回逐项结果（item-level result）并支持部分失败提示。
 
 验收口径：
-- 批处理必须先预演再确认。
-- 冲突项可在预演中提前看到。
+- `confirm=false` 不落盘，仅返回预演结果。
+- `confirm=true` 执行并返回逐项结果。
+- 冲突项可在 dry-run 中提前看到。
 
 ## M4 - 稳定性与运维可观测性
 
 交付项：
 - 增加核心单元测试与集成测试。
 - 日志结构化与错误码补全。
-- 可选 JSON 配置持久化（白名单、端口、基础配置）。
+- 外部 MCP Server 隔离策略完善（崩溃熔断、重启节流）。
 
 验收口径：
 - 关键流程可通过自动化测试回归。
-- 插件故障不会拖垮网关主进程。
+- 外部 MCP Server 故障不会拖垮网关主进程。
 
 ## 3. 风险与缓解
 
-1. 风险：插件能力增长导致接口漂移。  
+1. 风险：工具能力增长导致接口漂移。  
 缓解：坚持契约先行，接口变更先更新 `interfaces.md`。
 
 2. 风险：系统调用差异（Windows/WSL）引发不稳定。  
-缓解：系统集成能力优先封装在插件层，统一错误码映射。
+缓解：系统集成能力优先封装在 MCP 工具层，统一错误码映射。
 
 3. 风险：变更类操作误用造成文件损失。  
 缓解：强制 dry-run 与 confirm，默认不提供直接 destructive 入口。

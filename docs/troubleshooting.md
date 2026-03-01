@@ -50,6 +50,7 @@ npm run gateway
 
 - 启动 `npm run gateway` 时报错：`listen EADDRINUSE: address already in use 127.0.0.1:3210`
 - 或 `curl /v1/health` 返回非网关响应（例如旧 helper 返回 `Not found`）
+- 或 `POST /v1/mcp` 的 `tools/list` 返回 404（说明你连到的是旧服务）
 
 ### 原因
 
@@ -68,6 +69,14 @@ ss -ltnp | rg 3210
 ```bash
 kill <PID>
 npm run gateway
+```
+
+3. 验证 MCP 路由：
+
+```bash
+curl -s -X POST http://127.0.0.1:3210/v1/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
 ## 2) 选择文件夹后无法进入子目录

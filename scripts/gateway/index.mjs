@@ -1,3 +1,3 @@
 import { startGatewayServer } from './server.mjs'
 
-startGatewayServer()
+await startGatewayServer()

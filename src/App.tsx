@@ -42,7 +42,7 @@ function App() {
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const contentRef = useRef<HTMLDivElement>(null)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
-  const { supportsAction } = useGatewayCapabilities()
+  const { supportsTool } = useGatewayCapabilities()
 
   const filteredFiles = useMemo(() => {
     return filterFiles(files, filter)
@@ -79,8 +79,8 @@ function App() {
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
   } = usePreviewTraversal({ filteredFiles })
-  const supportsRevealAction = supportsAction('system.reveal')
-  const supportsOpenDefaultAction = supportsAction('system.openDefault')
+  const supportsRevealAction = supportsTool('system.reveal')
+  const supportsOpenDefaultAction = supportsTool('system.openDefault')
 
   const handleDirectoryClick = useCallback((dirName: string) => {
     navigateToDirectory(dirName)

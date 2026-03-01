@@ -5,12 +5,12 @@ const REFRESH_INTERVAL_MS = 15000
 
 export function useGatewayCapabilities() {
   const [isGatewayOnline, setIsGatewayOnline] = useState(false)
-  const [actionIds, setActionIds] = useState<string[]>([])
+  const [toolNames, setToolNames] = useState<string[]>([])
 
   const refresh = useCallback(async () => {
     const snapshot = await loadGatewayCapabilities()
     setIsGatewayOnline(snapshot.online)
-    setActionIds(snapshot.actions.map((action) => action.actionId))
+    setToolNames(snapshot.tools.map((tool) => tool.name))
   }, [])
 
   useEffect(() => {
@@ -24,17 +24,17 @@ export function useGatewayCapabilities() {
     }
   }, [refresh])
 
-  const actionSet = useMemo(() => new Set(actionIds), [actionIds])
+  const toolSet = useMemo(() => new Set(toolNames), [toolNames])
 
-  const supportsAction = useCallback((actionId: string): boolean => {
+  const supportsTool = useCallback((toolName: string): boolean => {
     if (!isGatewayOnline) return true
-    return actionSet.has(actionId)
-  }, [actionSet, isGatewayOnline])
+    return toolSet.has(toolName)
+  }, [toolSet, isGatewayOnline])
 
   return {
     isGatewayOnline,
-    actionIds,
-    supportsAction,
+    toolNames,
+    supportsTool,
     refresh,
   }
 }

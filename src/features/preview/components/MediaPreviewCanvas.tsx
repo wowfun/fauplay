@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { dispatchSystemAction } from '@/lib/actionDispatcher'
+import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getMediaType } from '@/lib/thumbnail'
 import type { FileItem } from '@/types'
 import { PreviewActionRail } from './PreviewActionRail'
@@ -87,8 +87,8 @@ export function MediaPreviewCanvas({
     try {
       setRevealError(null)
       setIsRevealing(true)
-      await dispatchSystemAction({
-        actionId: 'system.reveal',
+      await dispatchSystemTool({
+        toolName: 'system.reveal',
         rootHandle,
         relativePath: file.path,
       })
@@ -105,8 +105,8 @@ export function MediaPreviewCanvas({
     try {
       setOpenError(null)
       setIsOpening(true)
-      await dispatchSystemAction({
-        actionId: 'system.openDefault',
+      await dispatchSystemTool({
+        toolName: 'system.openDefault',
         rootHandle,
         relativePath: file.path,
       })
