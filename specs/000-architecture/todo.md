@@ -30,7 +30,7 @@ updated: 2026-03-01
 
 - [x] 复刻 `reveal-helper` 的 `/reveal` 行为为 `system.reveal` 动作。
 - [x] 复刻 `reveal-helper` 的 `/open` 行为为 `system.openDefault` 动作。
-- [x] 前端 `PreviewContent` 改用网关动作调用。
+- [x] 前端 `MediaPreviewCanvas` 改用网关动作调用。
 - [x] 保留并验证无网关时的降级路径。
 
 ## 5. 完成定义（Definition of Done）

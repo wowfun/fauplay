@@ -12,8 +12,9 @@ import {
 import { getMediaType } from '@/lib/thumbnail'
 import { ensureRootPath, openWithSystemDefaultApp, revealInSystemExplorer } from '@/lib/reveal'
 import type { FileItem } from '@/types'
+import { Button } from '@/ui/Button'
 
-interface PreviewContentProps {
+interface MediaPreviewCanvasProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   canRevealInExplorer?: boolean
@@ -32,7 +33,7 @@ interface PreviewContentProps {
   onVideoPlaybackError?: () => void
 }
 
-export function PreviewContent({
+export function MediaPreviewCanvas({
   file,
   rootHandle,
   canRevealInExplorer = true,
@@ -49,7 +50,7 @@ export function PreviewContent({
   isFullscreen = false,
   onVideoEnded,
   onVideoPlaybackError,
-}: PreviewContentProps) {
+}: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
   const [isOpening, setIsOpening] = useState(false)
@@ -119,26 +120,28 @@ export function PreviewContent({
       {showActionRail && (
         <div className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r ${panelBorderClass}`}>
           {canRevealInExplorer && (
-            <button
-              type="button"
+            <Button
               onClick={() => void handleRevealInExplorer()}
               disabled={isRevealing || !rootHandle}
+              variant="ghost"
+              size="icon"
               className={railButtonClass}
               title="在文件资源管理器中显示"
             >
               <FolderOpen className="w-4 h-4" />
-            </button>
+            </Button>
           )}
           {isVideo && canOpenWithSystemPlayer && (
-            <button
-              type="button"
+            <Button
               onClick={() => void handleOpenWithSystemPlayer()}
               disabled={isOpening || !rootHandle}
+              variant="ghost"
+              size="icon"
               className={railButtonClass}
               title="用系统默认播放器打开"
             >
               <Play className="w-4 h-4" />
-            </button>
+            </Button>
           )}
           <div className={`mt-auto space-y-1 text-[10px] text-center ${errorTextClass}`}>
             {openError && <p>{openError}</p>}
@@ -162,26 +165,28 @@ export function PreviewContent({
         ) : previewUrl && isImage ? (
           <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
             <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
-              <button
-                type="button"
+              <Button
                 onClick={onPrev}
                 disabled={!canPrev}
+                variant="ghost"
+                size="icon"
                 className={navButtonClass}
                 title="上一个文件"
               >
                 <span className="sr-only">上一个文件</span>
                 {canPrev && <ChevronLeft className={iconClass} />}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 onClick={onNext}
                 disabled={!canNext}
+                variant="ghost"
+                size="icon"
                 className={navButtonRightClass}
                 title="下一个文件"
               >
                 <span className="sr-only">下一个文件</span>
                 {canNext && <ChevronRight className={iconClass} />}
-              </button>
+              </Button>
               <img
                 src={previewUrl}
                 alt={file.name}
@@ -193,26 +198,28 @@ export function PreviewContent({
         ) : previewUrl && isVideo ? (
           <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
             <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
-              <button
-                type="button"
+              <Button
                 onClick={onPrev}
                 disabled={!canPrev}
+                variant="ghost"
+                size="icon"
                 className={navButtonClass}
                 title="上一个文件"
               >
                 <span className="sr-only">上一个文件</span>
                 {canPrev && <ChevronLeft className={iconClass} />}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 onClick={onNext}
                 disabled={!canNext}
+                variant="ghost"
+                size="icon"
                 className={navButtonRightClass}
                 title="下一个文件"
               >
                 <span className="sr-only">下一个文件</span>
                 {canNext && <ChevronRight className={iconClass} />}
-              </button>
+              </Button>
               <video
                 src={previewUrl}
                 controls

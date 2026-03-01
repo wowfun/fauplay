@@ -108,13 +108,23 @@ curl -s http://127.0.0.1:3210/v1/capabilities
 - 演进路线：[`specs/000-architecture/roadmap.md`](specs/000-architecture/roadmap.md)
 - 架构待办：[`specs/000-architecture/todo.md`](specs/000-architecture/todo.md)
 
+## UI/UX 规范文档
+
+- 治理总规范：[`specs/002-ui-ux-governance/spec.md`](specs/002-ui-ux-governance/spec.md)
+- 命名与分层：[`specs/002-ui-ux-governance/naming.md`](specs/002-ui-ux-governance/naming.md)
+- 迁移映射：[`specs/002-ui-ux-governance/mapping.md`](specs/002-ui-ux-governance/mapping.md)
+- 评审清单：[`specs/002-ui-ux-governance/checklist.md`](specs/002-ui-ux-governance/checklist.md)
+- 功能分区：[`specs/002-ui-ux-governance/areas.md`](specs/002-ui-ux-governance/areas.md)
+
 ## 项目结构
 
 ```
 src/
-├── components/     # UI 组件
 ├── config/         # 配置（含快捷键）
+├── features/       # 业务分层组件（explorer/preview）
 ├── hooks/          # 自定义 Hooks
+├── layouts/        # 页面布局骨架
 ├── lib/            # 工具函数
-└── types/          # TypeScript 类型定义
+├── types/          # TypeScript 类型定义
+└── ui/             # 通用基础组件
 ```

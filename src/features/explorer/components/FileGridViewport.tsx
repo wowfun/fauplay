@@ -1,12 +1,12 @@
 import { useMemo, useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
-import { FileItemCard } from './FileItemCard'
+import { FileGridCard } from './FileGridCard'
 import type { FileItem } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 
-interface VirtualGridProps {
+interface FileGridViewportProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
   onFileClick: (file: FileItem) => void
@@ -14,7 +14,7 @@ interface VirtualGridProps {
   onDirectoryClick: (dirName: string) => void
 }
 
-export interface VirtualGridHandle {
+export interface FileGridViewportHandle {
   syncSelectedPath: (path: string | null, options?: { scroll?: boolean; focus?: boolean }) => void
 }
 
@@ -22,7 +22,7 @@ const CARD_WIDTH = 160
 const CARD_HEIGHT = 180
 const GAP = 16
 
-export const VirtualGrid = forwardRef<VirtualGridHandle, VirtualGridProps>(function VirtualGrid({
+export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewportProps>(function FileGridViewport({
   files,
   rootHandle,
   onFileClick,
@@ -262,7 +262,7 @@ export const VirtualGrid = forwardRef<VirtualGridHandle, VirtualGridProps>(funct
                 height: CARD_HEIGHT,
               }}
             >
-              <FileItemCard
+              <FileGridCard
                 file={file}
                 rootHandle={rootHandle}
                 itemIndex={index}

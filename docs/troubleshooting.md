@@ -108,7 +108,7 @@ npm run gateway
 
 ### 建议
 
-- 选择逻辑保留在 `VirtualGrid` 内部，不向 `App` 透传 `selectedPath`。
+- 选择逻辑保留在 `FileGridViewport` 内部，不向 `App` 透传 `selectedPath`。
 - 使用 `ref + DOM attribute` 方式更新选中态：仅更新前后两个卡片的 `data-grid-selected`，避免整网格重渲。
 - 卡片样式通过 `data-[grid-selected=true]:...` 控制，保证失焦后仍保留高亮且不闪烁。
 
@@ -131,3 +131,18 @@ npm run gateway
 - 建议样式：
   - 图片：`max-h-[85vh] max-w-full object-contain`
   - 视频：`max-h-[85vh] max-w-full object-contain`
+
+## 6) 随机遍历模式下无法关闭预览
+
+### 现象
+
+- 在“随机”遍历模式下点击关闭预览（或按 `Esc`）后，预览面板立即被重新打开。
+
+### 原因
+
+- 随机队列同步逻辑在无活动预览目标时会回退到默认媒体并强制打开面板，覆盖了用户的关闭动作。
+
+### 解决
+
+- 仅在预览已打开（侧栏或全屏）时执行随机队列同步逻辑。
+- 当预览已完全关闭时，随机状态仅保留内存，不主动触发 UI 重开。

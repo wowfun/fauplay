@@ -1,9 +1,9 @@
 import { memo, forwardRef } from 'react'
-import { VirtualGrid } from './VirtualGrid'
-import type { VirtualGridHandle } from './VirtualGrid'
+import { FileGridViewport } from './FileGridViewport'
+import type { FileGridViewportHandle } from './FileGridViewport'
 import type { FileItem } from '@/types'
 
-interface FileGridProps {
+interface FileBrowserGridProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
   onFileClick: (file: FileItem) => void
@@ -11,9 +11,9 @@ interface FileGridProps {
   onDirectoryClick: (dirName: string) => void
 }
 
-export type FileGridHandle = VirtualGridHandle
+export type FileBrowserGridHandle = FileGridViewportHandle
 
-const FileGridImpl = forwardRef<FileGridHandle, FileGridProps>(function FileGridImpl({
+const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridProps>(function FileBrowserGridImpl({
   files,
   rootHandle,
   onFileClick,
@@ -21,7 +21,7 @@ const FileGridImpl = forwardRef<FileGridHandle, FileGridProps>(function FileGrid
   onDirectoryClick,
 }, ref) {
   return (
-    <VirtualGrid
+    <FileGridViewport
       ref={ref}
       files={files}
       rootHandle={rootHandle}
@@ -32,6 +32,6 @@ const FileGridImpl = forwardRef<FileGridHandle, FileGridProps>(function FileGrid
   )
 })
 
-FileGridImpl.displayName = 'FileGrid'
+FileBrowserGridImpl.displayName = 'FileBrowserGrid'
 
-export const FileGrid = memo(FileGridImpl)
+export const FileBrowserGrid = memo(FileBrowserGridImpl)

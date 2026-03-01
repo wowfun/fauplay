@@ -5,7 +5,7 @@ import { getMediaType, generateThumbnail } from '@/lib/thumbnail'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 
-interface FileItemCardProps {
+interface FileGridCardProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   itemIndex: number
@@ -34,14 +34,14 @@ async function getFileFromPath(
   }
 }
 
-export function FileItemCard({
+export function FileGridCard({
   file,
   rootHandle,
   itemIndex,
   isSelected = false,
   onClick,
   onDoubleClick,
-}: FileItemCardProps) {
+}: FileGridCardProps) {
   const isDir = file.kind === 'directory'
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)

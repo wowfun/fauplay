@@ -121,20 +121,29 @@ export async function readDirectory(
 }
 
 export async function getFileUrl(handle: FileSystemDirectoryHandle, filePath: string): Promise<string> {
-  const pathParts = filePath.split('/')
-  let current: FileSystemHandle = handle
+  const file = await getFileFromPath(handle, filePath)
+  const pathParts = filePath.split('/').filter(Boolean)
+  const fallbackName = pathParts[pathParts.length - 1] || file.name
+  return createObjectUrlForFile(file, fallbackName)
+}
 
-  for (const part of pathParts) {
-    if (part.includes('.')) {
-      const fileHandle = await (current as FileSystemDirectoryHandle).getFileHandle(part)
-      const file = await fileHandle.getFile()
-      return createObjectUrlForFile(file, part)
-    } else {
-      current = await (current as FileSystemDirectoryHandle).getDirectoryHandle(part)
-    }
+export async function getFileFromPath(
+  rootHandle: FileSystemDirectoryHandle,
+  filePath: string
+): Promise<File> {
+  const pathParts = filePath.split('/').filter(Boolean)
+  if (pathParts.length === 0) {
+    throw new Error('Invalid file path')
   }
 
-  throw new Error('Invalid file path')
+  let current: FileSystemDirectoryHandle = rootHandle
+  for (let i = 0; i < pathParts.length - 1; i++) {
+    current = await current.getDirectoryHandle(pathParts[i])
+  }
+
+  const fileName = pathParts[pathParts.length - 1]
+  const fileHandle = await current.getFileHandle(fileName)
+  return fileHandle.getFile()
 }
 
 export async function getDirectoryItemCount(

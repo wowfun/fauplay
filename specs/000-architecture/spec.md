@@ -65,3 +65,4 @@ updated: 2026-03-01
 - 接口契约：`specs/000-architecture/interfaces.md`
 - 演进路线：`specs/000-architecture/roadmap.md`
 - 架构待办：`specs/000-architecture/todo.md`
+- UI/UX 治理：`specs/002-ui-ux-governance/spec.md`

@@ -1,26 +1,28 @@
 import type { ShortcutBinding } from '@/lib/keyboard'
 
 export const keyboardShortcuts = {
-  global: {
+  app: {
     openDirectory: [
       { key: 'o', primary: true },
     ] satisfies ShortcutBinding[],
+    navigateUp: [
+      { key: 'backspace' },
+    ] satisfies ShortcutBinding[],
+  },
+  preview: {
     toggleAutoPlay: [
       { key: 'p', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
     toggleTraversalOrder: [
       { key: 'r', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
-    previewPrev: [
+    prev: [
       { code: 'bracketleft', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
-    previewNext: [
+    next: [
       { code: 'bracketright', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
-    navigateUp: [
-      { key: 'backspace' },
-    ] satisfies ShortcutBinding[],
-    closePreview: [
+    close: [
       { key: 'escape' },
     ] satisfies ShortcutBinding[],
   },
@@ -49,14 +51,6 @@ export const keyboardShortcuts = {
     ] satisfies ShortcutBinding[],
     openSelected: [
       { key: 'enter' },
-    ] satisfies ShortcutBinding[],
-  },
-  previewModal: {
-    close: [
-      { key: 'escape' },
-    ] satisfies ShortcutBinding[],
-    toggleVideoPlayback: [
-      { key: 'space' },
     ] satisfies ShortcutBinding[],
   },
 } as const

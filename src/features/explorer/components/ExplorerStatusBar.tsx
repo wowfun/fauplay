@@ -1,6 +1,6 @@
 import type { FileItem } from '@/types'
 
-interface StatusBarProps {
+interface ExplorerStatusBarProps {
   visibleFiles: FileItem[]
   selectedFile: FileItem | null
 }
@@ -24,7 +24,7 @@ function formatDate(date?: Date): string {
   })
 }
 
-export function StatusBar({ visibleFiles, selectedFile }: StatusBarProps) {
+export function ExplorerStatusBar({ visibleFiles, selectedFile }: ExplorerStatusBarProps) {
   const visibleCount = visibleFiles.length
   const selectedCount = selectedFile ? 1 : 0
   const showMeta = selectedFile?.kind === 'file'
