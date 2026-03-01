@@ -48,9 +48,85 @@ updated: 2026-03-01
 - 主要职责：当前选中文件预览、上一个/下一个切换、自动播放控制、系统动作入口。
 - 组件归属：
   - `features/preview/components/MediaPreviewPanel`
-  - `features/preview/components/MediaPreviewCanvas`
+  - `features/preview/components/PreviewHeaderBar`
+  - `features/preview/components/PreviewTitleRow`
+  - `features/preview/components/PreviewControlGroup`
   - `features/preview/components/MediaPlaybackControls`
+  - `features/preview/components/MediaPreviewCanvas`
+  - `features/preview/components/PreviewActionRail`
+  - `features/preview/components/PreviewMediaViewport`
+  - `features/preview/components/PreviewFeedbackOverlay`
 - 边界约束：面板行为由预览域状态驱动，不反向控制网格渲染策略。
+
+#### 3.3.1 子分区命名规范（Canonical Sub-Zone Names）
+
+| 规范中文名 | 规范英文名 | 当前实现载体 | 代码位置 | DOM 子分区标记 |
+| --- | --- | --- | --- | --- |
+| 预览头部栏 | `PreviewHeaderBar` | 独立组件 | `features/preview/components/PreviewHeaderBar.tsx` | `data-preview-subzone="PreviewHeaderBar"` |
+| 文件标题行 | `PreviewTitleRow` | 独立组件 | `features/preview/components/PreviewTitleRow.tsx` | `data-preview-subzone="PreviewTitleRow"` |
+| 头部控制组 | `PreviewControlGroup` | 独立组件 | `features/preview/components/PreviewControlGroup.tsx` | `data-preview-subzone="PreviewControlGroup"` |
+| 预览动作侧栏 | `PreviewActionRail` | 独立组件 | `features/preview/components/PreviewActionRail.tsx` | `data-preview-subzone="PreviewActionRail"` |
+| 媒体展示视口 | `PreviewMediaViewport` | 独立组件 | `features/preview/components/PreviewMediaViewport.tsx` | `data-preview-subzone="PreviewMediaViewport"` |
+| 预览反馈层 | `PreviewFeedbackOverlay` | 独立组件（挂载于 `PreviewMediaViewport` 内） | `features/preview/components/PreviewFeedbackOverlay.tsx` | `data-preview-subzone="PreviewFeedbackOverlay"` |
+
+编排关系（当前实现）：
+1. `MediaPreviewPanel` 负责 B2 顶层编排，组合 `PreviewHeaderBar + MediaPreviewCanvas`。
+2. `MediaPreviewCanvas` 负责 Body 编排，组合 `PreviewActionRail + PreviewMediaViewport`。
+3. `PreviewFeedbackOverlay` 作为 `PreviewMediaViewport` 的子层（Overlay Layer）渲染。
+
+命名约束：
+1. 子分区命名统一使用 `Preview` 作为前缀，避免 `Header/Canvas/Rail` 单词裸用。
+2. `PreviewHeaderBar` 必须包含且仅包含两行：`PreviewTitleRow` + `PreviewControlGroup`。
+3. `MediaPreviewCanvas` 保留为“媒体渲染组件名”，其所在布局区域命名为 `PreviewMediaViewport`。
+4. 后续新增子分区时，先在本表补充规范名，再进行实现。
+
+#### 3.3.2 结构分层（ASCII）
+
+```txt
+┌────────────────────────────────────────────────────────────┐
+│ B2. 预览面板区 Media Preview Panel Zone                    │
+├────────────────────────────────────────────────────────────┤
+│ [PreviewHeaderBar]                                         │
+│  [PreviewTitleRow]   文件名（单行省略，title 保留全名）      │
+│  [PreviewControlGroup] 遍历模式 | 间隔 | 自动播放 | 关闭      │
+├────────────────────────────────────────────────────────────┤
+│ [PreviewBody]                                              │
+│ ┌──────────────┬─────────────────────────────────────────┐ │
+│ │ PreviewAction│ PreviewMediaViewport                    │ │
+│ │ 系统动作入口  │ - loading/error/empty/media 视图切换     │ │
+│ │ reveal/open   │ - 通过快捷键触发上一项/下一项             │ │
+│ └──────────────┴─────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────┘
+```
+
+#### 3.3.3 输入与输出契约（Input/Output Contract）
+
+输入（Input）：
+
+1. 当前文件（Selected/Active File）。
+2. 预览遍历状态（Traversal State）：顺序/随机、可前进/后退。
+3. 自动播放状态（Auto-play State）：开关、间隔、视频结束/错误回调。
+4. 能力开关（Capability Flags）：是否可在系统中显示、是否可系统默认打开。
+
+输出（Output）：
+
+1. 预览控制事件：`onToggleAutoPlay`、`onToggleTraversalOrder`。
+2. 展示切换事件：`onOpenFullscreen`（仅面板态可用）、`onClose`。
+3. 系统动作事件：触发 `reveal/openDefault` 能力调用。
+
+#### 3.3.4 状态矩阵（State Matrix）
+
+1. `idle`：无文件可预览，显示空态提示。
+2. `loading`：读取文件并生成 `objectURL`。
+3. `ready`：媒体可交互（图片或视频）。
+4. `error`：文件读取失败或媒体解码失败，显示错误文案。
+5. `navigating`：快捷键或自动播放触发切换并回到 `loading` 或 `ready`。
+
+#### 3.3.5 与全屏预览区关系
+
+- 全屏预览区是 B2 的全屏表现状态（Fullscreen Presentation State）。
+- 两者共享同一套预览业务逻辑（Traversal/Auto-play/Action）。
+- 差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）。
 
 ### 3.4 C 底部状态区（Status Bar Zone）
 

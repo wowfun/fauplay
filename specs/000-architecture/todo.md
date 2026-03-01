@@ -11,7 +11,7 @@ updated: 2026-03-01
 
 ## 2. 待办（Todo）
 
-- [ ] 设计动作分发器（Action Dispatcher）前端接入点，替换组件内硬编码 helper 调用。
+- [x] 设计动作分发器（Action Dispatcher）前端接入点，替换组件内硬编码 helper 调用。
 - [ ] 设计插件注册器（Plugin Registry）与 actionId 冲突检测。
 - [ ] 定义网关错误码（Error Code）最小集合与文案映射策略。
 - [ ] 设计 `workspaceId -> rootPath` 安全映射存储结构。

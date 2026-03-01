@@ -4,6 +4,19 @@ updated: 2026-03-01
 
 # 002 UI/UX 评审检查清单
 
+## 0. 使用说明
+
+- 本清单是长期 PR 审查模板（Review Template），不会因某一轮迁移完成而删除。
+- 每个涉及 UI/UX、命名、分层的 PR 都应重新勾选本清单。
+- 首轮迁移完成状态请参考 `mapping.md`，不在本清单中固化勾选结果。
+
+## 0.1 本轮回填（2026-03-01）
+
+- [x] 状态完整性：`MediaPreviewCanvas` 已增加可追踪状态标记（`data-preview-state`、`data-action-state`）。
+- [x] 可访问性：图标按钮统一补齐 `aria-label` + `title` + `sr-only` 文本。
+- [x] 可扩展性：系统动作调用已通过 `Action Dispatcher` 入口分发，组件不再直接调用 helper。
+- [x] PR 附加要求：本轮已在规范文档中回填检查结论与落实结果。
+
 ## 1. 命名一致性检查（Naming Consistency）
 
 - [ ] 组件名是否为 `PascalCase` 且文件名一致。

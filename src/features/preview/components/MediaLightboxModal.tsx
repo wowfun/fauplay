@@ -8,10 +8,6 @@ interface MediaLightboxModalProps {
   canOpenWithSystemPlayer: boolean
   onClose: () => void
   autoPlayOnOpen?: boolean
-  canPrev: boolean
-  canNext: boolean
-  onPrev: () => void
-  onNext: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
@@ -29,10 +25,6 @@ export function MediaLightboxModal({
   canOpenWithSystemPlayer,
   onClose,
   autoPlayOnOpen = false,
-  canPrev,
-  canNext,
-  onPrev,
-  onNext,
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
@@ -50,10 +42,6 @@ export function MediaLightboxModal({
         canRevealInExplorer={canRevealInExplorer}
         canOpenWithSystemPlayer={canOpenWithSystemPlayer}
         onClose={onClose}
-        canPrev={canPrev}
-        canNext={canNext}
-        onPrev={onPrev}
-        onNext={onNext}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}

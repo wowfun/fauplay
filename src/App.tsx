@@ -66,10 +66,6 @@ function App() {
     autoPlayIntervalSec,
     traversalOrder,
     hasOpenPreview,
-    canPrevFromPane,
-    canNextFromPane,
-    canPrevFromModal,
-    canNextFromModal,
     showFileInPane,
     openFileInModal,
     closePreviewModal,
@@ -253,10 +249,6 @@ function App() {
       supportsOpenDefaultAction={supportsOpenDefaultAction}
       onClosePane={closePreviewPane}
       onOpenFullscreenFromPane={openFullscreenFromPane}
-      canPrevFromPane={canPrevFromPane}
-      canNextFromPane={canNextFromPane}
-      onNavigatePrevFromPane={() => navigateMediaFromPane('prev')}
-      onNavigateNextFromPane={() => navigateMediaFromPane('next')}
       autoPlayEnabled={autoPlayEnabled}
       autoPlayIntervalSec={autoPlayIntervalSec}
       onToggleAutoPlay={toggleAutoPlay}
@@ -268,10 +260,6 @@ function App() {
       previewFile={previewFile}
       previewAutoPlayOnOpen={previewAutoPlayOnOpen}
       onClosePreview={closePreviewModal}
-      canPrevFromModal={canPrevFromModal}
-      canNextFromModal={canNextFromModal}
-      onNavigatePrevFromModal={() => navigateMediaFromModal('prev')}
-      onNavigateNextFromModal={() => navigateMediaFromModal('next')}
     />
   )
 }

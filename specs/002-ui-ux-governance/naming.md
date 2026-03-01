@@ -44,6 +44,22 @@ updated: 2026-03-01
 - 行为/事件：`XxxAction`
 - 禁止模糊后缀：`Data`、`Info`、`Misc`
 
+### 2.4 预览面板子分区命名（Preview Sub-Zone Naming）
+
+- 预览面板区内部命名统一使用 `Preview` 前缀。
+- 区域命名建议：
+  - `PreviewHeaderBar`
+  - `PreviewTitleRow`
+  - `PreviewControlGroup`
+  - `PreviewActionRail`
+  - `PreviewMediaViewport`
+  - `PreviewFeedbackOverlay`
+- 组件命名建议：
+  - 头部结构优先 `Preview*`（例如 `PreviewHeaderBar`、`PreviewTitleRow`、`PreviewControlGroup`）。
+  - 媒体渲染组件保留 `MediaPreview*` 家族（例如 `MediaPreviewCanvas`）。
+- 结构约束：`PreviewHeaderBar` 必须包含 `PreviewTitleRow` 与 `PreviewControlGroup` 两个子区。
+- 禁止使用无前缀的裸名：`HeaderRow`、`TitleRow`、`ActionRail`、`MediaCanvas`。
+
 ## 3. 禁用命名（Disallowed Names）
 
 以下命名禁止直接使用，除非具备明确领域前缀：

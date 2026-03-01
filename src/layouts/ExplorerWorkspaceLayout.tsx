@@ -37,10 +37,6 @@ interface ExplorerWorkspaceLayoutProps {
   supportsOpenDefaultAction: boolean
   onClosePane: () => void
   onOpenFullscreenFromPane: () => void
-  canPrevFromPane: boolean
-  canNextFromPane: boolean
-  onNavigatePrevFromPane: () => void
-  onNavigateNextFromPane: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
@@ -52,10 +48,6 @@ interface ExplorerWorkspaceLayoutProps {
   previewFile: FileItem | null
   previewAutoPlayOnOpen: boolean
   onClosePreview: () => void
-  canPrevFromModal: boolean
-  canNextFromModal: boolean
-  onNavigatePrevFromModal: () => void
-  onNavigateNextFromModal: () => void
 }
 
 export function ExplorerWorkspaceLayout({
@@ -85,10 +77,6 @@ export function ExplorerWorkspaceLayout({
   supportsOpenDefaultAction,
   onClosePane,
   onOpenFullscreenFromPane,
-  canPrevFromPane,
-  canNextFromPane,
-  onNavigatePrevFromPane,
-  onNavigateNextFromPane,
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
@@ -100,10 +88,6 @@ export function ExplorerWorkspaceLayout({
   previewFile,
   previewAutoPlayOnOpen,
   onClosePreview,
-  canPrevFromModal,
-  canNextFromModal,
-  onNavigatePrevFromModal,
-  onNavigateNextFromModal,
 }: ExplorerWorkspaceLayoutProps) {
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -158,10 +142,6 @@ export function ExplorerWorkspaceLayout({
               canOpenWithSystemPlayer={supportsOpenDefaultAction}
               onClose={onClosePane}
               onOpenFullscreen={onOpenFullscreenFromPane}
-              canPrev={canPrevFromPane}
-              canNext={canNextFromPane}
-              onPrev={onNavigatePrevFromPane}
-              onNext={onNavigateNextFromPane}
               autoPlayEnabled={autoPlayEnabled}
               autoPlayIntervalSec={autoPlayIntervalSec}
               onToggleAutoPlay={onToggleAutoPlay}
@@ -188,10 +168,6 @@ export function ExplorerWorkspaceLayout({
           canOpenWithSystemPlayer={supportsOpenDefaultAction}
           onClose={onClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}
-          canPrev={canPrevFromModal}
-          canNext={canNextFromModal}
-          onPrev={onNavigatePrevFromModal}
-          onNext={onNavigateNextFromModal}
           autoPlayEnabled={autoPlayEnabled}
           autoPlayIntervalSec={autoPlayIntervalSec}
           onToggleAutoPlay={onToggleAutoPlay}

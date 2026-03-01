@@ -1,10 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X } from 'lucide-react'
 import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
-import { MediaPlaybackControls } from './MediaPlaybackControls'
-import { Button } from '@/ui/Button'
+import { PreviewHeaderBar } from './PreviewHeaderBar'
 
 type PreviewPresentation = 'panel' | 'fullscreen'
 
@@ -15,10 +13,6 @@ interface MediaPreviewPanelProps {
   canOpenWithSystemPlayer: boolean
   onClose: () => void
   onOpenFullscreen?: () => void
-  canPrev: boolean
-  canNext: boolean
-  onPrev: () => void
-  onNext: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
@@ -38,10 +32,6 @@ export function MediaPreviewPanel({
   canOpenWithSystemPlayer,
   onClose,
   onOpenFullscreen,
-  canPrev,
-  canNext,
-  onPrev,
-  onNext,
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
@@ -127,29 +117,17 @@ export function MediaPreviewPanel({
 
   return (
     <div className={isFullscreen ? 'flex flex-col h-full bg-background' : 'flex flex-col h-full bg-card border-l border-border'}>
-      <div className={`flex items-center justify-between p-3 border-b flex-shrink-0 ${isFullscreen ? 'border-white/10' : 'border-border'}`}>
-        <span className="text-sm font-medium truncate pr-2">{file.name}</span>
-        <div className="flex items-center gap-2 shrink-0">
-          <MediaPlaybackControls
-            autoPlayEnabled={autoPlayEnabled}
-            autoPlayIntervalSec={autoPlayIntervalSec}
-            onToggleAutoPlay={onToggleAutoPlay}
-            traversalOrder={traversalOrder}
-            onToggleTraversalOrder={onToggleTraversalOrder}
-            onAutoPlayIntervalChange={onAutoPlayIntervalChange}
-          />
-          <Button
-            onClick={onClose}
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            aria-label={isFullscreen ? '关闭全屏预览' : '关闭预览'}
-            title={isFullscreen ? '关闭全屏预览' : '关闭预览'}
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
+      <PreviewHeaderBar
+        fileName={file.name}
+        isFullscreen={isFullscreen}
+        autoPlayEnabled={autoPlayEnabled}
+        autoPlayIntervalSec={autoPlayIntervalSec}
+        onToggleAutoPlay={onToggleAutoPlay}
+        traversalOrder={traversalOrder}
+        onToggleTraversalOrder={onToggleTraversalOrder}
+        onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+        onClose={onClose}
+      />
 
       <MediaPreviewCanvas
         file={file}
@@ -159,10 +137,6 @@ export function MediaPreviewPanel({
         previewUrl={previewUrl}
         isLoading={isLoading}
         error={error}
-        canPrev={canPrev}
-        canNext={canNext}
-        onPrev={onPrev}
-        onNext={onNext}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
         autoPlayVideo={autoPlayEnabled || forceAutoPlayOnOpen}
         isFullscreen={isFullscreen}

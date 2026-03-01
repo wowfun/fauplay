@@ -180,32 +180,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   const hasOpenPreview = !!previewFile || showPreviewPane
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
-  const selectedMediaIndex = getMediaIndex(selectedFile)
-  const previewMediaIndex = getMediaIndex(previewFile)
-  const selectedShuffleCanPrev =
-    !!selectedFile &&
-    selectedFile.kind === 'file' &&
-    shuffleHistory.length > 1 &&
-    shuffleHistory[shuffleHistory.length - 1] === selectedFile.path
-  const previewShuffleCanPrev =
-    !!previewFile &&
-    previewFile.kind === 'file' &&
-    shuffleHistory.length > 1 &&
-    shuffleHistory[shuffleHistory.length - 1] === previewFile.path
-  const selectedShuffleCanNext = selectedMediaIndex >= 0 && mediaFiles.length > 1
-  const previewShuffleCanNext = previewMediaIndex >= 0 && mediaFiles.length > 1
-  const canPrevFromPane =
-    traversalOrder === 'shuffle' ? selectedShuffleCanPrev : selectedMediaIndex > 0
-  const canNextFromPane =
-    traversalOrder === 'shuffle'
-      ? selectedShuffleCanNext
-      : selectedMediaIndex >= 0 && selectedMediaIndex < mediaFiles.length - 1
-  const canPrevFromModal =
-    traversalOrder === 'shuffle' ? previewShuffleCanPrev : previewMediaIndex > 0
-  const canNextFromModal =
-    traversalOrder === 'shuffle'
-      ? previewShuffleCanNext
-      : previewMediaIndex >= 0 && previewMediaIndex < mediaFiles.length - 1
   const activeMediaIndex = getMediaIndex(activeMediaFile)
   const isAutoPlayEligible =
     autoPlayEnabled &&
@@ -436,10 +410,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     autoPlayIntervalSec,
     traversalOrder,
     hasOpenPreview,
-    canPrevFromPane,
-    canNextFromPane,
-    canPrevFromModal,
-    canNextFromModal,
     showFileInPane,
     openFileInModal,
     closePreviewModal,
