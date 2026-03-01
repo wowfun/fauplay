@@ -1,16 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getMediaType } from '@/lib/thumbnail'
 import type { FileItem } from '@/types'
-import { PreviewActionRail } from './PreviewActionRail'
+import type { GatewayToolDescriptor } from '@/lib/gateway'
+import {
+  PreviewActionRail,
+  type PreviewActionIcon,
+  type PreviewActionRailItem,
+  type PreviewActionState,
+} from './PreviewActionRail'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
 import { PreviewMediaViewport } from './PreviewMediaViewport'
 
 interface MediaPreviewCanvasProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
-  canRevealInExplorer?: boolean
-  canOpenWithSystemPlayer?: boolean
+  previewActionTools: GatewayToolDescriptor[]
   previewUrl: string | null
   isLoading: boolean
   error: string | null
@@ -22,12 +27,16 @@ interface MediaPreviewCanvasProps {
 }
 
 type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
+type PreviewActionRuntimeState = {
+  isLoading: boolean
+  error: string | null
+}
+type PreviewActionRuntimeMap = Record<string, PreviewActionRuntimeState>
 
 export function MediaPreviewCanvas({
   file,
   rootHandle,
-  canRevealInExplorer = true,
-  canOpenWithSystemPlayer = true,
+  previewActionTools,
   previewUrl,
   isLoading,
   error,
@@ -38,10 +47,7 @@ export function MediaPreviewCanvas({
   onVideoPlaybackError,
 }: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
-  const [isRevealing, setIsRevealing] = useState(false)
-  const [isOpening, setIsOpening] = useState(false)
-  const [openError, setOpenError] = useState<string | null>(null)
-  const [revealError, setRevealError] = useState<string | null>(null)
+  const [actionRuntimeState, setActionRuntimeState] = useState<PreviewActionRuntimeMap>({})
 
   const isImage = getMediaType(file.name) === 'image'
   const isVideo = getMediaType(file.name) === 'video'
@@ -52,7 +58,11 @@ export function MediaPreviewCanvas({
     : 'p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50'
   const emptyTextClass = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
   const errorTextClass = isFullscreen ? 'text-red-300' : 'text-destructive'
-  const showActionRail = canRevealInExplorer || (isVideo && canOpenWithSystemPlayer)
+  const fileActionTools = useMemo(() => {
+    if (file.kind !== 'file') return []
+    return previewActionTools.filter((tool) => tool.scopes.includes('file'))
+  }, [file.kind, previewActionTools])
+  const showActionRail = fileActionTools.length > 0
   const previewViewState: MediaPreviewViewState = isLoading
     ? 'loading'
     : error
@@ -60,82 +70,94 @@ export function MediaPreviewCanvas({
       : previewUrl && (isImage || isVideo)
         ? 'ready'
         : 'empty'
-  const revealActionState = revealError
-    ? 'error'
-    : isRevealing
-      ? 'loading'
-      : rootHandle
-        ? 'default'
-        : 'disabled'
-  const openActionState = openError
-    ? 'error'
-    : isOpening
-      ? 'loading'
-      : rootHandle
-        ? 'default'
-        : 'disabled'
+
+  const resolveActionIcon = useCallback((toolName: string): PreviewActionIcon => {
+    if (toolName === 'system.reveal') return 'reveal'
+    if (toolName === 'system.openDefault') return 'openDefault'
+    return 'default'
+  }, [])
+
+  const resolveActionState = useCallback((toolName: string): PreviewActionState => {
+    const state = actionRuntimeState[toolName]
+    if (state?.error) return 'error'
+    if (state?.isLoading) return 'loading'
+    return rootHandle ? 'default' : 'disabled'
+  }, [actionRuntimeState, rootHandle])
 
   useEffect(() => {
     setPlaybackError(false)
-    setOpenError(null)
-    setRevealError(null)
+    setActionRuntimeState({})
   }, [file.path])
 
-  const handleRevealInExplorer = async () => {
+  const handleToolAction = useCallback(async (tool: GatewayToolDescriptor) => {
     if (file.kind !== 'file' || !rootHandle) return
 
     try {
-      setRevealError(null)
-      setIsRevealing(true)
-      await dispatchSystemTool({
-        toolName: 'system.reveal',
+      setActionRuntimeState((prev) => ({
+        ...prev,
+        [tool.name]: { isLoading: true, error: null },
+      }))
+
+      const didDispatch = await dispatchSystemTool({
+        toolName: tool.name,
         rootHandle,
         relativePath: file.path,
       })
+
+      if (!didDispatch) {
+        setActionRuntimeState((prev) => ({
+          ...prev,
+          [tool.name]: { isLoading: false, error: null },
+        }))
+      }
     } catch (err) {
-      setRevealError((err as Error).message || '打开资源管理器失败')
+      setActionRuntimeState((prev) => ({
+        ...prev,
+        [tool.name]: {
+          isLoading: false,
+          error: (err as Error).message || `${tool.title || tool.name} 失败`,
+        },
+      }))
     } finally {
-      setIsRevealing(false)
-    }
-  }
+      setActionRuntimeState((prev) => {
+        const current = prev[tool.name]
+        if (!current) return prev
 
-  const handleOpenWithSystemPlayer = async () => {
-    if (file.kind !== 'file' || !rootHandle) return
-
-    try {
-      setOpenError(null)
-      setIsOpening(true)
-      await dispatchSystemTool({
-        toolName: 'system.openDefault',
-        rootHandle,
-        relativePath: file.path,
+        return {
+          ...prev,
+          [tool.name]: { ...current, isLoading: false },
+        }
       })
-    } catch (err) {
-      setOpenError((err as Error).message || '打开系统播放器失败')
-    } finally {
-      setIsOpening(false)
     }
-  }
+  }, [file.kind, file.path, rootHandle])
+
+  const railActions = useMemo<PreviewActionRailItem[]>(() => {
+    return fileActionTools.map((tool) => {
+      const state = actionRuntimeState[tool.name]
+      const title = tool.title || tool.name
+
+      return {
+        toolName: tool.name,
+        title,
+        onClick: () => {
+          void handleToolAction(tool)
+        },
+        disabled: !!state?.isLoading || !rootHandle,
+        actionState: resolveActionState(tool.name),
+        error: state?.error ?? null,
+        icon: resolveActionIcon(tool.name),
+      }
+    })
+  }, [actionRuntimeState, fileActionTools, handleToolAction, resolveActionIcon, resolveActionState, rootHandle])
 
   return (
     <div className="flex-1 min-h-0 flex" data-preview-state={previewViewState}>
       {showActionRail && (
         <PreviewActionRail
-          canRevealInExplorer={canRevealInExplorer}
-          canOpenWithSystemPlayer={canOpenWithSystemPlayer}
-          isVideo={isVideo}
-          isRevealing={isRevealing}
-          isOpening={isOpening}
-          hasRootHandle={!!rootHandle}
-          onReveal={() => void handleRevealInExplorer()}
-          onOpenWithSystemPlayer={() => void handleOpenWithSystemPlayer()}
+          actions={railActions}
           railButtonClass={railButtonClass}
           borderClass={panelBorderClass}
           errorTextClass={errorTextClass}
-          revealError={revealError}
-          openError={openError}
-          revealActionState={revealActionState}
-          openActionState={openActionState}
         />
       )}
 

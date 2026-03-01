@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
+import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
 
@@ -9,8 +10,7 @@ type PreviewPresentation = 'panel' | 'fullscreen'
 interface MediaPreviewPanelProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
-  canRevealInExplorer: boolean
-  canOpenWithSystemPlayer: boolean
+  previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
   onOpenFullscreen?: () => void
   autoPlayEnabled: boolean
@@ -28,8 +28,7 @@ interface MediaPreviewPanelProps {
 export function MediaPreviewPanel({
   file,
   rootHandle,
-  canRevealInExplorer,
-  canOpenWithSystemPlayer,
+  previewActionTools,
   onClose,
   onOpenFullscreen,
   autoPlayEnabled,
@@ -132,8 +131,7 @@ export function MediaPreviewPanel({
       <MediaPreviewCanvas
         file={file}
         rootHandle={rootHandle}
-        canRevealInExplorer={canRevealInExplorer}
-        canOpenWithSystemPlayer={canOpenWithSystemPlayer}
+        previewActionTools={previewActionTools}
         previewUrl={previewUrl}
         isLoading={isLoading}
         error={error}

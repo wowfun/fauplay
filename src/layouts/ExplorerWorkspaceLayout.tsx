@@ -7,6 +7,7 @@ import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatus
 import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { FileItem, FilterState } from '@/types'
+import type { GatewayToolDescriptor } from '@/lib/gateway'
 
 type TraversalOrder = 'sequential' | 'shuffle'
 
@@ -33,8 +34,7 @@ interface ExplorerWorkspaceLayoutProps {
   paneWidthRatio: number
   onPreviewPaneResizeStart: (event: ReactMouseEvent<HTMLDivElement>) => void
   selectedFile: FileItem | null
-  supportsRevealAction: boolean
-  supportsOpenDefaultAction: boolean
+  previewActionTools: GatewayToolDescriptor[]
   onClosePane: () => void
   onOpenFullscreenFromPane: () => void
   autoPlayEnabled: boolean
@@ -73,8 +73,7 @@ export function ExplorerWorkspaceLayout({
   paneWidthRatio,
   onPreviewPaneResizeStart,
   selectedFile,
-  supportsRevealAction,
-  supportsOpenDefaultAction,
+  previewActionTools,
   onClosePane,
   onOpenFullscreenFromPane,
   autoPlayEnabled,
@@ -138,8 +137,7 @@ export function ExplorerWorkspaceLayout({
             <MediaPreviewPanel
               file={selectedFile}
               rootHandle={rootHandle}
-              canRevealInExplorer={supportsRevealAction}
-              canOpenWithSystemPlayer={supportsOpenDefaultAction}
+              previewActionTools={previewActionTools}
               onClose={onClosePane}
               onOpenFullscreen={onOpenFullscreenFromPane}
               autoPlayEnabled={autoPlayEnabled}
@@ -164,8 +162,7 @@ export function ExplorerWorkspaceLayout({
         <MediaLightboxModal
           file={previewFile}
           rootHandle={rootHandle}
-          canRevealInExplorer={supportsRevealAction}
-          canOpenWithSystemPlayer={supportsOpenDefaultAction}
+          previewActionTools={previewActionTools}
           onClose={onClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}
           autoPlayEnabled={autoPlayEnabled}

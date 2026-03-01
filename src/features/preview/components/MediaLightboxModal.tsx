@@ -1,11 +1,11 @@
 import type { FileItem } from '@/types'
+import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { MediaPreviewPanel } from './MediaPreviewPanel'
 
 interface MediaLightboxModalProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
-  canRevealInExplorer: boolean
-  canOpenWithSystemPlayer: boolean
+  previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
   autoPlayOnOpen?: boolean
   autoPlayEnabled: boolean
@@ -21,8 +21,7 @@ interface MediaLightboxModalProps {
 export function MediaLightboxModal({
   file,
   rootHandle,
-  canRevealInExplorer,
-  canOpenWithSystemPlayer,
+  previewActionTools,
   onClose,
   autoPlayOnOpen = false,
   autoPlayEnabled,
@@ -39,8 +38,7 @@ export function MediaLightboxModal({
       <MediaPreviewPanel
         file={file}
         rootHandle={rootHandle}
-        canRevealInExplorer={canRevealInExplorer}
-        canOpenWithSystemPlayer={canOpenWithSystemPlayer}
+        previewActionTools={previewActionTools}
         onClose={onClose}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}

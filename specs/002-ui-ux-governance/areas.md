@@ -94,7 +94,7 @@ updated: 2026-03-01
 │ ┌──────────────┬─────────────────────────────────────────┐ │
 │ │ PreviewAction│ PreviewMediaViewport                    │ │
 │ │ 系统动作入口  │ - loading/error/empty/media 视图切换     │ │
-│ │ reveal/open   │ - 通过快捷键触发上一项/下一项             │ │
+│ │ tools/list 驱动│ - 通过快捷键触发上一项/下一项            │ │
 │ └──────────────┴─────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -106,13 +106,13 @@ updated: 2026-03-01
 1. 当前文件（Selected/Active File）。
 2. 预览遍历状态（Traversal State）：顺序/随机、可前进/后退。
 3. 自动播放状态（Auto-play State）：开关、间隔、视频结束/错误回调。
-4. 能力开关（Capability Flags）：是否可在系统中显示、是否可系统默认打开。
+4. 动作工具元数据（Action Tool Metadata）：来自 `tools/list` 的 `name/title/scopes/mutation`。
 
 输出（Output）：
 
 1. 预览控制事件：`onToggleAutoPlay`、`onToggleTraversalOrder`。
 2. 展示切换事件：`onOpenFullscreen`（仅面板态可用）、`onClose`。
-3. 系统动作事件：触发 `reveal/openDefault` 能力调用。
+3. 系统动作事件：触发当前工具 `name` 对应的 MCP `tools/call` 调用。
 
 #### 3.3.4 状态矩阵（State Matrix）
 
