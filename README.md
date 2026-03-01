@@ -21,7 +21,7 @@
 - 预览自动播放（侧边与全屏一致）：图片按间隔切换、视频播放结束后切换、末尾循环
 - 键盘导航与预览快捷键（方向键、W/A/S/D、PageUp/PageDown、Enter、Esc、P、R、[、]）
 - 快捷键配置集中管理（`src/config/shortcuts.ts`）
-- 可选本地集成：通过本地能力网关在 Windows 文件资源管理器中定位/打开文件（兼容旧 helper 路由）
+- 可选本地集成：通过本地能力网关在 Windows 文件资源管理器中定位/打开文件
 
 ## 技术栈
 
@@ -52,18 +52,6 @@ npm run dev
 npm run gateway
 ```
 
-### 启动资源管理器定位 helper（兼容命令）
-
-```bash
-npm run reveal-helper
-```
-
-### 启动旧版 helper（仅排障时使用）
-
-```bash
-npm run reveal-helper:legacy
-```
-
 ### 构建生产版本
 
 ```bash
@@ -78,7 +66,7 @@ npm run build
 4. 快捷键列表见 [`docs/shortcuts.md`](docs/shortcuts.md)
 5. 常见问题排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)
 6. 若需“在文件资源管理器中显示”：
-   - 在 WSL 中启动 `npm run gateway`（或兼容命令 `npm run reveal-helper`）
+   - 在 WSL 中启动 `npm run gateway`
    - 在预览面板点击“在文件资源管理器中显示”
    - 首次使用时输入当前已选目录的系统绝对路径（按目录名称保存到浏览器本地存储）
 

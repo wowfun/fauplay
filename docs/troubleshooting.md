@@ -7,7 +7,7 @@
 ### 现象
 
 - 点击“在文件资源管理器中显示”后失败
-- helper 日志出现类似错误：
+- 网关日志出现类似错误：
   - `MZ...`
   - `No such device`
   - `Syntax error: newline unexpected`
@@ -38,7 +38,7 @@ wsl --shutdown
 explorer.exe .
 ```
 
-4. 重新启动网关（兼容命令同名）：
+4. 重新启动网关：
 
 ```bash
 npm run gateway

@@ -1,10 +1,7 @@
 const GATEWAY_EXECUTE_URL = 'http://127.0.0.1:3210/v1/actions/execute'
-const LEGACY_REVEAL_HELPER_URL = 'http://127.0.0.1:3210/reveal'
-const LEGACY_OPEN_HELPER_URL = 'http://127.0.0.1:3210/open'
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
 
 type RootPathMap = Record<string, string>
-type LegacyAction = 'reveal' | 'openDefault'
 
 interface GatewayErrorShape {
   ok?: boolean
@@ -61,37 +58,6 @@ export function ensureRootPath(rootLabel: string): string | null {
   return next
 }
 
-function shouldFallbackToLegacy(error: unknown): boolean {
-  if (!(error instanceof GatewayActionError)) return true
-  if (!error.code) return true
-  return error.code === 'NOT_FOUND' || error.code === 'ACTION_NOT_FOUND'
-}
-
-async function fetchWithTimeout(
-  url: string,
-  payload: Record<string, unknown>,
-  fallbackMessage: string
-): Promise<void> {
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), 5000)
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    const result = await response.json().catch(() => ({ ok: false, error: 'Invalid response' }))
-    if (!response.ok || !result?.ok) {
-      throw new Error((result as { error?: string }).error || fallbackMessage)
-    }
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
-}
-
 async function executeGatewayAction(actionId: string, rootPath: string, relativePath: string): Promise<void> {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), 5000)
@@ -129,30 +95,10 @@ async function executeGatewayAction(actionId: string, rootPath: string, relative
   }
 }
 
-async function executeActionWithLegacyFallback(
-  actionId: 'system.reveal' | 'system.openDefault',
-  legacyAction: LegacyAction,
-  relativePath: string,
-  rootPath: string
-): Promise<void> {
-  try {
-    await executeGatewayAction(actionId, rootPath, relativePath)
-    return
-  } catch (error) {
-    if (!shouldFallbackToLegacy(error)) {
-      throw error
-    }
-  }
-
-  const legacyUrl = legacyAction === 'reveal' ? LEGACY_REVEAL_HELPER_URL : LEGACY_OPEN_HELPER_URL
-  const fallbackMessage = legacyAction === 'reveal' ? 'Failed to reveal file' : 'Failed to open file'
-  await fetchWithTimeout(legacyUrl, { rootPath, relativePath }, fallbackMessage)
-}
-
 export async function revealInSystemExplorer(relativePath: string, rootPath: string): Promise<void> {
-  await executeActionWithLegacyFallback('system.reveal', 'reveal', relativePath, rootPath)
+  await executeGatewayAction('system.reveal', rootPath, relativePath)
 }
 
 export async function openWithSystemDefaultApp(relativePath: string, rootPath: string): Promise<void> {
-  await executeActionWithLegacyFallback('system.openDefault', 'openDefault', relativePath, rootPath)
+  await executeGatewayAction('system.openDefault', rootPath, relativePath)
 }

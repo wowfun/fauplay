@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { createRevealPlugin } from './plugins/reveal.mjs'
 
-const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || process.env.FAUPLAY_REVEAL_PORT || 3210)
+const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
 const GATEWAY_VERSION = '0.1.0'
 
@@ -46,7 +46,6 @@ function createPluginRuntime() {
 export function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
-  const enableLegacyRoutes = options.enableLegacyRoutes !== false
   const runtime = createPluginRuntime()
 
   const server = http.createServer(async (req, res) => {
@@ -140,34 +139,6 @@ export function startGatewayServer(options = {}) {
       return
     }
 
-    if (enableLegacyRoutes && req.method === 'POST' && (url === '/reveal' || url === '/open')) {
-      try {
-        const payload = await readJsonBody(req)
-        const actionId = url === '/reveal' ? 'system.reveal' : 'system.openDefault'
-        const found = runtime.actionMap.get(actionId)
-
-        if (!found) {
-          sendJson(res, 500, { ok: false, error: 'Legacy route action is not available' })
-          return
-        }
-
-        await found.plugin.execute({
-          actionId,
-          payload,
-          context: {
-            workspaceId: 'legacy',
-            currentPath: '',
-            selectedPaths: payload?.relativePath ? [payload.relativePath] : [],
-          },
-        })
-
-        sendJson(res, 200, { ok: true })
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : 'Legacy action failed' })
-      }
-      return
-    }
-
     sendJson(res, 404, {
       ok: false,
       error: {
@@ -178,8 +149,7 @@ export function startGatewayServer(options = {}) {
   })
 
   server.listen(port, host, () => {
-    const legacyLabel = enableLegacyRoutes ? ' (legacy routes enabled)' : ''
-    console.log(`Fauplay gateway listening on http://${host}:${port}${legacyLabel}`)
+    console.log(`Fauplay gateway listening on http://${host}:${port}`)
   })
 
   return server

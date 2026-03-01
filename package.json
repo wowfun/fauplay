@@ -6,8 +6,6 @@
   "scripts": {
     "dev": "vite",
     "gateway": "node scripts/gateway/index.mjs",
-    "reveal-helper": "node scripts/gateway/index.mjs",
-    "reveal-helper:legacy": "node scripts/reveal-helper.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"

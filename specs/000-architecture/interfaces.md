@@ -163,6 +163,4 @@ type PluginManifest = {
 2. 已预留（当前返回 `501 NOT_IMPLEMENTED`）：
    - `POST /v1/mutations/plan`
    - `POST /v1/mutations/commit`
-3. 兼容路由（Legacy Routes）：
-   - `POST /reveal`
-   - `POST /open`
+3. 已移除旧版兼容路由（Legacy Routes），网关仅保留 `/v1/*` 契约接口。

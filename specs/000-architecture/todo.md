@@ -28,8 +28,8 @@ updated: 2026-03-01
 
 ## 4. 迁移清单（Migration Checklist）
 
-- [x] 复刻 `reveal-helper` 的 `/reveal` 行为为 `system.reveal` 动作。
-- [x] 复刻 `reveal-helper` 的 `/open` 行为为 `system.openDefault` 动作。
+- [x] 复刻旧版 `reveal-helper` 的“定位文件”行为为 `system.reveal` 动作。
+- [x] 复刻旧版 `reveal-helper` 的“系统默认打开”行为为 `system.openDefault` 动作。
 - [x] 前端 `MediaPreviewCanvas` 改用网关动作调用。
 - [x] 保留并验证无网关时的降级路径。
 
