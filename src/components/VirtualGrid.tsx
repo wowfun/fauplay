@@ -3,6 +3,8 @@ import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileItemCard } from './FileItemCard'
 import type { FileItem } from '@/types'
+import { keyboardShortcuts } from '@/config/shortcuts'
+import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 
 interface VirtualGridProps {
   files: FileItem[]
@@ -150,17 +152,6 @@ export const VirtualGrid = forwardRef<VirtualGridHandle, VirtualGridProps>(funct
   }, [files, markSelectedElement])
 
   useEffect(() => {
-    const isTypingTarget = (target: EventTarget | null) => {
-      if (!(target instanceof HTMLElement)) return false
-      const tag = target.tagName
-      return (
-        tag === 'INPUT' ||
-        tag === 'TEXTAREA' ||
-        tag === 'SELECT' ||
-        target.isContentEditable
-      )
-    }
-
     const focusItem = (index: number) => {
       const clampedIndex = Math.max(0, Math.min(files.length - 1, index))
       const targetFile = files[clampedIndex]
@@ -200,43 +191,31 @@ export const VirtualGrid = forwardRef<VirtualGridHandle, VirtualGridProps>(funct
 
       let nextIndex = -1
       const currentIndex = getCurrentIndex()
-      const key = event.key.toLowerCase()
 
-      switch (key) {
-        case 'arrowright':
-        case 'd':
-          nextIndex = Math.min(files.length - 1, currentIndex + 1)
-          break
-        case 'arrowleft':
-        case 'a':
-          nextIndex = Math.max(0, currentIndex - 1)
-          break
-        case 'arrowdown':
-        case 's':
-          nextIndex = Math.min(files.length - 1, currentIndex + columnCount)
-          break
-        case 'arrowup':
-        case 'w':
-          nextIndex = Math.max(0, currentIndex - columnCount)
-          break
-        case 'pagedown':
-          nextIndex = Math.min(files.length - 1, currentIndex + pageSize)
-          break
-        case 'pageup':
-          nextIndex = Math.max(0, currentIndex - pageSize)
-          break
-        case 'enter':
-          event.preventDefault()
-          if (files[currentIndex].kind === 'directory') {
-            onDirectoryClick(files[currentIndex].name)
-          } else if (onFileDoubleClick) {
-            onFileDoubleClick(files[currentIndex])
-          } else {
-            onFileClick(files[currentIndex])
-          }
-          return
-        default:
-          return
+      if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveRight)) {
+        nextIndex = Math.min(files.length - 1, currentIndex + 1)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveLeft)) {
+        nextIndex = Math.max(0, currentIndex - 1)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveDown)) {
+        nextIndex = Math.min(files.length - 1, currentIndex + columnCount)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveUp)) {
+        nextIndex = Math.max(0, currentIndex - columnCount)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageDown)) {
+        nextIndex = Math.min(files.length - 1, currentIndex + pageSize)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageUp)) {
+        nextIndex = Math.max(0, currentIndex - pageSize)
+      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.openSelected)) {
+        event.preventDefault()
+        if (files[currentIndex].kind === 'directory') {
+          onDirectoryClick(files[currentIndex].name)
+        } else if (onFileDoubleClick) {
+          onFileDoubleClick(files[currentIndex])
+        } else {
+          onFileClick(files[currentIndex])
+        }
+        return
+      } else {
+        return
       }
 
       event.preventDefault()

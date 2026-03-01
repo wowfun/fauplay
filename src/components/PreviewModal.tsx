@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import type { FileItem } from '@/types'
 import { PreviewContent } from '@/components/PreviewContent'
+import { keyboardShortcuts } from '@/config/shortcuts'
+import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { isVideoFile } from '@/lib/fileSystem'
 
 interface PreviewModalProps {
   file: FileItem
@@ -21,17 +24,6 @@ interface PreviewModalProps {
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    target.isContentEditable
-  )
 }
 
 export function PreviewModal({
@@ -57,18 +49,16 @@ export function PreviewModal({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (matchesAnyShortcut(e, keyboardShortcuts.previewModal.close)) {
         onClose()
         return
       }
 
       if (isTypingTarget(e.target)) return
 
-      if (e.key === ' ') {
-        if (/\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)) {
-          e.preventDefault()
-          setIsPlaying(p => !p)
-        }
+      if (matchesAnyShortcut(e, keyboardShortcuts.previewModal.toggleVideoPlayback) && isVideoFile(file.name)) {
+        e.preventDefault()
+        setIsPlaying((p) => !p)
       }
     }
 
@@ -77,8 +67,8 @@ export function PreviewModal({
   }, [onClose, file.name])
 
   useEffect(() => {
-    const isVideoFile = /\.(mp4|webm|mov|avi|mkv|ogg)$/i.test(file.name)
-    setIsPlaying((autoPlayOnOpen || autoPlayEnabled) && isVideoFile)
+    const isCurrentFileVideo = isVideoFile(file.name)
+    setIsPlaying((autoPlayOnOpen || autoPlayEnabled) && isCurrentFileVideo)
   }, [file, autoPlayOnOpen, autoPlayEnabled])
 
   return (

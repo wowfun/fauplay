@@ -9,6 +9,8 @@ import { PreviewPane } from '@/components/PreviewPane'
 import { createObjectUrlForFile, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import type { FileItem, FilterState } from '@/types'
 import { StatusBar } from '@/components/StatusBar'
+import { keyboardShortcuts } from '@/config/shortcuts'
+import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
@@ -24,17 +26,6 @@ const defaultFilter: FilterState = {
   hideEmptyFolders: true,
   sortBy: 'name',
   sortOrder: 'asc',
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    target.isContentEditable
-  )
 }
 
 function shufflePaths(paths: string[]): string[] {
@@ -539,10 +530,9 @@ function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
       const isTyping = isTypingTarget(event.target)
-      const key = event.key.toLowerCase()
 
       // Ctrl/Cmd + O: open folder picker
-      if ((event.ctrlKey || event.metaKey) && key === 'o') {
+      if (matchesAnyShortcut(event, keyboardShortcuts.global.openDirectory)) {
         event.preventDefault()
         void selectDirectory()
         return
@@ -552,20 +542,20 @@ function App() {
       if (isTyping) return
 
       // P: toggle preview autoplay
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === 'p') {
+      if (matchesAnyShortcut(event, keyboardShortcuts.global.toggleAutoPlay)) {
         event.preventDefault()
         setAutoPlayEnabled((previous) => !previous)
         return
       }
 
       // Preview traversal hotkeys only work while preview is open.
-      if (hasOpenPreview && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        if (key === 'r') {
+      if (hasOpenPreview) {
+        if (matchesAnyShortcut(event, keyboardShortcuts.global.toggleTraversalOrder)) {
           event.preventDefault()
           handleToggleTraversalOrder()
           return
         }
-        if (event.key === '[' || event.key === '{') {
+        if (matchesAnyShortcut(event, keyboardShortcuts.global.previewPrev)) {
           event.preventDefault()
           if (previewFile) {
             navigateMediaFromModal('prev')
@@ -574,7 +564,7 @@ function App() {
           }
           return
         }
-        if (event.key === ']' || event.key === '}') {
+        if (matchesAnyShortcut(event, keyboardShortcuts.global.previewNext)) {
           event.preventDefault()
           if (previewFile) {
             navigateMediaFromModal('next')
@@ -586,14 +576,14 @@ function App() {
       }
 
       // Backspace: navigate up one level
-      if (event.key === 'Backspace' && currentPath) {
+      if (matchesAnyShortcut(event, keyboardShortcuts.global.navigateUp) && currentPath) {
         event.preventDefault()
         void navigateUp()
         return
       }
 
       // Escape: close modal first, then side preview pane
-      if (event.key === 'Escape') {
+      if (matchesAnyShortcut(event, keyboardShortcuts.global.closePreview)) {
         if (previewFile) {
           event.preventDefault()
           handleClosePreview()
