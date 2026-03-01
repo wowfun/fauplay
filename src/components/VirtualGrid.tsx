@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useState } from 'react'
+import { useMemo, useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileItemCard } from './FileItemCard'
@@ -12,24 +12,28 @@ interface VirtualGridProps {
   onDirectoryClick: (dirName: string) => void
 }
 
+export interface VirtualGridHandle {
+  syncSelectedPath: (path: string | null, options?: { scroll?: boolean; focus?: boolean }) => void
+}
+
 const CARD_WIDTH = 160
 const CARD_HEIGHT = 180
 const GAP = 16
 
-export function VirtualGrid({
+export const VirtualGrid = forwardRef<VirtualGridHandle, VirtualGridProps>(function VirtualGrid({
   files,
   rootHandle,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
-}: VirtualGridProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<FixedSizeGridType>(null)
   const selectedIndexRef = useRef(0)
   const selectedPathRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
-  const markSelectedElement = (index: number, path: string) => {
+  const markSelectedElement = useCallback((index: number, path: string) => {
     selectedIndexRef.current = index
     selectedPathRef.current = path
 
@@ -45,7 +49,7 @@ export function VirtualGrid({
     if (next) {
       next.setAttribute('data-grid-selected', 'true')
     }
-  }
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -77,6 +81,47 @@ export function VirtualGrid({
     return visibleRows * columnCount
   }, [dimensions.height, columnCount])
 
+  const syncSelectedPath = useCallback((
+    path: string | null,
+    options?: { scroll?: boolean; focus?: boolean }
+  ) => {
+    if (!path || files.length === 0) return
+
+    const selectedIndex = files.findIndex((item) => item.path === path)
+    if (selectedIndex < 0) return
+    if (
+      selectedIndexRef.current === selectedIndex &&
+      selectedPathRef.current === path
+    ) {
+      return
+    }
+
+    selectedIndexRef.current = selectedIndex
+    selectedPathRef.current = path
+    markSelectedElement(selectedIndex, path)
+
+    if (options?.scroll !== false) {
+      gridRef.current?.scrollToItem({
+        rowIndex: Math.floor(selectedIndex / columnCount),
+        columnIndex: selectedIndex % columnCount,
+        align: 'smart',
+      })
+    }
+
+    if (options?.focus) {
+      requestAnimationFrame(() => {
+        const element = containerRef.current?.querySelector<HTMLButtonElement>(
+          `[data-grid-index="${selectedIndex}"]`
+        )
+        element?.focus({ preventScroll: true })
+      })
+    }
+  }, [files, columnCount, markSelectedElement])
+
+  useImperativeHandle(ref, () => ({
+    syncSelectedPath,
+  }), [syncSelectedPath])
+
   useEffect(() => {
     if (files.length === 0) {
       selectedIndexRef.current = 0
@@ -102,7 +147,7 @@ export function VirtualGrid({
     requestAnimationFrame(() => {
       markSelectedElement(selectedIndexRef.current, path)
     })
-  }, [files])
+  }, [files, markSelectedElement])
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -200,7 +245,7 @@ export function VirtualGrid({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [files, columnCount, pageSize, onDirectoryClick, onFileDoubleClick, onFileClick])
+  }, [files, columnCount, pageSize, onDirectoryClick, onFileDoubleClick, onFileClick, markSelectedElement])
 
   if (files.length === 0) {
     return (
@@ -263,4 +308,4 @@ export function VirtualGrid({
       </Grid>
     </div>
   )
-}
+})

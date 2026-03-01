@@ -13,6 +13,12 @@ interface PreviewPaneProps {
   canNext: boolean
   onPrev: () => void
   onNext: () => void
+  autoPlayEnabled: boolean
+  autoPlayIntervalSec: number
+  onToggleAutoPlay: () => void
+  onAutoPlayIntervalChange: (sec: number) => void
+  onVideoEnded: () => void
+  onVideoPlaybackError: () => void
 }
 
 async function getFileFromPath(
@@ -44,6 +50,12 @@ export function PreviewPane({
   canNext,
   onPrev,
   onNext,
+  autoPlayEnabled,
+  autoPlayIntervalSec,
+  onToggleAutoPlay,
+  onAutoPlayIntervalChange,
+  onVideoEnded,
+  onVideoPlaybackError,
 }: PreviewPaneProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -121,13 +133,41 @@ export function PreviewPane({
       className="flex flex-col h-full bg-card border-l border-border"
     >
       <div className="flex items-center justify-between p-3 border-b border-border flex-shrink-0">
-        <span className="text-sm font-medium truncate">{file.name}</span>
-        <button
-          onClick={onClose}
-          className="p-1 hover:bg-accent rounded transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <span className="text-sm font-medium truncate pr-2">{file.name}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <select
+            value={autoPlayIntervalSec}
+            onChange={(event) => onAutoPlayIntervalChange(Number(event.target.value))}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+            aria-label="自动播放速度（秒）"
+            title="自动播放速度（秒）"
+          >
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+              <option key={value} value={value}>
+                {value}s
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onToggleAutoPlay}
+            className={`h-8 rounded-md px-2 text-xs transition-colors ${
+              autoPlayEnabled
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-accent text-accent-foreground hover:bg-accent/80'
+            }`}
+            aria-label={autoPlayEnabled ? '暂停自动播放' : '开始自动播放'}
+            title={autoPlayEnabled ? '暂停自动播放' : '开始自动播放'}
+          >
+            {autoPlayEnabled ? '暂停' : '自动播放'}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-accent rounded transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <PreviewContent
@@ -141,6 +181,9 @@ export function PreviewPane({
         onPrev={onPrev}
         onNext={onNext}
         onOpenFullscreen={onOpenFullscreen}
+        autoPlayVideo={autoPlayEnabled}
+        onVideoEnded={onVideoEnded}
+        onVideoPlaybackError={onVideoPlaybackError}
       />
     </div>
   )

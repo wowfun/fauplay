@@ -26,6 +26,8 @@ interface PreviewContentProps {
   onOpenFullscreen?: () => void
   autoPlayVideo?: boolean
   isFullscreen?: boolean
+  onVideoEnded?: () => void
+  onVideoPlaybackError?: () => void
 }
 
 export function PreviewContent({
@@ -41,6 +43,8 @@ export function PreviewContent({
   onOpenFullscreen,
   autoPlayVideo = false,
   isFullscreen = false,
+  onVideoEnded,
+  onVideoPlaybackError,
 }: PreviewContentProps) {
   const [playbackError, setPlaybackError] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
@@ -205,7 +209,11 @@ export function PreviewContent({
                 controls
                 autoPlay={autoPlayVideo}
                 className={`block w-auto h-auto max-w-full ${mediaMaxHeightClass} object-contain`}
-                onError={() => setPlaybackError(true)}
+                onEnded={onVideoEnded}
+                onError={() => {
+                  setPlaybackError(true)
+                  onVideoPlaybackError?.()
+                }}
               >
                 您的浏览器不支持视频播放
               </video>

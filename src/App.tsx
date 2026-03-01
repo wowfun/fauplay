@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { FolderOpen, Loader2 } from 'lucide-react'
 import { useFileSystem } from '@/hooks/useFileSystem'
 import { FileGrid } from '@/components/FileGrid'
+import type { FileGridHandle } from '@/components/FileGrid'
 import { Toolbar } from '@/components/Toolbar'
 import { PreviewModal } from '@/components/PreviewModal'
 import { PreviewPane } from '@/components/PreviewPane'
@@ -12,6 +13,9 @@ import { StatusBar } from '@/components/StatusBar'
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
 const DEFAULT_PANE_WIDTH_RATIO = 0.4
+const DEFAULT_AUTOPLAY_INTERVAL_SEC = 3
+const MIN_AUTOPLAY_INTERVAL_SEC = 1
+const MAX_AUTOPLAY_INTERVAL_SEC = 10
 
 const defaultFilter: FilterState = {
   search: '',
@@ -51,11 +55,16 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
   const [previewAutoPlayOnOpen, setPreviewAutoPlayOnOpen] = useState(false)
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState(false)
+  const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
+  const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const [showPreviewPane, setShowPreviewPane] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const fileGridRef = useRef<FileGridHandle>(null)
   const previewUrlRef = useRef<string | null>(null)
+  const autoPlayTimerRef = useRef<number | null>(null)
 
   const filteredFiles = useMemo(() => {
     return filterFiles(files, filter)
@@ -93,34 +102,60 @@ function App() {
     [mediaIndexByPath]
   )
 
-  const navigateMediaFromPane = useCallback((direction: 'prev' | 'next') => {
-    const currentIndex = getMediaIndex(selectedFile)
+  const navigateMedia = useCallback((
+    currentFile: FileItem | null,
+    direction: 'prev' | 'next',
+    options: { source: 'pane' | 'modal' | 'autoplay'; wrap: boolean }
+  ) => {
+    const currentIndex = getMediaIndex(currentFile)
     if (currentIndex < 0) return
 
-    const targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
-    if (targetIndex < 0 || targetIndex >= mediaFiles.length) return
+    let targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
+    if (options.wrap) {
+      if (targetIndex < 0) {
+        targetIndex = mediaFiles.length - 1
+      } else if (targetIndex >= mediaFiles.length) {
+        targetIndex = 0
+      }
+    } else if (targetIndex < 0 || targetIndex >= mediaFiles.length) {
+      return
+    }
 
     const nextFile = mediaFiles[targetIndex]
+    if (!nextFile || nextFile.path === currentFile?.path) return
+
+    if (options.source === 'modal' || (options.source === 'autoplay' && previewFile)) {
+      if (options.source === 'modal') {
+        setPreviewAutoPlayOnOpen(false)
+      }
+      setPreviewFile(nextFile)
+      setSelectedFile(nextFile)
+      setShowPreviewPane(true)
+      return
+    }
+
     setSelectedFile(nextFile)
     setShowPreviewPane(true)
-  }, [getMediaIndex, selectedFile, mediaFiles])
+  }, [getMediaIndex, mediaFiles, previewFile])
+
+  const navigateMediaFromPane = useCallback((direction: 'prev' | 'next') => {
+    navigateMedia(selectedFile, direction, { source: 'pane', wrap: false })
+  }, [navigateMedia, selectedFile])
 
   const navigateMediaFromModal = useCallback((direction: 'prev' | 'next') => {
-    const currentIndex = getMediaIndex(previewFile)
-    if (currentIndex < 0) return
+    navigateMedia(previewFile, direction, { source: 'modal', wrap: false })
+  }, [navigateMedia, previewFile])
 
-    const targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
-    if (targetIndex < 0 || targetIndex >= mediaFiles.length) return
-
-    const nextFile = mediaFiles[targetIndex]
-    setPreviewAutoPlayOnOpen(false)
-    setPreviewFile(nextFile)
-    setSelectedFile(nextFile)
-    setShowPreviewPane(true)
-  }, [getMediaIndex, previewFile, mediaFiles])
+  const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
 
   const selectedMediaIndex = getMediaIndex(selectedFile)
   const previewMediaIndex = getMediaIndex(previewFile)
+  const activeMediaIndex = getMediaIndex(activeMediaFile)
+  const isAutoPlayEligible =
+    autoPlayEnabled &&
+    !autoPlayPausedByVisibility &&
+    activeMediaIndex >= 0 &&
+    mediaFiles.length > 1
 
   useEffect(() => {
     if (previewFile && rootHandle) {
@@ -167,11 +202,9 @@ function App() {
     } else {
       setSelectedFile(file)
       setShowPreviewPane(true)
-      if (previewFile) {
-        setPreviewFile(file)
-      }
+      setPreviewFile((current) => (current ? file : current))
     }
-  }, [navigateToDirectory, previewFile])
+  }, [navigateToDirectory])
 
   const handleFileDoubleClick = useCallback((file: FileItem) => {
     if (file.kind === 'file') {
@@ -200,6 +233,37 @@ function App() {
     }
   }, [selectedFile])
 
+  const clearAutoPlayTimer = useCallback(() => {
+    if (autoPlayTimerRef.current !== null) {
+      window.clearTimeout(autoPlayTimerRef.current)
+      autoPlayTimerRef.current = null
+    }
+  }, [])
+
+  const handleToggleAutoPlay = useCallback(() => {
+    setAutoPlayEnabled((previous) => !previous)
+  }, [])
+
+  const handleAutoPlayIntervalChange = useCallback((value: number) => {
+    const nextValue = Math.min(
+      MAX_AUTOPLAY_INTERVAL_SEC,
+      Math.max(MIN_AUTOPLAY_INTERVAL_SEC, value)
+    )
+    setAutoPlayIntervalSec(nextValue)
+  }, [])
+
+  const handleAutoPlayVideoEnded = useCallback(() => {
+    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
+    if (!isVideoFile(activeMediaFile.name)) return
+    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+  }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
+
+  const handleAutoPlayVideoPlaybackError = useCallback(() => {
+    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
+    if (!isVideoFile(activeMediaFile.name)) return
+    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+  }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
+
   useEffect(() => {
     if (filteredFiles.length === 0) {
       setSelectedFile(null)
@@ -212,6 +276,67 @@ function App() {
       setShowPreviewPane(filteredFiles[0].kind === 'file')
     }
   }, [filteredFiles, selectedFile])
+
+  useEffect(() => {
+    fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
+      scroll: true,
+      focus: false,
+    })
+  }, [selectedFile])
+
+  useEffect(() => {
+    if (!previewFile && !showPreviewPane) {
+      setAutoPlayEnabled(false)
+    }
+  }, [previewFile, showPreviewPane])
+
+  useEffect(() => {
+    const syncVisibilityState = () => {
+      setAutoPlayPausedByVisibility(document.visibilityState !== 'visible')
+    }
+
+    const handleBlur = () => {
+      setAutoPlayPausedByVisibility(true)
+    }
+
+    const handleFocus = () => {
+      syncVisibilityState()
+    }
+
+    syncVisibilityState()
+    document.addEventListener('visibilitychange', syncVisibilityState)
+    window.addEventListener('blur', handleBlur)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibilityState)
+      window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+
+  useEffect(() => {
+    clearAutoPlayTimer()
+
+    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') {
+      return
+    }
+    if (isVideoFile(activeMediaFile.name)) {
+      return
+    }
+
+    autoPlayTimerRef.current = window.setTimeout(() => {
+      navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+    }, autoPlayIntervalSec * 1000)
+
+    return clearAutoPlayTimer
+  }, [
+    clearAutoPlayTimer,
+    isAutoPlayEligible,
+    activeMediaFile,
+    autoPlayIntervalSec,
+    navigateMedia,
+  ])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -228,6 +353,13 @@ function App() {
 
       // Ignore most global shortcuts while user is typing
       if (isTyping) return
+
+      // P: toggle preview autoplay
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === 'p') {
+        event.preventDefault()
+        setAutoPlayEnabled((previous) => !previous)
+        return
+      }
 
       // Backspace: navigate up one level
       if (event.key === 'Backspace' && currentPath) {
@@ -327,6 +459,7 @@ function App() {
           </div>
         ) : (
           <FileGrid
+            ref={fileGridRef}
             files={filteredFiles}
             rootHandle={rootHandle}
             onFileClick={handleFileClick}
@@ -373,6 +506,12 @@ function App() {
               canNext={selectedMediaIndex >= 0 && selectedMediaIndex < mediaFiles.length - 1}
               onPrev={() => navigateMediaFromPane('prev')}
               onNext={() => navigateMediaFromPane('next')}
+              autoPlayEnabled={autoPlayEnabled}
+              autoPlayIntervalSec={autoPlayIntervalSec}
+              onToggleAutoPlay={handleToggleAutoPlay}
+              onAutoPlayIntervalChange={handleAutoPlayIntervalChange}
+              onVideoEnded={handleAutoPlayVideoEnded}
+              onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
             />
           </div>
         )}
@@ -394,6 +533,12 @@ function App() {
           canNext={previewMediaIndex >= 0 && previewMediaIndex < mediaFiles.length - 1}
           onPrev={() => navigateMediaFromModal('prev')}
           onNext={() => navigateMediaFromModal('next')}
+          autoPlayEnabled={autoPlayEnabled}
+          autoPlayIntervalSec={autoPlayIntervalSec}
+          onToggleAutoPlay={handleToggleAutoPlay}
+          onAutoPlayIntervalChange={handleAutoPlayIntervalChange}
+          onVideoEnded={handleAutoPlayVideoEnded}
+          onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
         />
       )}
     </div>
