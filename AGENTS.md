@@ -104,8 +104,8 @@ npm run typecheck   # TypeScript 类型检查
 3. 图片/视频预览
 4. 搜索与筛选
 5. 性能增强（缩略图并发队列、精细懒加载）
-6. 键盘快捷键完善（当前已支持方向键、PageUp/PageDown、Enter、Esc、Ctrl/Cmd+O）
-7. 幻灯片播放
+6. 键盘快捷键完善（当前已支持方向键、PageUp/PageDown、Enter、Esc、Ctrl/Cmd+O、P、R、[、]）
+7. 播放体验增强（如随机队列重洗牌、更多预览快捷键）
 8. 暗色主题切换能力
 
 ## UI 设计

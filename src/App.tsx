@@ -16,6 +16,7 @@ const DEFAULT_PANE_WIDTH_RATIO = 0.4
 const DEFAULT_AUTOPLAY_INTERVAL_SEC = 3
 const MIN_AUTOPLAY_INTERVAL_SEC = 1
 const MAX_AUTOPLAY_INTERVAL_SEC = 10
+type TraversalOrder = 'sequential' | 'shuffle'
 
 const defaultFilter: FilterState = {
   search: '',
@@ -34,6 +35,17 @@ function isTypingTarget(target: EventTarget | null): boolean {
     tag === 'SELECT' ||
     target.isContentEditable
   )
+}
+
+function shufflePaths(paths: string[]): string[] {
+  const result = [...paths]
+  for (let index = result.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    const current = result[index]
+    result[index] = result[swapIndex]
+    result[swapIndex] = current
+  }
+  return result
 }
 
 function App() {
@@ -58,6 +70,9 @@ function App() {
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false)
   const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
   const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
+  const [traversalOrder, setTraversalOrder] = useState<TraversalOrder>('sequential')
+  const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
+  const [shuffleHistory, setShuffleHistory] = useState<string[]>([])
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const [showPreviewPane, setShowPreviewPane] = useState(false)
@@ -93,6 +108,13 @@ function App() {
     })
     return indexMap
   }, [mediaFiles])
+  const mediaFileByPath = useMemo(() => {
+    const fileMap = new Map<string, FileItem>()
+    mediaFiles.forEach((file) => {
+      fileMap.set(file.path, file)
+    })
+    return fileMap
+  }, [mediaFiles])
 
   const getMediaIndex = useCallback(
     (file: FileItem | null) => {
@@ -102,13 +124,83 @@ function App() {
     [mediaIndexByPath]
   )
 
+  const initializeShuffleState = useCallback((currentPath: string) => {
+    const nextQueue = shufflePaths(
+      mediaFiles
+        .map((file) => file.path)
+        .filter((path) => path !== currentPath)
+    )
+    setShuffleHistory([currentPath])
+    setShuffleQueue(nextQueue)
+  }, [mediaFiles])
+
+  const applyMediaSelection = useCallback((
+    nextFile: FileItem,
+    source: 'pane' | 'modal' | 'autoplay'
+  ) => {
+    if (source === 'modal' || (source === 'autoplay' && previewFile)) {
+      if (source === 'modal') {
+        setPreviewAutoPlayOnOpen(false)
+      }
+      setPreviewFile(nextFile)
+      setSelectedFile(nextFile)
+      setShowPreviewPane(true)
+      return
+    }
+
+    setSelectedFile(nextFile)
+    setShowPreviewPane(true)
+  }, [previewFile])
+
   const navigateMedia = useCallback((
     currentFile: FileItem | null,
     direction: 'prev' | 'next',
     options: { source: 'pane' | 'modal' | 'autoplay'; wrap: boolean }
   ) => {
     const currentIndex = getMediaIndex(currentFile)
-    if (currentIndex < 0) return
+    if (currentIndex < 0 || !currentFile || currentFile.kind !== 'file') return
+    const currentPath = currentFile.path
+
+    if (traversalOrder === 'shuffle') {
+      if (direction === 'prev') {
+        const historyTail = shuffleHistory[shuffleHistory.length - 1]
+        if (historyTail !== currentPath || shuffleHistory.length <= 1) return
+
+        const previousPath = shuffleHistory[shuffleHistory.length - 2]
+        const previousFile = mediaFileByPath.get(previousPath)
+        if (!previousFile) return
+
+        setShuffleHistory((previous) => previous.slice(0, -1))
+        setShuffleQueue((previous) => [currentPath, ...previous.filter((path) => path !== currentPath)])
+        applyMediaSelection(previousFile, options.source)
+        return
+      }
+
+      let nextQueue = shuffleQueue.filter((path) => path !== currentPath)
+      if (nextQueue.length === 0) {
+        nextQueue = shufflePaths(
+          mediaFiles
+            .map((file) => file.path)
+            .filter((path) => path !== currentPath)
+        )
+      }
+
+      const nextPath = nextQueue[0]
+      if (!nextPath) return
+
+      const nextFile = mediaFileByPath.get(nextPath)
+      if (!nextFile) return
+
+      setShuffleQueue(nextQueue.slice(1))
+      setShuffleHistory((previous) => {
+        if (previous.length > 0 && previous[previous.length - 1] === currentPath) {
+          return [...previous, nextPath]
+        }
+        return [currentPath, nextPath]
+      })
+      applyMediaSelection(nextFile, options.source)
+      return
+    }
 
     let targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
     if (options.wrap) {
@@ -122,21 +214,17 @@ function App() {
     }
 
     const nextFile = mediaFiles[targetIndex]
-    if (!nextFile || nextFile.path === currentFile?.path) return
-
-    if (options.source === 'modal' || (options.source === 'autoplay' && previewFile)) {
-      if (options.source === 'modal') {
-        setPreviewAutoPlayOnOpen(false)
-      }
-      setPreviewFile(nextFile)
-      setSelectedFile(nextFile)
-      setShowPreviewPane(true)
-      return
-    }
-
-    setSelectedFile(nextFile)
-    setShowPreviewPane(true)
-  }, [getMediaIndex, mediaFiles, previewFile])
+    if (!nextFile || nextFile.path === currentPath) return
+    applyMediaSelection(nextFile, options.source)
+  }, [
+    getMediaIndex,
+    traversalOrder,
+    shuffleHistory,
+    mediaFileByPath,
+    shuffleQueue,
+    mediaFiles,
+    applyMediaSelection,
+  ])
 
   const navigateMediaFromPane = useCallback((direction: 'prev' | 'next') => {
     navigateMedia(selectedFile, direction, { source: 'pane', wrap: false })
@@ -145,11 +233,36 @@ function App() {
   const navigateMediaFromModal = useCallback((direction: 'prev' | 'next') => {
     navigateMedia(previewFile, direction, { source: 'modal', wrap: false })
   }, [navigateMedia, previewFile])
+  const hasOpenPreview = !!previewFile || showPreviewPane
 
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
 
   const selectedMediaIndex = getMediaIndex(selectedFile)
   const previewMediaIndex = getMediaIndex(previewFile)
+  const selectedShuffleCanPrev =
+    !!selectedFile &&
+    selectedFile.kind === 'file' &&
+    shuffleHistory.length > 1 &&
+    shuffleHistory[shuffleHistory.length - 1] === selectedFile.path
+  const previewShuffleCanPrev =
+    !!previewFile &&
+    previewFile.kind === 'file' &&
+    shuffleHistory.length > 1 &&
+    shuffleHistory[shuffleHistory.length - 1] === previewFile.path
+  const selectedShuffleCanNext = selectedMediaIndex >= 0 && mediaFiles.length > 1
+  const previewShuffleCanNext = previewMediaIndex >= 0 && mediaFiles.length > 1
+  const canPrevFromPane =
+    traversalOrder === 'shuffle' ? selectedShuffleCanPrev : selectedMediaIndex > 0
+  const canNextFromPane =
+    traversalOrder === 'shuffle'
+      ? selectedShuffleCanNext
+      : selectedMediaIndex >= 0 && selectedMediaIndex < mediaFiles.length - 1
+  const canPrevFromModal =
+    traversalOrder === 'shuffle' ? previewShuffleCanPrev : previewMediaIndex > 0
+  const canNextFromModal =
+    traversalOrder === 'shuffle'
+      ? previewShuffleCanNext
+      : previewMediaIndex >= 0 && previewMediaIndex < mediaFiles.length - 1
   const activeMediaIndex = getMediaIndex(activeMediaFile)
   const isAutoPlayEligible =
     autoPlayEnabled &&
@@ -244,6 +357,48 @@ function App() {
     setAutoPlayEnabled((previous) => !previous)
   }, [])
 
+  const handleToggleTraversalOrder = useCallback(() => {
+    const next = traversalOrder === 'sequential' ? 'shuffle' : 'sequential'
+    setTraversalOrder(next)
+
+    if (next === 'sequential') {
+      setShuffleQueue([])
+      setShuffleHistory([])
+      return
+    }
+
+    const anchor =
+      activeMediaFile?.kind === 'file' && mediaIndexByPath.has(activeMediaFile.path)
+        ? activeMediaFile.path
+        : null
+
+    if (anchor) {
+      initializeShuffleState(anchor)
+      return
+    }
+
+    if (mediaFiles.length > 0) {
+      const fallback = mediaFiles[0]
+      setSelectedFile(fallback)
+      if (previewFile) {
+        setPreviewFile(fallback)
+      }
+      setShowPreviewPane(true)
+      initializeShuffleState(fallback.path)
+      return
+    }
+
+    setShuffleQueue([])
+    setShuffleHistory([])
+  }, [
+    traversalOrder,
+    activeMediaFile,
+    mediaIndexByPath,
+    mediaFiles,
+    previewFile,
+    initializeShuffleState,
+  ])
+
   const handleAutoPlayIntervalChange = useCallback((value: number) => {
     const nextValue = Math.min(
       MAX_AUTOPLAY_INTERVAL_SEC,
@@ -276,6 +431,48 @@ function App() {
       setShowPreviewPane(filteredFiles[0].kind === 'file')
     }
   }, [filteredFiles, selectedFile])
+
+  useEffect(() => {
+    if (traversalOrder !== 'shuffle') return
+    if (mediaFiles.length === 0) {
+      setShuffleQueue([])
+      setShuffleHistory([])
+      return
+    }
+
+    const activePath =
+      activeMediaFile?.kind === 'file' && mediaIndexByPath.has(activeMediaFile.path)
+        ? activeMediaFile.path
+        : null
+
+    if (!activePath) {
+      const fallback = mediaFiles[0]
+      setSelectedFile(fallback)
+      if (previewFile) {
+        setPreviewFile(fallback)
+      }
+      setShowPreviewPane(true)
+      initializeShuffleState(fallback.path)
+      return
+    }
+
+    const hasInvalidQueueEntry = shuffleQueue.some((path) => !mediaIndexByPath.has(path))
+    const hasInvalidHistoryEntry = shuffleHistory.some((path) => !mediaIndexByPath.has(path))
+    const tailPath = shuffleHistory[shuffleHistory.length - 1]
+
+    if (hasInvalidQueueEntry || hasInvalidHistoryEntry || tailPath !== activePath) {
+      initializeShuffleState(activePath)
+    }
+  }, [
+    traversalOrder,
+    mediaFiles,
+    activeMediaFile,
+    mediaIndexByPath,
+    shuffleQueue,
+    shuffleHistory,
+    previewFile,
+    initializeShuffleState,
+  ])
 
   useEffect(() => {
     fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
@@ -361,6 +558,33 @@ function App() {
         return
       }
 
+      // Preview traversal hotkeys only work while preview is open.
+      if (hasOpenPreview && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (key === 'r') {
+          event.preventDefault()
+          handleToggleTraversalOrder()
+          return
+        }
+        if (event.key === '[' || event.key === '{') {
+          event.preventDefault()
+          if (previewFile) {
+            navigateMediaFromModal('prev')
+          } else {
+            navigateMediaFromPane('prev')
+          }
+          return
+        }
+        if (event.key === ']' || event.key === '}') {
+          event.preventDefault()
+          if (previewFile) {
+            navigateMediaFromModal('next')
+          } else {
+            navigateMediaFromPane('next')
+          }
+          return
+        }
+      }
+
       // Backspace: navigate up one level
       if (event.key === 'Backspace' && currentPath) {
         event.preventDefault()
@@ -388,8 +612,12 @@ function App() {
     selectDirectory,
     navigateUp,
     currentPath,
+    hasOpenPreview,
     previewFile,
     showPreviewPane,
+    navigateMediaFromModal,
+    navigateMediaFromPane,
+    handleToggleTraversalOrder,
     handleClosePreview,
     handleClosePane,
   ])
@@ -502,13 +730,15 @@ function App() {
               rootHandle={rootHandle}
               onClose={handleClosePane}
               onOpenFullscreen={handleOpenFullscreenFromPane}
-              canPrev={selectedMediaIndex > 0}
-              canNext={selectedMediaIndex >= 0 && selectedMediaIndex < mediaFiles.length - 1}
+              canPrev={canPrevFromPane}
+              canNext={canNextFromPane}
               onPrev={() => navigateMediaFromPane('prev')}
               onNext={() => navigateMediaFromPane('next')}
               autoPlayEnabled={autoPlayEnabled}
               autoPlayIntervalSec={autoPlayIntervalSec}
               onToggleAutoPlay={handleToggleAutoPlay}
+              traversalOrder={traversalOrder}
+              onToggleTraversalOrder={handleToggleTraversalOrder}
               onAutoPlayIntervalChange={handleAutoPlayIntervalChange}
               onVideoEnded={handleAutoPlayVideoEnded}
               onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
@@ -529,13 +759,15 @@ function App() {
           fileUrl={previewUrl}
           onClose={handleClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}
-          canPrev={previewMediaIndex > 0}
-          canNext={previewMediaIndex >= 0 && previewMediaIndex < mediaFiles.length - 1}
+          canPrev={canPrevFromModal}
+          canNext={canNextFromModal}
           onPrev={() => navigateMediaFromModal('prev')}
           onNext={() => navigateMediaFromModal('next')}
           autoPlayEnabled={autoPlayEnabled}
           autoPlayIntervalSec={autoPlayIntervalSec}
           onToggleAutoPlay={handleToggleAutoPlay}
+          traversalOrder={traversalOrder}
+          onToggleTraversalOrder={handleToggleTraversalOrder}
           onAutoPlayIntervalChange={handleAutoPlayIntervalChange}
           onVideoEnded={handleAutoPlayVideoEnded}
           onVideoPlaybackError={handleAutoPlayVideoPlaybackError}

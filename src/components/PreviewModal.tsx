@@ -16,6 +16,8 @@ interface PreviewModalProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
+  traversalOrder: 'sequential' | 'shuffle'
+  onToggleTraversalOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
@@ -45,6 +47,8 @@ export function PreviewModal({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
+  traversalOrder,
+  onToggleTraversalOrder,
   onAutoPlayIntervalChange,
   onVideoEnded,
   onVideoPlaybackError,
@@ -82,6 +86,19 @@ export function PreviewModal({
       <div className="flex items-center justify-between p-3 border-b border-border flex-shrink-0">
         <span className="text-sm font-medium truncate pr-2">{file.name}</span>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleTraversalOrder}
+            className={`h-8 rounded-md px-2 text-xs transition-colors ${
+              traversalOrder === 'shuffle'
+                ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                : 'bg-accent text-accent-foreground hover:bg-accent/80'
+            }`}
+            aria-label={traversalOrder === 'shuffle' ? '切换为顺序遍历' : '切换为随机遍历'}
+            title={traversalOrder === 'shuffle' ? '切换为顺序遍历' : '切换为随机遍历'}
+          >
+            {traversalOrder === 'shuffle' ? '随机' : '顺序'}
+          </button>
           <select
             value={autoPlayIntervalSec}
             onChange={(event) => onAutoPlayIntervalChange(Number(event.target.value))}
