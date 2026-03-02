@@ -1,5 +1,3 @@
-import { callGatewayTool } from '@/lib/gateway'
-
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
 
 type RootPathMap = Record<string, string>
@@ -39,19 +37,4 @@ export function ensureRootPath(rootLabel: string): string | null {
     setRootPathMap({ ...pathMap, [rootLabel]: next })
   }
   return next
-}
-
-async function executeGatewayTool(toolName: string, rootPath: string, relativePath: string): Promise<void> {
-  await callGatewayTool(toolName, {
-    rootPath,
-    relativePath,
-  })
-}
-
-export async function revealInSystemExplorer(relativePath: string, rootPath: string): Promise<void> {
-  await executeGatewayTool('system.reveal', rootPath, relativePath)
-}
-
-export async function openWithSystemDefaultApp(relativePath: string, rootPath: string): Promise<void> {
-  await executeGatewayTool('system.openDefault', rootPath, relativePath)
 }

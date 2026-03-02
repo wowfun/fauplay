@@ -5,7 +5,6 @@ import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import {
   PreviewActionRail,
-  type PreviewActionIcon,
   type PreviewActionRailItem,
   type PreviewActionState,
 } from './PreviewActionRail'
@@ -70,12 +69,6 @@ export function MediaPreviewCanvas({
       : previewUrl && (isImage || isVideo)
         ? 'ready'
         : 'empty'
-
-  const resolveActionIcon = useCallback((toolName: string): PreviewActionIcon => {
-    if (toolName === 'system.reveal') return 'reveal'
-    if (toolName === 'system.openDefault') return 'openDefault'
-    return 'default'
-  }, [])
 
   const resolveActionState = useCallback((toolName: string): PreviewActionState => {
     const state = actionRuntimeState[toolName]
@@ -145,10 +138,10 @@ export function MediaPreviewCanvas({
         disabled: !!state?.isLoading || !rootHandle,
         actionState: resolveActionState(tool.name),
         error: state?.error ?? null,
-        icon: resolveActionIcon(tool.name),
+        icon: tool.icon,
       }
     })
-  }, [actionRuntimeState, fileActionTools, handleToolAction, resolveActionIcon, resolveActionState, rootHandle])
+  }, [actionRuntimeState, fileActionTools, handleToolAction, resolveActionState, rootHandle])
 
   return (
     <div className="flex-1 min-h-0 flex" data-preview-state={previewViewState}>

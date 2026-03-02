@@ -7,6 +7,7 @@ export interface GatewayToolDescriptor {
   title: string
   mutation: boolean
   scopes: string[]
+  icon: 'reveal' | 'openDefault' | 'default'
 }
 
 interface GatewayHealthResponse {
@@ -130,11 +131,18 @@ function toToolDescriptor(tool: GatewayRawToolDescriptor): GatewayToolDescriptor
       ? tool.annotations.scopes.filter((scope: unknown): scope is string => typeof scope === 'string')
       : []
 
+  const icon = name === 'system.reveal'
+    ? 'reveal'
+    : name === 'system.openDefault'
+      ? 'openDefault'
+      : 'default'
+
   return {
     name,
     title,
     mutation,
     scopes,
+    icon,
   }
 }
 
