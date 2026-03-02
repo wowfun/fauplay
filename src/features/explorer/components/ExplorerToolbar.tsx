@@ -1,5 +1,5 @@
 import { Search, ArrowUpDown, Image, Video, Files, ChevronLeft, Rows3 } from 'lucide-react'
-import type { FilterState } from '@/types'
+import type { FilterState, ThumbnailSizePreset } from '@/types'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 import { Select } from '@/ui/Select'
@@ -18,6 +18,8 @@ interface ExplorerToolbarProps {
   totalCount: number
   imageCount: number
   videoCount: number
+  thumbnailSizePreset: ThumbnailSizePreset
+  onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
 }
 
 export function ExplorerToolbar({
@@ -30,6 +32,8 @@ export function ExplorerToolbar({
   totalCount,
   imageCount,
   videoCount,
+  thumbnailSizePreset,
+  onThumbnailSizePresetChange,
 }: ExplorerToolbarProps) {
   return (
     <div className="flex items-center gap-4 p-4 border-b border-border">
@@ -137,6 +141,17 @@ export function ExplorerToolbar({
         <option value="name">名称</option>
         <option value="date">日期</option>
         <option value="size">大小</option>
+      </Select>
+
+      <Select
+        value={thumbnailSizePreset}
+        onChange={(e) => onThumbnailSizePresetChange(e.target.value as ThumbnailSizePreset)}
+        className="h-8"
+        title="缩略图尺寸"
+      >
+        <option value="auto">缩略图：默认</option>
+        <option value="256">缩略图：256</option>
+        <option value="512">缩略图：512</option>
       </Select>
 
       <Button

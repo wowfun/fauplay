@@ -106,6 +106,11 @@ curl -s -X POST http://127.0.0.1:3210/v1/mcp \
 - 评审清单：[`specs/002-ui-ux-governance/checklist.md`](specs/002-ui-ux-governance/checklist.md)
 - 功能分区：[`specs/002-ui-ux-governance/areas.md`](specs/002-ui-ux-governance/areas.md)
 
+## 缩略图规范文档
+
+- 规范文档：[`specs/003-thumbnail/spec.md`](specs/003-thumbnail/spec.md)
+- 待办清单：[`specs/003-thumbnail/todo.md`](specs/003-thumbnail/todo.md)
+
 ## 项目结构
 
 ```

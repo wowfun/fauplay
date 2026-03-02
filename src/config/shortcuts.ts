@@ -14,7 +14,7 @@ export const keyboardShortcuts = {
       { key: 'p', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
     toggleTraversalOrder: [
-      { key: 'r', ctrl: false, meta: false, alt: false },
+      { key: 't', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
     prev: [
       { code: 'bracketleft', ctrl: false, meta: false, alt: false },

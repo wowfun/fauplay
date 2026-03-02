@@ -2,13 +2,14 @@ import { useMemo, useRef, useEffect, useState, useCallback, forwardRef, useImper
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileGridCard } from './FileGridCard'
-import type { FileItem } from '@/types'
+import type { FileItem, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 
 interface FileGridViewportProps {
   files: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
+  thumbnailSizePreset: ThumbnailSizePreset
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
@@ -18,13 +19,18 @@ export interface FileGridViewportHandle {
   syncSelectedPath: (path: string | null, options?: { scroll?: boolean; focus?: boolean }) => void
 }
 
-const CARD_WIDTH = 160
-const CARD_HEIGHT = 180
 const GAP = 16
+
+const CARD_SIZE_BY_PRESET: Record<ThumbnailSizePreset, { width: number; height: number }> = {
+  auto: { width: 160, height: 180 },
+  '256': { width: 256, height: 256 },
+  '512': { width: 512, height: 512 },
+}
 
 export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewportProps>(function FileGridViewport({
   files,
   rootHandle,
+  thumbnailSizePreset,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
@@ -34,6 +40,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   const selectedIndexRef = useRef(0)
   const selectedPathRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  const cardSize = CARD_SIZE_BY_PRESET[thumbnailSizePreset]
 
   const markSelectedElement = useCallback((index: number, path: string) => {
     selectedIndexRef.current = index
@@ -71,17 +78,17 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [])
 
   const columnCount = useMemo(() => {
-    return Math.max(1, Math.floor((dimensions.width + GAP) / (CARD_WIDTH + GAP)))
-  }, [dimensions.width])
+    return Math.max(1, Math.floor((dimensions.width + GAP) / (cardSize.width + GAP)))
+  }, [dimensions.width, cardSize.width])
 
   const rowCount = useMemo(() => {
     return Math.ceil(files.length / columnCount)
   }, [files.length, columnCount])
 
   const pageSize = useMemo(() => {
-    const visibleRows = Math.max(1, Math.floor(dimensions.height / (CARD_HEIGHT + GAP)))
+    const visibleRows = Math.max(1, Math.floor(dimensions.height / (cardSize.height + GAP)))
     return visibleRows * columnCount
-  }, [dimensions.height, columnCount])
+  }, [dimensions.height, columnCount, cardSize.height])
 
   const syncSelectedPath = useCallback((
     path: string | null,
@@ -239,10 +246,10 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       <Grid
         ref={gridRef}
         columnCount={columnCount}
-        columnWidth={CARD_WIDTH + GAP}
+        columnWidth={cardSize.width + GAP}
         height={dimensions.height}
         rowCount={rowCount}
-        rowHeight={CARD_HEIGHT + GAP}
+        rowHeight={cardSize.height + GAP}
         width={dimensions.width}
         className="scrollbar-thin"
       >
@@ -258,14 +265,15 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
                 ...style,
                 left: Number(style.left) + GAP / 2,
                 top: Number(style.top) + GAP / 2,
-                width: CARD_WIDTH,
-                height: CARD_HEIGHT,
+                width: cardSize.width,
+                height: cardSize.height,
               }}
             >
               <FileGridCard
                 file={file}
                 rootHandle={rootHandle}
                 itemIndex={index}
+                thumbnailSizePreset={thumbnailSizePreset}
                 isSelected={file.path === selectedPathRef.current}
                 onClick={() => {
                   markSelectedElement(index, file.path)

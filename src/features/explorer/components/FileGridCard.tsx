@@ -3,15 +3,28 @@ import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getMediaType, generateThumbnail } from '@/lib/thumbnail'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
-import type { FileItem } from '@/types'
+import type { FileItem, ThumbnailSizePreset } from '@/types'
 
 interface FileGridCardProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   itemIndex: number
+  thumbnailSizePreset: ThumbnailSizePreset
   isSelected?: boolean
   onClick: () => void
   onDoubleClick?: () => void
+}
+
+const THUMBNAIL_BOX_SIZE_BY_PRESET: Record<ThumbnailSizePreset, number> = {
+  auto: 80,
+  '256': 192,
+  '512': 448,
+}
+
+const ICON_SIZE_BY_PRESET: Record<ThumbnailSizePreset, number> = {
+  auto: 48,
+  '256': 72,
+  '512': 96,
 }
 
 async function getFileFromPath(
@@ -38,11 +51,14 @@ export function FileGridCard({
   file,
   rootHandle,
   itemIndex,
+  thumbnailSizePreset,
   isSelected = false,
   onClick,
   onDoubleClick,
 }: FileGridCardProps) {
   const isDir = file.kind === 'directory'
+  const thumbnailBoxSize = THUMBNAIL_BOX_SIZE_BY_PRESET[thumbnailSizePreset]
+  const iconSize = ICON_SIZE_BY_PRESET[thumbnailSizePreset]
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [directoryItemCount, setDirectoryItemCount] = useState<number | null>(null)
@@ -68,7 +84,10 @@ export function FileGridCard({
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (!fileObj || cancelled) return
 
-        const url = await generateThumbnail(fileObj, mediaType, file.path)
+        const url = await generateThumbnail(fileObj, mediaType, {
+          filePath: file.path,
+          sizePreset: thumbnailSizePreset,
+        })
 
         if (!cancelled) {
           setThumbnailUrl(url)
@@ -87,7 +106,7 @@ export function FileGridCard({
     return () => {
       cancelled = true
     }
-  }, [rootHandle, file.path, file.name, isDir])
+  }, [rootHandle, file.path, file.name, isDir, thumbnailSizePreset])
 
   useEffect(() => {
     if (!rootHandle || !isDir) {
@@ -118,11 +137,11 @@ export function FileGridCard({
   }, [rootHandle, isDir, file.path])
 
   const getIcon = () => {
-    if (isDir) return <FolderOpen className="w-12 h-12 text-yellow-500" />
+    if (isDir) return <FolderOpen size={iconSize} className="text-yellow-500" />
     if (thumbnailUrl) return null
-    if (getMediaType(file.name) === 'image') return <Image className="w-12 h-12 text-green-500" />
-    if (getMediaType(file.name) === 'video') return <Video className="w-12 h-12 text-blue-500" />
-    return <File className="w-12 h-12 text-gray-500" />
+    if (getMediaType(file.name) === 'image') return <Image size={iconSize} className="text-green-500" />
+    if (getMediaType(file.name) === 'video') return <Video size={iconSize} className="text-blue-500" />
+    return <File size={iconSize} className="text-gray-500" />
   }
 
   const formatSize = (bytes?: number) => {
@@ -140,13 +159,16 @@ export function FileGridCard({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       className={cn(
-        "w-full min-w-0 flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
+        "w-full min-w-0 h-full flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
         "hover:bg-accent/50",
         "focus:outline-none focus:bg-accent/70 focus:ring-1 focus:ring-primary/40",
         "data-[grid-selected=true]:bg-accent/70 data-[grid-selected=true]:ring-1 data-[grid-selected=true]:ring-primary/40"
       )}
     >
-      <div className="relative w-20 h-20 flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden">
+      <div
+        className="relative flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden"
+        style={{ width: thumbnailBoxSize, height: thumbnailBoxSize }}
+      >
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}

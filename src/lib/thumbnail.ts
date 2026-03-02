@@ -1,9 +1,30 @@
-const THUMBNAIL_SIZE = 180
+import type { ThumbnailSizePreset } from '@/types'
+
+const DEFAULT_THUMBNAIL_SIZE = 180
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
 
 const thumbnailCache = new Map<string, string>()
+
+const THUMBNAIL_SIZE_BY_PRESET: Record<ThumbnailSizePreset, number> = {
+  auto: DEFAULT_THUMBNAIL_SIZE,
+  '256': 256,
+  '512': 512,
+}
+
+interface GenerateThumbnailOptions {
+  filePath?: string
+  sizePreset?: ThumbnailSizePreset
+}
+
+function resolveThumbnailSize(sizePreset: ThumbnailSizePreset): number {
+  return THUMBNAIL_SIZE_BY_PRESET[sizePreset]
+}
+
+function buildCacheKey(filePath: string, sizePreset: ThumbnailSizePreset, size: number): string {
+  return `${filePath}::${sizePreset}::${size}`
+}
 
 export function isImageFile(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() || ''
@@ -22,28 +43,32 @@ export function isMediaFile(name: string): boolean {
 export async function generateThumbnail(
   file: File,
   type: 'image' | 'video',
-  filePath?: string
+  options: GenerateThumbnailOptions = {}
 ): Promise<string> {
-  if (filePath) {
-    const cached = thumbnailCache.get(filePath)
+  const sizePreset = options.sizePreset ?? 'auto'
+  const maxSize = resolveThumbnailSize(sizePreset)
+  const cacheKey = options.filePath ? buildCacheKey(options.filePath, sizePreset, maxSize) : null
+
+  if (cacheKey) {
+    const cached = thumbnailCache.get(cacheKey)
     if (cached) return cached
   }
 
   let url: string
   if (type === 'video') {
-    url = await generateVideoThumbnail(file)
+    url = await generateVideoThumbnail(file, maxSize)
   } else {
-    url = await generateImageThumbnail(file)
+    url = await generateImageThumbnail(file, maxSize)
   }
 
-  if (filePath) {
-    thumbnailCache.set(filePath, url)
+  if (cacheKey) {
+    thumbnailCache.set(cacheKey, url)
   }
 
   return url
 }
 
-async function generateImageThumbnail(file: File): Promise<string> {
+async function generateImageThumbnail(file: File, maxSize: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     const url = URL.createObjectURL(file)
@@ -62,14 +87,14 @@ async function generateImageThumbnail(file: File): Promise<string> {
       let height = img.height
 
       if (width > height) {
-        if (width > THUMBNAIL_SIZE) {
-          height = (height * THUMBNAIL_SIZE) / width
-          width = THUMBNAIL_SIZE
+        if (width > maxSize) {
+          height = (height * maxSize) / width
+          width = maxSize
         }
       } else {
-        if (height > THUMBNAIL_SIZE) {
-          width = (width * THUMBNAIL_SIZE) / height
-          height = THUMBNAIL_SIZE
+        if (height > maxSize) {
+          width = (width * maxSize) / height
+          height = maxSize
         }
       }
 
@@ -89,7 +114,7 @@ async function generateImageThumbnail(file: File): Promise<string> {
   })
 }
 
-async function generateVideoThumbnail(file: File): Promise<string> {
+async function generateVideoThumbnail(file: File, maxSize: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video')
     const url = URL.createObjectURL(file)
@@ -113,14 +138,14 @@ async function generateVideoThumbnail(file: File): Promise<string> {
       let height = video.videoHeight
 
       if (width > height) {
-        if (width > THUMBNAIL_SIZE) {
-          height = (height * THUMBNAIL_SIZE) / width
-          width = THUMBNAIL_SIZE
+        if (width > maxSize) {
+          height = (height * maxSize) / width
+          width = maxSize
         }
       } else {
-        if (height > THUMBNAIL_SIZE) {
-          width = (width * THUMBNAIL_SIZE) / height
-          height = THUMBNAIL_SIZE
+        if (height > maxSize) {
+          width = (width * maxSize) / height
+          height = maxSize
         }
       }
 

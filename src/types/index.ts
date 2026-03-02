@@ -28,6 +28,7 @@ export type ViewMode = 'grid' | 'list'
 
 export type SortBy = 'name' | 'date' | 'size'
 export type SortOrder = 'asc' | 'desc'
+export type ThumbnailSizePreset = 'auto' | '256' | '512'
 
 export interface FilterState {
   search: string

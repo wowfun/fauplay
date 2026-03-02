@@ -6,7 +6,7 @@ import type { FileBrowserGridHandle } from '@/features/explorer/components/FileB
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
 import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
-import type { FileItem, FilterState } from '@/types'
+import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
 type TraversalOrder = 'sequential' | 'shuffle'
@@ -21,6 +21,8 @@ interface ExplorerWorkspaceLayoutProps {
   totalCount: number
   imageCount: number
   videoCount: number
+  thumbnailSizePreset: ThumbnailSizePreset
+  onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   error: string | null
   isLoading: boolean
   files: FileItem[]
@@ -60,6 +62,8 @@ export function ExplorerWorkspaceLayout({
   totalCount,
   imageCount,
   videoCount,
+  thumbnailSizePreset,
+  onThumbnailSizePresetChange,
   error,
   isLoading,
   files,
@@ -100,6 +104,8 @@ export function ExplorerWorkspaceLayout({
         totalCount={totalCount}
         imageCount={imageCount}
         videoCount={videoCount}
+        thumbnailSizePreset={thumbnailSizePreset}
+        onThumbnailSizePresetChange={onThumbnailSizePresetChange}
       />
 
       {error && (
@@ -118,6 +124,7 @@ export function ExplorerWorkspaceLayout({
             ref={fileGridRef}
             files={files}
             rootHandle={rootHandle}
+            thumbnailSizePreset={thumbnailSizePreset}
             onFileClick={onFileClick}
             onFileDoubleClick={onFileDoubleClick}
             onDirectoryClick={onDirectoryClick}

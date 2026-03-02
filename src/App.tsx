@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useFileSystem } from '@/hooks/useFileSystem'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { isImageFile, isVideoFile } from '@/lib/fileSystem'
-import type { FileItem, FilterState } from '@/types'
+import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { useGatewayCapabilities } from '@/hooks/useGatewayCapabilities'
@@ -39,6 +39,7 @@ function App() {
   } = useFileSystem()
 
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
+  const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const contentRef = useRef<HTMLDivElement>(null)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
@@ -229,6 +230,8 @@ function App() {
       totalCount={totalCount}
       imageCount={imageCount}
       videoCount={videoCount}
+      thumbnailSizePreset={thumbnailSizePreset}
+      onThumbnailSizePresetChange={setThumbnailSizePreset}
       error={error}
       isLoading={isLoading}
       files={filteredFiles}
