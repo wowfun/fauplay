@@ -10,6 +10,14 @@ function withBasePath(items: FileItem[], basePath: string): FileItem[] {
   }))
 }
 
+function normalizeRelativePath(path: string): string {
+  return path.split('/').filter(Boolean).join('/')
+}
+
+interface NavigateToPathOptions {
+  resetFlattenView?: boolean
+}
+
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [files, setFiles] = useState<FileItem[]>([])
@@ -33,13 +41,14 @@ export function useFileSystem() {
     setFiles(withBasePath(allItems, basePath))
   }, [])
 
-  const getCurrentDirectoryHandle = useCallback(async () => {
+  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
     if (!rootHandle) return null
 
     let current: FileSystemDirectoryHandle = rootHandle
-    if (!currentPath) return current
+    const normalizedPath = normalizeRelativePath(targetPath)
+    if (!normalizedPath) return current
 
-    const pathParts = currentPath.split('/').filter(Boolean)
+    const pathParts = normalizedPath.split('/').filter(Boolean)
     for (const part of pathParts) {
       const opts: FileSystemPermissionDescriptor = { mode: 'read' }
       const permission = await current.queryPermission(opts)
@@ -50,7 +59,11 @@ export function useFileSystem() {
     }
 
     return current
-  }, [rootHandle, currentPath])
+  }, [rootHandle])
+
+  const getCurrentDirectoryHandle = useCallback(async () => {
+    return getDirectoryHandleByPath(currentPath)
+  }, [getDirectoryHandleByPath, currentPath])
 
   const selectDirectory = useCallback(async () => {
     setIsLoading(true)
@@ -74,62 +87,43 @@ export function useFileSystem() {
     }
   }, [loadDirectoryItems])
 
-  const navigateToDirectory = useCallback(async (dirName: string) => {
+  const navigateToPath = useCallback(async (
+    targetPath: string,
+    options: NavigateToPathOptions = {}
+  ) => {
     if (!rootHandle) return
 
+    const normalizedPath = normalizeRelativePath(targetPath)
+    const nextFlattenView = options.resetFlattenView ? false : isFlattenView
+
     setIsLoading(true)
     setError(null)
 
     try {
-      const current = await getCurrentDirectoryHandle()
-      if (!current) return
-
-      const opts: FileSystemPermissionDescriptor = { mode: 'read' }
-      const permission = await current.queryPermission(opts)
-      if (permission === 'prompt') {
-        await current.requestPermission(opts)
+      const targetDirectory = await getDirectoryHandleByPath(normalizedPath)
+      if (!targetDirectory) return
+      await loadDirectoryItems(targetDirectory, normalizedPath, nextFlattenView)
+      setCurrentPath(normalizedPath)
+      if (options.resetFlattenView) {
+        setIsFlattenView(false)
       }
-
-      const subDir = await current.getDirectoryHandle(dirName)
-      const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
-      setCurrentPath(nextPath)
-      await loadDirectoryItems(subDir, nextPath, isFlattenView)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setIsLoading(false)
     }
-  }, [rootHandle, currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems])
+  }, [rootHandle, isFlattenView, getDirectoryHandleByPath, loadDirectoryItems])
+
+  const navigateToDirectory = useCallback(async (dirName: string) => {
+    const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
+    await navigateToPath(nextPath)
+  }, [currentPath, navigateToPath])
 
   const navigateUp = useCallback(async () => {
-    if (!rootHandle || !currentPath) return
-
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const pathParts = currentPath.split('/')
-      pathParts.pop()
-
-      if (pathParts.length === 0) {
-        setCurrentPath('')
-        await loadDirectoryItems(rootHandle, '', isFlattenView)
-      } else {
-        let current: FileSystemDirectoryHandle = rootHandle
-        for (const part of pathParts) {
-          current = await current.getDirectoryHandle(part)
-        }
-
-        const nextPath = pathParts.join('/')
-        setCurrentPath(nextPath)
-        await loadDirectoryItems(current, nextPath, isFlattenView)
-      }
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [rootHandle, currentPath, isFlattenView, loadDirectoryItems])
+    if (!currentPath) return
+    const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+    await navigateToPath(parentPath)
+  }, [currentPath, navigateToPath])
 
   const setFlattenView = useCallback(async (flattenView: boolean) => {
     if (!rootHandle) return
@@ -199,6 +193,7 @@ export function useFileSystem() {
     isLoading,
     error,
     selectDirectory,
+    navigateToPath,
     navigateToDirectory,
     navigateUp,
     setFlattenView,

@@ -11,7 +11,9 @@ function formatCount(count: number): string {
 interface ExplorerToolbarProps {
   filter: FilterState
   onFilterChange: (filter: FilterState) => void
+  rootName: string
   currentPath: string
+  onNavigateToPath: (path: string) => void
   onNavigateUp: () => void
   isFlattenView: boolean
   onToggleFlattenView: () => void
@@ -25,7 +27,9 @@ interface ExplorerToolbarProps {
 export function ExplorerToolbar({
   filter,
   onFilterChange,
+  rootName,
   currentPath,
+  onNavigateToPath,
   onNavigateUp,
   isFlattenView,
   onToggleFlattenView,
@@ -35,6 +39,16 @@ export function ExplorerToolbar({
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
 }: ExplorerToolbarProps) {
+  const pathSegments = currentPath.split('/').filter(Boolean)
+  const rootLabel = rootName || '根目录'
+  const breadcrumbItems = [
+    { label: rootLabel, path: '' },
+    ...pathSegments.map((segment, index) => ({
+      label: segment,
+      path: pathSegments.slice(0, index + 1).join('/'),
+    })),
+  ]
+
   return (
     <div className="flex items-center gap-4 p-4 border-b border-border">
       {currentPath && (
@@ -49,11 +63,23 @@ export function ExplorerToolbar({
         </Button>
       )}
 
-      {currentPath && (
-        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span className="px-2 py-1 bg-muted rounded">{currentPath}</span>
-        </div>
-      )}
+      <div className="flex min-w-0 items-center text-sm">
+        {breadcrumbItems.map((item, index) => (
+          <div key={item.path || '__root'} className="flex min-w-0 items-center">
+            {index > 0 && <span className="px-1 text-muted-foreground">/</span>}
+            <button
+              type="button"
+              onClick={() => onNavigateToPath(item.path)}
+              className={`max-w-48 truncate rounded px-2 py-1 transition-colors hover:bg-accent ${
+                index === breadcrumbItems.length - 1 ? 'font-medium text-foreground' : 'text-muted-foreground'
+              }`}
+              title={item.path || rootLabel}
+            >
+              {item.label}
+            </button>
+          </div>
+        ))}
+      </div>
 
       <div className="flex-1" />
 

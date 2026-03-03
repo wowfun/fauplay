@@ -13,7 +13,9 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 interface ExplorerWorkspaceLayoutProps {
   filter: FilterState
   onFilterChange: (filter: FilterState) => void
+  rootName: string
   currentPath: string
+  onNavigateToPath: (path: string) => void
   onNavigateUp: () => void
   isFlattenView: boolean
   onToggleFlattenView: () => void
@@ -54,7 +56,9 @@ interface ExplorerWorkspaceLayoutProps {
 export function ExplorerWorkspaceLayout({
   filter,
   onFilterChange,
+  rootName,
   currentPath,
+  onNavigateToPath,
   onNavigateUp,
   isFlattenView,
   onToggleFlattenView,
@@ -96,7 +100,9 @@ export function ExplorerWorkspaceLayout({
       <ExplorerToolbar
         filter={filter}
         onFilterChange={onFilterChange}
+        rootName={rootName}
         currentPath={currentPath}
+        onNavigateToPath={onNavigateToPath}
         onNavigateUp={onNavigateUp}
         isFlattenView={isFlattenView}
         onToggleFlattenView={onToggleFlattenView}

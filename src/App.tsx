@@ -32,6 +32,7 @@ function App() {
     isLoading,
     error,
     selectDirectory,
+    navigateToPath,
     navigateToDirectory,
     navigateUp,
     setFlattenView,
@@ -97,6 +98,10 @@ function App() {
       openFileInModal(file)
     }
   }, [openFileInModal])
+
+  const handleNavigateToPath = useCallback((path: string) => {
+    void navigateToPath(path, { resetFlattenView: true })
+  }, [navigateToPath])
 
   useEffect(() => {
     fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
@@ -221,7 +226,9 @@ function App() {
     <ExplorerWorkspaceLayout
       filter={filter}
       onFilterChange={setFilter}
+      rootName={rootHandle.name}
       currentPath={currentPath}
+      onNavigateToPath={handleNavigateToPath}
       onNavigateUp={navigateUp}
       isFlattenView={isFlattenView}
       onToggleFlattenView={() => {
