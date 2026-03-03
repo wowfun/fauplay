@@ -76,6 +76,13 @@
 2. 文件变更类能力（File Mutation Capability）应具备显式确认与错误可见反馈；系统集成能力（System Integration Capability）默认不强制确认。
 3. 任何可选增强能力不可破坏“无网关可用”的基本路径。
 
+## 文档源头契约 (Documentation Source-of-Truth Contract)
+
+1. `README.md` 仅承载项目定位、快速开始、常用命令与文档索引，不承载细粒度行为规范。
+2. 具体行为规范只在 `specs/<topic>/spec.md` 维护；`README.md` 仅保留摘要与链接入口。
+3. 禁止在 `README.md` 复制粘贴 `specs` 细则，避免双源维护与内容漂移。
+4. 规格变更流程固定为：先更新对应 `specs/<topic>/spec.md`，再按需更新 `README.md` 导航链接。
+
 ## 非目标
 
 1. 不定义具体 API 字段、错误码枚举、JSON schema。

@@ -1,36 +1,10 @@
 # Fauplay - 本地文件浏览器
 
-一个运行在浏览器中的本地图片/视频浏览工具。
+Fauplay 是一个本地优先（Local-First）的浏览器图片/视频浏览工具，核心浏览链路纯 Web 可用；本地能力网关（Gateway）用于可选的系统集成增强能力。
 
-## 功能特性
+## 项目定位
 
-- 文件夹授权与浏览（基于 File System Access API）
-- 网格视图 + 虚拟列表（`react-window`）
-- 图片/视频缩略图生成（无持久化缓存，刷新后重新生成）
-- 搜索、类型筛选、排序（名称/日期/大小）
-- 默认隐藏空文件夹（可在工具栏切换）
-- 工具栏筛选按钮展示项目计数（封顶 `99+`）
-- 底部状态栏显示可见数量与当前选中项的大小/修改时间
-- 文件夹图标显示直接子项数量（懒加载，`99+` 上限展示）
-- 目录导航（进入子目录、返回上级）
-- 右侧预览窗格（单击文件，左侧纵向图标按钮）
-- 预览媒体按比例完整显示（`object-contain`），最大高度限制为 `85vh`，避免超出可见范围
-- 全屏预览弹窗（双击文件），与右侧预览复用同一套媒体 UI/交互逻辑
-- 预览切换采用统一快捷键（`[` / `]`）与自动播放逻辑，不提供鼠标导航热区
-- 预览遍历模式（顺序/随机）统一作用于手动上/下一个与自动播放切换逻辑
-- 预览自动播放（侧边与全屏一致）：图片按间隔切换、视频播放结束后切换、末尾循环
-- 键盘导航与预览快捷键（方向键、W/A/S/D、PageUp/PageDown、Enter、Esc、P、R、[、]）
-- 快捷键配置集中管理（`src/config/shortcuts.ts`）
-- 可选本地集成：通过本地能力网关在 Windows 文件资源管理器中定位/打开文件
-
-## 技术栈
-
-- React 18 + TypeScript
-- Vite
-- Tailwind CSS
-- react-window
-- lucide-react
-- clsx + tailwind-merge（`cn`）
+项目聚焦“本地目录浏览 + 预览体验”：默认不依赖后端服务，优先保障目录授权、筛选排序、预览浏览与快捷键操作；系统级动作（例如在资源管理器中显示）通过可选网关增强，不作为核心流程前置条件。
 
 ## 快速开始
 
@@ -40,44 +14,11 @@
 npm install
 ```
 
-### 开发模式
+### 启动开发环境
 
 ```bash
 npm run dev
 ```
-
-### 启动本地能力网关（可选）
-
-```bash
-npm run gateway
-```
-
-### 配置 MCP Server（`mcp.json`）
-
-Fauplay 网关按 VS Code 风格读取项目内的 [`./.fauplay/mcp.json`](./.fauplay/mcp.json)。
-
-```json
-{
-  "servers": {
-    "reveal-cli": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
-    },
-    "playwright-cli": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@microsoft/mcp-server-playwright"]
-    }
-  }
-}
-```
-
-约束：
-
-- 统一从 `servers` 加载 MCP server
-- 当前仅支持 `type: "stdio"` + `command/args`
-- `disabled: true` 的 server 会被跳过
 
 ### 构建生产版本
 
@@ -85,42 +26,32 @@ Fauplay 网关按 VS Code 风格读取项目内的 [`./.fauplay/mcp.json`](./.fa
 npm run build
 ```
 
-## 使用说明
+## 常用脚本
 
-1. 点击页面上的"选择文件夹"按钮
-2. 在浏览器弹出的授权窗口中选择要浏览的文件夹
-3. 开始浏览图片和视频
-4. 快捷键列表见 [`docs/shortcuts.md`](docs/shortcuts.md)
-5. 常见问题排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)
-6. 若需“在文件资源管理器中显示”：
-   - 在 WSL 中启动 `npm run gateway`
-   - 在预览面板点击“在文件资源管理器中显示”
-   - 首次使用时输入当前已选目录的系统绝对路径（按目录名称保存到浏览器本地存储）
+- `npm run dev`：启动前端开发服务（Vite）
+- `npm run gateway`：启动本地能力网关（可选）
+- `npm run build`：执行 TypeScript 构建检查并打包
+- `npm run typecheck`：执行 TypeScript 无输出类型检查
+- `npm run lint`：执行 ESLint 校验
 
-## 网关自测
+## 核心能力（概览）
 
-```bash
-curl -s http://127.0.0.1:3210/v1/health
+- 文件夹授权与目录浏览（File System Access API）
+- 网格浏览与虚拟列表渲染（`react-window`）
+- 图片/视频缩略图加载（运行时缓存，刷新后重建）
+- 搜索、类型筛选、排序（名称/日期/大小）
+- 侧栏预览与全屏预览（共享同一预览语义）
+- 预览遍历与自动播放（顺序/随机，快捷键驱动）
+- 可选网关集成：在 Windows 文件资源管理器定位/打开文件
 
-# 1) initialize
-curl -sD /tmp/fauplay-init.headers -o /tmp/fauplay-init.body -X POST http://127.0.0.1:3210/v1/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-05","capabilities":{},"clientInfo":{"name":"fauplay-smoke","version":"0.0.0"}}}'
-cat /tmp/fauplay-init.body
-sid=$(grep -i '^mcp-session-id:' /tmp/fauplay-init.headers | head -n1 | cut -d' ' -f2 | tr -d '\r')
+## 使用流程
 
-# 2) initialized notification (expected: HTTP 204)
-curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3210/v1/mcp \
-  -H 'Content-Type: application/json' \
-  -H "mcp-session-id: $sid" \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
-
-# 3) tools/list
-curl -s -X POST http://127.0.0.1:3210/v1/mcp \
-  -H 'Content-Type: application/json' \
-  -H "mcp-session-id: $sid" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-```
+1. 点击“选择文件夹”，在浏览器授权窗口中选择要浏览的目录。
+2. 在主内容区浏览目录与文件，按需使用搜索、筛选和排序。
+3. 单击文件打开侧栏预览，双击文件进入全屏预览。
+4. 使用快捷键提升浏览效率，快捷键清单见 [`docs/shortcuts.md`](docs/shortcuts.md)。
+5. 若需“在文件资源管理器中显示”，先启动 `npm run gateway`，再在预览面板触发对应动作。
+6. 网关自测与常见故障排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)。
 
 ## 浏览器兼容性
 
@@ -129,34 +60,23 @@ curl -s -X POST http://127.0.0.1:3210/v1/mcp \
 
 > 注意：本项目依赖 File System Access API，移动端浏览器支持普遍较弱。
 
-## 当前未实现
+## 文档索引
 
-- 更多快捷键动作扩展（当前已支持配置驱动的核心导航与预览快捷键）
-- 主题切换 UI（仅提供样式变量基础）
-
-## 架构文档
-
-- 架构总览：[`specs/000-architecture/spec.md`](specs/000-architecture/spec.md)
-- 接口契约：[`specs/000-architecture/interfaces.md`](specs/000-architecture/interfaces.md)
-- 演进路线：[`specs/000-architecture/roadmap.md`](specs/000-architecture/roadmap.md)
-- 架构待办：[`specs/000-architecture/todo.md`](specs/000-architecture/todo.md)
-
-## UI/UX 规范文档
-
-- 治理总规范：[`specs/002-ui-ux-governance/spec.md`](specs/002-ui-ux-governance/spec.md)
-- 命名与分层：[`specs/002-ui-ux-governance/naming.md`](specs/002-ui-ux-governance/naming.md)
-- 迁移映射：[`specs/002-ui-ux-governance/mapping.md`](specs/002-ui-ux-governance/mapping.md)
-- 评审清单：[`specs/002-ui-ux-governance/checklist.md`](specs/002-ui-ux-governance/checklist.md)
-- 功能分区：[`specs/002-ui-ux-governance/areas.md`](specs/002-ui-ux-governance/areas.md)
-
-## 缩略图规范文档
-
-- 规范文档：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
-- 执行计划与任务清单：后续在 `specs/101-thumbnail-pipeline/` 下补充 `plan.md` / `tasks.md`
+- 快捷键文档：[`docs/shortcuts.md`](docs/shortcuts.md)
+- 排障与网关自测：[`docs/troubleshooting.md`](docs/troubleshooting.md)
+- 规范总索引：[`specs/README.md`](specs/README.md)
+- 基线规范：[`specs/000-foundation/spec.md`](specs/000-foundation/spec.md)
+- 架构规范：[`specs/001-architecture/spec.md`](specs/001-architecture/spec.md)
+- 契约规范：[`specs/002-contracts/spec.md`](specs/002-contracts/spec.md)
+- UI/UX 规范：[`specs/003-ui-ux/spec.md`](specs/003-ui-ux/spec.md)
+- 预览播放专题：[`specs/100-preview-playback/spec.md`](specs/100-preview-playback/spec.md)
+- 缩略图管线专题：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
+- 面包屑导航专题：[`specs/102-breadcrumb-navigation/spec.md`](specs/102-breadcrumb-navigation/spec.md)
+- 规范变更日志：[`specs/CHANGELOG.md`](specs/CHANGELOG.md)
 
 ## 项目结构
 
-```
+```text
 src/
 ├── config/         # 配置（含快捷键）
 ├── features/       # 业务分层组件（explorer/preview）
