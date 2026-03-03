@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { File, Image as ImageIcon, Loader2, Video as VideoIcon } from 'lucide-react'
 import type { FileItem } from '@/types'
 
+const PREVIEW_MEDIA_CONTENT_CLASS = 'block w-auto max-w-full max-h-full h-[85vh] object-contain'
+
 interface PreviewMediaViewportProps {
   file: FileItem
   previewUrl: string | null
@@ -9,7 +11,6 @@ interface PreviewMediaViewportProps {
   error: string | null
   isImage: boolean
   isVideo: boolean
-  mediaMaxHeightClass: string
   emptyTextClass: string
   errorTextClass: string
   onOpenFullscreen?: () => void
@@ -26,7 +27,6 @@ export function PreviewMediaViewport({
   error,
   isImage,
   isVideo,
-  mediaMaxHeightClass,
   emptyTextClass,
   errorTextClass,
   onOpenFullscreen,
@@ -54,7 +54,7 @@ export function PreviewMediaViewport({
             <img
               src={previewUrl}
               alt={file.name}
-              className={`block w-auto h-auto max-w-full ${mediaMaxHeightClass} object-contain`}
+              className={PREVIEW_MEDIA_CONTENT_CLASS}
               onDoubleClick={onOpenFullscreen}
             />
           </div>
@@ -66,7 +66,7 @@ export function PreviewMediaViewport({
               src={previewUrl}
               controls
               autoPlay={autoPlayVideo}
-              className={`block w-auto h-auto max-w-full ${mediaMaxHeightClass} object-contain`}
+              className={PREVIEW_MEDIA_CONTENT_CLASS}
               onEnded={onVideoEnded}
               onError={onVideoRenderError}
             >

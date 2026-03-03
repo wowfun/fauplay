@@ -51,7 +51,6 @@ export function MediaPreviewCanvas({
   const isImage = getMediaType(file.name) === 'image'
   const isVideo = getMediaType(file.name) === 'video'
   const panelBorderClass = isFullscreen ? 'border-white/10' : 'border-border'
-  const mediaMaxHeightClass = isFullscreen ? 'max-h-[90vh]' : 'max-h-[85vh]'
   const railButtonClass = isFullscreen
     ? 'p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-50 text-white'
     : 'p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50'
@@ -161,7 +160,6 @@ export function MediaPreviewCanvas({
         error={error}
         isImage={isImage}
         isVideo={isVideo}
-        mediaMaxHeightClass={mediaMaxHeightClass}
         emptyTextClass={emptyTextClass}
         errorTextClass={errorTextClass}
         onOpenFullscreen={onOpenFullscreen}
