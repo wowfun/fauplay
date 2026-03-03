@@ -58,6 +58,10 @@ function toStringRecord(value) {
   return Object.keys(next).length > 0 ? next : undefined
 }
 
+function isObjectRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function resolveCwd(configDir, cwd) {
   if (typeof cwd !== 'string' || !cwd.trim()) return undefined
   return path.isAbsolute(cwd) ? cwd : path.resolve(configDir, cwd)
@@ -152,7 +156,7 @@ function parseJsonRpcRequest(payload) {
   return {
     id: payload.id,
     method,
-    params: payload.params && typeof payload.params === 'object' ? payload.params : {},
+    params: isObjectRecord(payload.params) ? payload.params : {},
   }
 }
 
@@ -249,12 +253,13 @@ async function handleMcpRequest(runtime, request, sessions, sessionId) {
     }
 
     const toolName = request.params?.name
-    const toolArgs = request.params?.arguments && typeof request.params.arguments === 'object'
-      ? request.params.arguments
-      : {}
+    const toolArgs = request.params?.arguments
 
     if (typeof toolName !== 'string' || !toolName) {
       throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'params.name is required for tools/call', 400)
+    }
+    if (!isObjectRecord(toolArgs)) {
+      throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'params.arguments must be an object', 400)
     }
 
     const result = await runtime.callTool(toolName, toolArgs)
