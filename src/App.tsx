@@ -10,10 +10,15 @@ import { useGatewayCapabilities } from '@/hooks/useGatewayCapabilities'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
+import {
+  FILE_GRID_CARD_SIZE_BY_PRESET,
+  TARGET_GRID_COLUMNS_AT_512_PRESET,
+  requiredGridWidthForColumns,
+} from '@/features/explorer/constants/gridLayout'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
-const DEFAULT_PANE_WIDTH_RATIO = 0.4
+const DEFAULT_PANE_WIDTH_RATIO = 0.375
 
 const defaultFilter: FilterState = {
   search: '',
@@ -43,6 +48,7 @@ function App() {
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const contentRef = useRef<HTMLDivElement>(null)
+  const isPaneWidthManualRef = useRef(false)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
   const { tools: previewActionTools } = useGatewayCapabilities()
 
@@ -197,8 +203,41 @@ function App() {
     toggleAutoPlay,
   ])
 
+  const getAdaptiveDefaultPaneWidthRatio = useCallback((containerWidth: number) => {
+    if (containerWidth <= 0 || thumbnailSizePreset !== '512') {
+      return DEFAULT_PANE_WIDTH_RATIO
+    }
+    const requiredGridWidth = requiredGridWidthForColumns(
+      TARGET_GRID_COLUMNS_AT_512_PRESET,
+      FILE_GRID_CARD_SIZE_BY_PRESET['512'].width
+    )
+    const maxPaneRatioForThreeColumns = 1 - requiredGridWidth / containerWidth
+    const adaptiveRatio = Math.min(DEFAULT_PANE_WIDTH_RATIO, maxPaneRatioForThreeColumns)
+    return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, adaptiveRatio))
+  }, [thumbnailSizePreset])
+
+  useEffect(() => {
+    if (!showPreviewPane || isPaneWidthManualRef.current) return
+
+    const applyAdaptiveDefault = () => {
+      const containerWidth = contentRef.current?.parentElement?.offsetWidth ?? window.innerWidth
+      const nextRatio = getAdaptiveDefaultPaneWidthRatio(containerWidth)
+      setPaneWidthRatio((currentRatio) => {
+        if (Math.abs(currentRatio - nextRatio) < 0.001) {
+          return currentRatio
+        }
+        return nextRatio
+      })
+    }
+
+    applyAdaptiveDefault()
+    window.addEventListener('resize', applyAdaptiveDefault)
+    return () => window.removeEventListener('resize', applyAdaptiveDefault)
+  }, [showPreviewPane, getAdaptiveDefaultPaneWidthRatio])
+
   const handlePreviewPaneResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
+    isPaneWidthManualRef.current = true
     const startX = event.clientX
     const startRatio = paneWidthRatio
 

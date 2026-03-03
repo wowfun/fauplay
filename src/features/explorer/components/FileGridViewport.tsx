@@ -6,6 +6,7 @@ import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 
 interface FileGridViewportProps {
   files: FileItem[]
@@ -18,14 +19,6 @@ interface FileGridViewportProps {
 
 export interface FileGridViewportHandle {
   syncSelectedPath: (path: string | null, options?: { scroll?: boolean; focus?: boolean }) => void
-}
-
-const GAP = 16
-
-const CARD_SIZE_BY_PRESET: Record<ThumbnailSizePreset, { width: number; height: number }> = {
-  auto: { width: 160, height: 180 },
-  '256': { width: 256, height: 256 },
-  '512': { width: 512, height: 512 },
 }
 
 interface GridRenderWindow {
@@ -64,7 +57,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   const selectedPathRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [renderWindow, setRenderWindow] = useState<GridRenderWindow>(INITIAL_RENDER_WINDOW)
-  const cardSize = CARD_SIZE_BY_PRESET[thumbnailSizePreset]
+  const cardSize = FILE_GRID_CARD_SIZE_BY_PRESET[thumbnailSizePreset]
 
   const markSelectedElement = useCallback((index: number, path: string) => {
     selectedIndexRef.current = index
@@ -102,7 +95,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [])
 
   const columnCount = useMemo(() => {
-    return Math.max(1, Math.floor((dimensions.width + GAP) / (cardSize.width + GAP)))
+    return Math.max(1, Math.floor((dimensions.width + FILE_GRID_GAP) / (cardSize.width + FILE_GRID_GAP)))
   }, [dimensions.width, cardSize.width])
 
   const rowCount = useMemo(() => {
@@ -110,7 +103,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [files.length, columnCount])
 
   const pageSize = useMemo(() => {
-    const visibleRows = Math.max(1, Math.floor(dimensions.height / (cardSize.height + GAP)))
+    const visibleRows = Math.max(1, Math.floor(dimensions.height / (cardSize.height + FILE_GRID_GAP)))
     return visibleRows * columnCount
   }, [dimensions.height, columnCount, cardSize.height])
 
@@ -288,11 +281,11 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       <Grid
         ref={gridRef}
         columnCount={columnCount}
-        columnWidth={cardSize.width + GAP}
+        columnWidth={cardSize.width + FILE_GRID_GAP}
         height={dimensions.height}
         onItemsRendered={handleItemsRendered}
         rowCount={rowCount}
-        rowHeight={cardSize.height + GAP}
+        rowHeight={cardSize.height + FILE_GRID_GAP}
         width={dimensions.width}
         className="scrollbar-thin"
       >
@@ -312,8 +305,8 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
             <div
               style={{
                 ...style,
-                left: Number(style.left) + GAP / 2,
-                top: Number(style.top) + GAP / 2,
+                left: Number(style.left) + FILE_GRID_GAP / 2,
+                top: Number(style.top) + FILE_GRID_GAP / 2,
                 width: cardSize.width,
                 height: cardSize.height,
               }}
