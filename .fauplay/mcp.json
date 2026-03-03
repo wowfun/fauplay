@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "reveal-cli": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+    }
+  }
+}

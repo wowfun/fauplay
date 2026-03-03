@@ -52,6 +52,33 @@ npm run dev
 npm run gateway
 ```
 
+### 配置 MCP Server（`mcp.json`）
+
+Fauplay 网关按 VS Code 风格读取项目内的 [`./.fauplay/mcp.json`](./.fauplay/mcp.json)。
+
+```json
+{
+  "servers": {
+    "reveal-cli": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+    },
+    "playwright-cli": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@microsoft/mcp-server-playwright"]
+    }
+  }
+}
+```
+
+约束：
+
+- 统一从 `servers` 加载 MCP server
+- 当前仅支持 `type: "stdio"` + `command/args`
+- `disabled: true` 的 server 会被跳过
+
 ### 构建生产版本
 
 ```bash
@@ -74,9 +101,25 @@ npm run build
 
 ```bash
 curl -s http://127.0.0.1:3210/v1/health
+
+# 1) initialize
+curl -sD /tmp/fauplay-init.headers -o /tmp/fauplay-init.body -X POST http://127.0.0.1:3210/v1/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-05","capabilities":{},"clientInfo":{"name":"fauplay-smoke","version":"0.0.0"}}}'
+cat /tmp/fauplay-init.body
+sid=$(grep -i '^mcp-session-id:' /tmp/fauplay-init.headers | head -n1 | cut -d' ' -f2 | tr -d '\r')
+
+# 2) initialized notification (expected: HTTP 204)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3210/v1/mcp \
+  -H 'Content-Type: application/json' \
+  -H "mcp-session-id: $sid" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+
+# 3) tools/list
 curl -s -X POST http://127.0.0.1:3210/v1/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+  -H "mcp-session-id: $sid" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
 ## 浏览器兼容性

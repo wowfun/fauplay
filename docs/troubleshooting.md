@@ -50,7 +50,8 @@ npm run gateway
 
 - 启动 `npm run gateway` 时报错：`listen EADDRINUSE: address already in use 127.0.0.1:3210`
 - 或 `curl /v1/health` 返回非网关响应（例如旧 helper 返回 `Not found`）
-- 或 `POST /v1/mcp` 的 `tools/list` 返回 404（说明你连到的是旧服务）
+- 或 `POST /v1/mcp` 的 `tools/list` 返回 `-32600`（说明未完成 MCP 初始化生命周期）
+- 或 `POST /v1/mcp` 的 `tools/list` 返回 404/非 JSON-RPC 响应（说明你连到的是旧服务）
 
 ### 原因
 
@@ -71,13 +72,74 @@ kill <PID>
 npm run gateway
 ```
 
-3. 验证 MCP 路由：
+3. 验证 MCP 路由（按生命周期顺序）：
 
 ```bash
+# health
+curl -s http://127.0.0.1:3210/v1/health
+
+# initialize
+curl -sD /tmp/fauplay-init.headers -o /tmp/fauplay-init.body -X POST http://127.0.0.1:3210/v1/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-05","capabilities":{},"clientInfo":{"name":"fauplay-smoke","version":"0.0.0"}}}'
+cat /tmp/fauplay-init.body
+sid=$(grep -i '^mcp-session-id:' /tmp/fauplay-init.headers | head -n1 | cut -d' ' -f2 | tr -d '\r')
+
+# initialized notification (expect HTTP 204)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3210/v1/mcp \
+  -H 'Content-Type: application/json' \
+  -H "mcp-session-id: $sid" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+
+# tools/list
 curl -s -X POST http://127.0.0.1:3210/v1/mcp \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+  -H "mcp-session-id: $sid" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
+
+## 1.2) MCP Server 未加载（`mcp.json`）
+
+### 现象
+
+- 启动网关后预期工具未出现在 `tools/list` 中
+- 网关日志提示 `Skip MCP server ...`
+
+### 原因
+
+- `.fauplay/mcp.json` 语法错误或结构错误
+- `servers.<name>.type` 不是 `stdio`
+- `stdio` 条目的 `command` 缺失或为空
+- `servers.<name>.disabled` 被设置为 `true`
+
+### 解决
+
+1. 检查配置文件路径与 JSON 语法：
+
+```bash
+cat .fauplay/mcp.json
+```
+
+2. 确认条目为可执行的 `stdio` server：
+
+```json
+{
+  "servers": {
+    "reveal-cli": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+    },
+    "my-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["path/to/server.js"]
+    }
+  }
+}
+```
+
+3. 重启网关并重新执行 `tools/list` 验证。
 
 ## 2) 选择文件夹后无法进入子目录
 

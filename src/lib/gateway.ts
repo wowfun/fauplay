@@ -1,6 +1,12 @@
 const GATEWAY_BASE_URL = 'http://127.0.0.1:3210'
 const HEALTH_ENDPOINT = `${GATEWAY_BASE_URL}/v1/health`
 const MCP_ENDPOINT = `${GATEWAY_BASE_URL}/v1/mcp`
+const MCP_PROTOCOL_VERSION = '2025-11-05'
+const MCP_SESSION_HEADER = 'mcp-session-id'
+const MCP_CLIENT_INFO = {
+  name: 'fauplay-web',
+  version: '0.0.1',
+}
 
 export interface GatewayToolDescriptor {
   name: string
@@ -11,22 +17,33 @@ export interface GatewayToolDescriptor {
 }
 
 interface GatewayHealthResponse {
-  ok?: boolean
+  status?: string
 }
 
-interface GatewayEnvelope<T> {
-  ok?: boolean
-  data?: T
-  error?: {
-    code?: string
-    message?: string
-  }
+interface JsonRpcErrorData {
+  code?: string
 }
 
-interface JsonRpcSuccess<T> {
+interface JsonRpcErrorObject {
+  code?: number
+  message?: string
+  data?: JsonRpcErrorData
+}
+
+interface JsonRpcResponse<T> {
   jsonrpc?: string
   id?: number | string | null
   result?: T
+  error?: JsonRpcErrorObject
+}
+
+interface InitializeResult {
+  protocolVersion?: string
+  capabilities?: Record<string, unknown>
+  serverInfo?: {
+    name?: string
+    version?: string
+  }
 }
 
 interface GatewayToolsListResult {
@@ -60,6 +77,29 @@ class GatewayMcpError extends Error {
   }
 }
 
+let mcpInitialized = false
+let mcpInitializingPromise: Promise<void> | null = null
+let mcpSessionId: string | null = null
+let mcpSessionIdCandidate: string | null = null
+
+function createRequestId(): number {
+  return Date.now() + Math.floor(Math.random() * 1000)
+}
+
+function resetMcpInitialization() {
+  mcpInitialized = false
+  mcpInitializingPromise = null
+  mcpSessionId = null
+  mcpSessionIdCandidate = null
+}
+
+function toGatewayMcpError(errorObj: JsonRpcErrorObject): GatewayMcpError {
+  const message = typeof errorObj?.message === 'string' ? errorObj.message : 'Gateway MCP request failed'
+  const internalCode = typeof errorObj?.data?.code === 'string' ? errorObj.data.code : undefined
+  const jsonRpcCode = typeof errorObj?.code === 'number' ? `JSONRPC_${errorObj.code}` : undefined
+  return new GatewayMcpError(message, internalCode || jsonRpcCode)
+}
+
 async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
@@ -79,34 +119,133 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
 }
 
 async function callGatewayMcp<T>(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<T> {
+  if (method !== 'initialize' && method !== 'notifications/initialized') {
+    await ensureGatewayMcpInitialized(timeoutMs)
+  }
+
+  return callGatewayMcpRequest<T>(method, params, timeoutMs)
+}
+
+async function callGatewayMcpRequest<T>(
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number,
+  options?: { notification?: boolean }
+): Promise<T> {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(MCP_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method,
-        params,
-      }),
-      signal: controller.signal,
-    })
+    const notification = options?.notification === true
+    const payload = notification
+      ? {
+          jsonrpc: '2.0',
+          method,
+          params,
+        }
+      : {
+          jsonrpc: '2.0',
+          id: createRequestId(),
+          method,
+          params,
+        }
 
-    const envelope = (await response
-      .json()
-      .catch(() => ({ ok: false, error: { message: 'Invalid response' } }))) as GatewayEnvelope<JsonRpcSuccess<T>>
-
-    if (!response.ok || envelope.ok !== true) {
-      throw new GatewayMcpError(envelope.error?.message || 'Gateway MCP request failed', envelope.error?.code)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (method !== 'initialize' && mcpSessionId) {
+      headers[MCP_SESSION_HEADER] = mcpSessionId
     }
 
-    return (envelope.data?.result ?? {}) as T
+    const response = await fetch(MCP_ENDPOINT, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    const responseSessionId = response.headers.get(MCP_SESSION_HEADER)
+    if (responseSessionId) {
+      mcpSessionIdCandidate = responseSessionId
+    }
+
+    if (notification) {
+      if (response.status === 204) {
+        return {} as T
+      }
+      if (!response.ok) {
+        throw new GatewayMcpError(`Gateway request failed: ${response.status}`)
+      }
+      return {} as T
+    }
+
+    if (!response.ok) {
+      throw new GatewayMcpError(`Gateway request failed: ${response.status}`)
+    }
+
+    const rpcResponse = (await response
+      .json()
+      .catch(() => ({}))) as JsonRpcResponse<T>
+
+    if (rpcResponse?.error) {
+      throw toGatewayMcpError(rpcResponse.error)
+    }
+
+    return (rpcResponse?.result ?? {}) as T
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+async function ensureGatewayMcpInitialized(timeoutMs: number): Promise<void> {
+  if (mcpInitialized) return
+  if (mcpInitializingPromise) {
+    await mcpInitializingPromise
+    return
+  }
+
+  mcpInitializingPromise = (async () => {
+    const result = await callGatewayMcpRequest<InitializeResult>(
+      'initialize',
+      {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: MCP_CLIENT_INFO,
+      },
+      timeoutMs
+    )
+
+    if (!result || typeof result !== 'object') {
+      throw new GatewayMcpError('Invalid initialize response')
+    }
+
+    const sessionId = responseSessionIdFromInitializeResult(result)
+    if (!sessionId) {
+      throw new GatewayMcpError(`Missing ${MCP_SESSION_HEADER} in initialize response`)
+    }
+    mcpSessionId = sessionId
+
+    await callGatewayMcpRequest(
+      'notifications/initialized',
+      {},
+      timeoutMs,
+      { notification: true }
+    )
+
+    mcpInitialized = true
+  })()
+    .catch((error) => {
+      resetMcpInitialization()
+      throw error
+    })
+    .finally(() => {
+      mcpInitializingPromise = null
+    })
+
+  await mcpInitializingPromise
+}
+
+function responseSessionIdFromInitializeResult(_result: InitializeResult): string | null {
+  // Session id is read from the latest HTTP response header in callGatewayMcpRequest.
+  // callGatewayMcpRequest stores it in mcpSessionIdCandidate for initialize only.
+  return mcpSessionIdCandidate
 }
 
 function toToolDescriptor(tool: GatewayRawToolDescriptor): GatewayToolDescriptor | null {
@@ -169,13 +308,15 @@ export async function callGatewayTool<T = Record<string, unknown>>(
 export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise<GatewayCapabilitiesSnapshot> {
   try {
     const health = (await fetchJsonWithTimeout(HEALTH_ENDPOINT, timeoutMs)) as GatewayHealthResponse
-    if (!health.ok) {
+    if (health?.status !== 'ok') {
+      resetMcpInitialization()
       return { online: false, tools: [] }
     }
 
     const tools = await listGatewayTools(timeoutMs)
     return { online: true, tools }
   } catch {
+    resetMcpInitialization()
     return { online: false, tools: [] }
   }
 }

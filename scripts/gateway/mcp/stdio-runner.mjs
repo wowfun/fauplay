@@ -7,13 +7,22 @@ function createRunnerError(code, message) {
   return error
 }
 
+function normalizeRemoteErrorCode(value) {
+  if (typeof value !== 'string') return 'MCP_TOOL_CALL_FAILED'
+  if (value === 'MCP_TOOL_NOT_FOUND') return value
+  if (value === 'MCP_INVALID_PARAMS') return value
+  if (value === 'MCP_TOOL_CALL_FAILED') return value
+  return 'MCP_TOOL_CALL_FAILED'
+}
+
 function pruneCrashHistory(history, now, windowMs) {
   return history.filter((timestamp) => now - timestamp <= windowMs)
 }
 
 export class StdioMcpRunner {
   constructor(options) {
-    this.pluginId = options.pluginId
+    this.sourceLabel =
+      typeof options.sourceLabel === 'string' && options.sourceLabel ? options.sourceLabel : 'stdio-server'
     this.command = options.command
     this.args = Array.isArray(options.args) ? options.args : []
     this.cwd = options.cwd
@@ -61,7 +70,7 @@ export class StdioMcpRunner {
   }
 
   async shutdown() {
-    this.rejectPending('MCP_SERVER_CRASHED', `MCP server exited: ${this.pluginId}`)
+    this.rejectPending('MCP_SERVER_CRASHED', `MCP server exited: ${this.sourceLabel}`)
 
     if (this.readline) {
       this.readline.close()
@@ -82,7 +91,7 @@ export class StdioMcpRunner {
     if (now < this.cooldownUntil) {
       throw createRunnerError(
         'MCP_SERVER_CRASHED',
-        `MCP server is in restart cooldown for plugin ${this.pluginId}`
+        `MCP server is in restart cooldown: ${this.sourceLabel}`
       )
     }
 
@@ -122,7 +131,7 @@ export class StdioMcpRunner {
     })
 
     child.once('exit', (code, signal) => {
-      const details = `plugin=${this.pluginId} code=${code ?? 'null'} signal=${signal ?? 'null'}`
+      const details = `source=${this.sourceLabel} code=${code ?? 'null'} signal=${signal ?? 'null'}`
       this.handleProcessExit(new Error(`MCP server exited (${details})`))
     })
   }
@@ -152,8 +161,9 @@ export class StdioMcpRunner {
       const message =
         typeof parsed.error?.message === 'string'
           ? parsed.error.message
-          : `MCP server returned an error for plugin ${this.pluginId}`
-      const error = createRunnerError('MCP_TOOL_CALL_FAILED', message)
+          : `MCP server returned an error: ${this.sourceLabel}`
+      const remoteCode = normalizeRemoteErrorCode(parsed.error?.data?.code)
+      const error = createRunnerError(remoteCode, message)
       pending.reject(error)
       return
     }
@@ -174,7 +184,7 @@ export class StdioMcpRunner {
 
     this.rejectPending(
       'MCP_SERVER_CRASHED',
-      `MCP server crashed: ${this.pluginId}. ${reason?.message || ''}`
+      `MCP server crashed: ${this.sourceLabel}. ${reason?.message || ''}`
     )
 
     if (this.readline) {
@@ -200,7 +210,7 @@ export class StdioMcpRunner {
     if (!this.proc || this.proc.killed || !this.proc.stdin.writable) {
       throw createRunnerError(
         'MCP_SERVER_CRASHED',
-        `MCP server is not running for plugin ${this.pluginId}`
+        `MCP server is not running: ${this.sourceLabel}`
       )
     }
 

@@ -11,30 +11,45 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : []
 }
 
-function toGatewayTool(pluginMeta, tool) {
+function toGatewayTool(sourceLabel, tool) {
   const name = tool?.name
   if (typeof name !== 'string' || !name) {
     throw createRuntimeError(
       'MCP_INVALID_PARAMS',
-      `Plugin ${pluginMeta.id} returned a tool with invalid name`,
+      `MCP server ${sourceLabel} returned a tool with invalid name`,
       500
     )
   }
 
   const annotations = tool?.annotations && typeof tool.annotations === 'object' ? tool.annotations : {}
   const scopes = normalizeArray(annotations.scopes).filter((scope) => typeof scope === 'string')
+  const normalizedAnnotations = {}
+  if (typeof annotations.title === 'string' && annotations.title) {
+    normalizedAnnotations.title = annotations.title
+  }
+  if (typeof annotations.mutation === 'boolean') {
+    normalizedAnnotations.mutation = annotations.mutation
+  }
+  if (scopes.length > 0) {
+    normalizedAnnotations.scopes = scopes
+  }
 
-  return {
+  const normalizedTool = {
     name,
+    title: typeof tool?.title === 'string' && tool.title
+      ? tool.title
+      : typeof annotations.title === 'string' && annotations.title
+        ? annotations.title
+        : name,
     description: typeof tool?.description === 'string' ? tool.description : '',
     inputSchema: tool?.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object' },
-    title: typeof annotations.title === 'string' ? annotations.title : tool?.description || name,
-    mutation: annotations.mutation === true,
-    scopes,
-    pluginId: pluginMeta.id,
-    pluginName: pluginMeta.name,
-    pluginVersion: pluginMeta.version,
   }
+
+  if (Object.keys(normalizedAnnotations).length > 0) {
+    normalizedTool.annotations = normalizedAnnotations
+  }
+
+  return normalizedTool
 }
 
 function mapRuntimeError(error) {
@@ -65,43 +80,17 @@ function mapRuntimeError(error) {
   )
 }
 
-function createInProcessClient(entry) {
-  const server = entry.createServer()
-
-  if (!server || typeof server.listTools !== 'function' || typeof server.callTool !== 'function') {
-    throw createRuntimeError(
-      'MCP_RUNTIME_ERROR',
-      `Invalid in-process MCP server for plugin ${entry.pluginId}`,
-      500
-    )
-  }
-
-  return {
-    async listTools() {
-      return server.listTools()
-    },
-    async callTool(name, args) {
-      return server.callTool(name, args)
-    },
-    async shutdown() {
-      if (typeof server.shutdown === 'function') {
-        await server.shutdown()
-      }
-    },
-  }
-}
-
-function createStdioClient(entry, defaults) {
+function createStdioClient(entry, defaults, sourceLabel) {
   if (typeof entry.command !== 'string' || !entry.command) {
     throw createRuntimeError(
       'MCP_RUNTIME_ERROR',
-      `Stdio plugin ${entry.pluginId} is missing command`,
+      `Stdio MCP server is missing command: ${sourceLabel}`,
       500
     )
   }
 
   const runner = new StdioMcpRunner({
-    pluginId: entry.pluginId,
+    sourceLabel,
     command: entry.command,
     args: entry.args,
     cwd: entry.cwd,
@@ -126,51 +115,50 @@ function createStdioClient(entry, defaults) {
   }
 }
 
+function resolveSourceLabel(entry, index) {
+  if (typeof entry?.sourceLabel === 'string' && entry.sourceLabel) {
+    return entry.sourceLabel
+  }
+
+  if (typeof entry?.command === 'string' && entry.command) {
+    return `stdio:${entry.command}`
+  }
+
+  return `stdio:${index}`
+}
+
 export class McpHostRuntime {
   constructor(options = {}) {
-    this.pluginRegistry = normalizeArray(options.pluginRegistry)
+    this.serverRegistry = normalizeArray(options.serverRegistry)
     this.callTimeoutMs = Number(options.callTimeoutMs || 5000)
     this.initTimeoutMs = Number(options.initTimeoutMs || 2000)
     this.restartWindowMs = Number(options.restartWindowMs || 10000)
     this.maxCrashesInWindow = Number(options.maxCrashesInWindow || 3)
     this.restartCooldownMs = Number(options.restartCooldownMs || 15000)
 
-    this.plugins = []
     this.toolMap = new Map()
     this.tools = []
   }
 
   async initialize() {
-    for (const entry of this.pluginRegistry) {
+    let index = 0
+    for (const entry of this.serverRegistry) {
       if (!entry || typeof entry !== 'object') continue
+      const sourceLabel = resolveSourceLabel(entry, index)
+      index += 1
 
-      const pluginId = entry.pluginId
-      if (typeof pluginId !== 'string' || !pluginId) {
-        throw createRuntimeError('MCP_RUNTIME_ERROR', 'pluginId is required', 500)
-      }
-
-      const manifest = {
-        id: pluginId,
-        name: typeof entry.name === 'string' ? entry.name : pluginId,
-        version: typeof entry.version === 'string' ? entry.version : '0.1.0',
-      }
-
-      const transport = entry.transport === 'stdio' ? 'stdio' : 'inproc'
-      const client =
-        transport === 'stdio'
-          ? createStdioClient(entry, {
-            callTimeoutMs: this.callTimeoutMs,
-            initTimeoutMs: this.initTimeoutMs,
-            restartWindowMs: this.restartWindowMs,
-            maxCrashesInWindow: this.maxCrashesInWindow,
-            restartCooldownMs: this.restartCooldownMs,
-          })
-          : createInProcessClient(entry)
+      const client = createStdioClient(entry, {
+        callTimeoutMs: this.callTimeoutMs,
+        initTimeoutMs: this.initTimeoutMs,
+        restartWindowMs: this.restartWindowMs,
+        maxCrashesInWindow: this.maxCrashesInWindow,
+        restartCooldownMs: this.restartCooldownMs,
+      }, sourceLabel)
 
       const tools = normalizeArray(await client.listTools())
 
       for (const tool of tools) {
-        const normalized = toGatewayTool(manifest, tool)
+        const normalized = toGatewayTool(sourceLabel, tool)
         if (this.toolMap.has(normalized.name)) {
           throw createRuntimeError(
             'MCP_RUNTIME_ERROR',
@@ -180,16 +168,10 @@ export class McpHostRuntime {
         }
 
         this.toolMap.set(normalized.name, {
-          plugin: manifest,
           client,
         })
         this.tools.push(normalized)
       }
-
-      this.plugins.push({
-        ...manifest,
-        transport,
-      })
     }
 
     this.tools.sort((a, b) => a.name.localeCompare(b.name))
@@ -197,10 +179,6 @@ export class McpHostRuntime {
 
   listTools() {
     return this.tools
-  }
-
-  listPlugins() {
-    return this.plugins
   }
 
   async callTool(toolName, args) {

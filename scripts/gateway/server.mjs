@@ -1,15 +1,21 @@
 import http from 'node:http'
+import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
-import { createRevealMcpServer } from './plugins/reveal.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
 const GATEWAY_VERSION = '0.2.0'
+const MCP_PROTOCOL_VERSION = '2025-11-05'
+const MCP_SESSION_HEADER = 'mcp-session-id'
+const DEFAULT_MCP_CONFIG_PATH = path.resolve(process.cwd(), '.fauplay', 'mcp.json')
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${MCP_SESSION_HEADER}`)
+  res.setHeader('Access-Control-Expose-Headers', MCP_SESSION_HEADER)
 }
 
 function sendJson(res, statusCode, body) {
@@ -30,101 +36,218 @@ async function readJsonBody(req) {
   try {
     return JSON.parse(raw)
   } catch {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be valid JSON', 400)
+    throw createMcpRuntimeError('MCP_PARSE_ERROR', 'Request body must be valid JSON', 400)
   }
 }
 
-function parseExternalPluginAllowlist() {
-  const raw = process.env.FAUPLAY_MCP_PLUGIN_ALLOWLIST_JSON
-  if (!raw) return []
+function toStringArray(value) {
+  if (!Array.isArray(value)) return []
+  return value.filter((item) => typeof item === 'string')
+}
 
+function toStringRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+
+  const next = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === 'string') {
+      next[key] = item
+    }
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined
+}
+
+function resolveCwd(configDir, cwd) {
+  if (typeof cwd !== 'string' || !cwd.trim()) return undefined
+  return path.isAbsolute(cwd) ? cwd : path.resolve(configDir, cwd)
+}
+
+async function loadMcpServersFromConfig(configPath) {
+  let raw = ''
   try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
+    raw = await readFile(configPath, 'utf-8')
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return []
+    }
+    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `Failed to read MCP config: ${configPath}`, 500)
+  }
 
-    return parsed
-      .filter((entry) => entry && typeof entry === 'object' && entry.transport === 'stdio')
-      .map((entry) => ({
-        pluginId: entry.id,
-        name: entry.name,
-        version: entry.version,
-        transport: 'stdio',
-        command: entry.command,
-        args: Array.isArray(entry.args) ? entry.args : [],
-        cwd: entry.cwd,
-        env: entry.env,
-        callTimeoutMs: entry.callTimeoutMs,
-        initTimeoutMs: entry.initTimeoutMs,
-        restartWindowMs: entry.restartWindowMs,
-        maxCrashesInWindow: entry.maxCrashesInWindow,
-        restartCooldownMs: entry.restartCooldownMs,
-      }))
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
   } catch {
+    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `Invalid JSON in MCP config: ${configPath}`, 500)
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw createMcpRuntimeError('MCP_CONFIG_ERROR', 'MCP config root must be an object', 500)
+  }
+
+  const servers = parsed.servers
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
     return []
   }
+
+  const configDir = path.dirname(configPath)
+  const serversToLoad = []
+
+  for (const [name, entry] of Object.entries(servers)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue
+    }
+    if (entry.disabled === true) {
+      continue
+    }
+
+    const type = typeof entry.type === 'string' && entry.type ? entry.type : 'stdio'
+    if (type !== 'stdio') {
+      console.warn(`[gateway] Skip MCP server "${name}": unsupported type "${type}"`)
+      continue
+    }
+
+    const command = typeof entry.command === 'string' ? entry.command.trim() : ''
+    if (!command) {
+      console.warn(`[gateway] Skip MCP server "${name}": missing command`)
+      continue
+    }
+
+    serversToLoad.push({
+      transport: 'stdio',
+      sourceLabel: name,
+      command,
+      args: toStringArray(entry.args),
+      cwd: resolveCwd(configDir, entry.cwd),
+      env: toStringRecord(entry.env),
+      callTimeoutMs: entry.callTimeoutMs,
+      initTimeoutMs: entry.initTimeoutMs,
+      restartWindowMs: entry.restartWindowMs,
+      maxCrashesInWindow: entry.maxCrashesInWindow,
+      restartCooldownMs: entry.restartCooldownMs,
+    })
+  }
+
+  return serversToLoad
 }
 
-function createPluginRegistry() {
-  const builtinPlugins = [
-    {
-      pluginId: 'builtin.reveal',
-      name: 'Builtin Reveal MCP Plugin',
-      version: '0.2.0',
-      transport: 'inproc',
-      createServer: createRevealMcpServer,
-    },
-  ]
-
-  const externalPlugins = parseExternalPluginAllowlist()
-  return [...builtinPlugins, ...externalPlugins]
+async function createMcpServerRegistry(configPath) {
+  return loadMcpServersFromConfig(configPath)
 }
 
 function parseJsonRpcRequest(payload) {
   if (!payload || typeof payload !== 'object') {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Invalid JSON-RPC request payload', 400)
+    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Invalid JSON-RPC request payload', 400)
+  }
+
+  if (payload.jsonrpc !== '2.0') {
+    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'jsonrpc must be "2.0"', 400)
   }
 
   const method = payload.method
   if (typeof method !== 'string' || !method) {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'method is required', 400)
+    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'method is required', 400)
   }
 
   return {
-    jsonrpc: payload.jsonrpc,
-    id: payload.id ?? null,
+    id: payload.id,
     method,
     params: payload.params && typeof payload.params === 'object' ? payload.params : {},
   }
 }
 
-function toErrorResponse(error) {
+function readSessionId(req) {
+  const raw = req.headers[MCP_SESSION_HEADER]
+  if (Array.isArray(raw)) return raw[0] || null
+  return typeof raw === 'string' && raw ? raw : null
+}
+
+function toJsonRpcError(error) {
+  if (error?.code === 'MCP_PARSE_ERROR') {
+    return {
+      code: -32700,
+      message: error.message || 'Parse error',
+      data: { code: 'MCP_PARSE_ERROR' },
+    }
+  }
+
+  if (error?.code === 'MCP_INVALID_REQUEST') {
+    return {
+      code: -32600,
+      message: error.message || 'Invalid Request',
+      data: { code: 'MCP_INVALID_REQUEST' },
+    }
+  }
+
+  if (error?.code === 'MCP_METHOD_NOT_FOUND') {
+    return {
+      code: -32601,
+      message: error.message || 'Method not found',
+      data: { code: 'MCP_METHOD_NOT_FOUND' },
+    }
+  }
+
+  if (error?.code === 'MCP_INVALID_PARAMS') {
+    return {
+      code: -32602,
+      message: error.message || 'Invalid params',
+      data: { code: 'MCP_INVALID_PARAMS' },
+    }
+  }
+
   return {
-    statusCode: Number(error?.statusCode || 500),
-    body: {
-      ok: false,
-      error: {
-        code: error?.code || 'MCP_RUNTIME_ERROR',
-        message: error instanceof Error ? error.message : 'MCP runtime error',
-      },
+    code: -32000,
+    message: error instanceof Error ? error.message : 'Server error',
+    data: {
+      code: error?.code || 'MCP_RUNTIME_ERROR',
     },
   }
 }
 
-async function handleMcpRequest(runtime, payload) {
-  const request = parseJsonRpcRequest(payload)
+function buildInitializeResult() {
+  return {
+    protocolVersion: MCP_PROTOCOL_VERSION,
+    capabilities: {
+      tools: {},
+    },
+    serverInfo: {
+      name: 'fauplay-local-gateway',
+      version: GATEWAY_VERSION,
+    },
+  }
+}
 
-  if (request.method === 'tools/list') {
+async function handleMcpRequest(runtime, request, sessions, sessionId) {
+  if (request.method === 'initialize') {
+    const nextSessionId = randomUUID()
+    sessions.set(nextSessionId, {
+      initialized: true,
+      clientReady: false,
+    })
+
     return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: {
-        tools: runtime.listTools(),
-        plugins: runtime.listPlugins(),
-      },
+      sessionId: nextSessionId,
+      result: buildInitializeResult(),
     }
   }
 
+  const state = sessionId ? sessions.get(sessionId) : null
+  if (!state) {
+    throw createMcpRuntimeError('MCP_INVALID_REQUEST', `Missing or invalid ${MCP_SESSION_HEADER} header`, 400)
+  }
+
+  if (request.method === 'tools/list') {
+    if (!state.initialized || !state.clientReady) {
+      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Client must complete initialize lifecycle', 400)
+    }
+    return { sessionId, result: { tools: runtime.listTools() } }
+  }
+
   if (request.method === 'tools/call') {
+    if (!state.initialized || !state.clientReady) {
+      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Client must complete initialize lifecycle', 400)
+    }
+
     const toolName = request.params?.name
     const toolArgs = request.params?.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments
@@ -135,11 +258,15 @@ async function handleMcpRequest(runtime, payload) {
     }
 
     const result = await runtime.callTool(toolName, toolArgs)
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: result ?? {},
+    return { sessionId, result: result ?? {} }
+  }
+
+  if (request.method === 'notifications/initialized') {
+    if (!state.initialized) {
+      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'initialize is required before initialized notification', 400)
     }
+    state.clientReady = true
+    return { sessionId, result: null }
   }
 
   throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Unsupported MCP method: ${request.method}`, 404)
@@ -148,9 +275,13 @@ async function handleMcpRequest(runtime, payload) {
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
+  const configPath = typeof options.mcpConfigPath === 'string' && options.mcpConfigPath
+    ? options.mcpConfigPath
+    : DEFAULT_MCP_CONFIG_PATH
+  const serverRegistry = await createMcpServerRegistry(configPath)
 
   const runtime = new McpHostRuntime({
-    pluginRegistry: createPluginRegistry(),
+    serverRegistry,
     callTimeoutMs: Number(process.env.FAUPLAY_MCP_CALL_TIMEOUT_MS || 5000),
     initTimeoutMs: Number(process.env.FAUPLAY_MCP_INIT_TIMEOUT_MS || 2000),
     restartWindowMs: Number(process.env.FAUPLAY_MCP_RESTART_WINDOW_MS || 10000),
@@ -159,12 +290,14 @@ export async function startGatewayServer(options = {}) {
   })
 
   await runtime.initialize()
+  const clientSessions = new Map()
 
   const server = http.createServer(async (req, res) => {
     setCorsHeaders(res)
 
     if (req.method === 'OPTIONS') {
-      sendJson(res, 204, { ok: true })
+      res.statusCode = 204
+      res.end()
       return
     }
 
@@ -172,34 +305,66 @@ export async function startGatewayServer(options = {}) {
 
     if (req.method === 'GET' && url === '/v1/health') {
       sendJson(res, 200, {
-        ok: true,
-        data: {
-          service: 'fauplay-local-gateway',
-          version: GATEWAY_VERSION,
-        },
+        service: 'fauplay-local-gateway',
+        version: GATEWAY_VERSION,
+        status: 'ok',
       })
       return
     }
 
     if (req.method === 'POST' && url === '/v1/mcp') {
+      let request = null
+      let requestIsNotification = false
+      let responseSessionId = null
       try {
         const payload = await readJsonBody(req)
-        const rpcResponse = await handleMcpRequest(runtime, payload)
+        request = parseJsonRpcRequest(payload)
+        requestIsNotification = request.id === undefined
+
+        const requestSessionId = request.method === 'initialize' ? null : readSessionId(req)
+        const { sessionId, result } = await handleMcpRequest(runtime, request, clientSessions, requestSessionId)
+        responseSessionId = sessionId
+
+        if (responseSessionId) {
+          res.setHeader(MCP_SESSION_HEADER, responseSessionId)
+        }
+
+        if (requestIsNotification) {
+          res.statusCode = 204
+          res.end()
+          return
+        }
+
         sendJson(res, 200, {
-          ok: true,
-          data: rpcResponse,
+          jsonrpc: '2.0',
+          id: request.id ?? null,
+          result: result ?? {},
         })
       } catch (error) {
-        const response = toErrorResponse(error)
-        sendJson(res, response.statusCode, response.body)
+        if (responseSessionId) {
+          res.setHeader(MCP_SESSION_HEADER, responseSessionId)
+        }
+
+        if (requestIsNotification) {
+          res.statusCode = 204
+          res.end()
+          return
+        }
+
+        sendJson(res, 200, {
+          jsonrpc: '2.0',
+          id: request?.id ?? null,
+          error: toJsonRpcError(error),
+        })
       }
       return
     }
 
     sendJson(res, 404, {
-      ok: false,
+      jsonrpc: '2.0',
+      id: null,
       error: {
-        code: 'NOT_FOUND',
+        code: -32601,
         message: 'Not found',
       },
     })
@@ -207,6 +372,8 @@ export async function startGatewayServer(options = {}) {
 
   server.listen(port, host, () => {
     console.log(`Fauplay gateway listening on http://${host}:${port}`)
+    console.log(`[gateway] MCP config: ${configPath}`)
+    console.log(`[gateway] MCP servers loaded: ${serverRegistry.length}`)
   })
 
   const shutdown = async () => {
