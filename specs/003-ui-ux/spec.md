@@ -1,0 +1,104 @@
+# 003 UI/UX 交互规范
+
+## 目的
+
+定义 Fauplay 的用户界面与交互体验基线（UI/UX Baseline），约束信息架构（Information Architecture, IA）、交互流程（Interaction Flow）、状态反馈（State Feedback）、可访问性（Accessibility, A11y）与降级行为（Graceful Degradation）。
+
+## 关键术语 (Terminology)
+
+- 信息架构（Information Architecture, IA）
+- 功能分区（Functional Zones）
+- 预览域状态（Preview Domain State）
+- 键盘契约（Keyboard Contract）
+- 优雅降级（Graceful Degradation）
+- 表现层（Presentation Layer）
+
+## 范围
+
+范围内：
+
+1. 页面分区与职责边界。
+2. 文件浏览与预览交互行为。
+3. 预览面板与全屏预览关系约束。
+4. 键盘快捷键规则与输入焦点保护。
+5. 网关能力的 UI 降级行为。
+6. 可访问性与反馈可见性最低要求。
+
+范围外：
+
+1. MCP 报文结构与错误码定义（归属 `002-contracts`）。
+2. 网关与插件运行机制（归属 `001-architecture`）。
+3. 品牌视觉系统与像素级视觉稿。
+
+## 功能分区契约 (Functional Zone Contract)
+
+1. 顶部工具区（Top Toolbar Zone）
+2. 主内容区（Main Content Zone）
+3. 底部状态区（Status Bar Zone）
+4. 全屏覆盖层（Lightbox Modal Zone）
+
+约束：
+
+1. 跨区协作必须通过显式契约（props/events/state）连接。
+2. 禁止跨区直接耦合内部实现细节。
+3. 详细分区与子分区见 [`areas.md`](./areas.md)。
+
+## 预览面板与全屏关系契约 (Panel-Fullscreen Relation Contract)
+
+1. 全屏预览区（Lightbox Modal Zone）是 B2 预览面板区（Media Preview Panel Zone）的全屏表现状态（Fullscreen Presentation State），不是独立业务域。
+2. 侧栏预览与全屏预览必须共享同一套预览业务逻辑（Traversal / Auto-play / Action），禁止并行维护两套状态机。
+3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PreviewActionRail`、`PreviewMediaViewport`、`PreviewFeedbackOverlay`。
+4. 两种表现态允许差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）与焦点管理（Focus Management）。
+5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
+
+## 核心交互契约 (Core Interaction Contract)
+
+1. 单击目录进入目录。
+2. 单击文件打开侧栏预览（必要时自动打开侧栏）。
+3. 双击文件打开全屏预览。
+4. `Esc` 关闭优先级必须为：全屏预览 -> 侧栏预览。
+5. 侧栏与全屏共享“上一项/下一项、顺序/随机、自动播放”语义。
+
+## 状态契约 (State Contract)
+
+1. 预览可视状态必须覆盖：`idle`、`loading`、`ready`、`error`。
+2. 预览导航触发过程可进入 `navigating` 过渡态。
+3. 工具动作运行态必须覆盖：`default`、`loading`、`error`、`disabled`。
+4. 错误状态必须用户可见，不得静默失败。
+
+## 快捷键契约 (Keyboard Contract)
+
+1. 快捷键配置唯一来源为 `src/config/shortcuts.ts`。
+2. 输入控件聚焦时，非全局快捷键必须失效。
+3. 快捷键文档 `docs/shortcuts.md` 必须与配置一致。
+4. 预览快捷键在侧栏与全屏表现态下语义必须一致。
+
+## 能力与降级契约 (Capability & Degradation Contract)
+
+1. 网关离线时，核心浏览链路（目录浏览、筛选、预览）必须保持可用。
+2. 系统动作入口只在对应工具可用时展示或可点击。
+3. 工具调用中必须提供进行态反馈，失败必须提供错误反馈。
+
+## 可访问性基线 (Accessibility Baseline)
+
+1. 图标按钮必须提供可读名称（`title` 或 `aria-label`）。
+2. 状态表达不得仅依赖颜色传达，必须有文本或结构化提示。
+
+## 命名与分层约束 (Naming & Layering Contract)
+
+1. 分层遵循：`ui` / `features` / `layouts`。
+2. 命名应表达语义职责，避免过度抽象命名。
+3. 预览域子分区统一采用 `Preview*` 前缀命名。
+
+## 非目标
+
+1. 不定义协议字段与网关内部实现细节。
+2. 不定义像素级视觉规范与品牌系统。
+3. 不定义功能专题的排期与任务拆解。
+
+## 关联主题
+
+- 上游基线：`000-foundation`
+- 架构边界：`001-architecture`
+- 协议契约：`002-contracts`
+- 功能专题：`100+`
