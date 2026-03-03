@@ -151,8 +151,8 @@ curl -s -X POST http://127.0.0.1:3210/v1/mcp \
 
 ## 缩略图规范文档
 
-- 规范文档：[`specs/003-thumbnail/spec.md`](specs/003-thumbnail/spec.md)
-- 待办清单：[`specs/003-thumbnail/todo.md`](specs/003-thumbnail/todo.md)
+- 规范文档：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
+- 执行计划与任务清单：后续在 `specs/101-thumbnail-pipeline/` 下补充 `plan.md` / `tasks.md`
 
 ## 项目结构
 

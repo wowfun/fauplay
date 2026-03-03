@@ -22,8 +22,14 @@ function resolveThumbnailSize(sizePreset: ThumbnailSizePreset): number {
   return THUMBNAIL_SIZE_BY_PRESET[sizePreset]
 }
 
-function buildCacheKey(filePath: string, sizePreset: ThumbnailSizePreset, size: number): string {
-  return `${filePath}::${sizePreset}::${size}`
+function buildCacheKey(
+  filePath: string,
+  sizePreset: ThumbnailSizePreset,
+  size: number,
+  file: File
+): string {
+  const fileVersion = `${file.lastModified}:${file.size}`
+  return `${filePath}::${fileVersion}::${sizePreset}::${size}`
 }
 
 export function isImageFile(name: string): boolean {
@@ -47,7 +53,9 @@ export async function generateThumbnail(
 ): Promise<string> {
   const sizePreset = options.sizePreset ?? 'auto'
   const maxSize = resolveThumbnailSize(sizePreset)
-  const cacheKey = options.filePath ? buildCacheKey(options.filePath, sizePreset, maxSize) : null
+  const cacheKey = options.filePath
+    ? buildCacheKey(options.filePath, sizePreset, maxSize, file)
+    : null
 
   if (cacheKey) {
     const cached = thumbnailCache.get(cacheKey)

@@ -2,6 +2,7 @@ import { useMemo, useRef, useEffect, useState, useCallback, forwardRef, useImper
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileGridCard } from './FileGridCard'
+import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
@@ -27,6 +28,28 @@ const CARD_SIZE_BY_PRESET: Record<ThumbnailSizePreset, { width: number; height: 
   '512': { width: 512, height: 512 },
 }
 
+interface GridRenderWindow {
+  overscanColumnStartIndex: number
+  overscanColumnStopIndex: number
+  overscanRowStartIndex: number
+  overscanRowStopIndex: number
+  visibleColumnStartIndex: number
+  visibleColumnStopIndex: number
+  visibleRowStartIndex: number
+  visibleRowStopIndex: number
+}
+
+const INITIAL_RENDER_WINDOW: GridRenderWindow = {
+  overscanColumnStartIndex: 0,
+  overscanColumnStopIndex: -1,
+  overscanRowStartIndex: 0,
+  overscanRowStopIndex: -1,
+  visibleColumnStartIndex: 0,
+  visibleColumnStopIndex: -1,
+  visibleRowStartIndex: 0,
+  visibleRowStopIndex: -1,
+}
+
 export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewportProps>(function FileGridViewport({
   files,
   rootHandle,
@@ -40,6 +63,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   const selectedIndexRef = useRef(0)
   const selectedPathRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  const [renderWindow, setRenderWindow] = useState<GridRenderWindow>(INITIAL_RENDER_WINDOW)
   const cardSize = CARD_SIZE_BY_PRESET[thumbnailSizePreset]
 
   const markSelectedElement = useCallback((index: number, path: string) => {
@@ -89,6 +113,24 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     const visibleRows = Math.max(1, Math.floor(dimensions.height / (cardSize.height + GAP)))
     return visibleRows * columnCount
   }, [dimensions.height, columnCount, cardSize.height])
+
+  const handleItemsRendered = useCallback((window: GridRenderWindow) => {
+    setRenderWindow((previous) => {
+      if (
+        previous.overscanColumnStartIndex === window.overscanColumnStartIndex &&
+        previous.overscanColumnStopIndex === window.overscanColumnStopIndex &&
+        previous.overscanRowStartIndex === window.overscanRowStartIndex &&
+        previous.overscanRowStopIndex === window.overscanRowStopIndex &&
+        previous.visibleColumnStartIndex === window.visibleColumnStartIndex &&
+        previous.visibleColumnStopIndex === window.visibleColumnStopIndex &&
+        previous.visibleRowStartIndex === window.visibleRowStartIndex &&
+        previous.visibleRowStopIndex === window.visibleRowStopIndex
+      ) {
+        return previous
+      }
+      return window
+    })
+  }, [])
 
   const syncSelectedPath = useCallback((
     path: string | null,
@@ -248,6 +290,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
         columnCount={columnCount}
         columnWidth={cardSize.width + GAP}
         height={dimensions.height}
+        onItemsRendered={handleItemsRendered}
         rowCount={rowCount}
         rowHeight={cardSize.height + GAP}
         width={dimensions.width}
@@ -258,6 +301,12 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
           if (index >= files.length) return null
 
           const file = files[index]
+          const isVisible =
+            rowIndex >= renderWindow.visibleRowStartIndex &&
+            rowIndex <= renderWindow.visibleRowStopIndex &&
+            columnIndex >= renderWindow.visibleColumnStartIndex &&
+            columnIndex <= renderWindow.visibleColumnStopIndex
+          const thumbnailPriority: ThumbnailTaskPriority = isVisible ? 'visible' : 'nearby'
 
           return (
             <div
@@ -274,6 +323,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
                 rootHandle={rootHandle}
                 itemIndex={index}
                 thumbnailSizePreset={thumbnailSizePreset}
+                thumbnailPriority={thumbnailPriority}
                 isSelected={file.path === selectedPathRef.current}
                 onClick={() => {
                   markSelectedElement(index, file.path)
