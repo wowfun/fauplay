@@ -13,7 +13,7 @@ export const keyboardShortcuts = {
     toggleAutoPlay: [
       { key: 'p', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
-    toggleTraversalOrder: [
+    togglePlaybackOrder: [
       { key: 't', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
     prev: [

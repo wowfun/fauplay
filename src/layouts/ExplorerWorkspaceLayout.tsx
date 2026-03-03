@@ -6,10 +6,9 @@ import type { FileBrowserGridHandle } from '@/features/explorer/components/FileB
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
 import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
+import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
-
-type TraversalOrder = 'sequential' | 'shuffle'
 
 interface ExplorerWorkspaceLayoutProps {
   filter: FilterState
@@ -42,8 +41,8 @@ interface ExplorerWorkspaceLayoutProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
-  traversalOrder: TraversalOrder
-  onToggleTraversalOrder: () => void
+  playbackOrder: PlaybackOrder
+  onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
@@ -83,8 +82,8 @@ export function ExplorerWorkspaceLayout({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
-  traversalOrder,
-  onToggleTraversalOrder,
+  playbackOrder,
+  onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onVideoEnded,
   onVideoPlaybackError,
@@ -150,8 +149,8 @@ export function ExplorerWorkspaceLayout({
               autoPlayEnabled={autoPlayEnabled}
               autoPlayIntervalSec={autoPlayIntervalSec}
               onToggleAutoPlay={onToggleAutoPlay}
-              traversalOrder={traversalOrder}
-              onToggleTraversalOrder={onToggleTraversalOrder}
+              playbackOrder={playbackOrder}
+              onTogglePlaybackOrder={onTogglePlaybackOrder}
               onAutoPlayIntervalChange={onAutoPlayIntervalChange}
               onVideoEnded={onVideoEnded}
               onVideoPlaybackError={onVideoPlaybackError}
@@ -175,8 +174,8 @@ export function ExplorerWorkspaceLayout({
           autoPlayEnabled={autoPlayEnabled}
           autoPlayIntervalSec={autoPlayIntervalSec}
           onToggleAutoPlay={onToggleAutoPlay}
-          traversalOrder={traversalOrder}
-          onToggleTraversalOrder={onToggleTraversalOrder}
+          playbackOrder={playbackOrder}
+          onTogglePlaybackOrder={onTogglePlaybackOrder}
           onAutoPlayIntervalChange={onAutoPlayIntervalChange}
           onVideoEnded={onVideoEnded}
           onVideoPlaybackError={onVideoPlaybackError}

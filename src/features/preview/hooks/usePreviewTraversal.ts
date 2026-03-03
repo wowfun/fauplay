@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isImageFile, isVideoFile } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
+import type { PlaybackOrder } from '@/features/preview/types/playback'
 
 const DEFAULT_AUTOPLAY_INTERVAL_SEC = 3
 const MIN_AUTOPLAY_INTERVAL_SEC = 1
 const MAX_AUTOPLAY_INTERVAL_SEC = 10
+const WRAP_AT_BOUNDARY = true
 
-type TraversalOrder = 'sequential' | 'shuffle'
 type NavigateSource = 'pane' | 'modal' | 'autoplay'
 type NavigateDirection = 'prev' | 'next'
 
@@ -33,7 +34,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false)
   const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
   const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
-  const [traversalOrder, setTraversalOrder] = useState<TraversalOrder>('sequential')
+  const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>('sequential')
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
   const [shuffleHistory, setShuffleHistory] = useState<string[]>([])
   const autoPlayTimerRef = useRef<number | null>(null)
@@ -59,6 +60,11 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     })
     return fileMap
   }, [mediaFiles])
+  const mediaSetKey = useMemo(
+    () => mediaFiles.map((file) => file.path).sort().join('\u0000'),
+    [mediaFiles]
+  )
+  const lastShuffleMediaSetKeyRef = useRef<string | null>(null)
 
   const getMediaIndex = useCallback(
     (file: FileItem | null) => {
@@ -105,7 +111,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     if (currentIndex < 0 || !currentFile || currentFile.kind !== 'file') return
     const currentPath = currentFile.path
 
-    if (traversalOrder === 'shuffle') {
+    if (playbackOrder === 'shuffle') {
       if (direction === 'prev') {
         const historyTail = shuffleHistory[shuffleHistory.length - 1]
         if (historyTail !== currentPath || shuffleHistory.length <= 1) return
@@ -162,7 +168,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     applyMediaSelection(nextFile, options.source)
   }, [
     getMediaIndex,
-    traversalOrder,
+    playbackOrder,
     shuffleHistory,
     mediaFileByPath,
     shuffleQueue,
@@ -171,11 +177,11 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   ])
 
   const navigateMediaFromPane = useCallback((direction: NavigateDirection) => {
-    navigateMedia(selectedFile, direction, { source: 'pane', wrap: false })
+    navigateMedia(selectedFile, direction, { source: 'pane', wrap: WRAP_AT_BOUNDARY })
   }, [navigateMedia, selectedFile])
 
   const navigateMediaFromModal = useCallback((direction: NavigateDirection) => {
-    navigateMedia(previewFile, direction, { source: 'modal', wrap: false })
+    navigateMedia(previewFile, direction, { source: 'modal', wrap: WRAP_AT_BOUNDARY })
   }, [navigateMedia, previewFile])
 
   const hasOpenPreview = !!previewFile || showPreviewPane
@@ -219,13 +225,14 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     setAutoPlayEnabled((previous) => !previous)
   }, [])
 
-  const toggleTraversalOrder = useCallback(() => {
-    const next = traversalOrder === 'sequential' ? 'shuffle' : 'sequential'
-    setTraversalOrder(next)
+  const togglePlaybackOrder = useCallback(() => {
+    const next = playbackOrder === 'sequential' ? 'shuffle' : 'sequential'
+    setPlaybackOrder(next)
 
     if (next === 'sequential') {
       setShuffleQueue([])
       setShuffleHistory([])
+      lastShuffleMediaSetKeyRef.current = null
       return
     }
 
@@ -236,6 +243,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
     if (anchor) {
       initializeShuffleState(anchor)
+      lastShuffleMediaSetKeyRef.current = mediaSetKey
       return
     }
 
@@ -247,16 +255,19 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
       }
       setShowPreviewPane(true)
       initializeShuffleState(fallback.path)
+      lastShuffleMediaSetKeyRef.current = mediaSetKey
       return
     }
 
     setShuffleQueue([])
     setShuffleHistory([])
+    lastShuffleMediaSetKeyRef.current = null
   }, [
-    traversalOrder,
+    playbackOrder,
     activeMediaFile,
     mediaIndexByPath,
     mediaFiles,
+    mediaSetKey,
     previewFile,
     initializeShuffleState,
   ])
@@ -272,13 +283,13 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const handleAutoPlayVideoEnded = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
     if (!isVideoFile(activeMediaFile.name)) return
-    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   const handleAutoPlayVideoPlaybackError = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
     if (!isVideoFile(activeMediaFile.name)) return
-    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   useEffect(() => {
@@ -295,10 +306,14 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [filteredFiles, selectedFile])
 
   useEffect(() => {
-    if (traversalOrder !== 'shuffle') return
+    if (playbackOrder !== 'shuffle') {
+      lastShuffleMediaSetKeyRef.current = null
+      return
+    }
     if (mediaFiles.length === 0) {
       setShuffleQueue([])
       setShuffleHistory([])
+      lastShuffleMediaSetKeyRef.current = mediaSetKey
       return
     }
     if (!previewFile && !showPreviewPane) {
@@ -310,6 +325,11 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
         ? activeMediaFile.path
         : null
 
+    const hasInvalidQueueEntry = shuffleQueue.some((path) => !mediaIndexByPath.has(path))
+    const hasInvalidHistoryEntry = shuffleHistory.some((path) => !mediaIndexByPath.has(path))
+    const tailPath = shuffleHistory[shuffleHistory.length - 1]
+    const hasMediaSetChanged = lastShuffleMediaSetKeyRef.current !== mediaSetKey
+
     if (!activePath) {
       const fallback = mediaFiles[0]
       setSelectedFile(fallback)
@@ -318,19 +338,20 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
       }
       setShowPreviewPane(true)
       initializeShuffleState(fallback.path)
+      lastShuffleMediaSetKeyRef.current = mediaSetKey
       return
     }
 
-    const hasInvalidQueueEntry = shuffleQueue.some((path) => !mediaIndexByPath.has(path))
-    const hasInvalidHistoryEntry = shuffleHistory.some((path) => !mediaIndexByPath.has(path))
-    const tailPath = shuffleHistory[shuffleHistory.length - 1]
-
-    if (hasInvalidQueueEntry || hasInvalidHistoryEntry || tailPath !== activePath) {
+    if (hasMediaSetChanged || hasInvalidQueueEntry || hasInvalidHistoryEntry || tailPath !== activePath) {
       initializeShuffleState(activePath)
+      lastShuffleMediaSetKeyRef.current = mediaSetKey
+      return
     }
+    lastShuffleMediaSetKeyRef.current = mediaSetKey
   }, [
-    traversalOrder,
+    playbackOrder,
     mediaFiles,
+    mediaSetKey,
     activeMediaFile,
     mediaIndexByPath,
     shuffleQueue,
@@ -389,7 +410,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     }
 
     autoPlayTimerRef.current = window.setTimeout(() => {
-      navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: true })
+      navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
     }, autoPlayIntervalSec * 1000)
 
     return clearAutoPlayTimer
@@ -408,7 +429,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     previewAutoPlayOnOpen,
     autoPlayEnabled,
     autoPlayIntervalSec,
-    traversalOrder,
+    playbackOrder,
     hasOpenPreview,
     showFileInPane,
     openFileInModal,
@@ -416,7 +437,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     closePreviewPane,
     openFullscreenFromPane,
     toggleAutoPlay,
-    toggleTraversalOrder,
+    togglePlaybackOrder,
     setAutoPlayInterval,
     navigateMediaFromPane,
     navigateMediaFromModal,

@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { MediaPlaybackControls } from './MediaPlaybackControls'
+import type { PlaybackOrder } from '@/features/preview/types/playback'
 import { Button } from '@/ui/Button'
 
 interface PreviewControlGroupProps {
@@ -7,8 +8,8 @@ interface PreviewControlGroupProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
-  traversalOrder: 'sequential' | 'shuffle'
-  onToggleTraversalOrder: () => void
+  playbackOrder: PlaybackOrder
+  onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onClose: () => void
 }
@@ -18,8 +19,8 @@ export function PreviewControlGroup({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
-  traversalOrder,
-  onToggleTraversalOrder,
+  playbackOrder,
+  onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onClose,
 }: PreviewControlGroupProps) {
@@ -32,8 +33,8 @@ export function PreviewControlGroup({
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}
-        traversalOrder={traversalOrder}
-        onToggleTraversalOrder={onToggleTraversalOrder}
+        playbackOrder={playbackOrder}
+        onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
       />
       <Button

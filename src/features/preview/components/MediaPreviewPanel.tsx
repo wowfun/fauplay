@@ -2,10 +2,9 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
-
-type PreviewPresentation = 'panel' | 'fullscreen'
 
 interface MediaPreviewPanelProps {
   file: FileItem | null
@@ -16,12 +15,12 @@ interface MediaPreviewPanelProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
-  traversalOrder: 'sequential' | 'shuffle'
-  onToggleTraversalOrder: () => void
+  playbackOrder: PlaybackOrder
+  onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
-  presentation?: PreviewPresentation
+  presentation?: PreviewSurface
   forceAutoPlayOnOpen?: boolean
 }
 
@@ -34,8 +33,8 @@ export function MediaPreviewPanel({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
-  traversalOrder,
-  onToggleTraversalOrder,
+  playbackOrder,
+  onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onVideoEnded,
   onVideoPlaybackError,
@@ -46,7 +45,7 @@ export function MediaPreviewPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
-  const isFullscreen = presentation === 'fullscreen'
+  const isFullscreen = presentation === 'lightbox'
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
     if (currentUrlRef.current) {
@@ -122,8 +121,8 @@ export function MediaPreviewPanel({
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}
-        traversalOrder={traversalOrder}
-        onToggleTraversalOrder={onToggleTraversalOrder}
+        playbackOrder={playbackOrder}
+        onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onClose={onClose}
       />

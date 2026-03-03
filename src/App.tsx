@@ -65,7 +65,7 @@ function App() {
     previewAutoPlayOnOpen,
     autoPlayEnabled,
     autoPlayIntervalSec,
-    traversalOrder,
+    playbackOrder,
     hasOpenPreview,
     showFileInPane,
     openFileInModal,
@@ -73,7 +73,7 @@ function App() {
     closePreviewPane,
     openFullscreenFromPane,
     toggleAutoPlay,
-    toggleTraversalOrder,
+    togglePlaybackOrder,
     setAutoPlayInterval,
     navigateMediaFromPane,
     navigateMediaFromModal,
@@ -129,9 +129,9 @@ function App() {
 
       // Preview traversal hotkeys only work while preview is open.
       if (hasOpenPreview) {
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.toggleTraversalOrder)) {
+        if (matchesAnyShortcut(event, keyboardShortcuts.preview.togglePlaybackOrder)) {
           event.preventDefault()
-          toggleTraversalOrder()
+          togglePlaybackOrder()
           return
         }
         if (matchesAnyShortcut(event, keyboardShortcuts.preview.prev)) {
@@ -186,7 +186,7 @@ function App() {
     showPreviewPane,
     navigateMediaFromModal,
     navigateMediaFromPane,
-    toggleTraversalOrder,
+    togglePlaybackOrder,
     closePreviewModal,
     closePreviewPane,
     toggleAutoPlay,
@@ -251,8 +251,8 @@ function App() {
       autoPlayEnabled={autoPlayEnabled}
       autoPlayIntervalSec={autoPlayIntervalSec}
       onToggleAutoPlay={toggleAutoPlay}
-      traversalOrder={traversalOrder}
-      onToggleTraversalOrder={toggleTraversalOrder}
+      playbackOrder={playbackOrder}
+      onTogglePlaybackOrder={togglePlaybackOrder}
       onAutoPlayIntervalChange={setAutoPlayInterval}
       onVideoEnded={handleAutoPlayVideoEnded}
       onVideoPlaybackError={handleAutoPlayVideoPlaybackError}

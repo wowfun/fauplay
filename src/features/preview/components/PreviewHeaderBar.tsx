@@ -1,5 +1,6 @@
 import { PreviewControlGroup } from './PreviewControlGroup'
 import { PreviewTitleRow } from './PreviewTitleRow'
+import type { PlaybackOrder } from '@/features/preview/types/playback'
 
 interface PreviewHeaderBarProps {
   fileName: string
@@ -7,8 +8,8 @@ interface PreviewHeaderBarProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
-  traversalOrder: 'sequential' | 'shuffle'
-  onToggleTraversalOrder: () => void
+  playbackOrder: PlaybackOrder
+  onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onClose: () => void
 }
@@ -19,8 +20,8 @@ export function PreviewHeaderBar({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
-  traversalOrder,
-  onToggleTraversalOrder,
+  playbackOrder,
+  onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onClose,
 }: PreviewHeaderBarProps) {
@@ -35,8 +36,8 @@ export function PreviewHeaderBar({
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}
-        traversalOrder={traversalOrder}
-        onToggleTraversalOrder={onToggleTraversalOrder}
+        playbackOrder={playbackOrder}
+        onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onClose={onClose}
       />

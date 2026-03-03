@@ -1,5 +1,6 @@
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { PlaybackOrder } from '@/features/preview/types/playback'
 import { MediaPreviewPanel } from './MediaPreviewPanel'
 
 interface MediaLightboxModalProps {
@@ -11,8 +12,8 @@ interface MediaLightboxModalProps {
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
-  traversalOrder: 'sequential' | 'shuffle'
-  onToggleTraversalOrder: () => void
+  playbackOrder: PlaybackOrder
+  onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
@@ -27,8 +28,8 @@ export function MediaLightboxModal({
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
-  traversalOrder,
-  onToggleTraversalOrder,
+  playbackOrder,
+  onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onVideoEnded,
   onVideoPlaybackError,
@@ -43,12 +44,12 @@ export function MediaLightboxModal({
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}
-        traversalOrder={traversalOrder}
-        onToggleTraversalOrder={onToggleTraversalOrder}
+        playbackOrder={playbackOrder}
+        onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}
-        presentation="fullscreen"
+        presentation="lightbox"
         forceAutoPlayOnOpen={autoPlayOnOpen}
       />
     </div>
