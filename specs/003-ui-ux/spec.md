@@ -8,6 +8,13 @@
 
 - 信息架构（Information Architecture, IA）
 - 功能分区（Functional Zones）
+- 工作区插件（Workspace Plugin）
+- 预览插件（Preview Plugin）
+- 当前工作目录（Current Working Directory）
+- 当前预览文件（Current Preview File）
+- 当前选中文件列表（Selected File List）
+- 网格多选（Grid Multi-selection）
+- 范围选择（Range Selection）
 - 预览域状态（Preview Domain State）
 - 键盘契约（Keyboard Contract）
 - 优雅降级（Graceful Degradation）
@@ -42,6 +49,8 @@
 1. 跨区协作必须通过显式契约（props/events/state）连接。
 2. 禁止跨区直接耦合内部实现细节。
 3. 详细分区与子分区见 [`areas.md`](./areas.md)。
+4. 工作区插件入口归属 B1 文件网格区侧，主要承载目录级或列表级操作。
+5. 预览插件入口归属 B2 预览面板区及其全屏表现态，主要承载当前预览文件操作。
 
 ## 预览面板与全屏关系契约 (Panel-Fullscreen Relation Contract)
 
@@ -58,6 +67,11 @@
 3. 双击文件打开全屏预览。
 4. `Esc` 关闭优先级必须为：全屏预览 -> 侧栏预览。
 5. 侧栏与全屏共享“上一项/下一项、顺序/随机、自动播放”语义。
+6. 工作区插件主要作用于当前工作目录或当前选中文件列表，不以“当前预览文件”作为唯一上下文。
+7. 预览插件主要作用于当前预览文件，不扩展为目录级批处理入口。
+8. 文件网格区应支持复选框多选，且文件与目录均可被勾选。
+9. 网格区应支持范围选择（`Shift + 单击`、`Shift + 方向键`），默认覆盖当前勾选集合。
+10. `Ctrl/Cmd + 单击` 网格项应仅切换勾选态，不触发目录进入或预览打开。
 
 ## 布局默认值契约 (Layout Default Contract)
 
@@ -71,6 +85,7 @@
 2. 预览导航触发过程可进入 `navigating` 过渡态。
 3. 工具动作运行态必须覆盖：`default`、`loading`、`error`、`disabled`。
 4. 错误状态必须用户可见，不得静默失败。
+5. 网格选择状态至少覆盖：活跃项（Active Item）与勾选集合（Checked Set）。
 
 ## 快捷键契约 (Keyboard Contract)
 
@@ -78,12 +93,15 @@
 2. 输入控件聚焦时，非全局快捷键必须失效。
 3. 快捷键文档 `docs/shortcuts.md` 必须与配置一致。
 4. 预览快捷键在侧栏与全屏表现态下语义必须一致。
+5. 网格多选快捷键至少覆盖：`Ctrl/Cmd + A` 全选与 `Esc` 清空选择（仅在无打开预览时生效）。
 
 ## 能力与降级契约 (Capability & Degradation Contract)
 
 1. 网关离线时，核心浏览链路（目录浏览、筛选、预览）必须保持可用。
 2. 系统动作入口只在对应工具可用时展示或可点击。
 3. 工具调用中必须提供进行态反馈，失败必须提供错误反馈。
+4. 网关离线时，工作区插件与预览插件入口均可隐藏或禁用，但不得阻断核心浏览与预览链路。
+5. 网格多选能力不得依赖网关在线状态。
 
 ## 可访问性基线 (Accessibility Baseline)
 
@@ -108,3 +126,4 @@
 - 架构边界：`001-architecture`
 - 协议契约：`002-contracts`
 - 功能专题：`100+`
+- 网格多选：`103-grid-multi-selection`

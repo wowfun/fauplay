@@ -10,6 +10,9 @@ interface FileBrowserGridProps {
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
+  selectionScopeKey: string
+  canClearSelectionWithEscape: boolean
+  onSelectionChange: (selectedPaths: string[]) => void
 }
 
 export type FileBrowserGridHandle = FileGridViewportHandle
@@ -21,6 +24,9 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
+  selectionScopeKey,
+  canClearSelectionWithEscape,
+  onSelectionChange,
 }, ref) {
   return (
     <FileGridViewport
@@ -31,6 +37,9 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
       onFileClick={onFileClick}
       onFileDoubleClick={onFileDoubleClick}
       onDirectoryClick={onDirectoryClick}
+      selectionScopeKey={selectionScopeKey}
+      canClearSelectionWithEscape={canClearSelectionWithEscape}
+      onSelectionChange={onSelectionChange}
     />
   )
 })

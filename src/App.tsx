@@ -47,6 +47,7 @@ function App() {
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
+  const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(false)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
@@ -65,6 +66,15 @@ function App() {
     () => files.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
     [files]
   )
+  const selectedGridItems = useMemo(() => {
+    if (gridSelectedPaths.length === 0) return []
+    const selectedPathSet = new Set(gridSelectedPaths)
+    return filteredFiles.filter((file) => selectedPathSet.has(file.path))
+  }, [filteredFiles, gridSelectedPaths])
+  const selectedGridMetaFile = useMemo(() => {
+    if (selectedGridItems.length !== 1) return null
+    return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
+  }, [selectedGridItems])
   const {
     selectedFile,
     previewFile,
@@ -286,11 +296,15 @@ function App() {
       onFileClick={handleFileClick}
       onFileDoubleClick={handleFileDoubleClick}
       onDirectoryClick={handleDirectoryClick}
+      onGridSelectionChange={setGridSelectedPaths}
       showPreviewPane={showPreviewPane}
+      hasOpenPreview={hasOpenPreview}
       contentRef={contentRef}
       paneWidthRatio={paneWidthRatio}
       onPreviewPaneResizeStart={handlePreviewPaneResizeStart}
       selectedFile={selectedFile}
+      gridSelectedCount={selectedGridItems.length}
+      selectedGridMetaFile={selectedGridMetaFile}
       previewActionTools={previewActionTools}
       onClosePane={closePreviewPane}
       onOpenFullscreenFromPane={openFullscreenFromPane}

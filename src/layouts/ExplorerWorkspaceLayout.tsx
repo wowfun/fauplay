@@ -32,11 +32,15 @@ interface ExplorerWorkspaceLayoutProps {
   onFileClick: (file: FileItem) => void
   onFileDoubleClick: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
+  onGridSelectionChange: (selectedPaths: string[]) => void
   showPreviewPane: boolean
+  hasOpenPreview: boolean
   contentRef: MutableRefObject<HTMLDivElement | null>
   paneWidthRatio: number
   onPreviewPaneResizeStart: (event: ReactMouseEvent<HTMLDivElement>) => void
   selectedFile: FileItem | null
+  gridSelectedCount: number
+  selectedGridMetaFile: FileItem | null
   previewActionTools: GatewayToolDescriptor[]
   onClosePane: () => void
   onOpenFullscreenFromPane: () => void
@@ -75,11 +79,15 @@ export function ExplorerWorkspaceLayout({
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
+  onGridSelectionChange,
   showPreviewPane,
+  hasOpenPreview,
   contentRef,
   paneWidthRatio,
   onPreviewPaneResizeStart,
   selectedFile,
+  gridSelectedCount,
+  selectedGridMetaFile,
   previewActionTools,
   onClosePane,
   onOpenFullscreenFromPane,
@@ -133,6 +141,9 @@ export function ExplorerWorkspaceLayout({
             onFileClick={onFileClick}
             onFileDoubleClick={onFileDoubleClick}
             onDirectoryClick={onDirectoryClick}
+            selectionScopeKey={currentPath}
+            canClearSelectionWithEscape={!hasOpenPreview}
+            onSelectionChange={onGridSelectionChange}
           />
         )}
 
@@ -167,7 +178,8 @@ export function ExplorerWorkspaceLayout({
 
       <ExplorerStatusBar
         visibleFiles={files}
-        selectedFile={selectedFile}
+        selectedCount={gridSelectedCount}
+        selectedMetaFile={selectedGridMetaFile}
       />
 
       {previewFile && (

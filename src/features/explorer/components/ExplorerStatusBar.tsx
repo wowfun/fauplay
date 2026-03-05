@@ -2,7 +2,8 @@ import type { FileItem } from '@/types'
 
 interface ExplorerStatusBarProps {
   visibleFiles: FileItem[]
-  selectedFile: FileItem | null
+  selectedCount: number
+  selectedMetaFile: FileItem | null
 }
 
 function formatSize(bytes?: number): string {
@@ -24,20 +25,19 @@ function formatDate(date?: Date): string {
   })
 }
 
-export function ExplorerStatusBar({ visibleFiles, selectedFile }: ExplorerStatusBarProps) {
+export function ExplorerStatusBar({ visibleFiles, selectedCount, selectedMetaFile }: ExplorerStatusBarProps) {
   const visibleCount = visibleFiles.length
-  const selectedCount = selectedFile ? 1 : 0
-  const showMeta = selectedFile?.kind === 'file'
+  const showMeta = selectedMetaFile?.kind === 'file'
 
   return (
     <div className="flex-shrink-0 flex items-center gap-4 px-4 h-8 border-t border-border text-xs text-muted-foreground">
       <span className="whitespace-nowrap">可见: {visibleCount}</span>
       <span className="whitespace-nowrap">已选: {selectedCount}</span>
       {showMeta && (
-        <span className="whitespace-nowrap">大小: {formatSize(selectedFile?.size)}</span>
+        <span className="whitespace-nowrap">大小: {formatSize(selectedMetaFile?.size)}</span>
       )}
       {showMeta && (
-        <span className="whitespace-nowrap">修改: {formatDate(selectedFile?.lastModified)}</span>
+        <span className="whitespace-nowrap">修改: {formatDate(selectedMetaFile?.lastModified)}</span>
       )}
     </div>
   )

@@ -31,16 +31,17 @@
 
 ### B1 文件网格区（File Browser Grid Zone）
 
-- 职责：文件列表虚拟渲染、选择态、双击打开、键盘导航承接。
+- 职责：文件列表虚拟渲染、选择态、双击打开、键盘导航承接、复选框多选与范围选择、工作区级插件入口与批处理触发。
 - 当前组件：
   - `features/explorer/components/FileBrowserGrid`
   - `features/explorer/components/FileGridViewport`
   - `features/explorer/components/FileGridCard`
-- 边界：聚焦浏览与选择，不直接处理预览播放状态机。
+- 边界：聚焦浏览与选择，不直接处理预览播放状态机；工作区插件仅面向当前工作目录或当前选中文件列表。
+- 选择约束：B1 同时维护活跃项与勾选集合，二者语义不得混淆。
 
 ### B2 预览面板区（Media Preview Panel Zone）
 
-- 职责：当前选中文件预览、遍历控制、自动播放控制、系统动作入口。
+- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口。
 - 当前组件：
   - `features/preview/components/MediaPreviewPanel`
   - `features/preview/components/PreviewHeaderBar`
@@ -48,7 +49,7 @@
   - `features/preview/components/PreviewActionRail`
   - `features/preview/components/PreviewMediaViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
-- 边界：由预览域状态驱动，不反向控制网格渲染策略。
+- 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
 
 ### C 底部状态区（Status Bar Zone）
 
@@ -85,6 +86,23 @@
 | `PreviewMediaViewport` | 全屏媒体视口 | MUST |
 | `PreviewFeedbackOverlay` | 全屏反馈层 | MUST |
 
+## 插件作用域与入口映射 (Plugin Scope-to-Zone Mapping)
+
+| 工具作用域 (`scopes`) | 入口分区 | 典型入口形态 | 主要作用对象 |
+| --- | --- | --- | --- |
+| `workspace` | B1 文件网格区 | 工作区插件侧栏（Workspace Plugin Rail） | 当前工作目录 / 当前选中文件列表 |
+| `file` | B2 预览面板区 | `PreviewActionRail` | 当前预览文件 |
+
+## B1 选择语义映射 (Grid Selection Mapping)
+
+| 交互入口 | 作用对象 | 默认行为 |
+| --- | --- | --- |
+| 复选框点击 | 单项（文件或目录） | 切换勾选态，不触发目录进入/预览打开 |
+| 普通单击卡片 | 单项（文件或目录） | 保持既有行为（目录进入、文件预览） |
+| `Ctrl/Cmd + 单击` | 单项（文件或目录） | 仅切换勾选态 |
+| `Shift + 单击` | 范围 | 覆盖当前勾选集合 |
+| `Shift + 方向键` | 范围 | 扩展范围，预览在 `Shift` 松开后提交 |
+
 ## 输入输出契约（Input/Output Contract）
 
 输入：
@@ -114,4 +132,5 @@
 
 1. 新功能先判定所属分区，再决定 `ui / features / layouts` 落位。
 2. 跨区协作通过显式契约连接，禁止直接读取对方内部状态。
-3. 系统动作入口优先落在 B2 预览区，避免下沉到基础 `ui` 组件。
+3. 动作入口按 `scopes` 落位：`workspace` 在 B1，`file` 在 B2，避免下沉到基础 `ui` 组件。
+4. `Esc` 交互优先级保持：先关闭预览态，再执行网格清空勾选。

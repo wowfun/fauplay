@@ -1,4 +1,13 @@
-import { useMemo, useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
+import {
+  useMemo,
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileGridCard } from './FileGridCard'
@@ -15,6 +24,9 @@ interface FileGridViewportProps {
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
+  selectionScopeKey: string
+  canClearSelectionWithEscape: boolean
+  onSelectionChange: (selectedPaths: string[]) => void
 }
 
 export interface FileGridViewportHandle {
@@ -32,6 +44,13 @@ interface GridRenderWindow {
   visibleRowStopIndex: number
 }
 
+interface FocusItemOptions {
+  syncPreview: boolean
+  updateAnchor: boolean
+  applyRangeSelection: boolean
+  queuePreviewAfterShiftRelease: boolean
+}
+
 const INITIAL_RENDER_WINDOW: GridRenderWindow = {
   overscanColumnStartIndex: 0,
   overscanColumnStopIndex: -1,
@@ -43,6 +62,14 @@ const INITIAL_RENDER_WINDOW: GridRenderWindow = {
   visibleRowStopIndex: -1,
 }
 
+function arePathSetsEqual(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) return false
+  for (const item of left) {
+    if (!right.has(item)) return false
+  }
+  return true
+}
+
 export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewportProps>(function FileGridViewport({
   files,
   rootHandle,
@@ -50,13 +77,19 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
+  selectionScopeKey,
+  canClearSelectionWithEscape,
+  onSelectionChange,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<FixedSizeGridType>(null)
   const selectedIndexRef = useRef(0)
   const selectedPathRef = useRef<string | null>(null)
+  const selectionAnchorPathRef = useRef<string | null>(null)
+  const pendingPreviewPathDuringRangeRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [renderWindow, setRenderWindow] = useState<GridRenderWindow>(INITIAL_RENDER_WINDOW)
+  const [selectedPathSet, setSelectedPathSet] = useState<Set<string>>(() => new Set())
   const cardSize = FILE_GRID_CARD_SIZE_BY_PRESET[thumbnailSizePreset]
 
   const markSelectedElement = useCallback((index: number, path: string) => {
@@ -75,6 +108,16 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     if (next) {
       next.setAttribute('data-grid-selected', 'true')
     }
+  }, [])
+
+  const setCheckedPathSet = useCallback((updater: (previous: Set<string>) => Set<string>) => {
+    setSelectedPathSet((previous) => {
+      const next = updater(previous)
+      if (arePathSetsEqual(previous, next)) {
+        return previous
+      }
+      return next
+    })
   }, [])
 
   useEffect(() => {
@@ -107,6 +150,14 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     return visibleRows * columnCount
   }, [dimensions.height, columnCount, cardSize.height])
 
+  const orderedSelectedPaths = useMemo(() => {
+    return files.filter((file) => selectedPathSet.has(file.path)).map((file) => file.path)
+  }, [files, selectedPathSet])
+
+  useEffect(() => {
+    onSelectionChange(orderedSelectedPaths)
+  }, [orderedSelectedPaths, onSelectionChange])
+
   const handleItemsRendered = useCallback((window: GridRenderWindow) => {
     setRenderWindow((previous) => {
       if (
@@ -124,6 +175,88 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       return window
     })
   }, [])
+
+  const applyRangeSelection = useCallback((targetIndex: number, options?: { queuePreviewAfterShiftRelease?: boolean }) => {
+    if (files.length === 0) return
+    const clampedIndex = Math.max(0, Math.min(files.length - 1, targetIndex))
+    const targetFile = files[clampedIndex]
+    const fallbackAnchor = selectionAnchorPathRef.current ?? selectedPathRef.current ?? targetFile.path
+    const anchorIndexByPath = files.findIndex((file) => file.path === fallbackAnchor)
+    const anchorIndex = anchorIndexByPath >= 0 ? anchorIndexByPath : clampedIndex
+    const rangeStart = Math.min(anchorIndex, clampedIndex)
+    const rangeEnd = Math.max(anchorIndex, clampedIndex)
+    const nextSet = new Set(
+      files.slice(rangeStart, rangeEnd + 1).map((file) => file.path)
+    )
+
+    setCheckedPathSet(() => nextSet)
+    markSelectedElement(clampedIndex, targetFile.path)
+
+    if (options?.queuePreviewAfterShiftRelease) {
+      pendingPreviewPathDuringRangeRef.current = targetFile.kind === 'file' ? targetFile.path : null
+    }
+  }, [files, markSelectedElement, setCheckedPathSet])
+
+  const focusItem = useCallback((index: number, options: FocusItemOptions) => {
+    if (files.length === 0) return
+
+    const clampedIndex = Math.max(0, Math.min(files.length - 1, index))
+    const targetFile = files[clampedIndex]
+    markSelectedElement(clampedIndex, targetFile.path)
+
+    gridRef.current?.scrollToItem({
+      rowIndex: Math.floor(clampedIndex / columnCount),
+      columnIndex: clampedIndex % columnCount,
+      align: 'smart',
+    })
+
+    requestAnimationFrame(() => {
+      const element = containerRef.current?.querySelector<HTMLButtonElement>(
+        `[data-grid-index="${clampedIndex}"]`
+      )
+      element?.focus({ preventScroll: true })
+    })
+
+    if (options.updateAnchor) {
+      selectionAnchorPathRef.current = targetFile.path
+    }
+
+    if (options.applyRangeSelection) {
+      applyRangeSelection(clampedIndex, {
+        queuePreviewAfterShiftRelease: options.queuePreviewAfterShiftRelease,
+      })
+      return
+    }
+
+    pendingPreviewPathDuringRangeRef.current = null
+
+    if (options.syncPreview && targetFile.kind === 'file') {
+      onFileClick(targetFile)
+    }
+  }, [applyRangeSelection, columnCount, files, markSelectedElement, onFileClick])
+
+  const toggleCheckedPath = useCallback((path: string) => {
+    setCheckedPathSet((previous) => {
+      const next = new Set(previous)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }, [setCheckedPathSet])
+
+  const clearCheckedPaths = useCallback(() => {
+    setCheckedPathSet((previous) => {
+      if (previous.size === 0) return previous
+      return new Set()
+    })
+  }, [setCheckedPathSet])
+
+  const selectAllVisiblePaths = useCallback(() => {
+    setCheckedPathSet(() => new Set(files.map((file) => file.path)))
+  }, [files, setCheckedPathSet])
 
   const syncSelectedPath = useCallback((
     path: string | null,
@@ -167,6 +300,32 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }), [syncSelectedPath])
 
   useEffect(() => {
+    selectionAnchorPathRef.current = null
+    pendingPreviewPathDuringRangeRef.current = null
+    clearCheckedPaths()
+  }, [clearCheckedPaths, selectionScopeKey])
+
+  useEffect(() => {
+    const visiblePathSet = new Set(files.map((file) => file.path))
+    setCheckedPathSet((previous) => {
+      const next = new Set(
+        [...previous].filter((path) => visiblePathSet.has(path))
+      )
+      return next
+    })
+
+    if (selectionAnchorPathRef.current && !visiblePathSet.has(selectionAnchorPathRef.current)) {
+      selectionAnchorPathRef.current = null
+    }
+    if (
+      pendingPreviewPathDuringRangeRef.current &&
+      !visiblePathSet.has(pendingPreviewPathDuringRangeRef.current)
+    ) {
+      pendingPreviewPathDuringRangeRef.current = null
+    }
+  }, [files, setCheckedPathSet])
+
+  useEffect(() => {
     if (files.length === 0) {
       selectedIndexRef.current = 0
       selectedPathRef.current = null
@@ -183,6 +342,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       }
     } else {
       selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
+      selectedPathRef.current = files[selectedIndexRef.current]?.path ?? null
     }
 
     const path = selectedPathRef.current
@@ -194,30 +354,6 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [files, markSelectedElement])
 
   useEffect(() => {
-    const focusItem = (index: number) => {
-      const clampedIndex = Math.max(0, Math.min(files.length - 1, index))
-      const targetFile = files[clampedIndex]
-      markSelectedElement(clampedIndex, targetFile.path)
-
-      gridRef.current?.scrollToItem({
-        rowIndex: Math.floor(clampedIndex / columnCount),
-        columnIndex: clampedIndex % columnCount,
-        align: 'smart',
-      })
-
-      requestAnimationFrame(() => {
-        const element = containerRef.current?.querySelector<HTMLButtonElement>(
-          `[data-grid-index="${clampedIndex}"]`
-        )
-        element?.focus({ preventScroll: true })
-      })
-
-      // Keep preview pane in sync with keyboard selection for files.
-      if (targetFile.kind === 'file') {
-        onFileClick(targetFile)
-      }
-    }
-
     const getCurrentIndex = () => {
       const active = document.activeElement as HTMLElement | null
       const rawIndex = active?.dataset?.gridIndex
@@ -229,7 +365,21 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (files.length === 0 || isTypingTarget(event.target)) return
+      if (event.defaultPrevented || files.length === 0 || isTypingTarget(event.target)) return
+
+      if (matchesAnyShortcut(event, keyboardShortcuts.grid.selectAll)) {
+        event.preventDefault()
+        selectAllVisiblePaths()
+        return
+      }
+
+      if (matchesAnyShortcut(event, keyboardShortcuts.grid.clearSelection)) {
+        if (canClearSelectionWithEscape && selectedPathSet.size > 0) {
+          event.preventDefault()
+          clearCheckedPaths()
+        }
+        return
+      }
 
       let nextIndex = -1
       const currentIndex = getCurrentIndex()
@@ -261,12 +411,48 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       }
 
       event.preventDefault()
-      if (nextIndex >= 0) focusItem(nextIndex)
+      if (nextIndex < 0) return
+
+      const applyRangeSelectionByKeyboard = event.shiftKey
+      focusItem(nextIndex, {
+        syncPreview: !applyRangeSelectionByKeyboard,
+        updateAnchor: !applyRangeSelectionByKeyboard,
+        applyRangeSelection: applyRangeSelectionByKeyboard,
+        queuePreviewAfterShiftRelease: applyRangeSelectionByKeyboard,
+      })
+    }
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== 'Shift') return
+      const pendingPath = pendingPreviewPathDuringRangeRef.current
+      if (!pendingPath) return
+      pendingPreviewPathDuringRangeRef.current = null
+
+      const targetFile = files.find((file) => file.path === pendingPath)
+      if (targetFile?.kind === 'file') {
+        onFileClick(targetFile)
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [files, columnCount, pageSize, onDirectoryClick, onFileDoubleClick, onFileClick, markSelectedElement])
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [
+    files,
+    selectedPathSet.size,
+    canClearSelectionWithEscape,
+    columnCount,
+    pageSize,
+    onDirectoryClick,
+    onFileDoubleClick,
+    onFileClick,
+    clearCheckedPaths,
+    focusItem,
+    selectAllVisiblePaths,
+  ])
 
   if (files.length === 0) {
     return (
@@ -318,8 +504,37 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
                 thumbnailSizePreset={thumbnailSizePreset}
                 thumbnailPriority={thumbnailPriority}
                 isSelected={file.path === selectedPathRef.current}
-                onClick={() => {
+                isChecked={selectedPathSet.has(file.path)}
+                onToggleChecked={(event: ReactMouseEvent<HTMLInputElement>) => {
+                  event.stopPropagation()
                   markSelectedElement(index, file.path)
+
+                  if (event.shiftKey) {
+                    applyRangeSelection(index)
+                    return
+                  }
+
+                  selectionAnchorPathRef.current = file.path
+                  pendingPreviewPathDuringRangeRef.current = null
+                  toggleCheckedPath(file.path)
+                }}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+                  markSelectedElement(index, file.path)
+
+                  if (event.shiftKey) {
+                    applyRangeSelection(index)
+                    return
+                  }
+
+                  if (event.ctrlKey || event.metaKey) {
+                    selectionAnchorPathRef.current = file.path
+                    pendingPreviewPathDuringRangeRef.current = null
+                    toggleCheckedPath(file.path)
+                    return
+                  }
+
+                  selectionAnchorPathRef.current = file.path
+                  pendingPreviewPathDuringRangeRef.current = null
                   if (file.kind === 'directory') {
                     onDirectoryClick(file.name)
                   } else {

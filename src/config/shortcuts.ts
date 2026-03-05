@@ -27,6 +27,12 @@ export const keyboardShortcuts = {
     ] satisfies ShortcutBinding[],
   },
   grid: {
+    selectAll: [
+      { key: 'a', primary: true },
+    ] satisfies ShortcutBinding[],
+    clearSelection: [
+      { key: 'escape' },
+    ] satisfies ShortcutBinding[],
     moveRight: [
       { key: 'arrowright' },
       { key: 'd' },

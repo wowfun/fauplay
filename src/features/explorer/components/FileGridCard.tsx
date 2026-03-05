@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getMediaType } from '@/lib/thumbnail'
@@ -18,8 +18,10 @@ interface FileGridCardProps {
   thumbnailSizePreset: ThumbnailSizePreset
   thumbnailPriority: ThumbnailTaskPriority
   isSelected?: boolean
-  onClick: () => void
-  onDoubleClick?: () => void
+  isChecked?: boolean
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
+  onDoubleClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
+  onToggleChecked: (event: ReactMouseEvent<HTMLInputElement>) => void
 }
 
 type ThumbnailLoadState = 'placeholder' | 'loading' | 'ready' | 'failed'
@@ -63,8 +65,10 @@ export function FileGridCard({
   thumbnailSizePreset,
   thumbnailPriority,
   isSelected = false,
+  isChecked = false,
   onClick,
   onDoubleClick,
+  onToggleChecked,
 }: FileGridCardProps) {
   const isDir = file.kind === 'directory'
   const mediaType = getMediaType(file.name)
@@ -257,53 +261,66 @@ export function FileGridCard({
   }
 
   return (
-    <button
-      type="button"
-      data-grid-index={itemIndex}
-      data-grid-selected={isSelected ? 'true' : 'false'}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-      className={cn(
-        "w-full min-w-0 h-full flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
-        "hover:bg-accent/50",
-        "focus:outline-none focus:bg-accent/70 focus:ring-1 focus:ring-primary/40",
-        "data-[grid-selected=true]:bg-accent/70 data-[grid-selected=true]:ring-1 data-[grid-selected=true]:ring-primary/40"
-      )}
-    >
-      <div
-        className="relative flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden"
-        style={{ width: thumbnailBoxSize, height: thumbnailBoxSize }}
+    <div className="relative h-full w-full">
+      <input
+        type="checkbox"
+        checked={isChecked}
+        readOnly
+        onClick={onToggleChecked}
+        aria-label={`选择 ${file.name}`}
+        className="absolute left-2 top-2 z-10 h-4 w-4 cursor-pointer accent-primary"
+      />
+
+      <button
+        type="button"
+        data-grid-index={itemIndex}
+        data-grid-selected={isSelected ? 'true' : 'false'}
+        data-grid-checked={isChecked ? 'true' : 'false'}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        className={cn(
+          "w-full min-w-0 h-full flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors",
+          "hover:bg-accent/50",
+          "focus:outline-none focus:bg-accent/70 focus:ring-1 focus:ring-primary/40",
+          "data-[grid-selected=true]:bg-accent/70 data-[grid-selected=true]:ring-1 data-[grid-selected=true]:ring-primary/40",
+          "data-[grid-checked=true]:bg-accent/40 data-[grid-checked=true]:ring-1 data-[grid-checked=true]:ring-primary/20"
+        )}
       >
-        {displayedThumbnailUrl ? (
-          <img
-            src={displayedThumbnailUrl}
-            alt={file.name}
-            className="w-full h-full object-cover"
-          />
-        ) : thumbnailState === 'loading' ? (
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        ) : (
-          getIcon()
-        )}
-        {thumbnailState === 'failed' && !displayedThumbnailUrl && !isDir && (
-          <span className="absolute bottom-1 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
-            失败
-          </span>
-        )}
-        {isDir && directoryItemCount !== null && (
-          <span className="absolute right-1 top-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-secondary-foreground">
-            {directoryItemCount > 99 ? '99+' : directoryItemCount}
-          </span>
-        )}
-      </div>
-      <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>
-        {file.name}
-      </span>
-      {!isDir && (
-        <span className="text-xs text-muted-foreground">
-          {formatSize(file.size)}
+        <div
+          className="relative flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden"
+          style={{ width: thumbnailBoxSize, height: thumbnailBoxSize }}
+        >
+          {displayedThumbnailUrl ? (
+            <img
+              src={displayedThumbnailUrl}
+              alt={file.name}
+              className="w-full h-full object-cover"
+            />
+          ) : thumbnailState === 'loading' ? (
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          ) : (
+            getIcon()
+          )}
+          {thumbnailState === 'failed' && !displayedThumbnailUrl && !isDir && (
+            <span className="absolute bottom-1 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
+              失败
+            </span>
+          )}
+          {isDir && directoryItemCount !== null && (
+            <span className="absolute right-1 top-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-secondary-foreground">
+              {directoryItemCount > 99 ? '99+' : directoryItemCount}
+            </span>
+          )}
+        </div>
+        <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>
+          {file.name}
         </span>
-      )}
-    </button>
+        {!isDir && (
+          <span className="text-xs text-muted-foreground">
+            {formatSize(file.size)}
+          </span>
+        )}
+      </button>
+    </div>
   )
 }
