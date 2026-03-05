@@ -41,12 +41,13 @@
 
 ### B2 预览面板区（Media Preview Panel Zone）
 
-- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口。
+- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口、当前文件工具结果展示。
 - 当前组件：
   - `features/preview/components/MediaPreviewPanel`
   - `features/preview/components/PreviewHeaderBar`
   - `features/preview/components/PreviewControlGroup`
   - `features/preview/components/PreviewActionRail`
+  - `features/preview/components/PreviewToolResultPanel`
   - `features/preview/components/PreviewMediaViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
 - 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
@@ -70,6 +71,7 @@
 | 预览头部栏 | `PreviewHeaderBar` | 独立组件 |
 | 头部控制组 | `PreviewControlGroup` | 独立组件 |
 | 预览动作侧栏 | `PreviewActionRail` | 独立组件 |
+| 工具结果面板 | `PreviewToolResultPanel` | 独立组件 |
 | 媒体展示视口 | `PreviewMediaViewport` | 独立组件 |
 | 预览反馈层 | `PreviewFeedbackOverlay` | 独立组件 |
 
@@ -83,6 +85,7 @@
 | `PreviewHeaderBar` | 全屏头部栏 | MUST |
 | `PreviewControlGroup` | 全屏控制组 | MUST |
 | `PreviewActionRail` | 全屏动作入口区 | MUST |
+| `PreviewToolResultPanel` | 全屏结果面板区 | MUST |
 | `PreviewMediaViewport` | 全屏媒体视口 | MUST |
 | `PreviewFeedbackOverlay` | 全屏反馈层 | MUST |
 

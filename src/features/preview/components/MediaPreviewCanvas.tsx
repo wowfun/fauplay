@@ -10,6 +10,7 @@ import {
 } from './PreviewActionRail'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
 import { PreviewMediaViewport } from './PreviewMediaViewport'
+import { PreviewToolResultPanel, type PreviewToolResultItem } from './PreviewToolResultPanel'
 
 interface MediaPreviewCanvasProps {
   file: FileItem
@@ -29,8 +30,24 @@ type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
 type PreviewActionRuntimeState = {
   isLoading: boolean
   error: string | null
+  errorCode?: string
+  result?: unknown
+  lastUpdatedAt?: number
 }
 type PreviewActionRuntimeMap = Record<string, PreviewActionRuntimeState>
+
+function hasToolResultState(state: PreviewActionRuntimeState | undefined): state is PreviewActionRuntimeState {
+  if (!state) return false
+  return state.isLoading
+    || state.error !== null
+    || typeof state.result !== 'undefined'
+    || typeof state.lastUpdatedAt === 'number'
+}
+
+function toRailErrorHint(error: string | null): string | null {
+  if (!error) return null
+  return '执行失败，查看结果面板'
+}
 
 export function MediaPreviewCanvas({
   file,
@@ -47,6 +64,7 @@ export function MediaPreviewCanvas({
 }: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
   const [actionRuntimeState, setActionRuntimeState] = useState<PreviewActionRuntimeMap>({})
+  const [selectedResultToolName, setSelectedResultToolName] = useState<string | null>(null)
 
   const isImage = getMediaType(file.name) === 'image'
   const isVideo = getMediaType(file.name) === 'video'
@@ -61,6 +79,7 @@ export function MediaPreviewCanvas({
     return previewActionTools.filter((tool) => tool.scopes.includes('file'))
   }, [file.kind, previewActionTools])
   const showActionRail = fileActionTools.length > 0
+  const showResultPanel = fileActionTools.length > 0
   const previewViewState: MediaPreviewViewState = isLoading
     ? 'loading'
     : error
@@ -79,6 +98,7 @@ export function MediaPreviewCanvas({
   useEffect(() => {
     setPlaybackError(false)
     setActionRuntimeState({})
+    setSelectedResultToolName(null)
   }, [file.path])
 
   const handleToolAction = useCallback(async (tool: GatewayToolDescriptor) => {
@@ -87,41 +107,91 @@ export function MediaPreviewCanvas({
     try {
       setActionRuntimeState((prev) => ({
         ...prev,
-        [tool.name]: { isLoading: true, error: null },
+        [tool.name]: {
+          ...(prev[tool.name] ?? { error: null }),
+          isLoading: true,
+          error: null,
+          errorCode: undefined,
+        },
       }))
 
-      const didDispatch = await dispatchSystemTool({
+      const dispatchResult = await dispatchSystemTool({
         toolName: tool.name,
         rootHandle,
         relativePath: file.path,
       })
-
-      if (!didDispatch) {
-        setActionRuntimeState((prev) => ({
-          ...prev,
-          [tool.name]: { isLoading: false, error: null },
-        }))
-      }
+      const completedAt = Date.now()
+      setSelectedResultToolName(tool.name)
+      setActionRuntimeState((prev) => ({
+        ...prev,
+        [tool.name]: dispatchResult.ok
+          ? {
+              isLoading: false,
+              error: null,
+              errorCode: undefined,
+              result: dispatchResult.result,
+              lastUpdatedAt: completedAt,
+            }
+          : {
+              isLoading: false,
+              error: dispatchResult.error || `${tool.title || tool.name} 失败`,
+              errorCode: dispatchResult.errorCode,
+              result: undefined,
+              lastUpdatedAt: completedAt,
+            },
+      }))
     } catch (err) {
+      const message = err instanceof Error
+        ? (err.message || `${tool.title || tool.name} 失败`)
+        : `${tool.title || tool.name} 失败`
+      const errorWithCode = err instanceof Error
+        ? (err as Error & { code?: unknown })
+        : null
+      const code = errorWithCode && typeof errorWithCode.code === 'string'
+        ? errorWithCode.code
+        : undefined
+      const completedAt = Date.now()
+      setSelectedResultToolName(tool.name)
       setActionRuntimeState((prev) => ({
         ...prev,
         [tool.name]: {
           isLoading: false,
-          error: (err as Error).message || `${tool.title || tool.name} 失败`,
+          error: message,
+          errorCode: code,
+          result: undefined,
+          lastUpdatedAt: completedAt,
         },
       }))
-    } finally {
-      setActionRuntimeState((prev) => {
-        const current = prev[tool.name]
-        if (!current) return prev
-
-        return {
-          ...prev,
-          [tool.name]: { ...current, isLoading: false },
-        }
-      })
     }
   }, [file.kind, file.path, rootHandle])
+
+  const resultPanelItems = useMemo<PreviewToolResultItem[]>(() => {
+    const items: PreviewToolResultItem[] = []
+    for (const tool of fileActionTools) {
+      const state = actionRuntimeState[tool.name]
+      if (!hasToolResultState(state)) continue
+      items.push({
+        toolName: tool.name,
+        title: tool.title || tool.name,
+        isLoading: state.isLoading,
+        error: state.error,
+        errorCode: state.errorCode,
+        result: state.result,
+        lastUpdatedAt: state.lastUpdatedAt,
+      })
+    }
+
+    items.sort((a, b) => (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0))
+    return items
+  }, [actionRuntimeState, fileActionTools])
+
+  const activeResultToolName = useMemo(() => {
+    if (resultPanelItems.length === 0) return null
+    if (selectedResultToolName && resultPanelItems.some((item) => item.toolName === selectedResultToolName)) {
+      return selectedResultToolName
+    }
+    return resultPanelItems[0].toolName
+  }, [resultPanelItems, selectedResultToolName])
 
   const railActions = useMemo<PreviewActionRailItem[]>(() => {
     return fileActionTools.map((tool) => {
@@ -136,7 +206,7 @@ export function MediaPreviewCanvas({
         },
         disabled: !!state?.isLoading || !rootHandle,
         actionState: resolveActionState(tool.name),
-        error: state?.error ?? null,
+        error: toRailErrorHint(state?.error ?? null),
         icon: tool.icon,
       }
     })
@@ -150,6 +220,15 @@ export function MediaPreviewCanvas({
           railButtonClass={railButtonClass}
           borderClass={panelBorderClass}
           errorTextClass={errorTextClass}
+        />
+      )}
+
+      {showResultPanel && (
+        <PreviewToolResultPanel
+          items={resultPanelItems}
+          activeToolName={activeResultToolName}
+          onSelectTool={setSelectedResultToolName}
+          isFullscreen={isFullscreen}
         />
       )}
 

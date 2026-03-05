@@ -4,6 +4,16 @@
       "type": "stdio",
       "command": "node",
       "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+    },
+    "timm-classifier": {
+      "type": "stdio",
+      "command": "python3",
+      "callTimeoutMs": 120000,
+      "args": [
+        "scripts/gateway/mcp-servers/timm-classifier-cli.py",
+        "--config",
+        ".fauplay/timm-classifier.json"
+      ]
     }
   }
 }

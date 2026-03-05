@@ -3,6 +3,8 @@ const HEALTH_ENDPOINT = `${GATEWAY_BASE_URL}/v1/health`
 const MCP_ENDPOINT = `${GATEWAY_BASE_URL}/v1/mcp`
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
+const DEFAULT_TOOL_TIMEOUT_MS = 5000
+const ML_CLASSIFY_TOOL_TIMEOUT_MS = 120000
 const MCP_CLIENT_INFO = {
   name: 'fauplay-web',
   version: '0.0.1',
@@ -67,6 +69,8 @@ export interface GatewayCapabilitiesSnapshot {
   tools: GatewayToolDescriptor[]
 }
 
+export type ToolCallResult = Record<string, unknown> | unknown[] | string | number | boolean | null
+
 class GatewayMcpError extends Error {
   code?: string
 
@@ -100,6 +104,27 @@ function toGatewayMcpError(errorObj: JsonRpcErrorObject): GatewayMcpError {
   return new GatewayMcpError(message, internalCode || jsonRpcCode)
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function createClientTimeoutError(timeoutMs: number): GatewayMcpError {
+  const timeoutSec = Math.ceil(timeoutMs / 1000)
+  return new GatewayMcpError(`Gateway request timed out after ${timeoutSec}s`, 'MCP_CLIENT_TIMEOUT')
+}
+
+function resolveToolTimeoutMs(toolName: string, timeoutMs?: number): number {
+  if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    return timeoutMs
+  }
+
+  if (toolName.startsWith('ml.classify')) {
+    return ML_CLASSIFY_TOOL_TIMEOUT_MS
+  }
+
+  return DEFAULT_TOOL_TIMEOUT_MS
+}
+
 async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
@@ -113,6 +138,11 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
       throw new Error(`Gateway request failed: ${response.status}`)
     }
     return response.json()
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createClientTimeoutError(timeoutMs)
+    }
+    throw error
   } finally {
     window.clearTimeout(timeoutId)
   }
@@ -189,6 +219,11 @@ async function callGatewayMcpRequest<T>(
     }
 
     return (rpcResponse?.result ?? {}) as T
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createClientTimeoutError(timeoutMs)
+    }
+    throw error
   } finally {
     window.clearTimeout(timeoutId)
   }
@@ -293,16 +328,17 @@ export async function listGatewayTools(timeoutMs: number = 2000): Promise<Gatewa
     .filter((tool): tool is GatewayToolDescriptor => tool !== null)
 }
 
-export async function callGatewayTool<T = Record<string, unknown>>(
+export async function callGatewayTool<T = ToolCallResult>(
   toolName: string,
   args: Record<string, unknown>,
-  timeoutMs: number = 5000
+  timeoutMs?: number
 ): Promise<T> {
   if (!toolName) {
     throw new GatewayMcpError('toolName is required', 'MCP_INVALID_PARAMS')
   }
 
-  return callGatewayMcp<T>('tools/call', { name: toolName, arguments: args }, timeoutMs)
+  const effectiveTimeoutMs = resolveToolTimeoutMs(toolName, timeoutMs)
+  return callGatewayMcp<T>('tools/call', { name: toolName, arguments: args }, effectiveTimeoutMs)
 }
 
 export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise<GatewayCapabilitiesSnapshot> {
