@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { isUnlimited, toolResultQueueConfig } from '@/config/toolResultQueue'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getMediaType } from '@/lib/thumbnail'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { PreviewToolResultQueueItem, PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
 import {
   PreviewActionRail,
   type PreviewActionRailItem,
@@ -10,7 +12,7 @@ import {
 } from './PreviewActionRail'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
 import { PreviewMediaViewport } from './PreviewMediaViewport'
-import { PreviewToolResultPanel, type PreviewToolResultItem } from './PreviewToolResultPanel'
+import { PreviewToolResultPanel } from './PreviewToolResultPanel'
 
 interface MediaPreviewCanvasProps {
   file: FileItem
@@ -24,28 +26,62 @@ interface MediaPreviewCanvasProps {
   isFullscreen?: boolean
   onVideoEnded?: () => void
   onVideoPlaybackError?: () => void
+  toolResultQueueState: PreviewToolResultQueueState
+  setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
 }
 
 type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
-type PreviewActionRuntimeState = {
-  isLoading: boolean
-  error: string | null
-  errorCode?: string
-  result?: unknown
-  lastUpdatedAt?: number
-}
-type PreviewActionRuntimeMap = Record<string, PreviewActionRuntimeState>
+const QUEUE_ID_RANDOM_MAX = 1_000_000
 
-function hasToolResultState(state: PreviewActionRuntimeState | undefined): state is PreviewActionRuntimeState {
-  if (!state) return false
-  return state.isLoading
-    || state.error !== null
-    || typeof state.result !== 'undefined'
-    || typeof state.lastUpdatedAt === 'number'
+function createQueueItemId(toolName: string): string {
+  return `${Date.now()}-${Math.floor(Math.random() * QUEUE_ID_RANDOM_MAX)}-${toolName}`
 }
 
-function toRailErrorHint(error: string | null): string | null {
-  if (!error) return null
+function touchFileOrder(fileOrder: string[], filePath: string): string[] {
+  return [filePath, ...fileOrder.filter((item) => item !== filePath)]
+}
+
+function trimQueueByItemLimit(queue: PreviewToolResultQueueItem[]): PreviewToolResultQueueItem[] {
+  if (isUnlimited(toolResultQueueConfig.maxItemsPerFile)) {
+    return queue
+  }
+  return queue.slice(0, Math.max(toolResultQueueConfig.maxItemsPerFile, 0))
+}
+
+function trimQueueStateByFileLimit(state: PreviewToolResultQueueState): PreviewToolResultQueueState {
+  if (isUnlimited(toolResultQueueConfig.maxFiles) || state.fileOrder.length <= toolResultQueueConfig.maxFiles) {
+    return state
+  }
+
+  const keepFilePaths = state.fileOrder.slice(0, Math.max(toolResultQueueConfig.maxFiles, 0))
+  const byFilePath: Record<string, PreviewToolResultQueueItem[]> = {}
+
+  for (const filePath of keepFilePaths) {
+    const queue = state.byFilePath[filePath]
+    if (queue) {
+      byFilePath[filePath] = queue
+    }
+  }
+
+  return {
+    byFilePath,
+    fileOrder: keepFilePaths,
+  }
+}
+
+function resolveToolActionState(
+  queue: PreviewToolResultQueueItem[],
+  toolName: string,
+  hasRootHandle: boolean
+): PreviewActionState {
+  const latest = queue.find((item) => item.toolName === toolName)
+  if (latest?.status === 'error') return 'error'
+  if (latest?.status === 'loading') return 'loading'
+  return hasRootHandle ? 'default' : 'disabled'
+}
+
+function toRailErrorHint(latest: PreviewToolResultQueueItem | undefined): string | null {
+  if (!latest || latest.status !== 'error') return null
   return '执行失败，查看结果面板'
 }
 
@@ -61,10 +97,10 @@ export function MediaPreviewCanvas({
   isFullscreen = false,
   onVideoEnded,
   onVideoPlaybackError,
+  toolResultQueueState,
+  setToolResultQueueState,
 }: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
-  const [actionRuntimeState, setActionRuntimeState] = useState<PreviewActionRuntimeMap>({})
-  const [selectedResultToolName, setSelectedResultToolName] = useState<string | null>(null)
 
   const isImage = getMediaType(file.name) === 'image'
   const isVideo = getMediaType(file.name) === 'video'
@@ -88,114 +124,140 @@ export function MediaPreviewCanvas({
         ? 'ready'
         : 'empty'
 
-  const resolveActionState = useCallback((toolName: string): PreviewActionState => {
-    const state = actionRuntimeState[toolName]
-    if (state?.error) return 'error'
-    if (state?.isLoading) return 'loading'
-    return rootHandle ? 'default' : 'disabled'
-  }, [actionRuntimeState, rootHandle])
+  const currentFileQueue = useMemo(
+    () => toolResultQueueState.byFilePath[file.path] ?? [],
+    [toolResultQueueState.byFilePath, file.path]
+  )
+
+  useEffect(() => {
+    setToolResultQueueState((prev) => {
+      if (!prev.byFilePath[file.path]) return prev
+      if (prev.fileOrder[0] === file.path) return prev
+      return {
+        ...prev,
+        fileOrder: touchFileOrder(prev.fileOrder, file.path),
+      }
+    })
+  }, [file.path, setToolResultQueueState])
 
   useEffect(() => {
     setPlaybackError(false)
-    setActionRuntimeState({})
-    setSelectedResultToolName(null)
   }, [file.path])
 
   const handleToolAction = useCallback(async (tool: GatewayToolDescriptor) => {
     if (file.kind !== 'file' || !rootHandle) return
 
-    try {
-      setActionRuntimeState((prev) => ({
-        ...prev,
-        [tool.name]: {
-          ...(prev[tool.name] ?? { error: null }),
-          isLoading: true,
-          error: null,
-          errorCode: undefined,
-        },
-      }))
+    const queueItemId = createQueueItemId(tool.name)
+    const startedAt = Date.now()
 
+    setToolResultQueueState((prev) => {
+      const previousQueue = prev.byFilePath[file.path] ?? []
+      const collapsedHistory = previousQueue.map((item) => (
+        item.toolName === tool.name
+          ? { ...item, collapsed: true }
+          : item
+      ))
+      const nextQueue = trimQueueByItemLimit([
+        {
+          id: queueItemId,
+          filePath: file.path,
+          toolName: tool.name,
+          title: tool.title || tool.name,
+          status: 'loading',
+          startedAt,
+          collapsed: false,
+        },
+        ...collapsedHistory,
+      ])
+      const nextState: PreviewToolResultQueueState = {
+        byFilePath: {
+          ...prev.byFilePath,
+          [file.path]: nextQueue,
+        },
+        fileOrder: touchFileOrder(prev.fileOrder, file.path),
+      }
+
+      return trimQueueStateByFileLimit(nextState)
+    })
+
+    try {
       const dispatchResult = await dispatchSystemTool({
         toolName: tool.name,
         rootHandle,
         relativePath: file.path,
       })
-      const completedAt = Date.now()
-      setSelectedResultToolName(tool.name)
-      setActionRuntimeState((prev) => ({
-        ...prev,
-        [tool.name]: dispatchResult.ok
-          ? {
-              isLoading: false,
-              error: null,
-              errorCode: undefined,
+      const finishedAt = Date.now()
+
+      setToolResultQueueState((prev) => {
+        const currentQueue = prev.byFilePath[file.path] ?? []
+        let hasMatched = false
+        const nextQueue = currentQueue.map((item) => {
+          if (item.id !== queueItemId) return item
+          hasMatched = true
+
+          if (dispatchResult.ok) {
+            return {
+              ...item,
+              status: 'success' as const,
               result: dispatchResult.result,
-              lastUpdatedAt: completedAt,
+              error: undefined,
+              errorCode: undefined,
+              finishedAt,
             }
-          : {
-              isLoading: false,
-              error: dispatchResult.error || `${tool.title || tool.name} 失败`,
-              errorCode: dispatchResult.errorCode,
-              result: undefined,
-              lastUpdatedAt: completedAt,
-            },
-      }))
-    } catch (err) {
-      const message = err instanceof Error
-        ? (err.message || `${tool.title || tool.name} 失败`)
-        : `${tool.title || tool.name} 失败`
-      const errorWithCode = err instanceof Error
-        ? (err as Error & { code?: unknown })
-        : null
-      const code = errorWithCode && typeof errorWithCode.code === 'string'
-        ? errorWithCode.code
-        : undefined
-      const completedAt = Date.now()
-      setSelectedResultToolName(tool.name)
-      setActionRuntimeState((prev) => ({
-        ...prev,
-        [tool.name]: {
-          isLoading: false,
-          error: message,
-          errorCode: code,
-          result: undefined,
-          lastUpdatedAt: completedAt,
-        },
-      }))
-    }
-  }, [file.kind, file.path, rootHandle])
+          }
 
-  const resultPanelItems = useMemo<PreviewToolResultItem[]>(() => {
-    const items: PreviewToolResultItem[] = []
-    for (const tool of fileActionTools) {
-      const state = actionRuntimeState[tool.name]
-      if (!hasToolResultState(state)) continue
-      items.push({
-        toolName: tool.name,
-        title: tool.title || tool.name,
-        isLoading: state.isLoading,
-        error: state.error,
-        errorCode: state.errorCode,
-        result: state.result,
-        lastUpdatedAt: state.lastUpdatedAt,
+          return {
+            ...item,
+            status: 'error' as const,
+            result: undefined,
+            error: dispatchResult.error || `${tool.title || tool.name} 失败`,
+            errorCode: dispatchResult.errorCode,
+            finishedAt,
+          }
+        })
+
+        if (!hasMatched) return prev
+
+        return {
+          ...prev,
+          byFilePath: {
+            ...prev.byFilePath,
+            [file.path]: nextQueue,
+          },
+        }
       })
+    } catch {
+      // dispatchSystemTool already converts runtime errors to structured result.
     }
+  }, [file.kind, file.path, rootHandle, setToolResultQueueState])
 
-    items.sort((a, b) => (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0))
-    return items
-  }, [actionRuntimeState, fileActionTools])
+  const handleToggleResultItemCollapsed = useCallback((id: string) => {
+    setToolResultQueueState((prev) => {
+      const currentQueue = prev.byFilePath[file.path] ?? []
+      let hasMatched = false
+      const nextQueue = currentQueue.map((item) => {
+        if (item.id !== id) return item
+        hasMatched = true
+        return {
+          ...item,
+          collapsed: !item.collapsed,
+        }
+      })
 
-  const activeResultToolName = useMemo(() => {
-    if (resultPanelItems.length === 0) return null
-    if (selectedResultToolName && resultPanelItems.some((item) => item.toolName === selectedResultToolName)) {
-      return selectedResultToolName
-    }
-    return resultPanelItems[0].toolName
-  }, [resultPanelItems, selectedResultToolName])
+      if (!hasMatched) return prev
+      return {
+        ...prev,
+        byFilePath: {
+          ...prev.byFilePath,
+          [file.path]: nextQueue,
+        },
+      }
+    })
+  }, [file.path, setToolResultQueueState])
 
   const railActions = useMemo<PreviewActionRailItem[]>(() => {
     return fileActionTools.map((tool) => {
-      const state = actionRuntimeState[tool.name]
+      const latestQueueItem = currentFileQueue.find((item) => item.toolName === tool.name)
       const title = tool.title || tool.name
 
       return {
@@ -204,13 +266,13 @@ export function MediaPreviewCanvas({
         onClick: () => {
           void handleToolAction(tool)
         },
-        disabled: !!state?.isLoading || !rootHandle,
-        actionState: resolveActionState(tool.name),
-        error: toRailErrorHint(state?.error ?? null),
+        disabled: latestQueueItem?.status === 'loading' || !rootHandle,
+        actionState: resolveToolActionState(currentFileQueue, tool.name, Boolean(rootHandle)),
+        error: toRailErrorHint(latestQueueItem),
         icon: tool.icon,
       }
     })
-  }, [actionRuntimeState, fileActionTools, handleToolAction, resolveActionState, rootHandle])
+  }, [currentFileQueue, fileActionTools, handleToolAction, rootHandle])
 
   return (
     <div className="flex-1 min-h-0 flex" data-preview-state={previewViewState}>
@@ -225,9 +287,8 @@ export function MediaPreviewCanvas({
 
       {showResultPanel && (
         <PreviewToolResultPanel
-          items={resultPanelItems}
-          activeToolName={activeResultToolName}
-          onSelectTool={setSelectedResultToolName}
+          items={currentFileQueue}
+          onToggleItemCollapsed={handleToggleResultItemCollapsed}
           isFullscreen={isFullscreen}
         />
       )}

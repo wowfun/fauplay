@@ -1,8 +1,9 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, type Dispatch, type SetStateAction } from 'react'
 import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
+import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
 
@@ -22,6 +23,8 @@ interface MediaPreviewPanelProps {
   onVideoPlaybackError: () => void
   presentation?: PreviewSurface
   forceAutoPlayOnOpen?: boolean
+  toolResultQueueState: PreviewToolResultQueueState
+  setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
 }
 
 export function MediaPreviewPanel({
@@ -40,6 +43,8 @@ export function MediaPreviewPanel({
   onVideoPlaybackError,
   presentation = 'panel',
   forceAutoPlayOnOpen = false,
+  toolResultQueueState,
+  setToolResultQueueState,
 }: MediaPreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -139,6 +144,8 @@ export function MediaPreviewPanel({
         isFullscreen={isFullscreen}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}
+        toolResultQueueState={toolResultQueueState}
+        setToolResultQueueState={setToolResultQueueState}
       />
     </div>
   )

@@ -41,7 +41,7 @@
 
 ### B2 预览面板区（Media Preview Panel Zone）
 
-- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口、当前文件工具结果展示。
+- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口、按调用队列平铺的工具结果展示。
 - 当前组件：
   - `features/preview/components/MediaPreviewPanel`
   - `features/preview/components/PreviewHeaderBar`
@@ -120,6 +120,7 @@
 1. 预览控制事件（自动播放开关、遍历模式切换、间隔调整）
 2. 展示切换事件（打开全屏、关闭预览）
 3. 系统动作触发（按工具名发起 `tools/call`）
+4. 结果面板事件（结果项折叠/展开、按文件恢复最近队列）
 
 ## 状态矩阵（State Matrix）
 

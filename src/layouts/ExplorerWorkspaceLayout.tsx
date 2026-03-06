@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent, MutableRefObject } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
@@ -7,6 +7,7 @@ import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatus
 import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
+import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
 import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
@@ -103,6 +104,11 @@ export function ExplorerWorkspaceLayout({
   previewAutoPlayOnOpen,
   onClosePreview,
 }: ExplorerWorkspaceLayoutProps) {
+  const [previewToolResultQueueState, setPreviewToolResultQueueState] = useState<PreviewToolResultQueueState>({
+    byFilePath: {},
+    fileOrder: [],
+  })
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       <ExplorerToolbar
@@ -171,6 +177,8 @@ export function ExplorerWorkspaceLayout({
               onAutoPlayIntervalChange={onAutoPlayIntervalChange}
               onVideoEnded={onVideoEnded}
               onVideoPlaybackError={onVideoPlaybackError}
+              toolResultQueueState={previewToolResultQueueState}
+              setToolResultQueueState={setPreviewToolResultQueueState}
             />
           </div>
         )}
@@ -197,6 +205,8 @@ export function ExplorerWorkspaceLayout({
           onAutoPlayIntervalChange={onAutoPlayIntervalChange}
           onVideoEnded={onVideoEnded}
           onVideoPlaybackError={onVideoPlaybackError}
+          toolResultQueueState={previewToolResultQueueState}
+          setToolResultQueueState={setPreviewToolResultQueueState}
         />
       )}
     </div>

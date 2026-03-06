@@ -1,22 +1,12 @@
-import { useMemo, useState } from 'react'
-import { Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, ChevronRight, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import type { PreviewToolResultQueueItem } from '@/features/preview/types/toolResult'
 import { Button } from '@/ui/Button'
 import { resolveToolResultRenderer } from './toolResultRenderers'
 
-export interface PreviewToolResultItem {
-  toolName: string
-  title: string
-  isLoading: boolean
-  error: string | null
-  errorCode?: string
-  result?: unknown
-  lastUpdatedAt?: number
-}
-
 interface PreviewToolResultPanelProps {
-  items: PreviewToolResultItem[]
-  activeToolName: string | null
-  onSelectTool: (toolName: string) => void
+  items: PreviewToolResultQueueItem[]
+  onToggleItemCollapsed: (id: string) => void
   isFullscreen?: boolean
 }
 
@@ -31,15 +21,10 @@ function formatTimestamp(value?: number): string {
 
 export function PreviewToolResultPanel({
   items,
-  activeToolName,
-  onSelectTool,
+  onToggleItemCollapsed,
   isFullscreen = false,
 }: PreviewToolResultPanelProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const activeItem = useMemo(
-    () => items.find((item) => item.toolName === activeToolName) ?? null,
-    [activeToolName, items]
-  )
 
   const panelClassName = isFullscreen
     ? 'border-r border-white/10 bg-black/20 text-white'
@@ -49,10 +34,11 @@ export function PreviewToolResultPanel({
   const emptyHintClassName = isFullscreen
     ? 'rounded-md border border-white/20 bg-white/5 px-3 py-2 text-xs text-white/70'
     : 'rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-xs text-muted-foreground'
-  const tabButtonClassName = isFullscreen
-    ? 'h-7 justify-start rounded-md px-2 text-xs text-white/70 hover:bg-white/10'
-    : 'h-7 justify-start rounded-md px-2 text-xs text-muted-foreground hover:bg-accent'
-  const activeTabClassName = isFullscreen ? 'bg-white/15 text-white' : 'bg-accent text-accent-foreground'
+  const cardClassName = isFullscreen
+    ? 'rounded-md border border-white/20 bg-white/5'
+    : 'rounded-md border border-border/80 bg-muted/20'
+  const headerHoverClassName = isFullscreen ? 'hover:bg-white/10' : 'hover:bg-accent/40'
+  const statusClassName = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
 
   return (
     <aside
@@ -62,7 +48,7 @@ export function PreviewToolResultPanel({
       <div className="flex items-center justify-between px-3 py-2 border-b border-inherit">
         <div>
           <p className={`text-xs font-medium ${titleClassName}`}>工具结果</p>
-          <p className={`text-[11px] ${secondaryTextClassName}`}>当前文件最近执行结果</p>
+          <p className={`text-[11px] ${secondaryTextClassName}`}>当前文件调用队列（最新在上）</p>
         </div>
         <Button
           variant="ghost"
@@ -81,71 +67,83 @@ export function PreviewToolResultPanel({
       {!collapsed && (
         <div className="flex-1 min-h-0 flex flex-col">
           {items.length > 0 ? (
-            <>
-              <div className="flex-shrink-0 max-h-24 overflow-auto border-b border-inherit p-2 space-y-1">
-                {items.map((item) => (
-                  <Button
-                    key={item.toolName}
-                    variant="ghost"
-                    size="sm"
-                    className={`${tabButtonClassName} w-full ${item.toolName === activeToolName ? activeTabClassName : ''}`}
-                    onClick={() => {
-                      onSelectTool(item.toolName)
-                    }}
-                  >
-                    <span className="truncate">{item.title}</span>
-                  </Button>
-                ))}
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
-                {!activeItem ? (
-                  <p className={emptyHintClassName}>请选择一个工具结果。</p>
-                ) : activeItem.isLoading ? (
-                  <div className={emptyHintClassName}>
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>{activeItem.title} 执行中...</span>
-                    </div>
-                  </div>
-                ) : activeItem.error ? (
-                  <div className={emptyHintClassName}>
-                    <p className="font-medium">执行失败</p>
-                    <p className="mt-1 break-all">{activeItem.error}</p>
-                    {activeItem.errorCode && (
-                      <p className="mt-1">错误码: {activeItem.errorCode}</p>
-                    )}
-                    <p className="mt-1">时间: {formatTimestamp(activeItem.lastUpdatedAt)}</p>
-                  </div>
-                ) : typeof activeItem.result !== 'undefined' ? (
-                  (() => {
-                    const renderer = resolveToolResultRenderer({
-                      toolName: activeItem.toolName,
-                      result: activeItem.result,
+            <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
+              {items.map((item) => {
+                const renderer = typeof item.result === 'undefined'
+                  ? null
+                  : resolveToolResultRenderer({
+                      toolName: item.toolName,
+                      result: item.result,
                     })
+                const summaryText = item.status === 'loading'
+                  ? '执行中...'
+                  : item.status === 'error'
+                    ? (item.error || '执行失败')
+                    : renderer
+                      ? renderer.renderSummary({
+                          toolName: item.toolName,
+                          result: item.result,
+                        })
+                      : '工具未返回结果'
 
-                    return (
-                      <>
-                        <div className={emptyHintClassName}>
-                          <p className="font-medium">{activeItem.title}</p>
-                          <p className="mt-1 break-all">{renderer.renderSummary({
-                            toolName: activeItem.toolName,
-                            result: activeItem.result,
-                          })}</p>
-                          <p className="mt-1">时间: {formatTimestamp(activeItem.lastUpdatedAt)}</p>
+                return (
+                  <section key={item.id} className={cardClassName}>
+                    <button
+                      type="button"
+                      className={`w-full text-left px-3 py-2 transition-colors ${headerHoverClassName}`}
+                      onClick={() => {
+                        onToggleItemCollapsed(item.id)
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className="pt-[2px]">
+                          {item.collapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">{item.title}</p>
+                          <p className={`mt-1 text-[11px] ${statusClassName}`}>
+                            {item.status === 'loading'
+                              ? '运行中'
+                              : item.status === 'error'
+                                ? '失败'
+                                : '成功'} · {formatTimestamp(item.finishedAt ?? item.startedAt)}
+                          </p>
+                          <p className="mt-1 text-[11px] break-all">{summaryText}</p>
                         </div>
-                        {renderer.renderDetail({
-                          toolName: activeItem.toolName,
-                          result: activeItem.result,
-                        })}
-                      </>
-                    )
-                  })()
-                ) : (
-                  <p className={emptyHintClassName}>工具未返回结果。</p>
-                )}
-              </div>
-            </>
+                      </div>
+                    </button>
+
+                    {!item.collapsed && (
+                      <div className="border-t border-inherit px-3 py-2 space-y-2">
+                        {item.status === 'loading' ? (
+                          <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>{item.title} 执行中...</span>
+                          </div>
+                        ) : item.status === 'error' ? (
+                          <div className="text-xs space-y-1">
+                            <p className="font-medium">执行失败</p>
+                            <p className="break-all">{item.error || '未知错误'}</p>
+                            {item.errorCode && <p>错误码: {item.errorCode}</p>}
+                          </div>
+                        ) : typeof item.result !== 'undefined' && renderer ? (
+                          renderer.renderDetail({
+                            toolName: item.toolName,
+                            result: item.result,
+                          })
+                        ) : (
+                          <p className={`text-xs ${statusClassName}`}>工具未返回结果。</p>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )
+              })}
+            </div>
           ) : (
             <div className="flex-1 p-3">
               <p className={emptyHintClassName}>

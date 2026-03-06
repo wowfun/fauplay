@@ -1,6 +1,8 @@
+import type { Dispatch, SetStateAction } from 'react'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
+import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
 import { MediaPreviewPanel } from './MediaPreviewPanel'
 
 interface MediaLightboxModalProps {
@@ -17,6 +19,8 @@ interface MediaLightboxModalProps {
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
+  toolResultQueueState: PreviewToolResultQueueState
+  setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
 }
 
 export function MediaLightboxModal({
@@ -33,6 +37,8 @@ export function MediaLightboxModal({
   onAutoPlayIntervalChange,
   onVideoEnded,
   onVideoPlaybackError,
+  toolResultQueueState,
+  setToolResultQueueState,
 }: MediaLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -51,6 +57,8 @@ export function MediaLightboxModal({
         onVideoPlaybackError={onVideoPlaybackError}
         presentation="lightbox"
         forceAutoPlayOnOpen={autoPlayOnOpen}
+        toolResultQueueState={toolResultQueueState}
+        setToolResultQueueState={setToolResultQueueState}
       />
     </div>
   )
