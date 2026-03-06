@@ -4,7 +4,7 @@
 - Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`)
 
 ## 提交与验证最小清单
-
+仅在修改代码后执行：
 ```bash
 npm run typecheck
 npm run lint
