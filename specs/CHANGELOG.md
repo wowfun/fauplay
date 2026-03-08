@@ -6,6 +6,10 @@
 - 新增 `specs/108-dev-cold-start-performance/spec.md`：定义“开发冷启动首次刷新慢”专项规范，覆盖问题证据、开始页优先可见、工作区重模块延后加载、首次进入工作区加载占位与稳定优先 `warmup` 约束。
 
 ### Changed
+- 优化根目录缓存与系统工具联动：`rootPath` 映射由“仅按 `rootLabel`”升级为“优先按 `rootId`（兼容 `rootLabel` 回退）”；选择目录或从缓存恢复目录时会预绑定绝对路径，减少首次插件调用时的输入弹窗。
+- 修复 `102-address-bar-navigation` 跨根历史回访错位问题：最近路径模型升级为 `rootId/rootName/path/visitedAt` 根目录感知结构，历史点击支持“自动切换到历史所属根目录后再导航”；旧版无根信息历史在升级时清空，避免误映射到当前根目录。
+- 新增根目录句柄缓存能力（IndexedDB，最多 `10` 项，LRU 淘汰）：`useFileSystem` 增加 `cachedRoots/openCachedRoot/openHistoryEntry`，开始页新增缓存目录入口，刷新后可直接恢复缓存根目录，缓存缺失或权限失效时降级提示重选目录。
+- 更新 `specs/000-foundation/spec.md`：将“刷新后需重新授权目录”基线调整为“优先恢复缓存句柄，失效再重选授权”，并明确目录句柄缓存属于可选增强能力。
 - 建立“性能治理 -> 性能专项”双层规范关系：`004-performance-governance` 作为跨专题上游约束，`108-dev-cold-start-performance` 作为首个落地专项入口。
 - 落地 `108-dev-cold-start-performance`：`App` 改为“开始页轻入口 + 工作区懒加载（`React.lazy + Suspense`）”，将工作区重依赖与网关能力探测后置到 `WorkspaceShell`；首次进入工作区新增可见加载占位；`vite.config.ts` 增加 `server.warmup.clientFiles` 预热开始页关键模块，优化开发冷启动首刷体验。
 - 优化 `108-dev-cold-start-performance` 工作区进入性能：`readDirectory` 默认改为“快速列表”模式（首轮不强制读取每个媒体文件 `getFile()` 元数据），并调整 `date/size` 排序在缺失元数据时回退名称排序；视频缩略图链路新增超时与清理机制，避免失败场景长时间挂起与重复 `blob:* net::ERR_FILE_NOT_FOUND` 噪声。

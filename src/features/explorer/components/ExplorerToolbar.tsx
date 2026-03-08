@@ -37,6 +37,7 @@ interface ExplorerToolbarProps {
   rootName: string
   currentPath: string
   onNavigateToPath: (path: string) => Promise<boolean>
+  onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
   recentPathHistory: AddressPathHistoryEntry[]
   onNavigateUp: () => void
@@ -63,6 +64,7 @@ export function ExplorerToolbar({
   rootName,
   currentPath,
   onNavigateToPath,
+  onNavigateHistoryEntry,
   onListChildDirectories,
   recentPathHistory,
   onNavigateUp,
@@ -238,8 +240,8 @@ export function ExplorerToolbar({
     setIsHistoryOpen((previous) => !previous)
   }
 
-  const handleNavigateHistoryPath = async (path: string) => {
-    const ok = await navigateByAddressBar(path)
+  const handleNavigateHistoryPath = async (entry: AddressPathHistoryEntry) => {
+    const ok = await onNavigateHistoryEntry(entry)
     if (!ok) return
     setAddressBarMode('breadcrumb')
     setIsHistoryOpen(false)
@@ -409,13 +411,13 @@ export function ExplorerToolbar({
                   ) : (
                     <div className="max-h-64 overflow-auto">
                       {sortedHistory.map((item) => {
-                        const displayPath = buildCopyPathText(rootLabel, item.path)
+                        const displayPath = buildCopyPathText(item.rootName || rootLabel, item.path)
                         return (
                           <button
-                            key={`${item.path}:${item.visitedAt}`}
+                            key={`${item.rootId}:${item.path}:${item.visitedAt}`}
                             type="button"
                             onClick={() => {
-                              void handleNavigateHistoryPath(item.path)
+                              void handleNavigateHistoryPath(item)
                             }}
                             className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
                             title={displayPath}

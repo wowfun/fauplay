@@ -10,6 +10,7 @@ import { PreviewHeaderBar } from './PreviewHeaderBar'
 interface MediaPreviewPanelProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
   onOpenFullscreen?: () => void
@@ -33,6 +34,7 @@ interface MediaPreviewPanelProps {
 export function MediaPreviewPanel({
   file,
   rootHandle,
+  rootId,
   previewActionTools,
   onClose,
   onOpenFullscreen,
@@ -141,6 +143,7 @@ export function MediaPreviewPanel({
       <MediaPreviewCanvas
         file={file}
         rootHandle={rootHandle}
+        rootId={rootId}
         previewActionTools={previewActionTools}
         previewUrl={previewUrl}
         isLoading={isLoading}

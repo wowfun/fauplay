@@ -1,6 +1,17 @@
-import { useState, useCallback } from 'react'
-import type { FileItem, FilterState } from '@/types'
+import { useCallback, useEffect, useState } from 'react'
+import type { AddressPathHistoryEntry, CachedRootEntry, FileItem, FilterState } from '@/types'
 import { openDirectory, readDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
+import {
+  getCachedRootHandle,
+  listCachedRoots,
+  markCachedRootAsUsed,
+  removeCachedRoot,
+  upsertCachedRootHandle,
+} from '@/lib/rootHandleCache'
+import { ensureRootPath } from '@/lib/reveal'
+
+const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
+const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
 
 function withBasePath(items: FileItem[], basePath: string): FileItem[] {
   if (!basePath) return items
@@ -14,17 +25,33 @@ function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
 }
 
+function createSessionRootId(handle: FileSystemDirectoryHandle): string {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `session:${handle.name}:${suffix}`
+}
+
 interface NavigateToPathOptions {
   resetFlattenView?: boolean
 }
 
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
+  const [rootId, setRootId] = useState<string | null>(null)
+  const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isFlattenView, setIsFlattenView] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const refreshCachedRoots = useCallback(async () => {
+    const entries = await listCachedRoots()
+    setCachedRoots(entries)
+  }, [])
+
+  useEffect(() => {
+    void refreshCachedRoots()
+  }, [refreshCachedRoots])
 
   const loadDirectoryItems = useCallback(async (
     dirHandle: FileSystemDirectoryHandle,
@@ -41,10 +68,21 @@ export function useFileSystem() {
     setFiles(withBasePath(allItems, basePath))
   }, [])
 
-  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
-    if (!rootHandle) return null
+  const ensureDirectoryReadable = useCallback(async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
+    const opts: FileSystemPermissionDescriptor = { mode: 'read' }
+    const permission = await handle.queryPermission(opts)
+    if (permission === 'granted') return true
+    if (permission === 'denied') return false
 
-    let current: FileSystemDirectoryHandle = rootHandle
+    const requested = await handle.requestPermission(opts)
+    return requested === 'granted'
+  }, [])
+
+  const getDirectoryHandleByPathFromRoot = useCallback(async (
+    baseRoot: FileSystemDirectoryHandle,
+    targetPath: string
+  ) => {
+    let current: FileSystemDirectoryHandle = baseRoot
     const normalizedPath = normalizeRelativePath(targetPath)
     if (!normalizedPath) return current
 
@@ -52,14 +90,51 @@ export function useFileSystem() {
     for (const part of pathParts) {
       const opts: FileSystemPermissionDescriptor = { mode: 'read' }
       const permission = await current.queryPermission(opts)
+      if (permission === 'denied') {
+        throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
+      }
       if (permission === 'prompt') {
-        await current.requestPermission(opts)
+        const requested = await current.requestPermission(opts)
+        if (requested !== 'granted') {
+          throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
+        }
       }
       current = await current.getDirectoryHandle(part)
     }
 
     return current
-  }, [rootHandle])
+  }, [])
+
+  const activateRootHandle = useCallback(async (
+    nextRootHandle: FileSystemDirectoryHandle,
+    nextRootId: string,
+    targetPath: string
+  ) => {
+    const normalizedPath = normalizeRelativePath(targetPath)
+    const targetDirectory = await getDirectoryHandleByPathFromRoot(nextRootHandle, normalizedPath)
+    await loadDirectoryItems(targetDirectory, normalizedPath, false)
+    setRootHandle(nextRootHandle)
+    setRootId(nextRootId)
+    setCurrentPath(normalizedPath)
+    setIsFlattenView(false)
+  }, [getDirectoryHandleByPathFromRoot, loadDirectoryItems])
+
+  const warmupRootPathBinding = useCallback((targetRootId: string, targetRootLabel: string) => {
+    try {
+      ensureRootPath({
+        rootId: targetRootId,
+        rootLabel: targetRootLabel || '根目录',
+        promptIfMissing: true,
+      })
+    } catch {
+      // ignore mapping warmup errors, plugin call can still prompt on demand
+    }
+  }, [])
+
+  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
+    if (!rootHandle) return null
+    return getDirectoryHandleByPathFromRoot(rootHandle, targetPath)
+  }, [rootHandle, getDirectoryHandleByPathFromRoot])
 
   const getCurrentDirectoryHandle = useCallback(async () => {
     return getDirectoryHandleByPath(currentPath)
@@ -88,21 +163,54 @@ export function useFileSystem() {
 
     try {
       const handle = await openDirectory()
-      if (!handle) {
-        setIsLoading(false)
-        return
-      }
+      if (!handle) return
 
-      setRootHandle(handle)
-      setCurrentPath('')
-      setIsFlattenView(false)
-      await loadDirectoryItems(handle, '', false)
+      const cached = await upsertCachedRootHandle(handle).catch(() => null)
+      const resolvedRootId = cached?.rootId ?? createSessionRootId(handle)
+
+      await activateRootHandle(handle, resolvedRootId, '')
+      warmupRootPathBinding(resolvedRootId, handle.name)
+      await refreshCachedRoots()
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setIsLoading(false)
     }
-  }, [loadDirectoryItems])
+  }, [activateRootHandle, refreshCachedRoots, warmupRootPathBinding])
+
+  const openCachedRoot = useCallback(async (targetRootId: string): Promise<boolean> => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const cachedHandle = await getCachedRootHandle(targetRootId)
+      if (!cachedHandle) {
+        await removeCachedRoot(targetRootId)
+        await refreshCachedRoots()
+        setError(ROOT_CACHE_MISS_MESSAGE)
+        return false
+      }
+
+      const granted = await ensureDirectoryReadable(cachedHandle)
+      if (!granted) {
+        await removeCachedRoot(targetRootId)
+        await refreshCachedRoots()
+        setError(ROOT_PERMISSION_DENIED_MESSAGE)
+        return false
+      }
+
+      await activateRootHandle(cachedHandle, targetRootId, '')
+      await markCachedRootAsUsed(targetRootId)
+      warmupRootPathBinding(targetRootId, cachedHandle.name)
+      await refreshCachedRoots()
+      return true
+    } catch (err) {
+      setError((err as Error).message)
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }, [activateRootHandle, ensureDirectoryReadable, refreshCachedRoots, warmupRootPathBinding])
 
   const navigateToPath = useCallback(async (
     targetPath: string,
@@ -132,6 +240,47 @@ export function useFileSystem() {
       setIsLoading(false)
     }
   }, [rootHandle, isFlattenView, getDirectoryHandleByPath, loadDirectoryItems])
+
+  const openHistoryEntry = useCallback(async (entry: AddressPathHistoryEntry): Promise<boolean> => {
+    if (!entry.rootId) return false
+
+    const normalizedPath = normalizeRelativePath(entry.path)
+    if (rootHandle && rootId === entry.rootId) {
+      return navigateToPath(normalizedPath, { resetFlattenView: true })
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const cachedHandle = await getCachedRootHandle(entry.rootId)
+      if (!cachedHandle) {
+        await removeCachedRoot(entry.rootId)
+        await refreshCachedRoots()
+        setError(ROOT_CACHE_MISS_MESSAGE)
+        return false
+      }
+
+      const granted = await ensureDirectoryReadable(cachedHandle)
+      if (!granted) {
+        await removeCachedRoot(entry.rootId)
+        await refreshCachedRoots()
+        setError(ROOT_PERMISSION_DENIED_MESSAGE)
+        return false
+      }
+
+      await activateRootHandle(cachedHandle, entry.rootId, normalizedPath)
+      await markCachedRootAsUsed(entry.rootId)
+      warmupRootPathBinding(entry.rootId, cachedHandle.name)
+      await refreshCachedRoots()
+      return true
+    } catch (err) {
+      setError((err as Error).message)
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }, [activateRootHandle, ensureDirectoryReadable, navigateToPath, refreshCachedRoots, rootHandle, rootId, warmupRootPathBinding])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
     const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
@@ -214,12 +363,16 @@ export function useFileSystem() {
 
   return {
     rootHandle,
+    rootId,
+    cachedRoots,
     files,
     currentPath,
     isFlattenView,
     isLoading,
     error,
     selectDirectory,
+    openCachedRoot,
+    openHistoryEntry,
     navigateToPath,
     navigateToDirectory,
     navigateUp,

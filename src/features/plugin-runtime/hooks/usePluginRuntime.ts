@@ -30,6 +30,7 @@ interface UsePluginRuntimeOptions {
   tools: GatewayToolDescriptor[]
   contextKey: string
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   resultQueueState: PluginResultQueueState
   setResultQueueState: Dispatch<SetStateAction<PluginResultQueueState>>
   workbenchState: PluginWorkbenchState
@@ -236,6 +237,7 @@ export function usePluginRuntime({
   tools,
   contextKey,
   rootHandle,
+  rootId,
   resultQueueState,
   setResultQueueState,
   workbenchState,
@@ -340,6 +342,7 @@ export function usePluginRuntime({
     const dispatchResult = await dispatchSystemTool({
       toolName: tool.name,
       rootHandle,
+      rootId,
       additionalArgs: argumentsPayload,
     })
 
@@ -389,7 +392,7 @@ export function usePluginRuntime({
     }
 
     return 'executed'
-  }, [baseArguments, canRunTool, contextKey, onMutationCommitted, rootHandle, setResultQueueState, workbenchState.optionValuesByTool])
+  }, [baseArguments, canRunTool, contextKey, onMutationCommitted, rootHandle, rootId, setResultQueueState, workbenchState.optionValuesByTool])
 
   const handleWorkbenchOptionChange = useCallback((toolName: string, optionKey: string, value: ToolWorkbenchOptionValue) => {
     setWorkbenchState((prev) => ({

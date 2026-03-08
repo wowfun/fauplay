@@ -29,7 +29,9 @@ interface ExplorerWorkspaceLayoutProps {
   onFilterChange: (filter: FilterState) => void
   rootName: string
   currentPath: string
+  rootId?: string | null
   onNavigateToPath: (path: string) => Promise<boolean>
+  onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
   recentPathHistory: AddressPathHistoryEntry[]
   onNavigateUp: () => void
@@ -80,7 +82,9 @@ export function ExplorerWorkspaceLayout({
   onFilterChange,
   rootName,
   currentPath,
+  rootId,
   onNavigateToPath,
+  onNavigateHistoryEntry,
   onListChildDirectories,
   recentPathHistory,
   onNavigateUp,
@@ -150,6 +154,7 @@ export function ExplorerWorkspaceLayout({
         rootName={rootName}
         currentPath={currentPath}
         onNavigateToPath={onNavigateToPath}
+        onNavigateHistoryEntry={onNavigateHistoryEntry}
         onListChildDirectories={onListChildDirectories}
         recentPathHistory={recentPathHistory}
         onNavigateUp={onNavigateUp}
@@ -190,10 +195,11 @@ export function ExplorerWorkspaceLayout({
               />
               {pluginTools.length > 0 && (
                 <Suspense fallback={null}>
-                  <WorkspacePluginHost
-                    tools={pluginTools}
-                    rootHandle={rootHandle}
-                    currentPath={currentPath}
+                <WorkspacePluginHost
+                  tools={pluginTools}
+                  rootHandle={rootHandle}
+                  rootId={rootId}
+                  currentPath={currentPath}
                     visibleFiles={files}
                     selectedPaths={gridSelectedPaths}
                     resultQueueState={workspacePluginResultQueueState}
@@ -228,6 +234,7 @@ export function ExplorerWorkspaceLayout({
               <MediaPreviewPanel
                 file={selectedFile}
                 rootHandle={rootHandle}
+                rootId={rootId}
                 previewActionTools={pluginTools}
                 onClose={onClosePane}
                 onOpenFullscreen={onOpenFullscreenFromPane}
@@ -267,6 +274,7 @@ export function ExplorerWorkspaceLayout({
           <MediaLightboxModal
             file={previewFile}
             rootHandle={rootHandle}
+            rootId={rootId}
             previewActionTools={pluginTools}
             onClose={onClosePreview}
             autoPlayOnOpen={previewAutoPlayOnOpen}

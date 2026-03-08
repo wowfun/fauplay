@@ -8,6 +8,7 @@ import { MediaPreviewPanel } from './MediaPreviewPanel'
 interface MediaLightboxModalProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
   autoPlayOnOpen?: boolean
@@ -29,6 +30,7 @@ interface MediaLightboxModalProps {
 export function MediaLightboxModal({
   file,
   rootHandle,
+  rootId,
   previewActionTools,
   onClose,
   autoPlayOnOpen = false,
@@ -51,6 +53,7 @@ export function MediaLightboxModal({
       <MediaPreviewPanel
         file={file}
         rootHandle={rootHandle}
+        rootId={rootId}
         previewActionTools={previewActionTools}
         onClose={onClose}
         autoPlayEnabled={autoPlayEnabled}

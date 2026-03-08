@@ -39,6 +39,14 @@ export interface FilterState {
 }
 
 export interface AddressPathHistoryEntry {
+  rootId: string
+  rootName: string
   path: string
   visitedAt: number
+}
+
+export interface CachedRootEntry {
+  rootId: string
+  rootName: string
+  lastUsedAt: number
 }

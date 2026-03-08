@@ -13,6 +13,7 @@ import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/pl
 interface WorkspacePluginHostProps {
   tools: GatewayToolDescriptor[]
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   currentPath: string
   visibleFiles: FileItem[]
   selectedPaths: string[]
@@ -26,6 +27,7 @@ interface WorkspacePluginHostProps {
 export function WorkspacePluginHost({
   tools,
   rootHandle,
+  rootId,
   currentPath,
   visibleFiles,
   selectedPaths,
@@ -59,6 +61,7 @@ export function WorkspacePluginHost({
     tools,
     contextKey,
     rootHandle,
+    rootId,
     resultQueueState,
     setResultQueueState,
     workbenchState,

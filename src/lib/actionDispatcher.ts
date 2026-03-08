@@ -6,6 +6,7 @@ export type SystemToolName = string
 interface DispatchSystemToolOptions {
   toolName: SystemToolName
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   additionalArgs?: Record<string, unknown>
 }
 
@@ -38,6 +39,7 @@ function toToolError(error: unknown): { message: string; code?: string } {
 export async function dispatchSystemTool({
   toolName,
   rootHandle,
+  rootId,
   additionalArgs,
 }: DispatchSystemToolOptions): Promise<DispatchSystemToolResult> {
   if (!toolName || !rootHandle) {
@@ -51,7 +53,11 @@ export async function dispatchSystemTool({
   }
 
   const rootLabel = rootHandle.name || 'current-folder'
-  const rootPath = ensureRootPath(rootLabel)
+  const rootPath = ensureRootPath({
+    rootLabel,
+    rootId,
+    promptIfMissing: true,
+  })
   if (!rootPath) {
     return {
       toolName,

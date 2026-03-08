@@ -21,12 +21,14 @@ let previewPanelModulesPreloaded = false
 
 interface WorkspaceShellProps {
   rootHandle: FileSystemDirectoryHandle
+  rootId: string
   files: FileItem[]
   currentPath: string
   isFlattenView: boolean
   isLoading: boolean
   error: string | null
   selectDirectory: () => Promise<void>
+  openHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   navigateToPath: (
     targetPath: string,
     options?: { resetFlattenView?: boolean }
@@ -51,48 +53,85 @@ function normalizeRelativePath(path: string): string {
 }
 
 function dedupeAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
-  const latestEntryByPath = new Map<string, AddressPathHistoryEntry>()
+  const latestEntryByKey = new Map<string, AddressPathHistoryEntry>()
 
   for (const item of entries) {
+    if (!item.rootId) continue
     const normalizedPath = normalizeRelativePath(item.path)
     const visitedAt = Number.isFinite(item.visitedAt) ? item.visitedAt : 0
-    const existing = latestEntryByPath.get(normalizedPath)
+    const key = `${item.rootId}:${normalizedPath}`
+    const existing = latestEntryByKey.get(key)
     if (!existing || visitedAt > existing.visitedAt) {
-      latestEntryByPath.set(normalizedPath, { path: normalizedPath, visitedAt })
+      latestEntryByKey.set(key, {
+        rootId: item.rootId,
+        rootName: item.rootName || '根目录',
+        path: normalizedPath,
+        visitedAt,
+      })
     }
   }
 
-  return [...latestEntryByPath.values()]
+  return [...latestEntryByKey.values()]
     .sort((left, right) => right.visitedAt - left.visitedAt)
     .slice(0, MAX_ADDRESS_PATH_HISTORY_ITEMS)
 }
 
-function parseAddressPathHistory(raw: string | null): AddressPathHistoryEntry[] {
-  if (!raw) return []
+interface ParsedAddressPathHistory {
+  entries: AddressPathHistoryEntry[]
+  shouldRewrite: boolean
+}
+
+function parseAddressPathHistory(raw: string | null): ParsedAddressPathHistory {
+  if (!raw) return { entries: [], shouldRewrite: false }
 
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
+    if (!Array.isArray(parsed)) return { entries: [], shouldRewrite: true }
+
+    let hasLegacyEntry = false
+    let hasInvalidEntry = false
 
     const validEntries = parsed
       .filter((item): item is AddressPathHistoryEntry => {
-        return Boolean(
-          item &&
-          typeof item === 'object' &&
-          typeof (item as AddressPathHistoryEntry).path === 'string' &&
-          typeof (item as AddressPathHistoryEntry).visitedAt === 'number'
-        )
+        if (!item || typeof item !== 'object') {
+          hasInvalidEntry = true
+          return false
+        }
+
+        const candidate = item as Partial<AddressPathHistoryEntry>
+        const hasPathShape = typeof candidate.path === 'string' && typeof candidate.visitedAt === 'number'
+        if (!hasPathShape) {
+          hasInvalidEntry = true
+          return false
+        }
+
+        if (typeof candidate.rootId !== 'string' || typeof candidate.rootName !== 'string') {
+          hasLegacyEntry = true
+          return false
+        }
+
+        return true
       })
 
-    return dedupeAddressPathHistory(validEntries)
+    const dedupedEntries = dedupeAddressPathHistory(validEntries)
+    const shouldRewrite = hasLegacyEntry || hasInvalidEntry || dedupedEntries.length !== validEntries.length
+    if (hasLegacyEntry) {
+      return { entries: [], shouldRewrite: true }
+    }
+
+    return { entries: dedupedEntries, shouldRewrite }
   } catch {
-    return []
+    return { entries: [], shouldRewrite: true }
   }
 }
 
 function loadAddressPathHistory(): AddressPathHistoryEntry[] {
   if (typeof window === 'undefined') return []
-  return parseAddressPathHistory(window.localStorage.getItem(ADDRESS_PATH_HISTORY_STORAGE_KEY))
+  const parsed = parseAddressPathHistory(window.localStorage.getItem(ADDRESS_PATH_HISTORY_STORAGE_KEY))
+  if (parsed.shouldRewrite) {
+    saveAddressPathHistory(parsed.entries)
+  }
+  return parsed.entries
 }
 
 function saveAddressPathHistory(history: AddressPathHistoryEntry[]): void {
@@ -102,11 +141,16 @@ function saveAddressPathHistory(history: AddressPathHistoryEntry[]): void {
 
 function upsertAddressPathHistory(
   previous: AddressPathHistoryEntry[],
-  nextPath: string
+  nextEntry: Pick<AddressPathHistoryEntry, 'rootId' | 'rootName' | 'path'>
 ): AddressPathHistoryEntry[] {
-  const normalizedPath = normalizeRelativePath(nextPath)
+  const normalizedPath = normalizeRelativePath(nextEntry.path)
   const now = Date.now()
-  return dedupeAddressPathHistory([{ path: normalizedPath, visitedAt: now }, ...previous])
+  return dedupeAddressPathHistory([{
+    rootId: nextEntry.rootId,
+    rootName: nextEntry.rootName,
+    path: normalizedPath,
+    visitedAt: now,
+  }, ...previous])
 }
 
 function preloadPreviewModules(): void {
@@ -131,12 +175,14 @@ function preloadPreviewModules(): void {
 
 export function WorkspaceShell({
   rootHandle,
+  rootId,
   files,
   currentPath,
   isFlattenView,
   isLoading,
   error,
   selectDirectory,
+  openHistoryEntry,
   navigateToPath,
   navigateToDirectory,
   navigateUp,
@@ -222,14 +268,22 @@ export function WorkspaceShell({
   const handleNavigateToPath = useCallback((path: string) => {
     return navigateToPath(path, { resetFlattenView: true })
   }, [navigateToPath])
+  const handleNavigateHistoryEntry = useCallback((entry: AddressPathHistoryEntry) => {
+    return openHistoryEntry(entry)
+  }, [openHistoryEntry])
 
   const handleWorkspaceMutationCommitted = useCallback(async () => {
     await navigateToPath(currentPath)
   }, [currentPath, navigateToPath])
 
   useEffect(() => {
-    setRecentPathHistory((previous) => upsertAddressPathHistory(previous, currentPath))
-  }, [currentPath])
+    if (!rootId) return
+    setRecentPathHistory((previous) => upsertAddressPathHistory(previous, {
+      rootId,
+      rootName: rootHandle.name || '根目录',
+      path: currentPath,
+    }))
+  }, [currentPath, rootId, rootHandle.name])
 
   useEffect(() => {
     saveAddressPathHistory(recentPathHistory)
@@ -429,7 +483,9 @@ export function WorkspaceShell({
       onFilterChange={setFilter}
       rootName={rootHandle.name}
       currentPath={currentPath}
+      rootId={rootId}
       onNavigateToPath={handleNavigateToPath}
+      onNavigateHistoryEntry={handleNavigateHistoryEntry}
       onListChildDirectories={listChildDirectories}
       recentPathHistory={recentPathHistory}
       onNavigateUp={navigateUp}

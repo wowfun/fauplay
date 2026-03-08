@@ -36,6 +36,7 @@ declare global {
   interface FileSystemHandle {
     kind: 'file' | 'directory'
     name: string
+    isSameEntry?: (other: FileSystemHandle) => Promise<boolean>
   }
 
   interface FileSystemPermissionDescriptor {

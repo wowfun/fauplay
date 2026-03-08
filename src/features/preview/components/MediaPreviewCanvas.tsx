@@ -9,6 +9,7 @@ import { PreviewMediaViewport } from './PreviewMediaViewport'
 interface MediaPreviewCanvasProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   previewUrl: string | null
   isLoading: boolean
@@ -35,6 +36,7 @@ const PreviewPluginHost = lazy(async () => {
 export function MediaPreviewCanvas({
   file,
   rootHandle,
+  rootId,
   previewActionTools,
   previewUrl,
   isLoading,
@@ -77,6 +79,7 @@ export function MediaPreviewCanvas({
           <PreviewPluginHost
             file={file}
             rootHandle={rootHandle}
+            rootId={rootId}
             previewActionTools={previewActionTools}
             previewViewState={previewViewState}
             surfaceVariant={surfaceVariant}

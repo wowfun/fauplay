@@ -23,12 +23,16 @@ function WorkspaceLoadingFallback({ rootName }: { rootName: string }) {
 function App() {
   const {
     rootHandle,
+    rootId,
+    cachedRoots,
     files,
     currentPath,
     isFlattenView,
     isLoading,
     error,
     selectDirectory,
+    openCachedRoot,
+    openHistoryEntry,
     navigateToPath,
     navigateToDirectory,
     navigateUp,
@@ -55,19 +59,31 @@ function App() {
   }, [rootHandle, selectDirectory])
 
   if (!rootHandle) {
-    return <DirectorySelectionLayout isLoading={isLoading} error={error} onSelectDirectory={selectDirectory} />
+    return (
+      <DirectorySelectionLayout
+        isLoading={isLoading}
+        error={error}
+        onSelectDirectory={selectDirectory}
+        cachedRoots={cachedRoots}
+        onOpenCachedRoot={(nextRootId) => {
+          void openCachedRoot(nextRootId)
+        }}
+      />
+    )
   }
 
   return (
     <Suspense fallback={<WorkspaceLoadingFallback rootName={rootHandle.name} />}>
       <WorkspaceShell
         rootHandle={rootHandle}
+        rootId={rootId ?? `session:${rootHandle.name}`}
         files={files}
         currentPath={currentPath}
         isFlattenView={isFlattenView}
         isLoading={isLoading}
         error={error}
         selectDirectory={selectDirectory}
+        openHistoryEntry={openHistoryEntry}
         navigateToPath={navigateToPath}
         navigateToDirectory={navigateToDirectory}
         navigateUp={navigateUp}

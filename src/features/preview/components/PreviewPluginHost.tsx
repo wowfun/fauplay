@@ -15,6 +15,7 @@ import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/pl
 interface PreviewPluginHostProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
+  rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   previewViewState: 'loading' | 'error' | 'ready' | 'empty'
   surfaceVariant: 'preview-lightbox' | 'preview-panel'
@@ -33,6 +34,7 @@ interface ContinuousToolTask {
 export function PreviewPluginHost({
   file,
   rootHandle,
+  rootId,
   previewActionTools,
   previewViewState,
   surfaceVariant,
@@ -51,6 +53,7 @@ export function PreviewPluginHost({
     tools: previewActionTools,
     contextKey: file.path,
     rootHandle,
+    rootId,
     resultQueueState: toolResultQueueState,
     setResultQueueState: setToolResultQueueState,
     workbenchState: toolWorkbenchState,
