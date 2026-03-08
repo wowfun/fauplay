@@ -71,7 +71,7 @@ npm run build
 - UI/UX 规范：[`specs/003-ui-ux/spec.md`](specs/003-ui-ux/spec.md)
 - 预览播放专题：[`specs/100-preview-playback/spec.md`](specs/100-preview-playback/spec.md)
 - 缩略图管线专题：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
-- 面包屑导航专题：[`specs/102-breadcrumb-navigation/spec.md`](specs/102-breadcrumb-navigation/spec.md)
+- 地址栏导航专题：[`specs/102-address-bar-navigation/spec.md`](specs/102-address-bar-navigation/spec.md)
 - 规范变更日志：[`specs/CHANGELOG.md`](specs/CHANGELOG.md)
 
 ## 项目结构

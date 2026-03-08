@@ -36,3 +36,7 @@
 - 功能专题使用 `100+`（例如 `100-*`）
 - 功能专题建议使用“能力域 + 行为”命名（例如：`100-preview-playback`、`101-thumbnail-pipeline`）
 - 历史规范归档在 [`_archive/`](./_archive/) 下，归档内容默认只读
+
+## 当前专题入口（示例）
+
+- 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)

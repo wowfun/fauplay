@@ -9,7 +9,7 @@ import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPan
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
 interface ExplorerWorkspaceLayoutProps {
@@ -17,7 +17,9 @@ interface ExplorerWorkspaceLayoutProps {
   onFilterChange: (filter: FilterState) => void
   rootName: string
   currentPath: string
-  onNavigateToPath: (path: string) => void
+  onNavigateToPath: (path: string) => Promise<boolean>
+  onListChildDirectories: (path: string) => Promise<string[]>
+  recentPathHistory: AddressPathHistoryEntry[]
   onNavigateUp: () => void
   isFlattenView: boolean
   onToggleFlattenView: () => void
@@ -67,6 +69,8 @@ export function ExplorerWorkspaceLayout({
   rootName,
   currentPath,
   onNavigateToPath,
+  onListChildDirectories,
+  recentPathHistory,
   onNavigateUp,
   isFlattenView,
   onToggleFlattenView,
@@ -134,6 +138,8 @@ export function ExplorerWorkspaceLayout({
         rootName={rootName}
         currentPath={currentPath}
         onNavigateToPath={onNavigateToPath}
+        onListChildDirectories={onListChildDirectories}
+        recentPathHistory={recentPathHistory}
         onNavigateUp={onNavigateUp}
         isFlattenView={isFlattenView}
         onToggleFlattenView={onToggleFlattenView}

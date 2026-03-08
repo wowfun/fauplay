@@ -37,3 +37,8 @@ export interface FilterState {
   sortBy: SortBy
   sortOrder: SortOrder
 }
+
+export interface AddressPathHistoryEntry {
+  path: string
+  visitedAt: number
+}

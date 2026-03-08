@@ -65,6 +65,23 @@ export function useFileSystem() {
     return getDirectoryHandleByPath(currentPath)
   }, [getDirectoryHandleByPath, currentPath])
 
+  const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
+    if (!rootHandle) return []
+
+    const normalizedPath = normalizeRelativePath(targetPath)
+    const directory = await getDirectoryHandleByPath(normalizedPath)
+    if (!directory) return []
+
+    const directoryNames: string[] = []
+    for await (const [name, handle] of directory.entries()) {
+      if (handle.kind !== 'directory') continue
+      directoryNames.push(name)
+    }
+
+    directoryNames.sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
+    return directoryNames
+  }, [rootHandle, getDirectoryHandleByPath])
+
   const selectDirectory = useCallback(async () => {
     setIsLoading(true)
     setError(null)
@@ -90,8 +107,8 @@ export function useFileSystem() {
   const navigateToPath = useCallback(async (
     targetPath: string,
     options: NavigateToPathOptions = {}
-  ) => {
-    if (!rootHandle) return
+  ): Promise<boolean> => {
+    if (!rootHandle) return false
 
     const normalizedPath = normalizeRelativePath(targetPath)
     const nextFlattenView = options.resetFlattenView ? false : isFlattenView
@@ -101,14 +118,16 @@ export function useFileSystem() {
 
     try {
       const targetDirectory = await getDirectoryHandleByPath(normalizedPath)
-      if (!targetDirectory) return
+      if (!targetDirectory) return false
       await loadDirectoryItems(targetDirectory, normalizedPath, nextFlattenView)
       setCurrentPath(normalizedPath)
       if (options.resetFlattenView) {
         setIsFlattenView(false)
       }
+      return true
     } catch (err) {
       setError((err as Error).message)
+      return false
     } finally {
       setIsLoading(false)
     }
@@ -196,6 +215,7 @@ export function useFileSystem() {
     navigateToPath,
     navigateToDirectory,
     navigateUp,
+    listChildDirectories,
     setFlattenView,
     filterFiles,
   }

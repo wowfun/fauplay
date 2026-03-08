@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useFileSystem } from '@/hooks/useFileSystem'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { isImageFile, isVideoFile } from '@/lib/fileSystem'
-import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { useGatewayCapabilities } from '@/hooks/useGatewayCapabilities'
@@ -19,6 +19,8 @@ import {
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
 const DEFAULT_PANE_WIDTH_RATIO = 0.375
+const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
+const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 
 const defaultFilter: FilterState = {
   search: '',
@@ -26,6 +28,67 @@ const defaultFilter: FilterState = {
   hideEmptyFolders: true,
   sortBy: 'name',
   sortOrder: 'asc',
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.split('/').filter(Boolean).join('/')
+}
+
+function dedupeAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
+  const latestEntryByPath = new Map<string, AddressPathHistoryEntry>()
+
+  for (const item of entries) {
+    const normalizedPath = normalizeRelativePath(item.path)
+    const visitedAt = Number.isFinite(item.visitedAt) ? item.visitedAt : 0
+    const existing = latestEntryByPath.get(normalizedPath)
+    if (!existing || visitedAt > existing.visitedAt) {
+      latestEntryByPath.set(normalizedPath, { path: normalizedPath, visitedAt })
+    }
+  }
+
+  return [...latestEntryByPath.values()]
+    .sort((left, right) => right.visitedAt - left.visitedAt)
+    .slice(0, MAX_ADDRESS_PATH_HISTORY_ITEMS)
+}
+
+function parseAddressPathHistory(raw: string | null): AddressPathHistoryEntry[] {
+  if (!raw) return []
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const validEntries = parsed
+      .filter((item): item is AddressPathHistoryEntry => {
+        return Boolean(
+          item &&
+          typeof item === 'object' &&
+          typeof (item as AddressPathHistoryEntry).path === 'string' &&
+          typeof (item as AddressPathHistoryEntry).visitedAt === 'number'
+        )
+      })
+    return dedupeAddressPathHistory(validEntries)
+  } catch {
+    return []
+  }
+}
+
+function loadAddressPathHistory(): AddressPathHistoryEntry[] {
+  if (typeof window === 'undefined') return []
+  return parseAddressPathHistory(window.localStorage.getItem(ADDRESS_PATH_HISTORY_STORAGE_KEY))
+}
+
+function saveAddressPathHistory(history: AddressPathHistoryEntry[]): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(ADDRESS_PATH_HISTORY_STORAGE_KEY, JSON.stringify(history))
+}
+
+function upsertAddressPathHistory(
+  previous: AddressPathHistoryEntry[],
+  nextPath: string
+): AddressPathHistoryEntry[] {
+  const normalizedPath = normalizeRelativePath(nextPath)
+  const now = Date.now()
+  return dedupeAddressPathHistory([{ path: normalizedPath, visitedAt: now }, ...previous])
 }
 
 function App() {
@@ -40,6 +103,7 @@ function App() {
     navigateToPath,
     navigateToDirectory,
     navigateUp,
+    listChildDirectories,
     setFlattenView,
     filterFiles,
   } = useFileSystem()
@@ -48,6 +112,7 @@ function App() {
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
   const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
+  const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(false)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
@@ -116,12 +181,21 @@ function App() {
   }, [openFileInModal])
 
   const handleNavigateToPath = useCallback((path: string) => {
-    void navigateToPath(path, { resetFlattenView: true })
+    return navigateToPath(path, { resetFlattenView: true })
   }, [navigateToPath])
 
   const handleWorkspaceMutationCommitted = useCallback(async () => {
     await navigateToPath(currentPath)
   }, [currentPath, navigateToPath])
+
+  useEffect(() => {
+    if (!rootHandle) return
+    setRecentPathHistory((previous) => upsertAddressPathHistory(previous, currentPath))
+  }, [rootHandle, currentPath])
+
+  useEffect(() => {
+    saveAddressPathHistory(recentPathHistory)
+  }, [recentPathHistory])
 
   useEffect(() => {
     fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
@@ -282,6 +356,8 @@ function App() {
       rootName={rootHandle.name}
       currentPath={currentPath}
       onNavigateToPath={handleNavigateToPath}
+      onListChildDirectories={listChildDirectories}
+      recentPathHistory={recentPathHistory}
       onNavigateUp={navigateUp}
       isFlattenView={isFlattenView}
       onToggleFlattenView={() => {

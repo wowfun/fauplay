@@ -1,7 +1,17 @@
 # CHANGELOG
 
 ## 2026-03-08
+### Added
+- 新增 `specs/004-performance-governance/spec.md`：定义性能治理基线（术语与口径、`FR-PG-*`/`AC-PG-*` 模板、性能变更五项信息集：基线/目标/测量方法/回归门槛/降级策略）。
+- 新增 `specs/108-dev-cold-start-performance/spec.md`：定义“开发冷启动首次刷新慢”专项规范，覆盖问题证据、开始页优先可见、工作区重模块延后加载、首次进入工作区加载占位与稳定优先 `warmup` 约束。
+
 ### Changed
+- 建立“性能治理 -> 性能专项”双层规范关系：`004-performance-governance` 作为跨专题上游约束，`108-dev-cold-start-performance` 作为首个落地专项入口。
+- 更新地址栏交互细节：编辑态新增“地址栏外左键点击即退出”语义；最近路径历史在加载与维护时强制去重，同一路径仅保留最新一条记录。
+- 落地 `102-address-bar-navigation`：`ExplorerToolbar` 新增地址栏双态（面包屑/编辑）、路径编辑提交与取消（`Enter/Esc`）、路径段子目录下拉导航、最近路径历史（localStorage 持久化）与当前路径复制能力；`useFileSystem` 扩展为导航成功布尔返回与目录直接子目录查询接口，`App/ExplorerWorkspaceLayout` 完成地址栏能力接线并保持地址栏导航后平铺视图复位语义。
+- 新增 `specs/102-address-bar-navigation/spec.md`：将原 102 主题升级为“地址栏导航”稳定规范，覆盖双态地址栏、分段下拉、最近路径历史与复制路径契约，并明确本轮不新增全局快捷键约束。
+- 归档 `specs/102-breadcrumb-navigation/spec.md` 到 `specs/_archive/2026-03-08/102-breadcrumb-navigation/spec.md`：原面包屑语义并入新 102 规范，作为地址栏能力子集保留。
+- 更新 `README.md` 与 `specs/README.md`：专题入口从 `102-breadcrumb-navigation` 切换为 `102-address-bar-navigation`。
 - 新增 `specs/107-stale-config-code-cleanup/spec.md`：定义“过期配置与冗余代码清理”边界，约束 TS 单一配置源、构建缓存忽略与冗余别名移除验收标准。
 - 更新 `tsconfig.json`：补齐 `composite=true` 与 `tsBuildInfoFile=./node_modules/.tmp/tsconfig.app.tsbuildinfo`，保留 `tsc -b` 增量构建路径并避免根目录缓存污染。
 - 删除 `tsconfig.app.json` 与 `tsconfig.tsbuildinfo`：移除重复 TS 配置与被误跟踪构建缓存文件。
