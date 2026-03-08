@@ -10,6 +10,7 @@ const GATEWAY_VERSION = '0.2.0'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_MCP_CONFIG_PATH = path.resolve(process.cwd(), '.fauplay', 'mcp.json')
+const LOCAL_MCP_CONFIG_FILENAME = 'mcp.local.json'
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -67,18 +68,23 @@ function resolveCwd(configDir, cwd) {
   return path.isAbsolute(cwd) ? cwd : path.resolve(configDir, cwd)
 }
 
-async function loadMcpServersFromConfig(configPath) {
+function toConfigObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value
+}
+
+async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
   let raw = ''
   try {
     raw = await readFile(configPath, 'utf-8')
   } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return []
+    if (allowMissing && error && typeof error === 'object' && error.code === 'ENOENT') {
+      return null
     }
     throw createMcpRuntimeError('MCP_CONFIG_ERROR', `Failed to read MCP config: ${configPath}`, 500)
   }
 
-  let parsed
+  let parsed = null
   try {
     parsed = JSON.parse(raw)
   } catch {
@@ -86,8 +92,44 @@ async function loadMcpServersFromConfig(configPath) {
   }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw createMcpRuntimeError('MCP_CONFIG_ERROR', 'MCP config root must be an object', 500)
+    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `MCP config root must be an object: ${configPath}`, 500)
   }
+
+  return parsed
+}
+
+function resolveLocalMcpConfigPath(configPath) {
+  return path.resolve(path.dirname(configPath), LOCAL_MCP_CONFIG_FILENAME)
+}
+
+function mergeMcpConfig(baseConfig, localConfig) {
+  const base = toConfigObject(baseConfig)
+  const local = toConfigObject(localConfig)
+
+  const merged = {
+    ...base,
+    ...local,
+  }
+
+  const baseServers = toConfigObject(base.servers)
+  const localServers = toConfigObject(local.servers)
+  const hasServers = Object.keys(baseServers).length > 0 || Object.keys(localServers).length > 0
+
+  if (hasServers) {
+    merged.servers = {
+      ...baseServers,
+      ...localServers,
+    }
+  }
+
+  return merged
+}
+
+async function loadMcpServersFromConfig(configPath) {
+  const baseConfig = await readMcpConfigFile(configPath, { allowMissing: true })
+  const localConfigPath = resolveLocalMcpConfigPath(configPath)
+  const localConfig = await readMcpConfigFile(localConfigPath, { allowMissing: true })
+  const parsed = mergeMcpConfig(baseConfig, localConfig)
 
   const servers = parsed.servers
   if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
