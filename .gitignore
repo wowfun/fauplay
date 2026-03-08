@@ -33,3 +33,8 @@ Thumbs.db
 
 # Testing
 coverage/
+__pycache__/
+
+# Local MCP plugins
+.fauplay/mcp.local.json
+tools/mcp-local/

@@ -12,7 +12,7 @@
       "args": [
         "tools/mcp/timm-classifier/server.py",
         "--config",
-        ".fauplay/timm-classifier.json"
+        "tools/mcp/timm-classifier/config.json"
       ]
     },
     "batch-rename": {

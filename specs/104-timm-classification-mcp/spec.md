@@ -2,7 +2,7 @@
 
 ## 1. 目的 (Purpose)
 
-定义 Fauplay 的 `timm` 图像分类 MCP 插件行为契约（Timm Classification MCP Contract），统一单图分类与批量分类工具的输入输出、错误语义、设备选择和模型生命周期规则。
+定义 Fauplay 的 `timm` 图像分类 MCP 插件行为契约（Timm Classification MCP Contract），统一单图分类与批量分类工具的输入输出、错误语义、设备选择和模型生命周期规则。插件推理实现基于 HuggingFace `transformers.pipelines.ImageClassificationPipeline` 标准接口。
 
 ## 2. 关键术语 (Terminology)
 
@@ -11,6 +11,8 @@
 - 批量分类（Batch Classification）
 - 模型目录（Model Directory）
 - Safetensors 权重（Safetensors Weights）
+- HuggingFace 图像分类管线（ImageClassificationPipeline）
+- 推理批大小（Batch Size）
 - Top-K 预测（Top-K Predictions）
 - 模型预热（Model Warm-up）
 
@@ -20,7 +22,7 @@
 
 1. 通过 `stdio` MCP Server 暴露 `ml.classifyImage` 与 `ml.classifyBatch`。
 2. 本地路径输入（`rootPath + relativePath(s)`）的校验与安全约束。
-3. `config.json + model.safetensors` 模型目录加载、设备自动选择与推理返回结构。
+3. 基于 `transformers` `ImageClassificationPipeline` 的模型目录加载、设备自动选择与推理返回结构。
 4. 批量调用的部分成功语义与项级错误返回。
 
 范围外：
@@ -35,10 +37,11 @@
 2. 单图分类返回按置信度降序的 `predictions` 列表，并包含 `device` 与 `timingMs`。
 3. 批量分类支持混合结果：成功项返回预测，失败项返回错误信息，不因单项失败终止整批。
 4. 首次调用允许出现模型加载开销；后续调用应复用已加载权重，不重复加载模型文件。
-5. 调用方（如 Web 端）在触发 `ml.classifyImage` / `ml.classifyBatch` 时必须使用长超时预算（不少于 `120000ms`），避免首轮模型加载被默认短超时中断。
-6. 当调用方超时取消请求时，用户可见错误必须为可读超时提示，不得直接暴露浏览器原始中止文案（例如 `signal is aborted without reason`）。
-7. `ml.classifyImage` 应通过 `annotations.toolOptions` 暴露 `preview.continuousCall.enabled`（`boolean`）选项，以支持预览区持续调用工作流。
-8. 当持续调用开启时，调用方可基于当前文件历史结果命中执行静默跳过，避免同签名请求反复触发。
+5. 分类推理应通过 `ImageClassificationPipeline` 执行（而非手写 `timm + torch` 前后处理链路），以收敛实现复杂度。
+6. 调用方（如 Web 端）在触发 `ml.classifyImage` / `ml.classifyBatch` 时必须使用长超时预算（不少于 `120000ms`），避免首轮模型加载被默认短超时中断。
+7. 当调用方超时取消请求时，用户可见错误必须为可读超时提示，不得直接暴露浏览器原始中止文案（例如 `signal is aborted without reason`）。
+8. `ml.classifyImage` 应通过 `annotations.toolOptions` 暴露 `preview.continuousCall.enabled`（`boolean`）选项，以支持预览区持续调用工作流。
+9. 当持续调用开启时，调用方可基于当前文件历史结果命中执行静默跳过，避免同签名请求反复触发。
 
 ## 5. 工具契约 (Tools Contract)
 
@@ -56,7 +59,7 @@
 - `model: string`
 - `device: string`（`cpu` 或 `cuda`）
 - `timingMs: number`
-- `predictions: Array<{ label: string; score: number; index: number }>`
+- `predictions: Array<{ label: string; score: number }>`
 
 错误约束：
 
@@ -71,6 +74,7 @@
    - `key: "preview.continuousCall.enabled"`
    - `label: "持续调用"`
    - `type: "boolean"`
+3. 推荐声明 `annotations.icon = "image"` 作为单图分类动作图标。
 
 ### 5.2 `ml.classifyBatch`
 
@@ -89,16 +93,21 @@
 - `timingMs: number`
 - `succeeded: number`
 - `failed: number`
-- `items: Array<{ relativePath: string; ok: boolean; predictions?: Array<{ label: string; score: number; index: number }>; error?: string }>`
+- `items: Array<{ relativePath: string; ok: boolean; predictions?: Array<{ label: string; score: number }>; error?: string }>`
 
 批量语义：
 
 1. 单项参数错误、文件不存在、文件不可解码时，仅标记该项失败。
 2. 全局初始化错误（配置缺失、权重加载失败）直接返回 MCP 错误。
 
+工具元数据约束：
+
+1. `annotations.scopes` 必须为 `["workspace"]`。
+2. 推荐声明 `annotations.icon = "images"` 作为批量分类动作图标。
+
 ## 6. 配置契约 (Configuration Contract)
 
-插件配置文件：`.fauplay/timm-classifier.json`
+插件配置文件：`tools/mcp/timm-classifier/config.json`
 
 必填字段：
 
@@ -107,15 +116,17 @@
 可选字段：
 
 - `device: "auto" | "cpu" | "cuda"`（默认 `auto`）
+- `batch_size: integer`（默认 `64`，必须为正整数）
 
 约束：
 
 1. 相对路径按配置文件目录解析。
-2. `modelDir` 必须同时包含 `config.json` 与 `model.safetensors`。
-3. `config.json` 必须提供 `architecture`、`num_classes` 与 `label_names`。
-4. `label_names` 长度必须与 `num_classes` 一致。
-5. `device=auto` 时优先 CUDA，不可用时回退 CPU。
-6. `.fauplay/mcp.json` 中 `timm-classifier` 注册项应配置 `callTimeoutMs >= 120000`，以覆盖首轮模型加载耗时。
+2. `modelDir` 必须是 `transformers` 图像分类管线可加载目录，至少包含 `config.json` 与模型权重文件（如 `model.safetensors`）。
+3. `modelDir` 缺少图像预处理配置（如 `preprocessor_config.json`）且无法自动推断时，调用必须返回 `MCP_TOOL_CALL_FAILED`。
+4. `device=auto` 时优先 CUDA，不可用时回退 CPU。
+5. `batch_size` 缺省时回退默认值 `64`。
+6. `batch_size` 非法（非整数或小于等于 `0`）时，插件初始化必须返回 `MCP_TOOL_CALL_FAILED`。
+7. `.fauplay/mcp.json` 中 `timm-classifier` 注册项应配置 `callTimeoutMs >= 120000`，以覆盖首轮模型加载耗时。
 
 ## 7. 安全与路径约束 (Security & Path Constraints)
 
@@ -136,6 +147,8 @@
 9. `FR-TIMM-09` 前端网关调用层必须将请求中止（Abort）统一映射为可读超时错误（建议内部码：`MCP_CLIENT_TIMEOUT`）。
 10. `FR-TIMM-10` `ml.classifyImage` 的工具注解必须声明 `preview.continuousCall.enabled` 布尔选项，用于驱动预览区持续调用开关。
 11. `FR-TIMM-11` 持续调用路径应支持基于 `tool + file + 请求签名` 的历史命中跳过；手动调用不受该跳过策略限制。
+12. `FR-TIMM-12` 插件实现必须通过 `ImageClassificationPipeline` 标准接口执行推理，并将输出映射为 `{label, score}`。
+13. `FR-TIMM-13` `ml.classifyBatch` 必须将配置中的 `batch_size` 传递到 pipeline 批推理调用，以提升多文件批处理吞吐。
 
 ## 9. 验收标准 (AC)
 
@@ -145,9 +158,10 @@
 4. `AC-TIMM-04` 首次调用后再次调用不重复加载权重（日志或运行时状态可观测）。
 5. `AC-TIMM-05` 越界路径与非法参数返回 `MCP_INVALID_PARAMS`。
 6. `AC-TIMM-06` 首次模型加载超过 `5s` 的场景下，Web 端仍可等待完成或返回可读超时错误，不出现原始浏览器中止文案。
-7. `AC-TIMM-07` 预览区结果展示在 `ml.classifyImage` 成功后可直接看到 Top-K 预测（`label/score/index`），无需依赖浏览器 Network 面板。
+7. `AC-TIMM-07` 预览区结果展示在 `ml.classifyImage` 成功后可直接看到 Top-K 预测（`label/score`），无需依赖浏览器 Network 面板。
 8. `AC-TIMM-08` `tools/list` 中 `ml.classifyImage.annotations.toolOptions` 包含 `preview.continuousCall.enabled`，开启后切换文件会自动触发分类调用。
 9. `AC-TIMM-09` 同文件下持续调用命中历史成功或失败记录时，系统静默跳过请求；手动点击工具仍会强制重算并产生新结果项。
+10. `AC-TIMM-10` `config.batch_size` 缺省时批处理使用默认值 `64`；显式配置后批处理调用使用配置值。
 
 ## 10. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -155,8 +169,10 @@
 2. 默认批量上限 `maxItems=256`。
 3. 默认设备策略为 `auto`（CUDA 优先，CPU 回退）。
 4. 插件元数据中 `ml.classifyImage` 的 `scopes` 为 `["file"]`，`ml.classifyBatch` 的 `scopes` 为 `["workspace"]`。
-5. 推荐 UI 呈现语义：`ml.classifyImage.predictions` 以 Top-K 表格展示（列：`label`、`score`、`index`），并保留通用 JSON 兜底视图。
+5. 推荐 UI 呈现语义：`ml.classifyImage.predictions` 以 Top-K 表格展示（列：`label`、`score`），并保留通用 JSON 兜底视图。
 6. `preview.continuousCall.enabled` 默认值应为 `false`，避免默认触发高频推理。
+7. 默认 `batch_size=64`，用于 `ml.classifyBatch` 的 pipeline 批推理调用。
+8. 推荐图标默认值：`ml.classifyImage -> image`，`ml.classifyBatch -> images`。
 
 ## 11. 关联主题 (Related Specs)
 

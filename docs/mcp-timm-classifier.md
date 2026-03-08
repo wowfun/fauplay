@@ -6,32 +6,34 @@
 
 - MCP server 脚本：`tools/mcp/timm-classifier/server.py`
 - MCP 注册配置：`.fauplay/mcp.json`
-- 模型配置文件：`.fauplay/timm-classifier.json`
+- 模型配置文件：`tools/mcp/timm-classifier/config.json`
 
 ## 2. Python 依赖
 
 在项目环境安装以下依赖：
 
 ```bash
-pip install torch timm pillow safetensors
+pip install torch transformers pillow
 ```
 
 ## 3. 模型配置
 
-编辑 `.fauplay/timm-classifier.json`：
+编辑 `tools/mcp/timm-classifier/config.json`：
 
 ```json
 {
   "modelDir": "/mnt/d/Projects/fau/models/vision/eva02_base_patch14_448.mim_in22k_ft_in22k_in1k-fau",
   "device": "auto",
+  "batch_size": 64
 }
 ```
 
 说明：
 
-1. 当前插件只支持目录模型格式：`modelDir` 下必须存在 `config.json` 和 `model.safetensors`。
-2. `config.json` 必须包含 `architecture`、`num_classes`、`label_names`。
+1. 当前插件使用 HuggingFace `ImageClassificationPipeline`，`modelDir` 必须是可直接加载的图像分类模型目录。
+2. 目录至少应包含 `config.json` 与模型权重（如 `model.safetensors`），并建议提供图像预处理配置（如 `preprocessor_config.json`）。
 3. `device=auto` 表示优先使用 CUDA，不可用时回退 CPU。
+4. `batch_size` 仅用于 `ml.classifyBatch`，默认值为 `64`。
 
 ## 4. 启动网关
 
@@ -114,3 +116,11 @@ curl -s -X POST http://127.0.0.1:3210/v1/mcp \
     }
   }'
 ```
+
+## 7. 输出说明
+
+- `predictions` 项结构为 `{ "label": string, "score": number }`（不包含 `index`）。
+
+## 8. 测试样本
+
+- 插件集成测试样本：`tools/mcp/timm-classifier/tests/fixtures/img1.jpg`

@@ -1,4 +1,5 @@
 {
   "modelDir": "/mnt/d/Projects/fau/models/vision/eva02_base_patch14_448.mim_in22k_ft_in22k_in1k-fau",
-  "device": "auto"
+  "device": "auto",
+  "batch_size": 64
 }

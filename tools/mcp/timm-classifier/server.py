@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import inspect
 import json
 import os
 import re
@@ -12,11 +11,12 @@ from typing import Any
 
 MCP_PROTOCOL_VERSION = "2025-11-05"
 SERVER_NAME = "fauplay-timm-classifier"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 
 DEFAULT_TOP_K = 5
 DEFAULT_MIN_SCORE = 0.0
 DEFAULT_MAX_ITEMS = 256
+DEFAULT_BATCH_SIZE = 64
 MAX_TOP_K = 20
 MAX_BATCH_ITEMS = 1024
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
@@ -133,6 +133,16 @@ def parse_max_items(value: object) -> int:
     return value
 
 
+def parse_batch_size(value: object) -> int:
+    if value is None:
+        return DEFAULT_BATCH_SIZE
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MCPError("MCP_TOOL_CALL_FAILED", "batch_size must be an integer")
+    if value <= 0:
+        raise MCPError("MCP_TOOL_CALL_FAILED", "batch_size must be greater than 0")
+    return value
+
+
 def resolve_image_path(root_path: object, relative_path: object) -> Path:
     if not isinstance(root_path, str) or not root_path.strip():
         raise MCPError("MCP_INVALID_PARAMS", "rootPath is required")
@@ -166,13 +176,6 @@ def resolve_image_path(root_path: object, relative_path: object) -> Path:
     return target
 
 
-def strip_module_prefix(state_dict: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in state_dict.items():
-        result[key[7:] if key.startswith("module.") else key] = value
-    return result
-
-
 def resolve_model_dir_path(config_dir: Path, model_dir_raw: str) -> Path:
     model_dir = Path(model_dir_raw)
     if not model_dir.is_absolute():
@@ -182,101 +185,91 @@ def resolve_model_dir_path(config_dir: Path, model_dir_raw: str) -> Path:
     return model_dir
 
 
-def load_model_bundle_metadata(model_dir: Path) -> dict[str, Any]:
+def load_model_name(model_dir: Path) -> str:
+    model_name = model_dir.name
     config_path = model_dir / "config.json"
-    weights_path = model_dir / "model.safetensors"
-
     if not config_path.exists() or not config_path.is_file():
         raise MCPError("MCP_TOOL_CALL_FAILED", f"model config not found: {config_path}")
-    if not weights_path.exists() or not weights_path.is_file():
-        raise MCPError("MCP_TOOL_CALL_FAILED", f"model weights not found: {weights_path}")
-
-    with config_path.open("r", encoding="utf-8") as fh:
-        model_cfg = json.load(fh)
-
-    if not isinstance(model_cfg, dict):
-        raise MCPError("MCP_TOOL_CALL_FAILED", "model config root must be an object")
-
-    architecture = model_cfg.get("architecture")
-    num_classes = model_cfg.get("num_classes")
-    label_names = model_cfg.get("label_names")
-
-    if not isinstance(architecture, str) or not architecture.strip():
-        raise MCPError("MCP_TOOL_CALL_FAILED", "config.json missing valid architecture")
-    if isinstance(num_classes, bool) or not isinstance(num_classes, int) or num_classes <= 0:
-        raise MCPError("MCP_TOOL_CALL_FAILED", "config.json missing valid num_classes")
-    if not isinstance(label_names, list) or not all(isinstance(item, str) for item in label_names):
-        raise MCPError("MCP_TOOL_CALL_FAILED", "config.json missing valid label_names")
-    if len(label_names) != num_classes:
-        raise MCPError(
-            "MCP_TOOL_CALL_FAILED",
-            f"label_names size ({len(label_names)}) does not match num_classes ({num_classes})",
-        )
-
-    pretrained_cfg = model_cfg.get("pretrained_cfg")
-    if pretrained_cfg is not None and not isinstance(pretrained_cfg, dict):
-        pretrained_cfg = {}
-
-    return {
-        "architecture": architecture.strip(),
-        "num_classes": num_classes,
-        "labels": label_names,
-        "weights_path": weights_path,
-        "pretrained_cfg": pretrained_cfg or {},
-    }
-
-
-def build_eval_transform(create_transform_fn, resolve_data_config_fn, model, pretrained_cfg: dict[str, Any]):
-    allowed = set(inspect.signature(create_transform_fn).parameters.keys())
-    args: dict[str, Any] = {"is_training": False}
-
-    for key in ["input_size", "interpolation", "mean", "std", "crop_pct"]:
-        if key in pretrained_cfg and key in allowed:
-            args[key] = pretrained_cfg[key]
-
-    if "input_size" in args and isinstance(args["input_size"], list):
-        args["input_size"] = tuple(args["input_size"])
-    if "mean" in args and isinstance(args["mean"], list):
-        args["mean"] = tuple(float(v) for v in args["mean"])
-    if "std" in args and isinstance(args["std"], list):
-        args["std"] = tuple(float(v) for v in args["std"])
 
     try:
-        if len(args) > 1:
-            return create_transform_fn(**args)
-    except Exception:
-        pass
+        with config_path.open("r", encoding="utf-8") as fh:
+            model_cfg = json.load(fh)
+    except Exception as error:
+        raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to parse model config: {error}") from error
 
-    fallback_cfg = resolve_data_config_fn({}, model=model)
-    fallback_args: dict[str, Any] = {"is_training": False}
-    for key in ["input_size", "interpolation", "mean", "std", "crop_pct"]:
-        if key in fallback_cfg and key in allowed:
-            fallback_args[key] = fallback_cfg[key]
+    if isinstance(model_cfg, dict):
+        for key in ("_name_or_path", "architecture", "model_type"):
+            value = model_cfg.get(key)
+            if isinstance(value, str) and value.strip():
+                model_name = value.strip()
+                break
 
-    return create_transform_fn(**fallback_args)
+    return model_name
+
+
+def normalize_predictions(raw: object, min_score: float) -> list[dict[str, Any]]:
+    candidates: list[object]
+    if isinstance(raw, dict):
+        candidates = [raw]
+    elif isinstance(raw, list):
+        candidates = raw
+    else:
+        return []
+
+    predictions: list[dict[str, Any]] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        score_value = item.get("score")
+        if not isinstance(label, str):
+            continue
+        if isinstance(score_value, bool) or not isinstance(score_value, (int, float)):
+            continue
+        score = float(score_value)
+        if score < min_score:
+            continue
+        predictions.append({"label": label, "score": score})
+
+    predictions.sort(key=lambda entry: entry["score"], reverse=True)
+    return predictions
+
+
+def normalize_batch_predictions(raw: object, expected_count: int, min_score: float) -> list[list[dict[str, Any]]]:
+    if not isinstance(raw, list):
+        raise MCPError("MCP_TOOL_CALL_FAILED", "invalid pipeline batch output")
+
+    if expected_count == 1 and (len(raw) == 0 or isinstance(raw[0], dict)):
+        return [normalize_predictions(raw, min_score)]
+
+    if len(raw) != expected_count:
+        raise MCPError("MCP_TOOL_CALL_FAILED", "invalid pipeline batch output size")
+
+    result: list[list[dict[str, Any]]] = []
+    for item in raw:
+        result.append(normalize_predictions(item, min_score))
+    return result
 
 
 class TimmClassifier:
     def __init__(self, config_path: Path):
         self.config_path = config_path
         self.config = self.load_plugin_config(config_path)
-        self.startup_error: str | None = None
 
-        self.model = None
-        self.transform = None
-        self.labels: list[str] = []
+        self.pipeline = None
+        self.pil_image = None
         self.device_name = "cpu"
         self.model_loaded = False
-
-        self.torch = None
-        self.pil_image = None
 
     def load_plugin_config(self, config_path: Path) -> dict[str, Any]:
         if not config_path.exists() or not config_path.is_file():
             raise MCPError("MCP_TOOL_CALL_FAILED", f"config file not found: {config_path}")
 
-        with config_path.open("r", encoding="utf-8") as fh:
-            parsed = json.load(fh)
+        try:
+            with config_path.open("r", encoding="utf-8") as fh:
+                parsed = json.load(fh)
+        except Exception as error:
+            raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to parse plugin config: {error}") from error
 
         if not isinstance(parsed, dict):
             raise MCPError("MCP_TOOL_CALL_FAILED", "config root must be an object")
@@ -289,117 +282,83 @@ class TimmClassifier:
         if device not in {"auto", "cpu", "cuda"}:
             raise MCPError("MCP_TOOL_CALL_FAILED", 'device must be one of: "auto", "cpu", "cuda"')
 
+        batch_size = parse_batch_size(parsed.get("batch_size"))
+
         model_dir = resolve_model_dir_path(config_path.parent, model_dir_raw.strip())
         if not model_dir.exists() or not model_dir.is_dir():
             raise MCPError("MCP_TOOL_CALL_FAILED", f"modelDir not found: {model_dir}")
 
-        bundle = load_model_bundle_metadata(model_dir)
+        model_name = load_model_name(model_dir)
 
         return {
             "modelDir": str(model_dir),
             "device": device,
-            "architecture": bundle["architecture"],
-            "num_classes": bundle["num_classes"],
-            "labels": bundle["labels"],
-            "weights_path": bundle["weights_path"],
-            "pretrained_cfg": bundle["pretrained_cfg"],
+            "batch_size": batch_size,
+            "modelName": model_name,
         }
+
+    def resolve_device(self, torch: Any) -> tuple[int, str]:
+        requested_device = self.config["device"]
+        cuda_available = bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
+
+        if requested_device == "cuda":
+            if not cuda_available:
+                raise MCPError("MCP_TOOL_CALL_FAILED", "CUDA requested but not available")
+            return 0, "cuda"
+        if requested_device == "cpu":
+            return -1, "cpu"
+        if cuda_available:
+            return 0, "cuda"
+        return -1, "cpu"
 
     def ensure_loaded(self) -> None:
         if self.model_loaded:
             return
-        if self.startup_error:
-            raise MCPError("MCP_TOOL_CALL_FAILED", self.startup_error)
 
         try:
             import torch
             from PIL import Image
-            import timm
-            from safetensors.torch import load_file as load_safetensors
-            from timm.data import create_transform, resolve_data_config
+            from transformers import AutoImageProcessor, AutoModelForImageClassification
+            from transformers.pipelines import ImageClassificationPipeline
         except Exception as error:
             raise MCPError("MCP_TOOL_CALL_FAILED", f"missing Python dependencies: {error}") from error
 
-        architecture = self.config["architecture"]
-        num_classes = self.config["num_classes"]
-        labels = self.config["labels"]
-        weights_path: Path = self.config["weights_path"]
+        device_index, device_name = self.resolve_device(torch)
 
-        model = timm.create_model(architecture, pretrained=False, num_classes=num_classes)
         try:
-            state_dict = load_safetensors(str(weights_path), device="cpu")
+            model = AutoModelForImageClassification.from_pretrained(self.config["modelDir"]).eval()
+            image_processor = AutoImageProcessor.from_pretrained(self.config["modelDir"])
+            self.pipeline = ImageClassificationPipeline(
+                model=model,
+                image_processor=image_processor,
+                device=device_index,
+            )
         except Exception as error:
-            raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to read safetensors: {error}") from error
+            raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to initialize ImageClassificationPipeline: {error}") from error
 
-        state_dict = strip_module_prefix(state_dict)
-        try:
-            model.load_state_dict(state_dict, strict=True)
-        except Exception as error:
-            raise MCPError("MCP_TOOL_CALL_FAILED", f"checkpoint keys mismatch: {error}") from error
-
-        requested_device = self.config["device"]
-        if requested_device == "cuda":
-            if not torch.cuda.is_available():
-                raise MCPError("MCP_TOOL_CALL_FAILED", "CUDA requested but not available")
-            device_name = "cuda"
-        elif requested_device == "cpu":
-            device_name = "cpu"
-        else:
-            device_name = "cuda" if torch.cuda.is_available() else "cpu"
-
-        device = torch.device(device_name)
-        model.eval()
-        model.to(device)
-
-        transform = build_eval_transform(
-            create_transform,
-            resolve_data_config,
-            model,
-            self.config.get("pretrained_cfg", {}),
-        )
-
-        self.torch = torch
         self.pil_image = Image
-        self.model = model
-        self.transform = transform
-        self.labels = labels
         self.device_name = device_name
         self.model_loaded = True
 
+    def classify_image_obj(self, image: Any, top_k: int, min_score: float) -> list[dict[str, Any]]:
+        self.ensure_loaded()
+        assert self.pipeline is not None
+        try:
+            raw = self.pipeline(image, top_k=top_k)
+        except Exception as error:
+            raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to classify image: {error}") from error
+        return normalize_predictions(raw, min_score)
+
     def classify_path(self, image_path: Path, top_k: int, min_score: float) -> list[dict[str, Any]]:
         self.ensure_loaded()
-        assert self.torch is not None
-        assert self.transform is not None
-        assert self.model is not None
         assert self.pil_image is not None
-
         try:
             with self.pil_image.open(image_path) as img:
-                rgb = img.convert("RGB")
-                tensor = self.transform(rgb).unsqueeze(0)
+                rgb = img.convert("RGB").copy()
         except Exception as error:
             raise MCPError("MCP_INVALID_PARAMS", f"failed to decode image: {image_path}") from error
 
-        tensor = tensor.to(self.device_name)
-        with self.torch.no_grad():
-            logits = self.model(tensor)
-            if hasattr(logits, "logits"):
-                logits = logits.logits
-            probs = self.torch.nn.functional.softmax(logits, dim=-1)[0]
-
-        num_outputs = int(probs.shape[-1])
-        effective_top_k = min(top_k, num_outputs)
-        values, indices = self.torch.topk(probs, k=effective_top_k)
-
-        predictions: list[dict[str, Any]] = []
-        for score_tensor, index_tensor in zip(values.tolist(), indices.tolist()):
-            score = float(score_tensor)
-            if score < min_score:
-                continue
-            index = int(index_tensor)
-            label = self.labels[index] if 0 <= index < len(self.labels) else str(index)
-            predictions.append({"label": label, "score": score, "index": index})
-        return predictions
+        return self.classify_image_obj(rgb, top_k, min_score)
 
     def classify_image(self, params: dict[str, Any]) -> dict[str, Any]:
         root_path = params.get("rootPath")
@@ -413,7 +372,7 @@ class TimmClassifier:
         timing_ms = round((time.perf_counter() - start) * 1000, 3)
 
         return {
-            "model": self.config["architecture"],
+            "model": self.config["modelName"],
             "device": self.device_name,
             "timingMs": timing_ms,
             "predictions": predictions,
@@ -436,8 +395,11 @@ class TimmClassifier:
             raise MCPError("MCP_INVALID_PARAMS", f"relativePaths exceeds maxItems ({max_items})")
 
         self.ensure_loaded()
+        assert self.pil_image is not None
+        assert self.pipeline is not None
 
-        items = []
+        items: list[dict[str, Any]] = []
+        valid_items: list[dict[str, Any]] = []
         succeeded = 0
         failed = 0
         start = time.perf_counter()
@@ -445,37 +407,65 @@ class TimmClassifier:
         for relative_path in relative_paths:
             try:
                 target = resolve_image_path(root_path, relative_path)
-                predictions = self.classify_path(target, top_k, min_score)
-                items.append(
-                    {
-                        "relativePath": relative_path,
-                        "ok": True,
-                        "predictions": predictions,
-                    }
-                )
-                succeeded += 1
+                with self.pil_image.open(target) as img:
+                    rgb = img.convert("RGB").copy()
+                valid_items.append({"relativePath": relative_path, "image": rgb})
             except MCPError as error:
-                items.append(
-                    {
-                        "relativePath": relative_path,
-                        "ok": False,
-                        "error": str(error),
-                    }
-                )
+                items.append({"relativePath": relative_path, "ok": False, "error": str(error)})
                 failed += 1
-            except Exception as error:
+            except Exception:
                 items.append(
                     {
                         "relativePath": relative_path,
                         "ok": False,
-                        "error": str(error),
+                        "error": f"failed to decode image: {relative_path}",
                     }
                 )
                 failed += 1
 
+        if valid_items:
+            try:
+                raw_batch = self.pipeline(
+                    [entry["image"] for entry in valid_items],
+                    top_k=top_k,
+                    batch_size=self.config["batch_size"],
+                )
+                prediction_groups = normalize_batch_predictions(raw_batch, len(valid_items), min_score)
+
+                for entry, predictions in zip(valid_items, prediction_groups):
+                    items.append(
+                        {
+                            "relativePath": entry["relativePath"],
+                            "ok": True,
+                            "predictions": predictions,
+                        }
+                    )
+                    succeeded += 1
+            except Exception:
+                for entry in valid_items:
+                    try:
+                        predictions = self.classify_image_obj(entry["image"], top_k, min_score)
+                        items.append(
+                            {
+                                "relativePath": entry["relativePath"],
+                                "ok": True,
+                                "predictions": predictions,
+                            }
+                        )
+                        succeeded += 1
+                    except Exception as error:
+                        items.append(
+                            {
+                                "relativePath": entry["relativePath"],
+                                "ok": False,
+                                "error": str(error),
+                            }
+                        )
+                        failed += 1
+
         timing_ms = round((time.perf_counter() - start) * 1000, 3)
         return {
-            "model": self.config["architecture"],
+            "model": self.config["modelName"],
             "device": self.device_name,
             "timingMs": timing_ms,
             "succeeded": succeeded,
@@ -487,7 +477,7 @@ class TimmClassifier:
 TOOL_DEFINITIONS = [
     {
         "name": "ml.classifyImage",
-        "description": "Classify one image with timm model",
+        "description": "Classify one image with HuggingFace ImageClassificationPipeline",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -502,6 +492,7 @@ TOOL_DEFINITIONS = [
         "annotations": {
             "title": "图像分类",
             "mutation": False,
+            "icon": "image",
             "scopes": ["file"],
             "toolOptions": [
                 {
@@ -516,7 +507,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "ml.classifyBatch",
-        "description": "Classify multiple images with timm model",
+        "description": "Classify multiple images with HuggingFace ImageClassificationPipeline",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -532,6 +523,7 @@ TOOL_DEFINITIONS = [
         "annotations": {
             "title": "批量图像分类",
             "mutation": False,
+            "icon": "images",
             "scopes": ["workspace"],
         },
     },
@@ -579,7 +571,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=".fauplay/timm-classifier.json",
+        default="tools/mcp/timm-classifier/config.json",
         help="Path to timm classifier config file",
     )
     return parser.parse_args()
@@ -589,7 +581,7 @@ class FallbackClassifier:
     def __init__(self, error_message: str, config_path: Path):
         self.error_message = error_message
         self.config = {
-            "architecture": f"invalid-config:{config_path.name}",
+            "modelName": f"invalid-config:{config_path.name}",
         }
 
     def classify_image(self, _params: dict[str, Any]) -> dict[str, Any]:
