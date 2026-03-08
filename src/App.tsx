@@ -51,7 +51,7 @@ function App() {
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(false)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
-  const { tools: previewActionTools } = useGatewayCapabilities()
+  const { tools: pluginTools } = useGatewayCapabilities()
 
   const filteredFiles = useMemo(() => {
     return filterFiles(files, filter)
@@ -118,6 +118,10 @@ function App() {
   const handleNavigateToPath = useCallback((path: string) => {
     void navigateToPath(path, { resetFlattenView: true })
   }, [navigateToPath])
+
+  const handleWorkspaceMutationCommitted = useCallback(async () => {
+    await navigateToPath(currentPath)
+  }, [currentPath, navigateToPath])
 
   useEffect(() => {
     fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
@@ -297,6 +301,8 @@ function App() {
       onFileDoubleClick={handleFileDoubleClick}
       onDirectoryClick={handleDirectoryClick}
       onGridSelectionChange={setGridSelectedPaths}
+      gridSelectedPaths={gridSelectedPaths}
+      onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
       showPreviewPane={showPreviewPane}
       hasOpenPreview={hasOpenPreview}
       contentRef={contentRef}
@@ -305,7 +311,7 @@ function App() {
       selectedFile={selectedFile}
       gridSelectedCount={selectedGridItems.length}
       selectedGridMetaFile={selectedGridMetaFile}
-      previewActionTools={previewActionTools}
+      pluginTools={pluginTools}
       onClosePane={closePreviewPane}
       onOpenFullscreenFromPane={openFullscreenFromPane}
       autoPlayEnabled={autoPlayEnabled}

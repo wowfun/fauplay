@@ -19,25 +19,26 @@ function stringifyJson(value: unknown): string {
   )
 }
 
-interface ToolResultJsonViewerProps {
+interface PluginResultJsonViewerProps {
   value: unknown
   title?: string
-  isFullscreen?: boolean
+  surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
 }
 
-export function ToolResultJsonViewer({
+export function PluginResultJsonViewer({
   value,
   title = 'JSON 结果',
-  isFullscreen = false,
-}: ToolResultJsonViewerProps) {
+  surfaceVariant,
+}: PluginResultJsonViewerProps) {
   const formatted = stringifyJson(value)
-  const containerClassName = isFullscreen
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const containerClassName = isLightbox
     ? 'rounded-md border border-white/20 bg-white/5'
     : 'rounded-md border border-border/80 bg-muted/20'
-  const summaryClassName = isFullscreen
+  const summaryClassName = isLightbox
     ? 'cursor-pointer px-3 py-2 text-xs text-white/70'
     : 'cursor-pointer px-3 py-2 text-xs text-muted-foreground'
-  const preClassName = isFullscreen
+  const preClassName = isLightbox
     ? 'max-h-64 overflow-auto border-t border-white/20 p-3 text-xs leading-5 text-white whitespace-pre-wrap break-all'
     : 'max-h-64 overflow-auto border-t border-border/60 p-3 text-xs leading-5 text-foreground whitespace-pre-wrap break-all'
 

@@ -4,11 +4,11 @@ import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
+import { WorkspacePluginHost } from '@/features/explorer/components/WorkspacePluginHost'
 import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
-import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
-import type { PreviewToolWorkbenchState } from '@/features/preview/types/toolWorkbench'
+import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
@@ -35,6 +35,8 @@ interface ExplorerWorkspaceLayoutProps {
   onFileDoubleClick: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
   onGridSelectionChange: (selectedPaths: string[]) => void
+  gridSelectedPaths: string[]
+  onWorkspaceMutationCommitted: () => void | Promise<void>
   showPreviewPane: boolean
   hasOpenPreview: boolean
   contentRef: MutableRefObject<HTMLDivElement | null>
@@ -43,7 +45,7 @@ interface ExplorerWorkspaceLayoutProps {
   selectedFile: FileItem | null
   gridSelectedCount: number
   selectedGridMetaFile: FileItem | null
-  previewActionTools: GatewayToolDescriptor[]
+  pluginTools: GatewayToolDescriptor[]
   onClosePane: () => void
   onOpenFullscreenFromPane: () => void
   autoPlayEnabled: boolean
@@ -82,6 +84,8 @@ export function ExplorerWorkspaceLayout({
   onFileDoubleClick,
   onDirectoryClick,
   onGridSelectionChange,
+  gridSelectedPaths,
+  onWorkspaceMutationCommitted,
   showPreviewPane,
   hasOpenPreview,
   contentRef,
@@ -90,7 +94,7 @@ export function ExplorerWorkspaceLayout({
   selectedFile,
   gridSelectedCount,
   selectedGridMetaFile,
-  previewActionTools,
+  pluginTools,
   onClosePane,
   onOpenFullscreenFromPane,
   autoPlayEnabled,
@@ -105,11 +109,19 @@ export function ExplorerWorkspaceLayout({
   previewAutoPlayOnOpen,
   onClosePreview,
 }: ExplorerWorkspaceLayoutProps) {
-  const [previewToolResultQueueState, setPreviewToolResultQueueState] = useState<PreviewToolResultQueueState>({
-    byFilePath: {},
-    fileOrder: [],
+  const [previewPluginResultQueueState, setPreviewPluginResultQueueState] = useState<PluginResultQueueState>({
+    byContextKey: {},
+    contextOrder: [],
   })
-  const [previewToolWorkbenchState, setPreviewToolWorkbenchState] = useState<PreviewToolWorkbenchState>({
+  const [previewPluginWorkbenchState, setPreviewPluginWorkbenchState] = useState<PluginWorkbenchState>({
+    activeToolName: null,
+    optionValuesByTool: {},
+  })
+  const [workspacePluginResultQueueState, setWorkspacePluginResultQueueState] = useState<PluginResultQueueState>({
+    byContextKey: {},
+    contextOrder: [],
+  })
+  const [workspacePluginWorkbenchState, setWorkspacePluginWorkbenchState] = useState<PluginWorkbenchState>({
     activeToolName: null,
     optionValuesByTool: {},
   })
@@ -139,24 +151,40 @@ export function ExplorerWorkspaceLayout({
       )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        {isLoading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <FileBrowserGrid
-            ref={fileGridRef}
-            files={files}
-            rootHandle={rootHandle}
-            thumbnailSizePreset={thumbnailSizePreset}
-            onFileClick={onFileClick}
-            onFileDoubleClick={onFileDoubleClick}
-            onDirectoryClick={onDirectoryClick}
-            selectionScopeKey={currentPath}
-            canClearSelectionWithEscape={!hasOpenPreview}
-            onSelectionChange={onGridSelectionChange}
-          />
-        )}
+        <div className="flex-1 min-w-0 flex overflow-hidden">
+          {isLoading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              <FileBrowserGrid
+                ref={fileGridRef}
+                files={files}
+                rootHandle={rootHandle}
+                thumbnailSizePreset={thumbnailSizePreset}
+                onFileClick={onFileClick}
+                onFileDoubleClick={onFileDoubleClick}
+                onDirectoryClick={onDirectoryClick}
+                selectionScopeKey={currentPath}
+                canClearSelectionWithEscape={!hasOpenPreview}
+                onSelectionChange={onGridSelectionChange}
+              />
+              <WorkspacePluginHost
+                tools={pluginTools}
+                rootHandle={rootHandle}
+                currentPath={currentPath}
+                visibleFiles={files}
+                selectedPaths={gridSelectedPaths}
+                resultQueueState={workspacePluginResultQueueState}
+                setResultQueueState={setWorkspacePluginResultQueueState}
+                workbenchState={workspacePluginWorkbenchState}
+                setWorkbenchState={setWorkspacePluginWorkbenchState}
+                onMutationCommitted={onWorkspaceMutationCommitted}
+              />
+            </>
+          )}
+        </div>
 
         {showPreviewPane && (
           <div
@@ -171,7 +199,7 @@ export function ExplorerWorkspaceLayout({
             <MediaPreviewPanel
               file={selectedFile}
               rootHandle={rootHandle}
-              previewActionTools={previewActionTools}
+              previewActionTools={pluginTools}
               onClose={onClosePane}
               onOpenFullscreen={onOpenFullscreenFromPane}
               autoPlayEnabled={autoPlayEnabled}
@@ -182,10 +210,10 @@ export function ExplorerWorkspaceLayout({
               onAutoPlayIntervalChange={onAutoPlayIntervalChange}
               onVideoEnded={onVideoEnded}
               onVideoPlaybackError={onVideoPlaybackError}
-              toolResultQueueState={previewToolResultQueueState}
-              setToolResultQueueState={setPreviewToolResultQueueState}
-              toolWorkbenchState={previewToolWorkbenchState}
-              setToolWorkbenchState={setPreviewToolWorkbenchState}
+              toolResultQueueState={previewPluginResultQueueState}
+              setToolResultQueueState={setPreviewPluginResultQueueState}
+              toolWorkbenchState={previewPluginWorkbenchState}
+              setToolWorkbenchState={setPreviewPluginWorkbenchState}
               enableContinuousAutoRunOwner={showPreviewPane}
             />
           </div>
@@ -202,7 +230,7 @@ export function ExplorerWorkspaceLayout({
         <MediaLightboxModal
           file={previewFile}
           rootHandle={rootHandle}
-          previewActionTools={previewActionTools}
+          previewActionTools={pluginTools}
           onClose={onClosePreview}
           autoPlayOnOpen={previewAutoPlayOnOpen}
           autoPlayEnabled={autoPlayEnabled}
@@ -213,10 +241,10 @@ export function ExplorerWorkspaceLayout({
           onAutoPlayIntervalChange={onAutoPlayIntervalChange}
           onVideoEnded={onVideoEnded}
           onVideoPlaybackError={onVideoPlaybackError}
-          toolResultQueueState={previewToolResultQueueState}
-          setToolResultQueueState={setPreviewToolResultQueueState}
-          toolWorkbenchState={previewToolWorkbenchState}
-          setToolWorkbenchState={setPreviewToolWorkbenchState}
+          toolResultQueueState={previewPluginResultQueueState}
+          setToolResultQueueState={setPreviewPluginResultQueueState}
+          toolWorkbenchState={previewPluginWorkbenchState}
+          setToolWorkbenchState={setPreviewPluginWorkbenchState}
           enableContinuousAutoRunOwner={!showPreviewPane}
         />
       )}

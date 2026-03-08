@@ -1,13 +1,16 @@
 import type { ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import type { PreviewToolResultQueueItem } from '@/features/preview/types/toolResult'
-import { ToolResultStructuredView } from './ToolResultStructuredView'
+import type { PluginResultQueueItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
+import { PluginResultStructuredView } from './PluginResultStructuredView'
 
-interface PreviewToolResultPanelProps {
+interface PluginToolResultPanelProps {
   workbench?: ReactNode
-  items: PreviewToolResultQueueItem[]
+  items: PluginResultQueueItem[]
   onToggleItemCollapsed: (id: string) => void
-  isFullscreen?: boolean
+  surfaceVariant: PluginSurfaceVariant
+  side?: 'left' | 'right'
+  subzone?: string
+  emptyHint?: string
 }
 
 function formatTimestamp(value?: number): string {
@@ -28,7 +31,7 @@ function resolveResultOk(value: unknown): boolean | null {
   return typeof value.ok === 'boolean' ? value.ok : null
 }
 
-function resolveStatusLabel(item: PreviewToolResultQueueItem): '运行中' | '成功' | '失败' {
+function resolveStatusLabel(item: PluginResultQueueItem): '运行中' | '成功' | '失败' {
   if (item.status === 'loading') return '运行中'
 
   const resultOk = resolveResultOk(item.result)
@@ -39,28 +42,33 @@ function resolveStatusLabel(item: PreviewToolResultQueueItem): '运行中' | '�
   return item.status === 'error' ? '失败' : '成功'
 }
 
-export function PreviewToolResultPanel({
+export function PluginToolResultPanel({
   workbench,
   items,
   onToggleItemCollapsed,
-  isFullscreen = false,
-}: PreviewToolResultPanelProps) {
-  const panelClassName = isFullscreen
-    ? 'border-r border-white/10 bg-black/20 text-white'
-    : 'border-r border-border bg-card'
-  const emptyHintClassName = isFullscreen
+  surfaceVariant,
+  side = 'left',
+  subzone,
+  emptyHint,
+}: PluginToolResultPanelProps) {
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const borderClass = side === 'left'
+    ? (isLightbox ? 'border-r border-white/10' : 'border-r border-border')
+    : (isLightbox ? 'border-l border-white/10' : 'border-l border-border')
+  const backgroundClass = isLightbox ? 'bg-black/20 text-white' : 'bg-card'
+  const emptyHintClassName = isLightbox
     ? 'rounded-md border border-white/20 bg-white/5 px-3 py-2 text-xs text-white/70'
     : 'rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-xs text-muted-foreground'
-  const cardClassName = isFullscreen
+  const cardClassName = isLightbox
     ? 'rounded-md border border-white/20 bg-white/5'
     : 'rounded-md border border-border/80 bg-muted/20'
-  const headerHoverClassName = isFullscreen ? 'hover:bg-white/10' : 'hover:bg-accent/40'
-  const statusClassName = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
+  const headerHoverClassName = isLightbox ? 'hover:bg-white/10' : 'hover:bg-accent/40'
+  const statusClassName = isLightbox ? 'text-white/70' : 'text-muted-foreground'
 
   return (
     <aside
-      className={`w-80 shrink-0 min-h-0 flex flex-col ${panelClassName}`}
-      data-preview-subzone="PreviewToolResultPanel"
+      className={`w-80 shrink-0 min-h-0 flex flex-col ${borderClass} ${backgroundClass}`}
+      data-plugin-subzone={subzone ?? 'PluginToolResultPanel'}
     >
       <div className="flex-1 min-h-0 flex flex-col">
         {workbench && (
@@ -109,7 +117,7 @@ export function PreviewToolResultPanel({
                           {item.errorCode && <p>错误码: {item.errorCode}</p>}
                         </div>
                       ) : typeof item.result !== 'undefined' ? (
-                        <ToolResultStructuredView value={item.result} isFullscreen={isFullscreen} />
+                        <PluginResultStructuredView value={item.result} surfaceVariant={surfaceVariant} />
                       ) : (
                         <p className={`text-xs ${statusClassName}`}>工具未返回结果。</p>
                       )}
@@ -122,7 +130,7 @@ export function PreviewToolResultPanel({
         ) : (
           <div className="flex-1 p-3">
             <p className={emptyHintClassName}>
-              点击左侧工具按钮后，结果会显示在这里。
+              {emptyHint ?? '点击工具按钮后，结果会显示在这里。'}
             </p>
           </div>
         )}

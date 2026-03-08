@@ -1,14 +1,15 @@
 import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
-import type { ToolWorkbenchOptionValue } from '@/features/preview/types/toolWorkbench'
+import type { PluginSurfaceVariant, ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
 
-interface PreviewToolWorkbenchProps {
+interface PluginToolWorkbenchProps {
   tool: GatewayToolDescriptor | null
   optionValues?: Record<string, ToolWorkbenchOptionValue>
   onOptionChange: (toolName: string, optionKey: string, value: ToolWorkbenchOptionValue) => void
   onRunAction: (tool: GatewayToolDescriptor, action: ToolActionAnnotation) => void
-  isFullscreen?: boolean
+  surfaceVariant: PluginSurfaceVariant
+  subzone?: string
 }
 
 function resolveOptionValue(
@@ -20,6 +21,11 @@ function resolveOptionValue(
   if (option.type === 'boolean') {
     if (typeof currentValue === 'boolean') return currentValue
     return typeof option.defaultValue === 'boolean' ? option.defaultValue : false
+  }
+
+  if (option.type === 'string') {
+    if (typeof currentValue === 'string') return currentValue
+    return typeof option.defaultValue === 'string' ? option.defaultValue : ''
   }
 
   const values = option.values ?? []
@@ -38,33 +44,38 @@ function toActionVariant(action: ToolActionAnnotation): 'default' | 'outline' | 
   return 'outline'
 }
 
-export function PreviewToolWorkbench({
+export function PluginToolWorkbench({
   tool,
   optionValues,
   onOptionChange,
   onRunAction,
-  isFullscreen = false,
-}: PreviewToolWorkbenchProps) {
+  surfaceVariant,
+  subzone,
+}: PluginToolWorkbenchProps) {
   if (!tool) return null
 
   const hasOptions = tool.toolOptions.length > 0
   const hasActions = tool.toolActions.length > 0
   if (!hasOptions && !hasActions) return null
 
-  const containerClassName = isFullscreen
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const containerClassName = isLightbox
     ? 'rounded-md border border-white/20 bg-white/5'
     : 'rounded-md border border-border/80 bg-muted/20'
-  const titleClassName = isFullscreen ? 'text-white' : 'text-foreground'
-  const hintClassName = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
-  const rowClassName = isFullscreen
+  const titleClassName = isLightbox ? 'text-white' : 'text-foreground'
+  const hintClassName = isLightbox ? 'text-white/70' : 'text-muted-foreground'
+  const rowClassName = isLightbox
     ? 'rounded-md border border-white/20 bg-white/5'
     : 'rounded-md border border-border bg-background/70'
-  const checkboxClassName = isFullscreen
+  const checkboxClassName = isLightbox
     ? 'h-4 w-4 rounded border-white/30 bg-black/20 text-white'
     : 'h-4 w-4 rounded border-border bg-background text-primary'
+  const textInputClassName = isLightbox
+    ? 'h-8 min-w-[120px] rounded-md border border-white/30 bg-black/20 px-2 text-xs text-white'
+    : 'h-8 min-w-[120px] rounded-md border border-border bg-background px-2 text-xs'
 
   return (
-    <section className={`p-3 ${containerClassName}`} data-preview-subzone="PreviewToolWorkbench">
+    <section className={`p-3 ${containerClassName}`} data-plugin-subzone={subzone ?? 'PluginToolWorkbench'}>
       <div className="mb-2">
         <p className={`text-xs font-medium ${titleClassName}`}>{tool.title} 工作台</p>
         <p className={`text-[11px] ${hintClassName}`}>支持工具选项与工具操作</p>
@@ -94,6 +105,16 @@ export function PreviewToolWorkbench({
                       checked={Boolean(optionValue)}
                       onChange={(event) => {
                         onOptionChange(tool.name, option.key, event.currentTarget.checked)
+                      }}
+                    />
+                  ) : option.type === 'string' ? (
+                    <input
+                      id={optionId}
+                      type="text"
+                      className={textInputClassName}
+                      value={typeof optionValue === 'string' ? optionValue : ''}
+                      onChange={(event) => {
+                        onOptionChange(tool.name, option.key, event.currentTarget.value)
                       }}
                     />
                   ) : (

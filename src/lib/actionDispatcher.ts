@@ -6,7 +6,6 @@ export type SystemToolName = string
 interface DispatchSystemToolOptions {
   toolName: SystemToolName
   rootHandle: FileSystemDirectoryHandle | null
-  relativePath: string
   additionalArgs?: Record<string, unknown>
 }
 
@@ -39,10 +38,9 @@ function toToolError(error: unknown): { message: string; code?: string } {
 export async function dispatchSystemTool({
   toolName,
   rootHandle,
-  relativePath,
   additionalArgs,
 }: DispatchSystemToolOptions): Promise<DispatchSystemToolResult> {
-  if (!toolName || !rootHandle || !relativePath) {
+  if (!toolName || !rootHandle) {
     return {
       toolName,
       ok: false,
@@ -67,7 +65,6 @@ export async function dispatchSystemTool({
   try {
     const result = await callGatewayTool(toolName, {
       rootPath,
-      relativePath,
       ...(additionalArgs ?? {}),
     })
 

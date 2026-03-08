@@ -36,8 +36,13 @@
   - `features/explorer/components/FileBrowserGrid`
   - `features/explorer/components/FileGridViewport`
   - `features/explorer/components/FileGridCard`
+  - `features/explorer/components/WorkspacePluginHost`
+  - `features/plugin-runtime/components/PluginActionRail`
+  - `features/plugin-runtime/components/PluginToolWorkbench`
+  - `features/plugin-runtime/components/PluginToolResultPanel`
 - 边界：聚焦浏览与选择，不直接处理预览播放状态机；工作区插件仅面向当前工作目录或当前选中文件列表。
 - 选择约束：B1 同时维护活跃项与勾选集合，二者语义不得混淆。
+- 布局约束：B1 内部从左到右顺序固定为 `FileGridViewport | WorkspaceToolPanel | WorkspaceActionRail`，动作入口在最右侧，工作台与结果队列在其左侧。
 
 ### B2 预览面板区（Media Preview Panel Zone）
 
@@ -46,9 +51,9 @@
   - `features/preview/components/MediaPreviewPanel`
   - `features/preview/components/PreviewHeaderBar`
   - `features/preview/components/PreviewControlGroup`
-  - `features/preview/components/PreviewActionRail`
-  - `features/preview/components/PreviewToolWorkbench`
-  - `features/preview/components/PreviewToolResultPanel`
+  - `features/plugin-runtime/components/PluginActionRail`
+  - `features/plugin-runtime/components/PluginToolWorkbench`
+  - `features/plugin-runtime/components/PluginToolResultPanel`
   - `features/preview/components/PreviewMediaViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
 - 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
@@ -66,30 +71,27 @@
 - 当前组件：`features/preview/components/MediaLightboxModal`
 - 边界：作为覆盖层，不改变底层 A/B1/C 布局状态。
 
-## B2 子分区命名规范（Canonical Sub-zones）
+## 插件三段式子分区命名规范（Canonical Plugin Sub-zones）
 
 | 规范中文名 | 规范英文名 | 当前实现载体 |
 | --- | --- | --- |
-| 预览头部栏 | `PreviewHeaderBar` | 独立组件 |
-| 头部控制组 | `PreviewControlGroup` | 独立组件 |
-| 预览动作侧栏 | `PreviewActionRail` | 独立组件 |
-| 工具工作台 | `PreviewToolWorkbench` | 独立组件 |
-| 工具结果面板 | `PreviewToolResultPanel` | 独立组件 |
-| 媒体展示视口 | `PreviewMediaViewport` | 独立组件 |
-| 预览反馈层 | `PreviewFeedbackOverlay` | 独立组件 |
+| 动作入口侧栏 | `PluginActionRail` | 独立组件 |
+| 工具工作台 | `PluginToolWorkbench` | 独立组件 |
+| 工具结果面板 | `PluginToolResultPanel` | 独立组件 |
 
 说明：
-- `data-preview-subzone` 作为推荐（SHOULD）标记方式，可用于测试与调试，但本轮不设为强制。
+- `workspace` 与 `preview` 必须共享上述三段式交互语义；可使用作用域前缀形成实例化子区名（如 `WorkspaceActionRail`、`PreviewActionRail`）。
+- `data-plugin-subzone` 作为推荐（SHOULD）标记方式，可用于测试与调试，但本轮不设为强制。
 
-## 预览子分区与全屏对应关系 (Sub-zone Mapping)
+## 预览媒体子分区与全屏对应关系 (Sub-zone Mapping)
 
 | 面板态子分区 | 全屏态对应区 | 语义一致性要求 |
 | --- | --- | --- |
 | `PreviewHeaderBar` | 全屏头部栏 | MUST |
 | `PreviewControlGroup` | 全屏控制组 | MUST |
-| `PreviewActionRail` | 全屏动作入口区 | MUST |
-| `PreviewToolWorkbench` | 全屏工具工作台区 | MUST |
-| `PreviewToolResultPanel` | 全屏结果面板区 | MUST |
+| `PluginActionRail` | 全屏动作入口区 | MUST |
+| `PluginToolWorkbench` | 全屏工具工作台区 | MUST |
+| `PluginToolResultPanel` | 全屏结果面板区 | MUST |
 | `PreviewMediaViewport` | 全屏媒体视口 | MUST |
 | `PreviewFeedbackOverlay` | 全屏反馈层 | MUST |
 
@@ -97,8 +99,8 @@
 
 | 工具作用域 (`scopes`) | 入口分区 | 典型入口形态 | 主要作用对象 |
 | --- | --- | --- | --- |
-| `workspace` | B1 文件网格区 | 工作区插件侧栏（Workspace Plugin Rail） | 当前工作目录 / 当前选中文件列表 |
-| `file` | B2 预览面板区 | `PreviewActionRail` | 当前预览文件 |
+| `workspace` | B1 文件网格区 | `WorkspaceActionRail`（最右侧）+ `WorkspaceToolPanel`（其左侧） | 当前工作目录 / 当前选中文件列表 |
+| `file` | B2 预览面板区 | `PreviewActionRail` + `PreviewToolPanel` | 当前预览文件 |
 
 ## B1 选择语义映射 (Grid Selection Mapping)
 
@@ -114,18 +116,19 @@
 
 输入：
 
-1. 当前文件（Selected/Active File）
-2. 预览遍历状态（Traversal State）
-3. 自动播放状态（Auto-play State）
-4. 工具元数据（Action Tool Metadata）
+1. 插件上下文资源（文件或工作区目标集合）
+2. 作用域实例状态（`workspace` 或 `file`）
+3. 工具元数据（Action Tool Metadata）
+4. 预览遍历状态（仅 `file` 实例）
+5. 自动播放状态（仅 `file` 实例）
 
 输出：
 
-1. 预览控制事件（自动播放开关、遍历模式切换、间隔调整）
-2. 展示切换事件（打开全屏、关闭预览）
-3. 系统动作触发（按工具名发起 `tools/call`）
-4. 工作台事件（按工具切换上下文、工具选项变更、工作台操作触发）
-5. 结果面板事件（结果项折叠/展开、按文件恢复最近队列）
+1. 系统动作触发（按工具名发起 `tools/call`）
+2. 工作台事件（按工具切换上下文、工具选项变更、工作台操作触发）
+3. 结果面板事件（结果项折叠/展开、按上下文恢复最近队列）
+4. 预览控制事件（自动播放开关、遍历模式切换、间隔调整，仅 `file` 实例）
+5. 展示切换事件（打开全屏、关闭预览，仅 `file` 实例）
 
 ## 状态矩阵（State Matrix）
 
@@ -142,4 +145,5 @@
 1. 新功能先判定所属分区，再决定 `ui / features / layouts` 落位。
 2. 跨区协作通过显式契约连接，禁止直接读取对方内部状态。
 3. 动作入口按 `scopes` 落位：`workspace` 在 B1，`file` 在 B2，避免下沉到基础 `ui` 组件。
-4. `Esc` 交互优先级保持：先关闭预览态，再执行网格清空勾选。
+4. 插件三段式必须复用同一运行内核：`PluginActionRail`、`PluginToolWorkbench`、`PluginToolResultPanel`。
+5. `Esc` 交互优先级保持：先关闭预览态，再执行网格清空勾选。

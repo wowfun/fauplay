@@ -3,8 +3,7 @@ import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
-import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
-import type { PreviewToolWorkbenchState } from '@/features/preview/types/toolWorkbench'
+import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
 
@@ -24,10 +23,10 @@ interface MediaPreviewPanelProps {
   onVideoPlaybackError: () => void
   presentation?: PreviewSurface
   forceAutoPlayOnOpen?: boolean
-  toolResultQueueState: PreviewToolResultQueueState
-  setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
-  toolWorkbenchState: PreviewToolWorkbenchState
-  setToolWorkbenchState: Dispatch<SetStateAction<PreviewToolWorkbenchState>>
+  toolResultQueueState: PluginResultQueueState
+  setToolResultQueueState: Dispatch<SetStateAction<PluginResultQueueState>>
+  toolWorkbenchState: PluginWorkbenchState
+  setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
 }
 

@@ -54,12 +54,13 @@
 
 ### Server 注册配置（Host Registration）
 
-1. 网关从项目路径 `.fauplay/mcp.json` 读取 MCP Server 注册信息（VS Code `mcp.json` 风格）。
+1. 网关从项目路径 `.fauplay/mcp.json` 读取主 MCP Server 注册信息（VS Code `mcp.json` 风格），并可选读取 `.fauplay/mcp.local.json` 作为本地覆盖层。
 2. 当前仅支持 `servers.<name>.type = "stdio"`。
 3. 内置能力需以独立 CLI 形式注册到 `servers` 中（不在网关内硬编码 inproc server）。
 4. `stdio` 条目必须提供 `command`（可选 `args/cwd/env`）。
 5. `disabled: true` 的 server 必须被跳过。
-6. server 注册配置不改变 MCP 对外协议字段。
+6. 当主配置与本地覆盖层存在同名 `servers.<name>` 时，本地覆盖层必须优先。
+7. server 注册配置不改变 MCP 对外协议字段。
 
 ## 生命周期契约 (Lifecycle Contract)
 
@@ -188,9 +189,10 @@
 
 1. `annotations.toolOptions` 为可选数组；缺失或空数组表示“该工具无可展示选项”。
 2. `annotations.toolActions` 为可选数组；缺失或空数组表示“该工具无可展示操作”。
-3. `toolOptions` 单项最小字段为：`key`、`label`、`type`；首期 `type` 支持 `boolean` 与 `enum`。
-4. `toolActions` 单项最小字段为：`key`、`label`；可选 `description` 与 `intent`。
-5. 客户端应按“最小校验 + 忽略非法项”处理注解：无效项不得阻断工具本身可见与可调用性。
+3. `toolOptions` 单项最小字段为：`key`、`label`、`type`；首期 `type` 支持 `boolean`、`enum` 与 `string`。
+4. `toolOptions` 可选声明 `sendToTool`（默认 `false`）与 `argumentKey`（默认使用 `key`）；当 `sendToTool=true` 时，客户端应将该选项值透传到 `tools/call.arguments`。
+5. `toolActions` 单项最小字段为：`key`、`label`；可选 `description`、`intent` 与 `arguments`（对象）。
+6. 客户端应按“最小校验 + 忽略非法项”处理注解：无效项不得阻断工具本身可见与可调用性。
 
 ### `tools/call`
 
@@ -219,6 +221,17 @@
 
 1. `params.name` 必须为非空字符串。
 2. `params.arguments` 必须为对象（可为空对象）。
+
+### 作用域同构约定（Scope-isomorphic Runtime Semantics）
+
+用途：约束 `workspace` 与 `file` 两类工具在前端消费层保持同一交互语义，仅资源上下文不同。
+
+约束：
+
+1. 当工具声明 `annotations.scopes=["file"]` 或 `["workspace"]` 时，客户端必须按相同的工作台元数据解析规则消费 `toolOptions/toolActions`。
+2. 客户端不得为 `workspace` 与 `file` 维护两套不兼容的工作台元数据协议。
+3. 变更类与批处理类工具的 `result` 建议采用“顶层汇总 + item 逐项结果”结构，并允许部分成功。
+4. 当工具返回逐项结果时，单项失败不应强制提升为整批传输失败；调用失败（JSON-RPC `error`）仅用于请求级异常。
 
 ## 错误契约 (Error Contract)
 

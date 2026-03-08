@@ -25,7 +25,7 @@ export interface ToolOptionEnumValue {
   label: string
 }
 
-export type ToolOptionType = 'boolean' | 'enum'
+export type ToolOptionType = 'boolean' | 'enum' | 'string'
 
 export interface ToolOptionAnnotation {
   key: string
@@ -34,6 +34,8 @@ export interface ToolOptionAnnotation {
   defaultValue?: boolean | string
   description?: string
   values?: ToolOptionEnumValue[]
+  sendToTool?: boolean
+  argumentKey?: string
 }
 
 export interface ToolActionAnnotation {
@@ -41,6 +43,7 @@ export interface ToolActionAnnotation {
   label: string
   description?: string
   intent?: string
+  arguments?: Record<string, unknown>
 }
 
 interface GatewayHealthResponse {
@@ -326,11 +329,21 @@ function toToolOptionAnnotations(annotations: GatewayRawToolDescriptor['annotati
     const description = typeof item.description === 'string' ? item.description : undefined
 
     if (!key || !label) continue
-    if (type !== 'boolean' && type !== 'enum') continue
+    if (type !== 'boolean' && type !== 'enum' && type !== 'string') continue
+    const sendToTool = item.sendToTool === true
+    const argumentKey = typeof item.argumentKey === 'string' && item.argumentKey.trim()
+      ? item.argumentKey.trim()
+      : undefined
 
     if (type === 'boolean') {
       const defaultValue = typeof item.defaultValue === 'boolean' ? item.defaultValue : undefined
-      options.push({ key, label, type, defaultValue, description })
+      options.push({ key, label, type, defaultValue, description, sendToTool, argumentKey })
+      continue
+    }
+
+    if (type === 'string') {
+      const defaultValue = typeof item.defaultValue === 'string' ? item.defaultValue : undefined
+      options.push({ key, label, type, defaultValue, description, sendToTool, argumentKey })
       continue
     }
 
@@ -349,7 +362,7 @@ function toToolOptionAnnotations(annotations: GatewayRawToolDescriptor['annotati
       ? item.defaultValue
       : undefined
 
-    options.push({ key, label, type, defaultValue, description, values })
+    options.push({ key, label, type, defaultValue, description, values, sendToTool, argumentKey })
   }
 
   return options
@@ -366,8 +379,9 @@ function toToolActionAnnotations(annotations: GatewayRawToolDescriptor['annotati
     const label = typeof item.label === 'string' ? item.label.trim() : ''
     const description = typeof item.description === 'string' ? item.description : undefined
     const intent = typeof item.intent === 'string' ? item.intent : undefined
+    const argumentsPayload = isRecord(item.arguments) ? item.arguments : undefined
     if (!key || !label) continue
-    actions.push({ key, label, description, intent })
+    actions.push({ key, label, description, intent, arguments: argumentsPayload })
   }
 
   return actions

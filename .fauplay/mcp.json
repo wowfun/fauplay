@@ -14,6 +14,13 @@
         "--config",
         ".fauplay/timm-classifier.json"
       ]
+    },
+    "batch-rename": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "tools/mcp/batch-rename/server.mjs"
+      ]
     }
   }
 }

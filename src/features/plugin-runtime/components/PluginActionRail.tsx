@@ -1,50 +1,46 @@
 import { FolderOpen, Play, Wrench } from 'lucide-react'
 import { Button } from '@/ui/Button'
 import { cn } from '@/lib/utils'
+import type { PluginActionIcon, PluginActionRailItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 
-export type PreviewActionState = 'default' | 'disabled' | 'loading' | 'error'
-export type PreviewActionIcon = 'reveal' | 'openDefault' | 'default'
-
-export interface PreviewActionRailItem {
-  toolName: string
-  title: string
-  onClick: () => void
-  disabled: boolean
-  actionState: PreviewActionState
-  error: string | null
-  icon: PreviewActionIcon
-  highlighted?: boolean
-}
-
-interface PreviewActionRailProps {
-  actions: PreviewActionRailItem[]
-  railButtonClass: string
-  highlightedRailButtonClass: string
-  borderClass: string
-  errorTextClass: string
+interface PluginActionRailProps {
+  actions: PluginActionRailItem[]
+  surfaceVariant: PluginSurfaceVariant
+  side?: 'left' | 'right'
+  subzone?: string
   onActionHoverChange?: (toolName: string) => void
 }
 
-function getActionIcon(icon: PreviewActionIcon) {
+function getActionIcon(icon: PluginActionIcon) {
   if (icon === 'reveal') return FolderOpen
   if (icon === 'openDefault') return Play
   return Wrench
 }
 
-export function PreviewActionRail({
+export function PluginActionRail({
   actions,
-  railButtonClass,
-  highlightedRailButtonClass,
-  borderClass,
-  errorTextClass,
+  surfaceVariant,
+  side = 'left',
+  subzone,
   onActionHoverChange,
-}: PreviewActionRailProps) {
-  const actionErrors = actions.filter((action) => !!action.error)
+}: PluginActionRailProps) {
+  const actionErrors = actions.filter((action) => Boolean(action.error))
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const borderClass = side === 'left'
+    ? (isLightbox ? 'border-r border-white/10' : 'border-r border-border')
+    : (isLightbox ? 'border-l border-white/10' : 'border-l border-border')
+  const railButtonClass = isLightbox
+    ? 'p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-50 text-white'
+    : 'p-2 rounded-md hover:bg-accent transition-colors disabled:opacity-50'
+  const highlightedRailButtonClass = isLightbox
+    ? 'bg-white/20 ring-1 ring-white/60 translate-y-[1px]'
+    : 'bg-accent/70 ring-1 ring-primary/60 translate-y-[1px]'
+  const errorTextClass = isLightbox ? 'text-red-300' : 'text-destructive'
 
   return (
     <div
-      className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 border-r ${borderClass}`}
-      data-preview-subzone="PreviewActionRail"
+      className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 ${borderClass}`}
+      data-plugin-subzone={subzone ?? 'PluginActionRail'}
     >
       {actions.map((action) => {
         const Icon = getActionIcon(action.icon)

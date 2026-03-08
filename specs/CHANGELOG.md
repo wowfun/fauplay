@@ -2,16 +2,32 @@
 
 ## 2026-03-08
 ### Changed
+- 新增 `specs/106-batch-rename-workspace/spec.md`：定义工作区批量重命名插件契约（`fs.batchRename`、`confirm=false/true`、逐项结果、冲突逐项跳过、仅文件与主体名规则）。
+- 新增 `tools/mcp/batch-rename/server.mjs`：落地工作区批量重命名 MCP server（`fs.batchRename`），支持 `dry-run/commit` 动作、字符串规则选项与逐项结果返回。
+- 更新 `.fauplay/mcp.json`：注册 `batch-rename` MCP server（`node tools/mcp/batch-rename/server.mjs`）。
+- 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：插件三段式基线由 `Preview*` 收敛为通用 `PluginActionRail/PluginToolWorkbench/PluginToolResultPanel`，并明确 `workspace` 与 `preview` 为同构运行实例；B1 固定为“右侧动作入口 + 左侧工作台与结果队列”布局。
+- 更新 `specs/002-contracts/spec.md`：补充 `workspace/file` 作用域同构消费约束与“批处理部分成功 + item 逐项结果”语义，并扩展 `toolOptions`（`string` + `sendToTool/argumentKey`）与 `toolActions.arguments` 注解约定。
+- 插件运行内核抽象：新增 `src/features/plugin-runtime/*`（通用组件 + `usePluginRuntime`），统一工具筛选、上下文切换、选项状态、调用入队与结果折叠逻辑。
+- 预览实例迁移：`MediaPreviewCanvas` 改为基于 `usePluginRuntime` 的 `file` 作用域装配层，连续调用能力保留为 file 实例策略。
+- 工作区实例落地：新增 `WorkspacePluginHost`，在 B1 右侧提供 `workspace` 作用域工具入口，左侧展示同构工作台与结果队列，目标集合策略为“选中优先，否则当前目录可见文件（仅文件）”。
+- 工具分发统一：`dispatchSystemTool` 改为通用参数透传，去除单文件 `relativePath` 硬依赖，供 `workspace/file` 两实例复用；`src/lib/gateway.ts` 同步支持 `string` 类型工具选项与动作参数透传。
+- 修复工作区 mutation 插件执行后视图未同步问题：`workspace` 作用域下 `mutation=true` 且非 dry-run 的成功调用会自动刷新当前目录，网格区文件名即时与落盘结果一致。
+- 修复刷新联动体验问题：工作区 mutation 自动刷新后不再意外关闭侧栏预览；当原预览文件失效时，预览自动回退到当前目录内可用文件并保持面板打开。
 - 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：预览区新增 `PreviewToolWorkbench` 子区语义，明确“工具工作台（选项+操作）与结果队列分层”及侧栏/全屏共享状态契约。
 - 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：`PreviewToolResultPanel` 移除面板级标题/描述/收起控制，结果项头部统一为 `<工具名>: <调用时间> <调用状态>`，并收敛为统一结构化结果渲染（key-value、对象递归、`list[dict]` 表格、JSON 兜底，`result.ok` 仅用于状态判定）。
 - 更新 `specs/002-contracts/spec.md`：新增 `tools/list` 注解约定 `annotations.toolOptions` 与 `annotations.toolActions`，并定义最小字段与“非法项忽略”处理原则。
 - 更新 `specs/104-timm-classification-mcp/spec.md`：`ml.classifyImage` 新增 `annotations.toolOptions.preview.continuousCall.enabled` 契约，用于预览区持续调用分类能力。
+- 重构 `tools/mcp/timm-classifier/server.py`：移除手写 `timm + torch` 推理链路，改为基于 HuggingFace `transformers.pipelines.ImageClassificationPipeline` 标准接口实现，并保持 `ml.classifyImage/ml.classifyBatch` 的 MCP 输入输出契约。
+- 更新 `docs/mcp-timm-classifier.md`：依赖说明切换为 `torch + transformers + pillow`，并同步模型目录要求到 HuggingFace `ImageClassificationPipeline` 契约。
 - 更新持续调用防泛滥逻辑：基于当前文件结果队列执行历史命中跳过（`tool + file + 请求签名`），命中后静默跳过持续调用请求；手动调用保持强制重算。
 - 新增 `specs/105-mcp-plugin-layout/spec.md`：定义 MCP 插件目录布局规范与 Inspector 独立调试最小生命周期契约。
 - MCP 插件目录迁移：`scripts/gateway/mcp-servers/*` 迁移为 `tools/mcp/<plugin>/server.*`，并清理旧目录。
 - 更新 `.fauplay/mcp.json`：`reveal-cli` 与 `timm-classifier` 的入口路径切换到 `tools/mcp`。
 - 新增 `docs/mcp-inspector.md`：提供 Inspector 通用操作指引（安装/启动、`command/args/env/cwd` 填写、生命周期调试顺序与常见错误排查），不包含插件清单。
 - 更新 `docs/mcp-timm-classifier.md` 与 `docs/troubleshooting.md`：同步 MCP 脚本路径到 `tools/mcp`。
+- 更新 `specs/002-contracts/spec.md` 与 `specs/105-mcp-plugin-layout/spec.md`：新增本地覆盖层契约，网关支持 `.fauplay/mcp.json` + `.fauplay/mcp.local.json` 合并加载，且本地同名 server 覆盖主配置。
+- 更新 `scripts/gateway/server.mjs`：MCP 配置加载支持自动读取 `.fauplay/mcp.local.json`，缺省可忽略；当本地配置 JSON 非法时返回 `MCP_CONFIG_ERROR` 并标注路径。
+- 更新 `.gitignore`：忽略 `.fauplay/mcp.local.json` 与 `tools/mcp-local/`，用于私有/第三方插件本地接入。
 
 ## 2026-03-05
 ### Added

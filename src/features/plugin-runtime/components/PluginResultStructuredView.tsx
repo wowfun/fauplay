@@ -1,10 +1,10 @@
-import { ToolResultJsonViewer } from './ToolResultJsonViewer'
+import { PluginResultJsonViewer } from './PluginResultJsonViewer'
 
 type JsonObject = Record<string, unknown>
 
-interface ToolResultStructuredViewProps {
+interface PluginResultStructuredViewProps {
   value: unknown
-  isFullscreen?: boolean
+  surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
 }
 
 function isSimpleValue(value: unknown): value is string | number | boolean | null {
@@ -60,27 +60,28 @@ function renderTableCell(value: unknown): string {
   return toCompactJson(value)
 }
 
-interface ToolResultRecordTableProps {
+interface PluginResultRecordTableProps {
   rows: JsonObject[]
-  isFullscreen: boolean
+  surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
 }
 
-function ToolResultRecordTable({ rows, isFullscreen }: ToolResultRecordTableProps) {
+function PluginResultRecordTable({ rows, surfaceVariant }: PluginResultRecordTableProps) {
   const columns = collectTableColumns(rows)
   if (columns.length === 0) {
-    return <ToolResultJsonViewer value={rows} title="JSON 兜底视图" isFullscreen={isFullscreen} />
+    return <PluginResultJsonViewer value={rows} title="JSON 兜底视图" surfaceVariant={surfaceVariant} />
   }
 
-  const tableBorderClassName = isFullscreen
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const tableBorderClassName = isLightbox
     ? 'overflow-hidden rounded-md border border-white/20'
     : 'overflow-hidden rounded-md border border-border/80'
-  const theadClassName = isFullscreen
+  const theadClassName = isLightbox
     ? 'bg-white/10 text-white/70'
     : 'bg-muted/40 text-muted-foreground'
-  const rowClassName = isFullscreen
+  const rowClassName = isLightbox
     ? 'border-t border-white/20'
     : 'border-t border-border/60'
-  const cellClassName = isFullscreen ? 'text-white' : 'text-foreground'
+  const cellClassName = isLightbox ? 'text-white' : 'text-foreground'
 
   return (
     <div className={tableBorderClassName}>
@@ -110,16 +111,17 @@ function ToolResultRecordTable({ rows, isFullscreen }: ToolResultRecordTableProp
   )
 }
 
-interface ToolResultFieldsProps {
+interface PluginResultFieldsProps {
   value: JsonObject
-  isFullscreen: boolean
+  surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
 }
 
-function ToolResultFields({ value, isFullscreen }: ToolResultFieldsProps) {
+function PluginResultFields({ value, surfaceVariant }: PluginResultFieldsProps) {
   const entries = Object.entries(value).filter(([key]) => key !== 'ok')
-  const keyClassName = isFullscreen ? 'font-medium text-white' : 'font-medium text-foreground'
-  const valueClassName = isFullscreen ? 'text-white/80' : 'text-muted-foreground'
-  const nestedBorderClassName = isFullscreen ? 'ml-3 border-l border-white/20 pl-3' : 'ml-3 border-l border-border/70 pl-3'
+  const isLightbox = surfaceVariant === 'preview-lightbox'
+  const keyClassName = isLightbox ? 'font-medium text-white' : 'font-medium text-foreground'
+  const valueClassName = isLightbox ? 'text-white/80' : 'text-muted-foreground'
+  const nestedBorderClassName = isLightbox ? 'ml-3 border-l border-white/20 pl-3' : 'ml-3 border-l border-border/70 pl-3'
 
   if (entries.length === 0) {
     return <p className={`text-xs ${valueClassName}`}>无可展示字段</p>
@@ -141,7 +143,7 @@ function ToolResultFields({ value, isFullscreen }: ToolResultFieldsProps) {
             <div key={key} className="space-y-1">
               <p className={keyClassName}>{key}:</p>
               <div className={nestedBorderClassName}>
-                <ToolResultFields value={fieldValue} isFullscreen={isFullscreen} />
+                <PluginResultFields value={fieldValue} surfaceVariant={surfaceVariant} />
               </div>
             </div>
           )
@@ -151,7 +153,7 @@ function ToolResultFields({ value, isFullscreen }: ToolResultFieldsProps) {
           return (
             <div key={key} className="space-y-1">
               <p className={keyClassName}>{key}:</p>
-              <ToolResultRecordTable rows={fieldValue} isFullscreen={isFullscreen} />
+              <PluginResultRecordTable rows={fieldValue} surfaceVariant={surfaceVariant} />
             </div>
           )
         }
@@ -159,7 +161,7 @@ function ToolResultFields({ value, isFullscreen }: ToolResultFieldsProps) {
         return (
           <div key={key} className="space-y-1">
             <p className={keyClassName}>{key}:</p>
-            <ToolResultJsonViewer value={fieldValue} title="JSON 兜底视图" isFullscreen={isFullscreen} />
+            <PluginResultJsonViewer value={fieldValue} title="JSON 兜底视图" surfaceVariant={surfaceVariant} />
           </div>
         )
       })}
@@ -167,19 +169,19 @@ function ToolResultFields({ value, isFullscreen }: ToolResultFieldsProps) {
   )
 }
 
-export function ToolResultStructuredView({ value, isFullscreen = false }: ToolResultStructuredViewProps) {
+export function PluginResultStructuredView({ value, surfaceVariant }: PluginResultStructuredViewProps) {
   if (isSimpleValue(value)) {
-    const valueClassName = isFullscreen ? 'text-white/80' : 'text-muted-foreground'
+    const valueClassName = surfaceVariant === 'preview-lightbox' ? 'text-white/80' : 'text-muted-foreground'
     return <p className={`text-xs break-all ${valueClassName}`}>{formatSimpleValue(value)}</p>
   }
 
   if (isObject(value)) {
-    return <ToolResultFields value={value} isFullscreen={isFullscreen} />
+    return <PluginResultFields value={value} surfaceVariant={surfaceVariant} />
   }
 
   if (isObjectArray(value)) {
-    return <ToolResultRecordTable rows={value} isFullscreen={isFullscreen} />
+    return <PluginResultRecordTable rows={value} surfaceVariant={surfaceVariant} />
   }
 
-  return <ToolResultJsonViewer value={value} title="JSON 兜底视图" isFullscreen={isFullscreen} />
+  return <PluginResultJsonViewer value={value} title="JSON 兜底视图" surfaceVariant={surfaceVariant} />
 }

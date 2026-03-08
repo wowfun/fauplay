@@ -295,15 +295,33 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   useEffect(() => {
     if (filteredFiles.length === 0) {
       setSelectedFile(null)
+      setShowPreviewPane(false)
+      setPreviewFile(null)
       return
     }
     if (!selectedFile) return
     const stillExists = filteredFiles.some((item) => item.path === selectedFile.path)
     if (!stillExists) {
+      const fallbackFile = filteredFiles.find((item): item is FileItem => item.kind === 'file') ?? null
+
+      if (fallbackFile) {
+        setSelectedFile(fallbackFile)
+        if (showPreviewPane) {
+          setShowPreviewPane(true)
+        }
+        if (previewFile) {
+          setPreviewFile(fallbackFile)
+        }
+        return
+      }
+
       setSelectedFile(filteredFiles[0])
-      setShowPreviewPane(filteredFiles[0].kind === 'file')
+      setShowPreviewPane(false)
+      if (previewFile) {
+        setPreviewFile(null)
+      }
     }
-  }, [filteredFiles, selectedFile])
+  }, [filteredFiles, previewFile, selectedFile, showPreviewPane])
 
   useEffect(() => {
     if (playbackOrder !== 'shuffle') {
