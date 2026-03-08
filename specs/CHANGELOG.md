@@ -2,6 +2,11 @@
 
 ## 2026-03-08
 ### Changed
+- 新增 `specs/107-stale-config-code-cleanup/spec.md`：定义“过期配置与冗余代码清理”边界，约束 TS 单一配置源、构建缓存忽略与冗余别名移除验收标准。
+- 更新 `tsconfig.json`：补齐 `composite=true` 与 `tsBuildInfoFile=./node_modules/.tmp/tsconfig.app.tsbuildinfo`，保留 `tsc -b` 增量构建路径并避免根目录缓存污染。
+- 删除 `tsconfig.app.json` 与 `tsconfig.tsbuildinfo`：移除重复 TS 配置与被误跟踪构建缓存文件。
+- 更新 `.gitignore`：新增 `*.tsbuildinfo` 忽略规则，防止构建缓存再次入库。
+- 删除 `src/features/preview/types/toolResult.ts` 与 `src/features/preview/types/toolWorkbench.ts`：清理未被入口可达图引用的类型别名层。
 - 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：为 `fs.batchRename` 增加推荐图标配置 `annotations.icon="replace-all"`。
 - 更新 `specs/002-contracts/spec.md` 与 `specs/003-ui-ux/spec.md`：`tools/list` 注解新增 `annotations.icon`（Lucide 图标名）契约；`PluginActionRail` 图标渲染改为“注解优先，失败回退工具名首字母缩写（最多 3 字母）”。
 - 更新 `scripts/gateway/mcp/runtime.mjs` 与 `src/lib/gateway.ts`：网关归一化与前端解析链路支持透传/消费 `annotations.icon`，移除按工具名硬编码图标映射。
