@@ -7,6 +7,11 @@
 
 ### Changed
 - 建立“性能治理 -> 性能专项”双层规范关系：`004-performance-governance` 作为跨专题上游约束，`108-dev-cold-start-performance` 作为首个落地专项入口。
+- 落地 `108-dev-cold-start-performance`：`App` 改为“开始页轻入口 + 工作区懒加载（`React.lazy + Suspense`）”，将工作区重依赖与网关能力探测后置到 `WorkspaceShell`；首次进入工作区新增可见加载占位；`vite.config.ts` 增加 `server.warmup.clientFiles` 预热开始页关键模块，优化开发冷启动首刷体验。
+- 优化 `108-dev-cold-start-performance` 工作区进入性能：`readDirectory` 默认改为“快速列表”模式（首轮不强制读取每个媒体文件 `getFile()` 元数据），并调整 `date/size` 排序在缺失元数据时回退名称排序；视频缩略图链路新增超时与清理机制，避免失败场景长时间挂起与重复 `blob:* net::ERR_FILE_NOT_FOUND` 噪声。
+- 继续优化 `108-dev-cold-start-performance` 工作区首屏：`ExplorerWorkspaceLayout` 将 `WorkspacePluginHost/MediaPreviewPanel/MediaLightboxModal` 改为按需懒加载（仅在有工具或打开预览时加载）；`WorkspaceShell` 将 gateway 能力探测改为异步动态导入，移除对首屏模块图的前置依赖；`vite` 预热扩展到工作区核心渲染链路（不含插件/预览重模块）。
+- 继续优化 `108-dev-cold-start-performance` 预览首开性能：`MediaPreviewCanvas` 拆分为“媒体渲染主路径 + 懒加载 `PreviewPluginHost`”，无 gateway/无工具时不再拉起 `plugin-runtime` 模块链；`WorkspaceShell` 新增工作区空闲态预热预览模块，降低首次点击文件时的冷编译等待。
+- 调整 `108-dev-cold-start-performance` 预览预热策略：`WorkspaceShell` 预热由“面板+全屏”改为“仅预览面板主路径与关键子模块”，并在文件点击时兜底触发一次性预热，降低无效编译竞争与首点预览等待。
 - 更新地址栏交互细节：编辑态新增“地址栏外左键点击即退出”语义；最近路径历史在加载与维护时强制去重，同一路径仅保留最新一条记录。
 - 落地 `102-address-bar-navigation`：`ExplorerToolbar` 新增地址栏双态（面包屑/编辑）、路径编辑提交与取消（`Enter/Esc`）、路径段子目录下拉导航、最近路径历史（localStorage 持久化）与当前路径复制能力；`useFileSystem` 扩展为导航成功布尔返回与目录直接子目录查询接口，`App/ExplorerWorkspaceLayout` 完成地址栏能力接线并保持地址栏导航后平铺视图复位语义。
 - 新增 `specs/102-address-bar-navigation/spec.md`：将原 102 主题升级为“地址栏导航”稳定规范，覆盖双态地址栏、分段下拉、最近路径历史与复制路径契约，并明确本轮不新增全局快捷键约束。

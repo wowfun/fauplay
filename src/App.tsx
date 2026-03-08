@@ -1,94 +1,23 @@
-import type { MouseEvent as ReactMouseEvent } from 'react'
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { useFileSystem } from '@/hooks/useFileSystem'
-import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
-import { isImageFile, isVideoFile } from '@/lib/fileSystem'
-import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import { keyboardShortcuts } from '@/config/shortcuts'
-import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
-import { useGatewayCapabilities } from '@/hooks/useGatewayCapabilities'
+import { matchesAnyShortcut } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
-import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
-import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
-import {
-  FILE_GRID_CARD_SIZE_BY_PRESET,
-  TARGET_GRID_COLUMNS_AT_512_PRESET,
-  requiredGridWidthForColumns,
-} from '@/features/explorer/constants/gridLayout'
+const WorkspaceShell = lazy(async () => {
+  const mod = await import('@/features/workspace/components/WorkspaceShell')
+  return { default: mod.WorkspaceShell }
+})
 
-const MIN_PANE_WIDTH_RATIO = 0.15
-const MAX_PANE_WIDTH_RATIO = 0.75
-const DEFAULT_PANE_WIDTH_RATIO = 0.375
-const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
-const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
-
-const defaultFilter: FilterState = {
-  search: '',
-  type: 'all',
-  hideEmptyFolders: true,
-  sortBy: 'name',
-  sortOrder: 'asc',
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
-}
-
-function dedupeAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
-  const latestEntryByPath = new Map<string, AddressPathHistoryEntry>()
-
-  for (const item of entries) {
-    const normalizedPath = normalizeRelativePath(item.path)
-    const visitedAt = Number.isFinite(item.visitedAt) ? item.visitedAt : 0
-    const existing = latestEntryByPath.get(normalizedPath)
-    if (!existing || visitedAt > existing.visitedAt) {
-      latestEntryByPath.set(normalizedPath, { path: normalizedPath, visitedAt })
-    }
-  }
-
-  return [...latestEntryByPath.values()]
-    .sort((left, right) => right.visitedAt - left.visitedAt)
-    .slice(0, MAX_ADDRESS_PATH_HISTORY_ITEMS)
-}
-
-function parseAddressPathHistory(raw: string | null): AddressPathHistoryEntry[] {
-  if (!raw) return []
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    const validEntries = parsed
-      .filter((item): item is AddressPathHistoryEntry => {
-        return Boolean(
-          item &&
-          typeof item === 'object' &&
-          typeof (item as AddressPathHistoryEntry).path === 'string' &&
-          typeof (item as AddressPathHistoryEntry).visitedAt === 'number'
-        )
-      })
-    return dedupeAddressPathHistory(validEntries)
-  } catch {
-    return []
-  }
-}
-
-function loadAddressPathHistory(): AddressPathHistoryEntry[] {
-  if (typeof window === 'undefined') return []
-  return parseAddressPathHistory(window.localStorage.getItem(ADDRESS_PATH_HISTORY_STORAGE_KEY))
-}
-
-function saveAddressPathHistory(history: AddressPathHistoryEntry[]): void {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(ADDRESS_PATH_HISTORY_STORAGE_KEY, JSON.stringify(history))
-}
-
-function upsertAddressPathHistory(
-  previous: AddressPathHistoryEntry[],
-  nextPath: string
-): AddressPathHistoryEntry[] {
-  const normalizedPath = normalizeRelativePath(nextPath)
-  const now = Date.now()
-  return dedupeAddressPathHistory([{ path: normalizedPath, visitedAt: now }, ...previous])
+function WorkspaceLoadingFallback({ rootName }: { rootName: string }) {
+  return (
+    <div className="h-screen bg-background flex flex-col items-center justify-center p-8 overflow-hidden">
+      <div className="text-center max-w-md space-y-3">
+        <div className="mx-auto h-8 w-8 rounded-full border-2 border-muted border-t-foreground animate-spin" />
+        <p className="text-sm text-muted-foreground">正在加载工作区...</p>
+        <p className="text-xs text-muted-foreground">目录：{rootName}</p>
+      </div>
+    </div>
+  )
 }
 
 function App() {
@@ -108,300 +37,45 @@ function App() {
     filterFiles,
   } = useFileSystem()
 
-  const [filter, setFilter] = useState<FilterState>(defaultFilter)
-  const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
-  const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
-  const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
-  const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
-  const contentRef = useRef<HTMLDivElement>(null)
-  const isPaneWidthManualRef = useRef(false)
-  const fileGridRef = useRef<FileBrowserGridHandle>(null)
-  const { tools: pluginTools } = useGatewayCapabilities()
-
-  const filteredFiles = useMemo(() => {
-    return filterFiles(files, filter)
-  }, [files, filter, filterFiles])
-
-  const totalCount = useMemo(() => files.length, [files])
-  const imageCount = useMemo(
-    () => files.filter((file) => file.kind === 'file' && isImageFile(file.name)).length,
-    [files]
-  )
-  const videoCount = useMemo(
-    () => files.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
-    [files]
-  )
-  const selectedGridItems = useMemo(() => {
-    if (gridSelectedPaths.length === 0) return []
-    const selectedPathSet = new Set(gridSelectedPaths)
-    return filteredFiles.filter((file) => selectedPathSet.has(file.path))
-  }, [filteredFiles, gridSelectedPaths])
-  const selectedGridMetaFile = useMemo(() => {
-    if (selectedGridItems.length !== 1) return null
-    return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
-  }, [selectedGridItems])
-  const {
-    selectedFile,
-    previewFile,
-    showPreviewPane,
-    previewAutoPlayOnOpen,
-    autoPlayEnabled,
-    autoPlayIntervalSec,
-    playbackOrder,
-    hasOpenPreview,
-    showFileInPane,
-    openFileInModal,
-    closePreviewModal,
-    closePreviewPane,
-    openFullscreenFromPane,
-    toggleAutoPlay,
-    togglePlaybackOrder,
-    setAutoPlayInterval,
-    navigateMediaFromPane,
-    navigateMediaFromModal,
-    handleAutoPlayVideoEnded,
-    handleAutoPlayVideoPlaybackError,
-  } = usePreviewTraversal({ filteredFiles })
-  const handleDirectoryClick = useCallback((dirName: string) => {
-    navigateToDirectory(dirName)
-  }, [navigateToDirectory])
-
-  const handleFileClick = useCallback((file: FileItem) => {
-    if (file.kind === 'directory') {
-      navigateToDirectory(file.name)
-    } else {
-      showFileInPane(file)
-    }
-  }, [navigateToDirectory, showFileInPane])
-
-  const handleFileDoubleClick = useCallback((file: FileItem) => {
-    if (file.kind === 'file') {
-      openFileInModal(file)
-    }
-  }, [openFileInModal])
-
-  const handleNavigateToPath = useCallback((path: string) => {
-    return navigateToPath(path, { resetFlattenView: true })
-  }, [navigateToPath])
-
-  const handleWorkspaceMutationCommitted = useCallback(async () => {
-    await navigateToPath(currentPath)
-  }, [currentPath, navigateToPath])
-
   useEffect(() => {
-    if (!rootHandle) return
-    setRecentPathHistory((previous) => upsertAddressPathHistory(previous, currentPath))
-  }, [rootHandle, currentPath])
+    if (rootHandle) return
 
-  useEffect(() => {
-    saveAddressPathHistory(recentPathHistory)
-  }, [recentPathHistory])
-
-  useEffect(() => {
-    fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
-      scroll: true,
-      focus: false,
-    })
-  }, [selectedFile])
-
-  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
-      const isTyping = isTypingTarget(event.target)
 
       // Ctrl/Cmd + O: open folder picker
       if (matchesAnyShortcut(event, keyboardShortcuts.app.openDirectory)) {
         event.preventDefault()
         void selectDirectory()
-        return
-      }
-
-      // Ignore most global shortcuts while user is typing
-      if (isTyping) return
-
-      // P: toggle preview autoplay
-      if (matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
-        event.preventDefault()
-        toggleAutoPlay()
-        return
-      }
-
-      // Preview traversal hotkeys only work while preview is open.
-      if (hasOpenPreview) {
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.togglePlaybackOrder)) {
-          event.preventDefault()
-          togglePlaybackOrder()
-          return
-        }
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.prev)) {
-          event.preventDefault()
-          if (previewFile) {
-            navigateMediaFromModal('prev')
-          } else {
-            navigateMediaFromPane('prev')
-          }
-          return
-        }
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.next)) {
-          event.preventDefault()
-          if (previewFile) {
-            navigateMediaFromModal('next')
-          } else {
-            navigateMediaFromPane('next')
-          }
-          return
-        }
-      }
-
-      // Backspace: navigate up one level
-      if (matchesAnyShortcut(event, keyboardShortcuts.app.navigateUp) && currentPath) {
-        event.preventDefault()
-        void navigateUp()
-        return
-      }
-
-      // Escape: close modal first, then side preview pane
-      if (matchesAnyShortcut(event, keyboardShortcuts.preview.close)) {
-        if (previewFile) {
-          event.preventDefault()
-          closePreviewModal()
-          return
-        }
-        if (showPreviewPane) {
-          event.preventDefault()
-          closePreviewPane()
-        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    selectDirectory,
-    navigateUp,
-    currentPath,
-    hasOpenPreview,
-    previewFile,
-    showPreviewPane,
-    navigateMediaFromModal,
-    navigateMediaFromPane,
-    togglePlaybackOrder,
-    closePreviewModal,
-    closePreviewPane,
-    toggleAutoPlay,
-  ])
-
-  const getAdaptiveDefaultPaneWidthRatio = useCallback((containerWidth: number) => {
-    if (containerWidth <= 0 || thumbnailSizePreset !== '512') {
-      return DEFAULT_PANE_WIDTH_RATIO
-    }
-    const requiredGridWidth = requiredGridWidthForColumns(
-      TARGET_GRID_COLUMNS_AT_512_PRESET,
-      FILE_GRID_CARD_SIZE_BY_PRESET['512'].width
-    )
-    const maxPaneRatioForThreeColumns = 1 - requiredGridWidth / containerWidth
-    const adaptiveRatio = Math.min(DEFAULT_PANE_WIDTH_RATIO, maxPaneRatioForThreeColumns)
-    return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, adaptiveRatio))
-  }, [thumbnailSizePreset])
-
-  useEffect(() => {
-    if (!showPreviewPane || isPaneWidthManualRef.current) return
-
-    const applyAdaptiveDefault = () => {
-      const containerWidth = contentRef.current?.parentElement?.offsetWidth ?? window.innerWidth
-      const nextRatio = getAdaptiveDefaultPaneWidthRatio(containerWidth)
-      setPaneWidthRatio((currentRatio) => {
-        if (Math.abs(currentRatio - nextRatio) < 0.001) {
-          return currentRatio
-        }
-        return nextRatio
-      })
-    }
-
-    applyAdaptiveDefault()
-    window.addEventListener('resize', applyAdaptiveDefault)
-    return () => window.removeEventListener('resize', applyAdaptiveDefault)
-  }, [showPreviewPane, getAdaptiveDefaultPaneWidthRatio])
-
-  const handlePreviewPaneResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    isPaneWidthManualRef.current = true
-    const startX = event.clientX
-    const startRatio = paneWidthRatio
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const containerWidth = contentRef.current?.parentElement?.offsetWidth || window.innerWidth
-      const delta = (startX - moveEvent.clientX) / containerWidth
-      const newRatio = startRatio + delta
-      setPaneWidthRatio(Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, newRatio)))
-    }
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [paneWidthRatio])
+  }, [rootHandle, selectDirectory])
 
   if (!rootHandle) {
     return <DirectorySelectionLayout isLoading={isLoading} error={error} onSelectDirectory={selectDirectory} />
   }
 
   return (
-    <ExplorerWorkspaceLayout
-      filter={filter}
-      onFilterChange={setFilter}
-      rootName={rootHandle.name}
-      currentPath={currentPath}
-      onNavigateToPath={handleNavigateToPath}
-      onListChildDirectories={listChildDirectories}
-      recentPathHistory={recentPathHistory}
-      onNavigateUp={navigateUp}
-      isFlattenView={isFlattenView}
-      onToggleFlattenView={() => {
-        void setFlattenView(!isFlattenView)
-      }}
-      totalCount={totalCount}
-      imageCount={imageCount}
-      videoCount={videoCount}
-      thumbnailSizePreset={thumbnailSizePreset}
-      onThumbnailSizePresetChange={setThumbnailSizePreset}
-      error={error}
-      isLoading={isLoading}
-      files={filteredFiles}
-      rootHandle={rootHandle}
-      fileGridRef={fileGridRef}
-      onFileClick={handleFileClick}
-      onFileDoubleClick={handleFileDoubleClick}
-      onDirectoryClick={handleDirectoryClick}
-      onGridSelectionChange={setGridSelectedPaths}
-      gridSelectedPaths={gridSelectedPaths}
-      onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
-      showPreviewPane={showPreviewPane}
-      hasOpenPreview={hasOpenPreview}
-      contentRef={contentRef}
-      paneWidthRatio={paneWidthRatio}
-      onPreviewPaneResizeStart={handlePreviewPaneResizeStart}
-      selectedFile={selectedFile}
-      gridSelectedCount={selectedGridItems.length}
-      selectedGridMetaFile={selectedGridMetaFile}
-      pluginTools={pluginTools}
-      onClosePane={closePreviewPane}
-      onOpenFullscreenFromPane={openFullscreenFromPane}
-      autoPlayEnabled={autoPlayEnabled}
-      autoPlayIntervalSec={autoPlayIntervalSec}
-      onToggleAutoPlay={toggleAutoPlay}
-      playbackOrder={playbackOrder}
-      onTogglePlaybackOrder={togglePlaybackOrder}
-      onAutoPlayIntervalChange={setAutoPlayInterval}
-      onVideoEnded={handleAutoPlayVideoEnded}
-      onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
-      previewFile={previewFile}
-      previewAutoPlayOnOpen={previewAutoPlayOnOpen}
-      onClosePreview={closePreviewModal}
-    />
+    <Suspense fallback={<WorkspaceLoadingFallback rootName={rootHandle.name} />}>
+      <WorkspaceShell
+        rootHandle={rootHandle}
+        files={files}
+        currentPath={currentPath}
+        isFlattenView={isFlattenView}
+        isLoading={isLoading}
+        error={error}
+        selectDirectory={selectDirectory}
+        navigateToPath={navigateToPath}
+        navigateToDirectory={navigateToDirectory}
+        navigateUp={navigateUp}
+        listChildDirectories={listChildDirectories}
+        setFlattenView={setFlattenView}
+        filterFiles={filterFiles}
+      />
+    </Suspense>
   )
 }
 

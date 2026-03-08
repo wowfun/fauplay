@@ -1,16 +1,28 @@
-import { useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
+import { lazy, Suspense, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
-import { WorkspacePluginHost } from '@/features/explorer/components/WorkspacePluginHost'
-import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPanel'
-import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+
+const WorkspacePluginHost = lazy(async () => {
+  const mod = await import('@/features/explorer/components/WorkspacePluginHost')
+  return { default: mod.WorkspacePluginHost }
+})
+
+const MediaPreviewPanel = lazy(async () => {
+  const mod = await import('@/features/preview/components/MediaPreviewPanel')
+  return { default: mod.MediaPreviewPanel }
+})
+
+const MediaLightboxModal = lazy(async () => {
+  const mod = await import('@/features/preview/components/MediaLightboxModal')
+  return { default: mod.MediaLightboxModal }
+})
 
 interface ExplorerWorkspaceLayoutProps {
   filter: FilterState
@@ -176,18 +188,22 @@ export function ExplorerWorkspaceLayout({
                 canClearSelectionWithEscape={!hasOpenPreview}
                 onSelectionChange={onGridSelectionChange}
               />
-              <WorkspacePluginHost
-                tools={pluginTools}
-                rootHandle={rootHandle}
-                currentPath={currentPath}
-                visibleFiles={files}
-                selectedPaths={gridSelectedPaths}
-                resultQueueState={workspacePluginResultQueueState}
-                setResultQueueState={setWorkspacePluginResultQueueState}
-                workbenchState={workspacePluginWorkbenchState}
-                setWorkbenchState={setWorkspacePluginWorkbenchState}
-                onMutationCommitted={onWorkspaceMutationCommitted}
-              />
+              {pluginTools.length > 0 && (
+                <Suspense fallback={null}>
+                  <WorkspacePluginHost
+                    tools={pluginTools}
+                    rootHandle={rootHandle}
+                    currentPath={currentPath}
+                    visibleFiles={files}
+                    selectedPaths={gridSelectedPaths}
+                    resultQueueState={workspacePluginResultQueueState}
+                    setResultQueueState={setWorkspacePluginResultQueueState}
+                    workbenchState={workspacePluginWorkbenchState}
+                    setWorkbenchState={setWorkspacePluginWorkbenchState}
+                    onMutationCommitted={onWorkspaceMutationCommitted}
+                  />
+                </Suspense>
+              )}
             </>
           )}
         </div>
@@ -202,26 +218,34 @@ export function ExplorerWorkspaceLayout({
               className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 bg-transparent transition-colors z-10"
               onMouseDown={onPreviewPaneResizeStart}
             />
-            <MediaPreviewPanel
-              file={selectedFile}
-              rootHandle={rootHandle}
-              previewActionTools={pluginTools}
-              onClose={onClosePane}
-              onOpenFullscreen={onOpenFullscreenFromPane}
-              autoPlayEnabled={autoPlayEnabled}
-              autoPlayIntervalSec={autoPlayIntervalSec}
-              onToggleAutoPlay={onToggleAutoPlay}
-              playbackOrder={playbackOrder}
-              onTogglePlaybackOrder={onTogglePlaybackOrder}
-              onAutoPlayIntervalChange={onAutoPlayIntervalChange}
-              onVideoEnded={onVideoEnded}
-              onVideoPlaybackError={onVideoPlaybackError}
-              toolResultQueueState={previewPluginResultQueueState}
-              setToolResultQueueState={setPreviewPluginResultQueueState}
-              toolWorkbenchState={previewPluginWorkbenchState}
-              setToolWorkbenchState={setPreviewPluginWorkbenchState}
-              enableContinuousAutoRunOwner={showPreviewPane}
-            />
+            <Suspense
+              fallback={(
+                <div className="h-full w-full flex items-center justify-center">
+                  <Loader2 className="w-7 h-7 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            >
+              <MediaPreviewPanel
+                file={selectedFile}
+                rootHandle={rootHandle}
+                previewActionTools={pluginTools}
+                onClose={onClosePane}
+                onOpenFullscreen={onOpenFullscreenFromPane}
+                autoPlayEnabled={autoPlayEnabled}
+                autoPlayIntervalSec={autoPlayIntervalSec}
+                onToggleAutoPlay={onToggleAutoPlay}
+                playbackOrder={playbackOrder}
+                onTogglePlaybackOrder={onTogglePlaybackOrder}
+                onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+                onVideoEnded={onVideoEnded}
+                onVideoPlaybackError={onVideoPlaybackError}
+                toolResultQueueState={previewPluginResultQueueState}
+                setToolResultQueueState={setPreviewPluginResultQueueState}
+                toolWorkbenchState={previewPluginWorkbenchState}
+                setToolWorkbenchState={setPreviewPluginWorkbenchState}
+                enableContinuousAutoRunOwner={showPreviewPane}
+              />
+            </Suspense>
           </div>
         )}
       </div>
@@ -233,26 +257,34 @@ export function ExplorerWorkspaceLayout({
       />
 
       {previewFile && (
-        <MediaLightboxModal
-          file={previewFile}
-          rootHandle={rootHandle}
-          previewActionTools={pluginTools}
-          onClose={onClosePreview}
-          autoPlayOnOpen={previewAutoPlayOnOpen}
-          autoPlayEnabled={autoPlayEnabled}
-          autoPlayIntervalSec={autoPlayIntervalSec}
-          onToggleAutoPlay={onToggleAutoPlay}
-          playbackOrder={playbackOrder}
-          onTogglePlaybackOrder={onTogglePlaybackOrder}
-          onAutoPlayIntervalChange={onAutoPlayIntervalChange}
-          onVideoEnded={onVideoEnded}
-          onVideoPlaybackError={onVideoPlaybackError}
-          toolResultQueueState={previewPluginResultQueueState}
-          setToolResultQueueState={setPreviewPluginResultQueueState}
-          toolWorkbenchState={previewPluginWorkbenchState}
-          setToolWorkbenchState={setPreviewPluginWorkbenchState}
-          enableContinuousAutoRunOwner={!showPreviewPane}
-        />
+        <Suspense
+          fallback={(
+            <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        >
+          <MediaLightboxModal
+            file={previewFile}
+            rootHandle={rootHandle}
+            previewActionTools={pluginTools}
+            onClose={onClosePreview}
+            autoPlayOnOpen={previewAutoPlayOnOpen}
+            autoPlayEnabled={autoPlayEnabled}
+            autoPlayIntervalSec={autoPlayIntervalSec}
+            onToggleAutoPlay={onToggleAutoPlay}
+            playbackOrder={playbackOrder}
+            onTogglePlaybackOrder={onTogglePlaybackOrder}
+            onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+            onVideoEnded={onVideoEnded}
+            onVideoPlaybackError={onVideoPlaybackError}
+            toolResultQueueState={previewPluginResultQueueState}
+            setToolResultQueueState={setPreviewPluginResultQueueState}
+            toolWorkbenchState={previewPluginWorkbenchState}
+            setToolWorkbenchState={setPreviewPluginWorkbenchState}
+            enableContinuousAutoRunOwner={!showPreviewPane}
+          />
+        </Suspense>
       )}
     </div>
   )

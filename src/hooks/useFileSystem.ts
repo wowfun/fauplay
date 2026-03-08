@@ -191,10 +191,18 @@ export function useFileSystem() {
           cmp = a.name.localeCompare(b.name)
           break
         case 'date':
-          cmp = (a.lastModified?.getTime() || 0) - (b.lastModified?.getTime() || 0)
+          if (!a.lastModified || !b.lastModified) {
+            cmp = a.name.localeCompare(b.name)
+          } else {
+            cmp = a.lastModified.getTime() - b.lastModified.getTime()
+          }
           break
         case 'size':
-          cmp = (a.size || 0) - (b.size || 0)
+          if (typeof a.size !== 'number' || typeof b.size !== 'number') {
+            cmp = a.name.localeCompare(b.name)
+          } else {
+            cmp = a.size - b.size
+          }
           break
       }
 

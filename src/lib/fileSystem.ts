@@ -69,24 +69,31 @@ export async function openDirectory(): Promise<FileSystemDirectoryHandle | null>
 
 export async function readDirectory(
   dirHandle: FileSystemDirectoryHandle,
-  recursive: boolean = false
+  recursive: boolean = false,
+  options: { includeMetadata?: boolean } = {}
 ): Promise<{ files: import('@/types').FileItem[]; directories: import('@/types').FileItem[] }> {
   const files: import('@/types').FileItem[] = []
   const directories: import('@/types').FileItem[] = []
+  const includeMetadata = options.includeMetadata === true
 
   for await (const entry of dirHandle.values()) {
     if (entry.kind === 'file') {
       if (recursive || isMediaFile(entry.name)) {
-        const fileHandle = entry as FileSystemFileHandle
-        const file = await fileHandle.getFile()
-        files.push({
+        const fileItem: import('@/types').FileItem = {
           name: entry.name,
           path: entry.name,
           kind: 'file',
-          size: file.size,
-          lastModified: file.lastModified ? new Date(file.lastModified) : undefined,
           mimeType: getMimeType(entry.name),
-        })
+        }
+
+        if (includeMetadata) {
+          const fileHandle = entry as FileSystemFileHandle
+          const file = await fileHandle.getFile()
+          fileItem.size = file.size
+          fileItem.lastModified = file.lastModified ? new Date(file.lastModified) : undefined
+        }
+
+        files.push(fileItem)
       }
     } else if (entry.kind === 'directory') {
       const directoryHandle = entry as FileSystemDirectoryHandle
@@ -104,7 +111,7 @@ export async function readDirectory(
       })
 
       if (recursive) {
-        const subResult = await readDirectory(directoryHandle, true)
+        const subResult = await readDirectory(directoryHandle, true, options)
         files.push(...subResult.files.map(f => ({
           ...f,
           path: `${entry.name}/${f.path}`,

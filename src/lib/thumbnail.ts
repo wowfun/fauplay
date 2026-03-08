@@ -1,6 +1,7 @@
 import type { ThumbnailSizePreset } from '@/types'
 
 const DEFAULT_THUMBNAIL_SIZE = 180
+const VIDEO_THUMBNAIL_TIMEOUT_MS = 4000
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
@@ -135,12 +136,41 @@ async function generateVideoThumbnail(file: File, maxSize: number): Promise<stri
       return
     }
 
-    video.onloadeddata = () => {
-      video.currentTime = 1
+    let settled = false
+    const timeoutId = window.setTimeout(() => {
+      settleWithError(new Error('Video thumbnail generation timed out'))
+    }, VIDEO_THUMBNAIL_TIMEOUT_MS)
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId)
+      video.onloadeddata = null
+      video.onseeked = null
+      video.onerror = null
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+      URL.revokeObjectURL(url)
     }
 
-    video.onseeked = () => {
-      URL.revokeObjectURL(url)
+    const settleWithError = (error: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+
+    const settleWithSuccess = (thumbnailDataUrl: string) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(thumbnailDataUrl)
+    }
+
+    const captureCurrentFrame = () => {
+      if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+        settleWithError(new Error('Failed to read video dimensions'))
+        return
+      }
 
       let width = video.videoWidth
       let height = video.videoHeight
@@ -160,17 +190,33 @@ async function generateVideoThumbnail(file: File, maxSize: number): Promise<stri
       canvas.width = width
       canvas.height = height
       ctx.drawImage(video, 0, 0, width, height)
-
-      resolve(canvas.toDataURL('image/jpeg', 0.7))
+      settleWithSuccess(canvas.toDataURL('image/jpeg', 0.7))
     }
+
+    video.onloadeddata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0
+      const seekTime = duration > 0 ? Math.min(1, Math.max(0, duration * 0.1)) : 0
+      if (seekTime <= 0) {
+        captureCurrentFrame()
+        return
+      }
+      try {
+        video.currentTime = seekTime
+      } catch {
+        settleWithError(new Error('Failed to seek video'))
+      }
+    }
+
+    video.onseeked = captureCurrentFrame
 
     video.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Failed to load video'))
+      settleWithError(new Error('Failed to load video'))
     }
 
+    video.preload = 'metadata'
+    video.muted = true
+    video.playsInline = true
     video.src = url
-    video.crossOrigin = 'anonymous'
   })
 }
 
