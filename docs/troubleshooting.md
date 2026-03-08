@@ -128,7 +128,7 @@ cat .fauplay/mcp.json
     "reveal-cli": {
       "type": "stdio",
       "command": "node",
-      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+      "args": ["tools/mcp/reveal-cli/server.mjs"]
     },
     "my-server": {
       "type": "stdio",

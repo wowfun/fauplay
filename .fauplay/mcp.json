@@ -3,14 +3,14 @@
     "reveal-cli": {
       "type": "stdio",
       "command": "node",
-      "args": ["scripts/gateway/mcp-servers/reveal-cli.mjs"]
+      "args": ["tools/mcp/reveal-cli/server.mjs"]
     },
     "timm-classifier": {
       "type": "stdio",
       "command": "python3",
       "callTimeoutMs": 120000,
       "args": [
-        "scripts/gateway/mcp-servers/timm-classifier-cli.py",
+        "tools/mcp/timm-classifier/server.py",
         "--config",
         ".fauplay/timm-classifier.json"
       ]

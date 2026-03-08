@@ -4,7 +4,7 @@
 
 ## 1. 文件位置
 
-- MCP server 脚本：`scripts/gateway/mcp-servers/timm-classifier-cli.py`
+- MCP server 脚本：`tools/mcp/timm-classifier/server.py`
 - MCP 注册配置：`.fauplay/mcp.json`
 - 模型配置文件：`.fauplay/timm-classifier.json`
 

@@ -1,3 +1,4 @@
+/* global process */
 import { execFile, spawn } from 'node:child_process'
 import path from 'node:path'
 import readline from 'node:readline'
