@@ -34,6 +34,9 @@ function toGatewayTool(sourceLabel, tool) {
   if (typeof annotations.mutation === 'boolean') {
     normalizedAnnotations.mutation = annotations.mutation
   }
+  if (typeof annotations.icon === 'string' && annotations.icon.trim()) {
+    normalizedAnnotations.icon = annotations.icon.trim()
+  }
   if (scopes.length > 0) {
     normalizedAnnotations.scopes = scopes
   }

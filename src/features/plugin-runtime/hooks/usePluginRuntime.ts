@@ -467,7 +467,7 @@ export function usePluginRuntime({
         disabled: latestQueueItem?.status === 'loading' || !rootHandle || !runnableInContext,
         actionState: resolveToolActionState(currentQueue, tool.name, Boolean(rootHandle && runnableInContext)),
         error: toRailErrorHint(latestQueueItem),
-        icon: tool.icon,
+        iconName: tool.iconName,
       }
     })
   }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, rootHandle, runToolCall, scopedTools])

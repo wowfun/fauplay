@@ -15,7 +15,7 @@ export interface GatewayToolDescriptor {
   title: string
   mutation: boolean
   scopes: string[]
-  icon: 'reveal' | 'openDefault' | 'default'
+  iconName?: string
   toolOptions: ToolOptionAnnotation[]
   toolActions: ToolActionAnnotation[]
 }
@@ -88,6 +88,7 @@ interface GatewayRawToolDescriptor {
   annotations?: Record<string, unknown> & {
     title?: string
     mutation?: boolean
+    icon?: string
     scopes?: string[]
   }
 }
@@ -408,19 +409,16 @@ function toToolDescriptor(tool: GatewayRawToolDescriptor): GatewayToolDescriptor
     : Array.isArray(tool?.annotations?.scopes)
       ? tool.annotations.scopes.filter((scope: unknown): scope is string => typeof scope === 'string')
       : []
-
-  const icon = name === 'system.reveal'
-    ? 'reveal'
-    : name === 'system.openDefault'
-      ? 'openDefault'
-      : 'default'
+  const iconName = typeof tool?.annotations?.icon === 'string' && tool.annotations.icon.trim()
+    ? tool.annotations.icon.trim()
+    : undefined
 
   return {
     name,
     title,
     mutation,
     scopes,
-    icon,
+    iconName,
     toolOptions: toToolOptionAnnotations(tool.annotations),
     toolActions: toToolActionAnnotations(tool.annotations),
   }

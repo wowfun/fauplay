@@ -1,7 +1,8 @@
-import { FolderOpen, Play, Wrench } from 'lucide-react'
+import { useEffect, useMemo, useState, type ComponentType } from 'react'
+import dynamicIconImports from 'lucide-react/dynamicIconImports'
 import { Button } from '@/ui/Button'
 import { cn } from '@/lib/utils'
-import type { PluginActionIcon, PluginActionRailItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
+import type { PluginActionRailItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 
 interface PluginActionRailProps {
   actions: PluginActionRailItem[]
@@ -11,10 +12,124 @@ interface PluginActionRailProps {
   onActionHoverChange?: (toolName: string) => void
 }
 
-function getActionIcon(icon: PluginActionIcon) {
-  if (icon === 'reveal') return FolderOpen
-  if (icon === 'openDefault') return Play
-  return Wrench
+type DynamicIconName = keyof typeof dynamicIconImports
+type DynamicIconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean }>
+
+const iconComponentCache = new Map<DynamicIconName, DynamicIconComponent | 'failed'>()
+
+function hasDynamicIconName(value: string): value is DynamicIconName {
+  return Object.prototype.hasOwnProperty.call(dynamicIconImports, value)
+}
+
+function toKebabCase(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .toLowerCase()
+}
+
+function resolveDynamicIconName(iconName?: string): DynamicIconName | null {
+  if (typeof iconName !== 'string') return null
+  const trimmed = iconName.trim()
+  if (!trimmed) return null
+
+  if (hasDynamicIconName(trimmed)) return trimmed
+
+  const kebab = toKebabCase(trimmed).replace(/^-+|-+$/g, '')
+  if (hasDynamicIconName(kebab)) return kebab
+
+  return null
+}
+
+function toToolNameAbbreviation(toolName: string): string {
+  const letters = toolName
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((segment) => segment[0]?.toUpperCase() ?? '')
+    .join('')
+    .slice(0, 3)
+
+  return letters || '?'
+}
+
+interface PluginActionGlyphProps {
+  iconName?: string
+  toolName: string
+}
+
+function PluginActionGlyph({ iconName, toolName }: PluginActionGlyphProps) {
+  const fallback = useMemo(() => toToolNameAbbreviation(toolName), [toolName])
+  const dynamicIconName = useMemo(() => resolveDynamicIconName(iconName), [iconName])
+  const [iconComponent, setIconComponent] = useState<DynamicIconComponent | null>(() => {
+    if (!dynamicIconName) return null
+    const cached = iconComponentCache.get(dynamicIconName)
+    return cached && cached !== 'failed' ? cached : null
+  })
+  const [loadFailed, setLoadFailed] = useState<boolean>(() => {
+    if (!dynamicIconName) return false
+    return iconComponentCache.get(dynamicIconName) === 'failed'
+  })
+
+  useEffect(() => {
+    if (!dynamicIconName) {
+      setIconComponent(null)
+      setLoadFailed(false)
+      return
+    }
+
+    const cached = iconComponentCache.get(dynamicIconName)
+    if (cached === 'failed') {
+      setIconComponent(null)
+      setLoadFailed(true)
+      return
+    }
+
+    if (cached) {
+      setIconComponent(() => cached)
+      setLoadFailed(false)
+      return
+    }
+
+    let cancelled = false
+    const loader = dynamicIconImports[dynamicIconName]
+
+    void loader()
+      .then((module) => {
+        const loadedIcon = module?.default as DynamicIconComponent | undefined
+        if (!loadedIcon) {
+          throw new Error('Missing lucide icon module default export')
+        }
+        iconComponentCache.set(dynamicIconName, loadedIcon)
+        if (cancelled) return
+        setIconComponent(() => loadedIcon)
+        setLoadFailed(false)
+      })
+      .catch(() => {
+        iconComponentCache.set(dynamicIconName, 'failed')
+        if (cancelled) return
+        setIconComponent(null)
+        setLoadFailed(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [dynamicIconName])
+
+  if (dynamicIconName && iconComponent && !loadFailed) {
+    const Icon = iconComponent
+    return <Icon className="w-4 h-4" aria-hidden />
+  }
+
+  return (
+    <span className="text-[10px] font-semibold leading-none uppercase" aria-hidden="true">
+      {fallback}
+    </span>
+  )
 }
 
 export function PluginActionRail({
@@ -43,7 +158,6 @@ export function PluginActionRail({
       data-plugin-subzone={subzone ?? 'PluginActionRail'}
     >
       {actions.map((action) => {
-        const Icon = getActionIcon(action.icon)
         return (
           <Button
             key={action.toolName}
@@ -63,7 +177,7 @@ export function PluginActionRail({
             }}
           >
             <span className="sr-only">{action.title}</span>
-            <Icon className="w-4 h-4" aria-hidden="true" />
+            <PluginActionGlyph iconName={action.iconName} toolName={action.toolName} />
           </Button>
         )
       })}

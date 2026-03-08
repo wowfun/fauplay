@@ -80,6 +80,7 @@
    - `dryRun`（`arguments.confirm=false`）
    - `commit`（`arguments.confirm=true`）
 3. `annotations.mutation` 应声明为 `true`。
+4. 推荐声明 `annotations.icon = "replace-all"` 作为批量重命名动作图标。
 
 逐项错误码建议：
 
@@ -121,6 +122,7 @@
 1. `confirm` 默认值为 `false`。
 2. 工作区默认目标集合策略：优先选中集；无选中时使用当前目录可见文件列表（仅文件）。
 3. 工作区结果队列分桶键默认为目录路径。
+4. 推荐图标默认值：`fs.batchRename -> replace-all`。
 
 ## 10. 关联主题 (Related Specs)
 

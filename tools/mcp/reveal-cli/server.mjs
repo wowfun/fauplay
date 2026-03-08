@@ -23,6 +23,7 @@ const TOOL_DEFINITIONS = [
     annotations: {
       title: '在文件资源管理器中显示',
       mutation: false,
+      icon: 'folder-open',
       scopes: ['file'],
     },
   },
@@ -41,6 +42,7 @@ const TOOL_DEFINITIONS = [
     annotations: {
       title: '用系统默认应用打开',
       mutation: false,
+      icon: 'play',
       scopes: ['file'],
     },
   },

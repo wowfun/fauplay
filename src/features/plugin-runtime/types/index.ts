@@ -2,7 +2,7 @@ export type PluginResultStatus = 'loading' | 'success' | 'error'
 export type PluginResultTrigger = 'manual' | 'continuous'
 export type ToolWorkbenchOptionValue = boolean | string
 export type PluginActionState = 'default' | 'disabled' | 'loading' | 'error'
-export type PluginActionIcon = 'reveal' | 'openDefault' | 'default'
+export type PluginActionIconName = string
 
 export interface PluginResultQueueItem {
   id: string
@@ -41,7 +41,7 @@ export interface PluginActionRailItem {
   disabled: boolean
   actionState: PluginActionState
   error: string | null
-  icon: PluginActionIcon
+  iconName?: PluginActionIconName
   highlighted?: boolean
 }
 

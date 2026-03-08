@@ -2,6 +2,11 @@
 
 ## 2026-03-08
 ### Changed
+- 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：为 `fs.batchRename` 增加推荐图标配置 `annotations.icon="replace-all"`。
+- 更新 `specs/002-contracts/spec.md` 与 `specs/003-ui-ux/spec.md`：`tools/list` 注解新增 `annotations.icon`（Lucide 图标名）契约；`PluginActionRail` 图标渲染改为“注解优先，失败回退工具名首字母缩写（最多 3 字母）”。
+- 更新 `scripts/gateway/mcp/runtime.mjs` 与 `src/lib/gateway.ts`：网关归一化与前端解析链路支持透传/消费 `annotations.icon`，移除按工具名硬编码图标映射。
+- 更新 `src/features/plugin-runtime/components/PluginActionRail.tsx` 与插件运行时类型：动作图标支持 Lucide 动态解析（PascalCase/kebab-case），异常场景统一回退缩写 glyph。
+- 更新 `tools/mcp/reveal-cli/server.mjs`：为 `system.reveal` 与 `system.openDefault` 补充 `annotations.icon`，保持内置系统工具默认视觉语义。
 - 新增 `specs/106-batch-rename-workspace/spec.md`：定义工作区批量重命名插件契约（`fs.batchRename`、`confirm=false/true`、逐项结果、冲突逐项跳过、仅文件与主体名规则）。
 - 新增 `tools/mcp/batch-rename/server.mjs`：落地工作区批量重命名 MCP server（`fs.batchRename`），支持 `dry-run/commit` 动作、字符串规则选项与逐项结果返回。
 - 更新 `.fauplay/mcp.json`：注册 `batch-rename` MCP server（`node tools/mcp/batch-rename/server.mjs`）。
@@ -15,6 +20,12 @@
 - 修复刷新联动体验问题：工作区 mutation 自动刷新后不再意外关闭侧栏预览；当原预览文件失效时，预览自动回退到当前目录内可用文件并保持面板打开。
 - 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：预览区新增 `PreviewToolWorkbench` 子区语义，明确“工具工作台（选项+操作）与结果队列分层”及侧栏/全屏共享状态契约。
 - 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：`PreviewToolResultPanel` 移除面板级标题/描述/收起控制，结果项头部统一为 `<工具名>: <调用时间> <调用状态>`，并收敛为统一结构化结果渲染（key-value、对象递归、`list[dict]` 表格、JSON 兜底，`result.ok` 仅用于状态判定）。
+- 重构 `tools/mcp/timm-classifier/server.py`：基于 HuggingFace `AutoModelForImageClassification + AutoImageProcessor + ImageClassificationPipeline` 重写推理路径，移除手写 `timm + safetensors + transform` 链路。
+- 更新 `tools/mcp/timm-classifier/config.json` 与 `specs/104-timm-classification-mcp/spec.md`：新增 `batch_size` 配置（默认 `64`），并约束 `ml.classifyBatch` 使用该配置进行 pipeline 批推理。
+- 收敛 `ml.classifyImage/ml.classifyBatch` 输出结构：`predictions` 改为 `{label, score}`，移除 `index` 字段契约。
+- 新增 `tools/mcp/timm-classifier/tests/test_server_integration.py`：增加 `unittest` 集成测试（单图、批量、`batch_size` 配置生效），成功判据为获取非空预测结果。
+- 迁移插件测试样本：`.references/img1.jpg` 移动到 `tools/mcp/timm-classifier/tests/fixtures/img1.jpg`。
+- 迁移 `timm-classifier` 配置文件：`.fauplay/timm-classifier.json` 移动到 `tools/mcp/timm-classifier/config.json`，并同步更新 `.fauplay/mcp.json`、`tools/mcp/timm-classifier/server.py` 默认 `--config` 与 `docs/mcp-timm-classifier.md`。
 - 更新 `specs/002-contracts/spec.md`：新增 `tools/list` 注解约定 `annotations.toolOptions` 与 `annotations.toolActions`，并定义最小字段与“非法项忽略”处理原则。
 - 更新 `specs/104-timm-classification-mcp/spec.md`：`ml.classifyImage` 新增 `annotations.toolOptions.preview.continuousCall.enabled` 契约，用于预览区持续调用分类能力。
 - 重构 `tools/mcp/timm-classifier/server.py`：移除手写 `timm + torch` 推理链路，改为基于 HuggingFace `transformers.pipelines.ImageClassificationPipeline` 标准接口实现，并保持 `ml.classifyImage/ml.classifyBatch` 的 MCP 输入输出契约。

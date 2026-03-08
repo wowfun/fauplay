@@ -31,6 +31,7 @@ const TOOL_DEFINITIONS = [
     annotations: {
       title: '批量重命名',
       mutation: true,
+      icon: 'replace-all',
       scopes: ['workspace'],
       toolOptions: [
         {
