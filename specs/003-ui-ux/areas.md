@@ -52,6 +52,7 @@
   - `features/preview/components/PreviewMediaViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
 - 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
+- 结果面板分层：工作台区与结果队列区同侧栏共存，使用分隔边界区分；不提供面板级标题、描述与整体收起控制。
 
 ### C 底部状态区（Status Bar Zone）
 

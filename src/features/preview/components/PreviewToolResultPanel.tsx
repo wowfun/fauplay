@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import type { PreviewToolResultQueueItem } from '@/features/preview/types/toolResult'
-import { Button } from '@/ui/Button'
-import { resolveToolResultRenderer } from './toolResultRenderers'
+import { ToolResultStructuredView } from './ToolResultStructuredView'
 
 interface PreviewToolResultPanelProps {
   workbench?: ReactNode
@@ -20,19 +19,35 @@ function formatTimestamp(value?: number): string {
   })
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function resolveResultOk(value: unknown): boolean | null {
+  if (!isObject(value)) return null
+  return typeof value.ok === 'boolean' ? value.ok : null
+}
+
+function resolveStatusLabel(item: PreviewToolResultQueueItem): '运行中' | '成功' | '失败' {
+  if (item.status === 'loading') return '运行中'
+
+  const resultOk = resolveResultOk(item.result)
+  if (typeof resultOk === 'boolean') {
+    return resultOk ? '成功' : '失败'
+  }
+
+  return item.status === 'error' ? '失败' : '成功'
+}
+
 export function PreviewToolResultPanel({
   workbench,
   items,
   onToggleItemCollapsed,
   isFullscreen = false,
 }: PreviewToolResultPanelProps) {
-  const [collapsed, setCollapsed] = useState(false)
-
   const panelClassName = isFullscreen
     ? 'border-r border-white/10 bg-black/20 text-white'
     : 'border-r border-border bg-card'
-  const titleClassName = isFullscreen ? 'text-white' : 'text-foreground'
-  const secondaryTextClassName = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
   const emptyHintClassName = isFullscreen
     ? 'rounded-md border border-white/20 bg-white/5 px-3 py-2 text-xs text-white/70'
     : 'rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-xs text-muted-foreground'
@@ -47,119 +62,71 @@ export function PreviewToolResultPanel({
       className={`w-80 shrink-0 min-h-0 flex flex-col ${panelClassName}`}
       data-preview-subzone="PreviewToolResultPanel"
     >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-inherit">
-        <div>
-          <p className={`text-xs font-medium ${titleClassName}`}>工具结果</p>
-          <p className={`text-[11px] ${secondaryTextClassName}`}>当前文件调用队列（最新在上）</p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={isFullscreen ? 'text-white hover:bg-white/10' : ''}
-          aria-label={collapsed ? '展开结果面板' : '收起结果面板'}
-          title={collapsed ? '展开结果面板' : '收起结果面板'}
-          onClick={() => {
-            setCollapsed((prev) => !prev)
-          }}
-        >
-          {collapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
-        </Button>
-      </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        {workbench && (
+          <div className="p-3 border-b border-inherit">
+            {workbench}
+          </div>
+        )}
+        {items.length > 0 ? (
+          <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
+            {items.map((item) => {
+              const statusLabel = resolveStatusLabel(item)
+              const headerText = `${item.title}: ${formatTimestamp(item.finishedAt ?? item.startedAt)} ${statusLabel}`
 
-      {!collapsed && (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {workbench && (
-            <div className="p-3 border-b border-inherit">
-              {workbench}
-            </div>
-          )}
-          {items.length > 0 ? (
-            <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
-              {items.map((item) => {
-                const renderer = typeof item.result === 'undefined'
-                  ? null
-                  : resolveToolResultRenderer({
-                      toolName: item.toolName,
-                      result: item.result,
-                    })
-                const summaryText = item.status === 'loading'
-                  ? '执行中...'
-                  : item.status === 'error'
-                    ? (item.error || '执行失败')
-                    : renderer
-                      ? renderer.renderSummary({
-                          toolName: item.toolName,
-                          result: item.result,
-                        })
-                      : '工具未返回结果'
-
-                return (
-                  <section key={item.id} className={cardClassName}>
-                    <button
-                      type="button"
-                      className={`w-full text-left px-3 py-2 transition-colors ${headerHoverClassName}`}
-                      onClick={() => {
-                        onToggleItemCollapsed(item.id)
-                      }}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className="pt-[2px]">
-                          {item.collapsed ? (
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          ) : (
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          )}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium">{item.title}</p>
-                          <p className={`mt-1 text-[11px] ${statusClassName}`}>
-                            {item.status === 'loading'
-                              ? '运行中'
-                              : item.status === 'error'
-                                ? '失败'
-                                : '成功'} · {item.trigger === 'continuous' ? '持续调用' : '手动调用'} · {formatTimestamp(item.finishedAt ?? item.startedAt)}
-                          </p>
-                          <p className="mt-1 text-[11px] break-all">{summaryText}</p>
-                        </div>
-                      </div>
-                    </button>
-
-                    {!item.collapsed && (
-                      <div className="border-t border-inherit px-3 py-2 space-y-2">
-                        {item.status === 'loading' ? (
-                          <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>{item.title} 执行中...</span>
-                          </div>
-                        ) : item.status === 'error' ? (
-                          <div className="text-xs space-y-1">
-                            <p className="font-medium">执行失败</p>
-                            <p className="break-all">{item.error || '未知错误'}</p>
-                            {item.errorCode && <p>错误码: {item.errorCode}</p>}
-                          </div>
-                        ) : typeof item.result !== 'undefined' && renderer ? (
-                          renderer.renderDetail({
-                            toolName: item.toolName,
-                            result: item.result,
-                          })
+              return (
+                <section key={item.id} className={cardClassName}>
+                  <button
+                    type="button"
+                    className={`w-full text-left px-3 py-2 transition-colors ${headerHoverClassName}`}
+                    onClick={() => {
+                      onToggleItemCollapsed(item.id)
+                    }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="pt-[2px]">
+                        {item.collapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5" />
                         ) : (
-                          <p className={`text-xs ${statusClassName}`}>工具未返回结果。</p>
+                          <ChevronDown className="h-3.5 w-3.5" />
                         )}
-                      </div>
-                    )}
-                  </section>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="flex-1 p-3">
-              <p className={emptyHintClassName}>
-                点击左侧工具按钮后，结果会显示在这里。
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+                      </span>
+                      <p className="min-w-0 flex-1 text-xs font-medium break-all">{headerText}</p>
+                    </div>
+                  </button>
+
+                  {!item.collapsed && (
+                    <div className="border-t border-inherit px-3 py-2 space-y-2">
+                      {item.status === 'loading' ? (
+                        <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>{item.title} 执行中...</span>
+                        </div>
+                      ) : item.status === 'error' ? (
+                        <div className="text-xs space-y-1">
+                          <p className="font-medium">执行失败</p>
+                          <p className="break-all">{item.error || '未知错误'}</p>
+                          {item.errorCode && <p>错误码: {item.errorCode}</p>}
+                        </div>
+                      ) : typeof item.result !== 'undefined' ? (
+                        <ToolResultStructuredView value={item.result} isFullscreen={isFullscreen} />
+                      ) : (
+                        <p className={`text-xs ${statusClassName}`}>工具未返回结果。</p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="flex-1 p-3">
+            <p className={emptyHintClassName}>
+              点击左侧工具按钮后，结果会显示在这里。
+            </p>
+          </div>
+        )}
+      </div>
     </aside>
   )
 }
