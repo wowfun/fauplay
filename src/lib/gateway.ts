@@ -16,6 +16,31 @@ export interface GatewayToolDescriptor {
   mutation: boolean
   scopes: string[]
   icon: 'reveal' | 'openDefault' | 'default'
+  toolOptions: ToolOptionAnnotation[]
+  toolActions: ToolActionAnnotation[]
+}
+
+export interface ToolOptionEnumValue {
+  value: string
+  label: string
+}
+
+export type ToolOptionType = 'boolean' | 'enum'
+
+export interface ToolOptionAnnotation {
+  key: string
+  label: string
+  type: ToolOptionType
+  defaultValue?: boolean | string
+  description?: string
+  values?: ToolOptionEnumValue[]
+}
+
+export interface ToolActionAnnotation {
+  key: string
+  label: string
+  description?: string
+  intent?: string
 }
 
 interface GatewayHealthResponse {
@@ -57,7 +82,7 @@ interface GatewayRawToolDescriptor {
   title?: string
   mutation?: boolean
   scopes?: string[]
-  annotations?: {
+  annotations?: Record<string, unknown> & {
     title?: string
     mutation?: boolean
     scopes?: string[]
@@ -283,6 +308,71 @@ function responseSessionIdFromInitializeResult(_result: InitializeResult): strin
   return mcpSessionIdCandidate
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function toToolOptionAnnotations(annotations: GatewayRawToolDescriptor['annotations']): ToolOptionAnnotation[] {
+  const raw = annotations?.toolOptions
+  if (!Array.isArray(raw)) return []
+
+  const options: ToolOptionAnnotation[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+
+    const key = typeof item.key === 'string' ? item.key.trim() : ''
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    const type = item.type
+    const description = typeof item.description === 'string' ? item.description : undefined
+
+    if (!key || !label) continue
+    if (type !== 'boolean' && type !== 'enum') continue
+
+    if (type === 'boolean') {
+      const defaultValue = typeof item.defaultValue === 'boolean' ? item.defaultValue : undefined
+      options.push({ key, label, type, defaultValue, description })
+      continue
+    }
+
+    const rawValues = Array.isArray(item.values) ? item.values : []
+    const values = rawValues.flatMap((rawValue) => {
+      if (!isRecord(rawValue)) return []
+      const value = typeof rawValue.value === 'string' ? rawValue.value : ''
+      const valueLabel = typeof rawValue.label === 'string' ? rawValue.label : ''
+      if (!value || !valueLabel) return []
+      return [{ value, label: valueLabel }]
+    })
+
+    if (values.length === 0) continue
+
+    const defaultValue = typeof item.defaultValue === 'string' && values.some((value) => value.value === item.defaultValue)
+      ? item.defaultValue
+      : undefined
+
+    options.push({ key, label, type, defaultValue, description, values })
+  }
+
+  return options
+}
+
+function toToolActionAnnotations(annotations: GatewayRawToolDescriptor['annotations']): ToolActionAnnotation[] {
+  const raw = annotations?.toolActions
+  if (!Array.isArray(raw)) return []
+
+  const actions: ToolActionAnnotation[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const key = typeof item.key === 'string' ? item.key.trim() : ''
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    const description = typeof item.description === 'string' ? item.description : undefined
+    const intent = typeof item.intent === 'string' ? item.intent : undefined
+    if (!key || !label) continue
+    actions.push({ key, label, description, intent })
+  }
+
+  return actions
+}
+
 function toToolDescriptor(tool: GatewayRawToolDescriptor): GatewayToolDescriptor | null {
   const name = typeof tool?.name === 'string' ? tool.name : ''
   if (!name) return null
@@ -317,6 +407,8 @@ function toToolDescriptor(tool: GatewayRawToolDescriptor): GatewayToolDescriptor
     mutation,
     scopes,
     icon,
+    toolOptions: toToolOptionAnnotations(tool.annotations),
+    toolActions: toToolActionAnnotations(tool.annotations),
   }
 }
 

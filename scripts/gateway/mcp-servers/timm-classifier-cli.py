@@ -503,6 +503,15 @@ TOOL_DEFINITIONS = [
             "title": "图像分类",
             "mutation": False,
             "scopes": ["file"],
+            "toolOptions": [
+                {
+                    "key": "preview.continuousCall.enabled",
+                    "label": "持续调用",
+                    "type": "boolean",
+                    "defaultValue": False,
+                    "description": "切换预览文件后自动触发图像分类",
+                }
+            ],
         },
     },
     {

@@ -11,6 +11,10 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : []
 }
 
+function normalizeWorkbenchMetadataItems(value) {
+  return normalizeArray(value).filter((item) => item && typeof item === 'object')
+}
+
 function toGatewayTool(sourceLabel, tool) {
   const name = tool?.name
   if (typeof name !== 'string' || !name) {
@@ -32,6 +36,14 @@ function toGatewayTool(sourceLabel, tool) {
   }
   if (scopes.length > 0) {
     normalizedAnnotations.scopes = scopes
+  }
+  const toolOptions = normalizeWorkbenchMetadataItems(annotations.toolOptions)
+  if (toolOptions.length > 0) {
+    normalizedAnnotations.toolOptions = toolOptions
+  }
+  const toolActions = normalizeWorkbenchMetadataItems(annotations.toolActions)
+  if (toolActions.length > 0) {
+    normalizedAnnotations.toolActions = toolActions
   }
 
   const normalizedTool = {

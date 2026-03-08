@@ -1,5 +1,6 @@
 import { FolderOpen, Play, Wrench } from 'lucide-react'
 import { Button } from '@/ui/Button'
+import { cn } from '@/lib/utils'
 
 export type PreviewActionState = 'default' | 'disabled' | 'loading' | 'error'
 export type PreviewActionIcon = 'reveal' | 'openDefault' | 'default'
@@ -12,13 +13,16 @@ export interface PreviewActionRailItem {
   actionState: PreviewActionState
   error: string | null
   icon: PreviewActionIcon
+  highlighted?: boolean
 }
 
 interface PreviewActionRailProps {
   actions: PreviewActionRailItem[]
   railButtonClass: string
+  highlightedRailButtonClass: string
   borderClass: string
   errorTextClass: string
+  onActionHoverChange?: (toolName: string) => void
 }
 
 function getActionIcon(icon: PreviewActionIcon) {
@@ -30,8 +34,10 @@ function getActionIcon(icon: PreviewActionIcon) {
 export function PreviewActionRail({
   actions,
   railButtonClass,
+  highlightedRailButtonClass,
   borderClass,
   errorTextClass,
+  onActionHoverChange,
 }: PreviewActionRailProps) {
   const actionErrors = actions.filter((action) => !!action.error)
 
@@ -49,10 +55,16 @@ export function PreviewActionRail({
             disabled={action.disabled}
             variant="ghost"
             size="icon"
-            className={railButtonClass}
+            className={cn(railButtonClass, action.highlighted && highlightedRailButtonClass)}
             aria-label={action.title}
             title={action.title}
             data-action-state={action.actionState}
+            onMouseEnter={() => {
+              onActionHoverChange?.(action.toolName)
+            }}
+            onFocus={() => {
+              onActionHoverChange?.(action.toolName)
+            }}
           >
             <span className="sr-only">{action.title}</span>
             <Icon className="w-4 h-4" aria-hidden="true" />

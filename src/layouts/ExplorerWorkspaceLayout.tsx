@@ -8,6 +8,7 @@ import { MediaPreviewPanel } from '@/features/preview/components/MediaPreviewPan
 import { MediaLightboxModal } from '@/features/preview/components/MediaLightboxModal'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
+import type { PreviewToolWorkbenchState } from '@/features/preview/types/toolWorkbench'
 import type { FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
@@ -108,6 +109,10 @@ export function ExplorerWorkspaceLayout({
     byFilePath: {},
     fileOrder: [],
   })
+  const [previewToolWorkbenchState, setPreviewToolWorkbenchState] = useState<PreviewToolWorkbenchState>({
+    activeToolName: null,
+    optionValuesByTool: {},
+  })
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -179,6 +184,9 @@ export function ExplorerWorkspaceLayout({
               onVideoPlaybackError={onVideoPlaybackError}
               toolResultQueueState={previewToolResultQueueState}
               setToolResultQueueState={setPreviewToolResultQueueState}
+              toolWorkbenchState={previewToolWorkbenchState}
+              setToolWorkbenchState={setPreviewToolWorkbenchState}
+              enableContinuousAutoRunOwner={showPreviewPane}
             />
           </div>
         )}
@@ -207,6 +215,9 @@ export function ExplorerWorkspaceLayout({
           onVideoPlaybackError={onVideoPlaybackError}
           toolResultQueueState={previewToolResultQueueState}
           setToolResultQueueState={setPreviewToolResultQueueState}
+          toolWorkbenchState={previewToolWorkbenchState}
+          setToolWorkbenchState={setPreviewToolWorkbenchState}
+          enableContinuousAutoRunOwner={!showPreviewPane}
         />
       )}
     </div>

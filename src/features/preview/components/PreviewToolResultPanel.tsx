@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import type { PreviewToolResultQueueItem } from '@/features/preview/types/toolResult'
 import { Button } from '@/ui/Button'
 import { resolveToolResultRenderer } from './toolResultRenderers'
 
 interface PreviewToolResultPanelProps {
+  workbench?: ReactNode
   items: PreviewToolResultQueueItem[]
   onToggleItemCollapsed: (id: string) => void
   isFullscreen?: boolean
@@ -20,6 +21,7 @@ function formatTimestamp(value?: number): string {
 }
 
 export function PreviewToolResultPanel({
+  workbench,
   items,
   onToggleItemCollapsed,
   isFullscreen = false,
@@ -66,6 +68,11 @@ export function PreviewToolResultPanel({
 
       {!collapsed && (
         <div className="flex-1 min-h-0 flex flex-col">
+          {workbench && (
+            <div className="p-3 border-b border-inherit">
+              {workbench}
+            </div>
+          )}
           {items.length > 0 ? (
             <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
               {items.map((item) => {
@@ -110,7 +117,7 @@ export function PreviewToolResultPanel({
                               ? '运行中'
                               : item.status === 'error'
                                 ? '失败'
-                                : '成功'} · {formatTimestamp(item.finishedAt ?? item.startedAt)}
+                                : '成功'} · {item.trigger === 'continuous' ? '持续调用' : '手动调用'} · {formatTimestamp(item.finishedAt ?? item.startedAt)}
                           </p>
                           <p className="mt-1 text-[11px] break-all">{summaryText}</p>
                         </div>

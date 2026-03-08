@@ -178,6 +178,19 @@
 1. 标准返回字段为 `result.tools`（可选 `result.nextCursor`）。
 2. 不在 `result` 顶层返回 `plugins`。
 3. 当前 `tools/list` 不返回非标准来源字段。
+4. 工具注解允许通过 `annotations.toolOptions` 与 `annotations.toolActions` 暴露前端工作台元数据。
+
+### `tools/list` 注解约定（Tool Workbench Metadata）
+
+用途：在不改变 `tools/call` 主体结构的前提下，为前端提供工具工作台渲染所需元数据。
+
+约束：
+
+1. `annotations.toolOptions` 为可选数组；缺失或空数组表示“该工具无可展示选项”。
+2. `annotations.toolActions` 为可选数组；缺失或空数组表示“该工具无可展示操作”。
+3. `toolOptions` 单项最小字段为：`key`、`label`、`type`；首期 `type` 支持 `boolean` 与 `enum`。
+4. `toolActions` 单项最小字段为：`key`、`label`；可选 `description` 与 `intent`。
+5. 客户端应按“最小校验 + 忽略非法项”处理注解：无效项不得阻断工具本身可见与可调用性。
 
 ### `tools/call`
 

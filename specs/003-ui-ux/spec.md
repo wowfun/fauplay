@@ -56,11 +56,12 @@
 
 1. 全屏预览区（Lightbox Modal Zone）是 B2 预览面板区（Media Preview Panel Zone）的全屏表现状态（Fullscreen Presentation State），不是独立业务域。
 2. 侧栏预览与全屏预览必须共享同一套预览业务逻辑（Traversal / Auto-play / Action），禁止并行维护两套状态机。
-3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PreviewActionRail`、`PreviewMediaViewport`、`PreviewFeedbackOverlay`。
+3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PreviewActionRail`、`PreviewToolWorkbench`、`PreviewToolResultPanel`、`PreviewMediaViewport`、`PreviewFeedbackOverlay`。
 4. 两种表现态允许差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）与焦点管理（Focus Management）。
 5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
 6. `PreviewToolResultPanel` 在侧栏与全屏表现态下必须共享同一份运行时状态（单一事实源），禁止分别维护独立结果状态导致信息不一致。
 7. 在同一预览文件下切换侧栏/全屏表现态时，工具结果不得被重置；仅当“当前预览文件”变化时才允许切换队列上下文。
+8. `PreviewToolWorkbench` 在侧栏与全屏表现态下必须共享同一份工具工作台状态（单一事实源），包括当前工具上下文与选项值。
 
 ## 核心交互契约 (Core Interaction Contract)
 
@@ -92,6 +93,10 @@
 7. 工具结果展示应采用“调用队列平铺”语义：后调用结果在前，按时间倒序展示。
 8. 队列中每条结果项必须支持独立折叠/展开，不得依赖全局单选切换才能查看结果详情。
 9. 结果生命周期应按文件维度维护最近文件队列：切换文件时允许恢复该文件最近结果，不要求跨会话持久化。
+10. 当工具声明 `annotations.toolOptions` 或 `annotations.toolActions` 时，B2 应展示 `PreviewToolWorkbench`；两者均为空时不展示工作台。
+11. `PreviewToolWorkbench` 需支持“悬浮/聚焦动作图标即时切换上下文”，并将选项值按工具维度维护为会话态。
+12. `preview.continuousCall.enabled` 作为标准工具选项键时，切换预览文件后应在资源 `ready` 阶段自动调用该工具，并在动作图标提供激活态提示。
+13. 持续调用发起前应基于当前文件结果队列执行历史命中检查；若同 `tool + file + 请求签名` 已存在成功或失败记录，则本次持续调用静默跳过（不新增结果项）。
 
 ## 快捷键契约 (Keyboard Contract)
 

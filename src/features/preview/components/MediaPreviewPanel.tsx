@@ -4,6 +4,7 @@ import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
+import type { PreviewToolWorkbenchState } from '@/features/preview/types/toolWorkbench'
 import { MediaPreviewCanvas } from './MediaPreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
 
@@ -25,6 +26,9 @@ interface MediaPreviewPanelProps {
   forceAutoPlayOnOpen?: boolean
   toolResultQueueState: PreviewToolResultQueueState
   setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
+  toolWorkbenchState: PreviewToolWorkbenchState
+  setToolWorkbenchState: Dispatch<SetStateAction<PreviewToolWorkbenchState>>
+  enableContinuousAutoRunOwner: boolean
 }
 
 export function MediaPreviewPanel({
@@ -45,6 +49,9 @@ export function MediaPreviewPanel({
   forceAutoPlayOnOpen = false,
   toolResultQueueState,
   setToolResultQueueState,
+  toolWorkbenchState,
+  setToolWorkbenchState,
+  enableContinuousAutoRunOwner,
 }: MediaPreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -146,6 +153,9 @@ export function MediaPreviewPanel({
         onVideoPlaybackError={onVideoPlaybackError}
         toolResultQueueState={toolResultQueueState}
         setToolResultQueueState={setToolResultQueueState}
+        toolWorkbenchState={toolWorkbenchState}
+        setToolWorkbenchState={setToolWorkbenchState}
+        enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
       />
     </div>
   )

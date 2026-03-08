@@ -3,6 +3,7 @@ import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewToolResultQueueState } from '@/features/preview/types/toolResult'
+import type { PreviewToolWorkbenchState } from '@/features/preview/types/toolWorkbench'
 import { MediaPreviewPanel } from './MediaPreviewPanel'
 
 interface MediaLightboxModalProps {
@@ -21,6 +22,9 @@ interface MediaLightboxModalProps {
   onVideoPlaybackError: () => void
   toolResultQueueState: PreviewToolResultQueueState
   setToolResultQueueState: Dispatch<SetStateAction<PreviewToolResultQueueState>>
+  toolWorkbenchState: PreviewToolWorkbenchState
+  setToolWorkbenchState: Dispatch<SetStateAction<PreviewToolWorkbenchState>>
+  enableContinuousAutoRunOwner: boolean
 }
 
 export function MediaLightboxModal({
@@ -39,6 +43,9 @@ export function MediaLightboxModal({
   onVideoPlaybackError,
   toolResultQueueState,
   setToolResultQueueState,
+  toolWorkbenchState,
+  setToolWorkbenchState,
+  enableContinuousAutoRunOwner,
 }: MediaLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -59,6 +66,9 @@ export function MediaLightboxModal({
         forceAutoPlayOnOpen={autoPlayOnOpen}
         toolResultQueueState={toolResultQueueState}
         setToolResultQueueState={setToolResultQueueState}
+        toolWorkbenchState={toolWorkbenchState}
+        setToolWorkbenchState={setToolWorkbenchState}
+        enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
       />
     </div>
   )

@@ -6,7 +6,7 @@ export interface ToolResultQueueConfig {
 // -1 means unlimited.
 export const toolResultQueueConfig: ToolResultQueueConfig = {
   maxItemsPerFile: 30,
-  maxFiles: 10,
+  maxFiles: 1000,
 }
 
 export function isUnlimited(limit: number): boolean {

@@ -37,6 +37,8 @@
 4. 首次调用允许出现模型加载开销；后续调用应复用已加载权重，不重复加载模型文件。
 5. 调用方（如 Web 端）在触发 `ml.classifyImage` / `ml.classifyBatch` 时必须使用长超时预算（不少于 `120000ms`），避免首轮模型加载被默认短超时中断。
 6. 当调用方超时取消请求时，用户可见错误必须为可读超时提示，不得直接暴露浏览器原始中止文案（例如 `signal is aborted without reason`）。
+7. `ml.classifyImage` 应通过 `annotations.toolOptions` 暴露 `preview.continuousCall.enabled`（`boolean`）选项，以支持预览区持续调用工作流。
+8. 当持续调用开启时，调用方可基于当前文件历史结果命中执行静默跳过，避免同签名请求反复触发。
 
 ## 5. 工具契约 (Tools Contract)
 
@@ -61,6 +63,14 @@
 1. 参数缺失、越界、路径不安全时返回 `MCP_INVALID_PARAMS`。
 2. 工具名错误时返回 `MCP_TOOL_NOT_FOUND`。
 3. 模型加载或推理失败时返回 `MCP_TOOL_CALL_FAILED`。
+
+工具元数据约束：
+
+1. `annotations.scopes` 必须为 `["file"]`。
+2. `annotations.toolOptions` 应至少包含：
+   - `key: "preview.continuousCall.enabled"`
+   - `label: "持续调用"`
+   - `type: "boolean"`
 
 ### 5.2 `ml.classifyBatch`
 
@@ -124,6 +134,8 @@
 7. `FR-TIMM-07` 网关侧 `timm-classifier` 注册必须提供不少于 `120000ms` 的下游调用超时预算（`callTimeoutMs`）。
 8. `FR-TIMM-08` 前端网关调用层必须为 `ml.classify*` 工具提供不少于 `120000ms` 的默认调用超时。
 9. `FR-TIMM-09` 前端网关调用层必须将请求中止（Abort）统一映射为可读超时错误（建议内部码：`MCP_CLIENT_TIMEOUT`）。
+10. `FR-TIMM-10` `ml.classifyImage` 的工具注解必须声明 `preview.continuousCall.enabled` 布尔选项，用于驱动预览区持续调用开关。
+11. `FR-TIMM-11` 持续调用路径应支持基于 `tool + file + 请求签名` 的历史命中跳过；手动调用不受该跳过策略限制。
 
 ## 9. 验收标准 (AC)
 
@@ -134,6 +146,8 @@
 5. `AC-TIMM-05` 越界路径与非法参数返回 `MCP_INVALID_PARAMS`。
 6. `AC-TIMM-06` 首次模型加载超过 `5s` 的场景下，Web 端仍可等待完成或返回可读超时错误，不出现原始浏览器中止文案。
 7. `AC-TIMM-07` 预览区结果展示在 `ml.classifyImage` 成功后可直接看到 Top-K 预测（`label/score/index`），无需依赖浏览器 Network 面板。
+8. `AC-TIMM-08` `tools/list` 中 `ml.classifyImage.annotations.toolOptions` 包含 `preview.continuousCall.enabled`，开启后切换文件会自动触发分类调用。
+9. `AC-TIMM-09` 同文件下持续调用命中历史成功或失败记录时，系统静默跳过请求；手动点击工具仍会强制重算并产生新结果项。
 
 ## 10. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -142,6 +156,7 @@
 3. 默认设备策略为 `auto`（CUDA 优先，CPU 回退）。
 4. 插件元数据中 `ml.classifyImage` 的 `scopes` 为 `["file"]`，`ml.classifyBatch` 的 `scopes` 为 `["workspace"]`。
 5. 推荐 UI 呈现语义：`ml.classifyImage.predictions` 以 Top-K 表格展示（列：`label`、`score`、`index`），并保留通用 JSON 兜底视图。
+6. `preview.continuousCall.enabled` 默认值应为 `false`，避免默认触发高频推理。
 
 ## 11. 关联主题 (Related Specs)
 
