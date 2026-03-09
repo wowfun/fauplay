@@ -5,6 +5,10 @@ import path from 'node:path'
 import readline from 'node:readline'
 
 const MCP_PROTOCOL_VERSION = '2025-11-05'
+const DEFAULT_NAME_MASK = '[N]'
+const DEFAULT_SEARCH_MODE = 'plain'
+const DEFAULT_REGEX_FLAGS = 'g'
+const REGEX_FLAG_OPTIONS = ['g', 'gi', 'gm', 'gim', 'gu', 'giu', 'gs', 'gis']
 
 const TOOL_DEFINITIONS = [
   {
@@ -19,10 +23,26 @@ const TOOL_DEFINITIONS = [
           items: { type: 'string' },
           minItems: 1,
         },
+        nameMask: { type: 'string' },
         findText: { type: 'string' },
         replaceText: { type: 'string' },
-        prefix: { type: 'string' },
-        suffix: { type: 'string' },
+        searchMode: {
+          type: 'string',
+          enum: ['plain', 'regex'],
+        },
+        regexFlags: {
+          type: 'string',
+          enum: REGEX_FLAG_OPTIONS,
+        },
+        counterStart: {
+          oneOf: [{ type: 'integer' }, { type: 'string' }],
+        },
+        counterStep: {
+          oneOf: [{ type: 'integer' }, { type: 'string' }],
+        },
+        counterPad: {
+          oneOf: [{ type: 'integer' }, { type: 'string' }],
+        },
         confirm: { type: 'boolean' },
       },
       required: ['rootPath', 'relativePaths'],
@@ -35,11 +55,19 @@ const TOOL_DEFINITIONS = [
       scopes: ['workspace'],
       toolOptions: [
         {
+          key: 'nameMask',
+          label: '命名掩码',
+          type: 'string',
+          defaultValue: '[N]',
+          description: '支持 [N]/[P]/[G]/[C]，例如 foo[N]bar',
+          sendToTool: true,
+        },
+        {
           key: 'findText',
           label: '查找文本',
           type: 'string',
           defaultValue: '',
-          description: '在文件名主体中查找文本（不含扩展名）',
+          description: '在掩码渲染后的文件名主体中查找',
           sendToTool: true,
         },
         {
@@ -47,23 +75,61 @@ const TOOL_DEFINITIONS = [
           label: '替换文本',
           type: 'string',
           defaultValue: '',
-          description: '替换查找到的文本（需配合查找文本）',
+          description: '替换查找到的文本，允许为空字符串',
           sendToTool: true,
         },
         {
-          key: 'prefix',
-          label: '前缀',
-          type: 'string',
-          defaultValue: '',
-          description: '追加到文件名主体前',
+          key: 'searchMode',
+          label: '查找模式',
+          type: 'enum',
+          defaultValue: 'plain',
+          values: [
+            { value: 'plain', label: '普通文本' },
+            { value: 'regex', label: '正则表达式' },
+          ],
+          description: '普通文本或正则表达式查找',
           sendToTool: true,
         },
         {
-          key: 'suffix',
-          label: '后缀',
+          key: 'regexFlags',
+          label: '正则 Flags',
+          type: 'enum',
+          defaultValue: 'g',
+          values: [
+            { value: 'g', label: 'g (全局)' },
+            { value: 'gi', label: 'gi (全局 + 忽略大小写)' },
+            { value: 'gm', label: 'gm (全局 + 多行)' },
+            { value: 'gim', label: 'gim (全局 + 忽略大小写 + 多行)' },
+            { value: 'gu', label: 'gu (全局 + Unicode)' },
+            { value: 'giu', label: 'giu (全局 + 忽略大小写 + Unicode)' },
+            { value: 'gs', label: 'gs (全局 + dotAll)' },
+            { value: 'gis', label: 'gis (全局 + 忽略大小写 + dotAll)' },
+          ],
+          description: '仅 searchMode=regex 生效，默认 g',
+          sendToTool: true,
+        },
+        {
+          key: 'counterStart',
+          label: '计数起始',
           type: 'string',
-          defaultValue: '',
-          description: '追加到文件名主体后',
+          defaultValue: '1',
+          description: '[C] 起始值（整数，>=1）',
+          sendToTool: true,
+        },
+        {
+          key: 'counterStep',
+          label: '计数步长',
+          type: 'string',
+          defaultValue: '1',
+          description: '[C] 递增步长（整数，>=1）',
+          sendToTool: true,
+        },
+        {
+          key: 'counterPad',
+          label: '补零位数',
+          type: 'string',
+          defaultValue: '0',
+          description: '[C] 左侧补零位数（整数，>=0）',
           sendToTool: true,
         },
       ],
@@ -219,38 +285,167 @@ function resolvePathWithinRoot(rootPath, relativePath) {
   return target
 }
 
+function hasOwnKey(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function parsePositiveIntOption(input, optionName, defaultValue) {
+  if (typeof input === 'undefined' || input === null) {
+    return defaultValue
+  }
+
+  const raw = typeof input === 'string' ? input.trim() : input
+  if (raw === '') {
+    return defaultValue
+  }
+
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(value) || value < 1) {
+    throw toInvalidParamsError(`${optionName} must be an integer >= 1`)
+  }
+
+  return value
+}
+
+function parseNonNegativeIntOption(input, optionName, defaultValue) {
+  if (typeof input === 'undefined' || input === null) {
+    return defaultValue
+  }
+
+  const raw = typeof input === 'string' ? input.trim() : input
+  if (raw === '') {
+    return defaultValue
+  }
+
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(value) || value < 0) {
+    throw toInvalidParamsError(`${optionName} must be an integer >= 0`)
+  }
+
+  return value
+}
+
+function normalizeRegexFlags(input) {
+  const flags = typeof input === 'string' && input.trim() ? input.trim() : DEFAULT_REGEX_FLAGS
+  if (!REGEX_FLAG_OPTIONS.includes(flags)) {
+    throw toInvalidParamsError(`regexFlags must be one of: ${REGEX_FLAG_OPTIONS.join(', ')}`)
+  }
+
+  try {
+    // Validate flags syntax and duplicates.
+    new RegExp('', flags)
+  } catch {
+    throw toInvalidParamsError('regexFlags is invalid')
+  }
+
+  return flags
+}
+
 function splitRuleArgs(args) {
+  if (hasOwnKey(args, 'prefix') || hasOwnKey(args, 'suffix')) {
+    throw toInvalidParamsError('prefix/suffix are removed; use nameMask with [N] instead')
+  }
+
+  let nameMask = DEFAULT_NAME_MASK
+  if (typeof args.nameMask !== 'undefined') {
+    if (typeof args.nameMask !== 'string' || args.nameMask.length === 0) {
+      throw toInvalidParamsError('nameMask must be a non-empty string when provided')
+    }
+    nameMask = args.nameMask
+  }
+
   const findText = typeof args.findText === 'string' ? args.findText : ''
   const replaceText = typeof args.replaceText === 'string' ? args.replaceText : ''
-  const prefix = typeof args.prefix === 'string' ? args.prefix : ''
-  const suffix = typeof args.suffix === 'string' ? args.suffix : ''
 
-  if (findText === '' && prefix === '' && suffix === '') {
-    throw toInvalidParamsError('at least one rename rule is required (findText/prefix/suffix)')
+  let searchMode = DEFAULT_SEARCH_MODE
+  if (typeof args.searchMode !== 'undefined') {
+    if (args.searchMode !== 'plain' && args.searchMode !== 'regex') {
+      throw toInvalidParamsError('searchMode must be one of: plain, regex')
+    }
+    searchMode = args.searchMode
+  }
+
+  const counterStart = parsePositiveIntOption(args.counterStart, 'counterStart', 1)
+  const counterStep = parsePositiveIntOption(args.counterStep, 'counterStep', 1)
+  const counterPad = parseNonNegativeIntOption(args.counterPad, 'counterPad', 0)
+
+  if (nameMask === DEFAULT_NAME_MASK && findText === '') {
+    throw toInvalidParamsError('at least one rename rule is required (nameMask/findText)')
+  }
+
+  let searchRegex = null
+  let regexFlags = DEFAULT_REGEX_FLAGS
+  if (findText !== '' && searchMode === 'regex') {
+    regexFlags = normalizeRegexFlags(args.regexFlags)
+    try {
+      searchRegex = new RegExp(findText, regexFlags)
+    } catch {
+      throw toInvalidParamsError('findText is not a valid regular expression')
+    }
   }
 
   return {
+    nameMask,
     findText,
     replaceText,
-    prefix,
-    suffix,
+    searchMode,
+    regexFlags,
+    searchRegex,
+    counterStart,
+    counterStep,
+    counterPad,
   }
 }
 
-function applyRenameRule(fileName, rule) {
-  const parsed = path.parse(fileName)
-  let nextBase = parsed.name
+function resolveRootBaseName(rootPath) {
+  const base = path.basename(rootPath)
+  if (base) return base
 
-  if (rule.findText) {
-    nextBase = nextBase.split(rule.findText).join(rule.replaceText)
+  const parsed = path.parse(rootPath)
+  return parsed.name || parsed.root || rootPath
+}
+
+function formatCounterValue(counterValue, counterPad) {
+  const raw = String(counterValue)
+  if (counterPad <= 0) return raw
+  return raw.padStart(counterPad, '0')
+}
+
+function renderNameMask(mask, context) {
+  return mask.replace(/\[(N|P|G|C)\]/g, (full, token) => {
+    if (token === 'N') return context.N
+    if (token === 'P') return context.P
+    if (token === 'G') return context.G
+    if (token === 'C') return context.C
+    return full
+  })
+}
+
+function applySearchReplace(input, rule) {
+  if (rule.findText === '') {
+    return input
   }
 
-  if (rule.prefix) {
-    nextBase = `${rule.prefix}${nextBase}`
+  if (rule.searchMode === 'plain') {
+    return input.split(rule.findText).join(rule.replaceText)
   }
-  if (rule.suffix) {
-    nextBase = `${nextBase}${rule.suffix}`
+
+  return input.replace(rule.searchRegex, rule.replaceText)
+}
+
+function applyRenameRule({ sourceFileName, normalizedRelativePath, rule, counterValue, rootBaseName }) {
+  const sourceParsed = path.parse(sourceFileName)
+  const segments = normalizedRelativePath.split('/')
+
+  const context = {
+    N: sourceParsed.name,
+    P: segments.length >= 2 ? segments[segments.length - 2] : rootBaseName,
+    G: segments.length >= 3 ? segments[segments.length - 3] : '',
+    C: formatCounterValue(counterValue, rule.counterPad),
   }
+
+  let nextBase = renderNameMask(rule.nameMask, context)
+  nextBase = applySearchReplace(nextBase, rule)
 
   if (!nextBase) {
     throw toInvalidParamsError('rename result basename is empty')
@@ -260,7 +455,7 @@ function applyRenameRule(fileName, rule) {
     throw toInvalidParamsError('rename result basename contains path separators')
   }
 
-  return `${nextBase}${parsed.ext}`
+  return `${nextBase}${sourceParsed.ext}`
 }
 
 async function pathExists(targetPath) {
@@ -272,8 +467,33 @@ async function pathExists(targetPath) {
   }
 }
 
+async function allocateDedupedTargetPath({ sourceAbsolutePath, candidateAbsolutePath, reservedTargetPaths }) {
+  const parsed = path.parse(candidateAbsolutePath)
+  let attemptPath = candidateAbsolutePath
+  let suffixIndex = 1
+
+  while (true) {
+    if (attemptPath === sourceAbsolutePath) {
+      return attemptPath
+    }
+
+    if (!reservedTargetPaths.has(attemptPath)) {
+      const exists = await pathExists(attemptPath)
+      if (!exists) {
+        return attemptPath
+      }
+    }
+
+    attemptPath = path.join(parsed.dir, `${parsed.name} (${suffixIndex})${parsed.ext}`)
+    suffixIndex += 1
+  }
+}
+
 async function buildRenamePlans({ rootPath, relativePaths, rule }) {
   const plans = []
+  const reservedTargetPaths = new Set()
+  const rootBaseName = resolveRootBaseName(rootPath)
+  let counterValue = rule.counterStart
 
   for (const originalRelativePath of relativePaths) {
     let normalizedRelativePath = originalRelativePath
@@ -308,22 +528,38 @@ async function buildRenamePlans({ rootPath, relativePaths, rule }) {
       }
 
       const sourceFileName = path.basename(sourceAbsolutePath)
-      const targetFileName = applyRenameRule(sourceFileName, rule)
-      const targetAbsolutePath = path.join(path.dirname(sourceAbsolutePath), targetFileName)
-      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
+      const targetFileName = applyRenameRule({
+        sourceFileName,
+        normalizedRelativePath,
+        rule,
+        counterValue,
+        rootBaseName,
+      })
+      counterValue += rule.counterStep
 
-      if (targetAbsolutePath === sourceAbsolutePath) {
+      const candidateAbsolutePath = path.join(path.dirname(sourceAbsolutePath), targetFileName)
+      const candidateRelativePath = toPosixPath(path.relative(rootPath, candidateAbsolutePath))
+
+      if (candidateAbsolutePath === sourceAbsolutePath) {
         plans.push({
           relativePath: normalizedRelativePath,
-          nextRelativePath: targetRelativePath,
+          nextRelativePath: candidateRelativePath,
           sourceAbsolutePath,
-          targetAbsolutePath,
+          targetAbsolutePath: sourceAbsolutePath,
           ok: true,
           skipped: true,
           reasonCode: 'RENAME_NO_CHANGE',
         })
+        reservedTargetPaths.add(sourceAbsolutePath)
         continue
       }
+
+      const targetAbsolutePath = await allocateDedupedTargetPath({
+        sourceAbsolutePath,
+        candidateAbsolutePath,
+        reservedTargetPaths,
+      })
+      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
 
       plans.push({
         relativePath: normalizedRelativePath,
@@ -333,6 +569,7 @@ async function buildRenamePlans({ rootPath, relativePaths, rule }) {
         ok: true,
         skipped: false,
       })
+      reservedTargetPaths.add(targetAbsolutePath)
     } catch (error) {
       plans.push({
         relativePath: normalizedRelativePath,
@@ -341,32 +578,6 @@ async function buildRenamePlans({ rootPath, relativePaths, rule }) {
         reasonCode: 'RENAME_INVALID_PATH',
         error: error instanceof Error ? error.message : 'invalid path',
       })
-    }
-  }
-
-  const pendingPlans = plans.filter((plan) => plan.ok && !plan.skipped && plan.targetAbsolutePath)
-  const targetCountMap = new Map()
-  for (const plan of pendingPlans) {
-    const next = (targetCountMap.get(plan.targetAbsolutePath) || 0) + 1
-    targetCountMap.set(plan.targetAbsolutePath, next)
-  }
-
-  for (const plan of pendingPlans) {
-    const sameTargetCount = targetCountMap.get(plan.targetAbsolutePath) || 0
-    if (sameTargetCount > 1) {
-      plan.ok = false
-      plan.skipped = false
-      plan.reasonCode = 'RENAME_TARGET_EXISTS'
-      plan.error = 'target path conflicts within current batch'
-      continue
-    }
-
-    const targetExists = await pathExists(plan.targetAbsolutePath)
-    if (targetExists) {
-      plan.ok = false
-      plan.skipped = false
-      plan.reasonCode = 'RENAME_TARGET_EXISTS'
-      plan.error = 'target path already exists'
     }
   }
 

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-03-10
+### Changed
+- 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：`fs.batchRename` 移除 `prefix/suffix`，新增 `nameMask`（支持 `[N]/[P]/[G]/[C]`）、普通/正则查找替换（`replaceText` 允许空字符串）、`counterStart/counterStep/counterPad` 计数器参数，并将同目录命名冲突策略升级为 Windows 风格自动序号去重（`name.ext` -> `name (1).ext` ...）。
+- 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：将 `regexFlags` 从自由文本改为枚举选项（`g/gi/gm/gim/gu/giu/gs/gis`），工作台改为下拉选择并在服务端按枚举值校验。
+
 ## 2026-03-08
 ### Added
 - 新增 `specs/004-performance-governance/spec.md`：定义性能治理基线（术语与口径、`FR-PG-*`/`AC-PG-*` 模板、性能变更五项信息集：基线/目标/测量方法/回归门槛/降级策略）。
