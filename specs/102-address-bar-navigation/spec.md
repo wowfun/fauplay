@@ -77,6 +77,10 @@
    - 缓存命中时可直接恢复已授权根目录；缓存缺失或句柄失效时降级为“要求用户重选根目录”。
    - 缓存容量上限固定为 `10`，淘汰策略为 LRU（最久未使用优先淘汰）。
    - 根目录缓存不持久化 `rootName`，展示名称应在运行时从缓存句柄即时读取。
+   - 根目录句柄去重必须基于句柄同一性（如 `isSameEntry`）或既有 `rootId` 命中，禁止仅按 `rootName/rootLabel` 推断同一根目录。
+   - `rootPath` 存储模型固定为 `version=3 + byRootId`，不得继续读写 `byRootLabel`。
+   - 旧版 `version=2` 与 `rootLabel -> path` 结构不再兼容；读取到旧结构时应按空映射处理，并在后续调用时按需重绑。
+   - 插件调用链路必须携带 `rootId`；当插件上下文缺失 `rootId` 时，应判定为无效上下文并中止调用，不得回退到 `rootLabel` 绑定。
    - `rootPath` 绑定时机为“首次插件调用且映射缺失”；目录接入阶段不触发绑定弹窗。
 5. 复制路径语义
    - 根目录复制值：`<rootLabel>`。
@@ -111,6 +115,9 @@
 18. `FR-AB-18` 页面刷新后开始页必须提供缓存根目录入口，支持点击直接恢复对应根目录。
 19. `FR-AB-19` 系统应支持基于 `rootId` 维护 `rootPath` 映射；同一根目录在映射已存在时，插件调用不得再次弹出绝对路径输入提示。
 20. `FR-AB-20` 系统必须在根目录缓存恢复失败时自动移除失效 `rootId` 项并刷新缓存列表，避免重复失败。
+21. `FR-AB-21` 系统必须避免“同名但不同路径”的根目录缓存串绑：句柄缓存与 `rootPath` 绑定均不得仅按目录名推断同一根目录。
+22. `FR-AB-22` 插件调度层必须将 `rootId` 作为必备上下文字段；`rootId` 缺失时调用必须失败并给出可见错误，禁止退化到 `rootLabel` 推断。
+23. `FR-AB-23` 系统必须仅接受 `fauplay:host-root-path-map` 的 `v3` 结构（仅 `byRootId`）；旧版结构不再兼容。
 
 ## 7. 验收标准 (AC)
 
@@ -132,6 +139,9 @@
 16. `AC-AB-16` 目录接入阶段不会触发绝对路径录入；首次插件调用且 `rootPath` 缺失时才触发录入，后续同根目录插件调用不再重复提示。
 17. `AC-AB-17` 外部重命名根目录后，开始页缓存列表与最近路径优先展示更新后的根目录名称。
 18. `AC-AB-18` 根目录缓存恢复失败时，失效缓存项会自动从缓存列表移除并给出可见提示。
+19. `AC-AB-19` 当先后接入两个同名根目录（路径不同）时，二者缓存项与 `rootPath` 绑定互不覆盖，插件调用不会误用另一目录的路径。
+20. `AC-AB-20` 模拟插件上下文缺失 `rootId` 时，调用会被阻断并给出上下文错误提示，不会触发 `rootLabel` 路径复用。
+21. `AC-AB-21` 完成一次 `rootPath` 读写后，`localStorage.fauplay:host-root-path-map` 仅包含 `version=3` 与 `byRootId`，不再包含 `byRootLabel` 字段。
 
 ## 8. 失败与降级行为 (Failure & Degradation)
 
@@ -154,6 +164,9 @@
 8. 页面刷新后开始页缓存根目录入口可恢复目录。
 9. 外部重命名根目录后，缓存目录列表与最近路径根目录名展示与实际名称一致。
 10. 目录接入阶段不触发 `rootPath` 录入；首次插件调用触发录入并复用。
+11. 同名根目录（路径不同）并存时，缓存恢复与插件 `rootPath` 绑定不会发生串绑。
+12. 插件调用上下文缺失 `rootId` 时，调用被拦截且不会退化为按目录名绑定。
+13. 注入旧版 `version=2` 或 `rootLabel -> path` 数据后，系统按空映射处理并在首次插件调用时重新绑定。
 
 ## 10. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -171,7 +184,10 @@
    - 根目录缓存数据模型：`Array<{ rootId: string; handle: FileSystemDirectoryHandle; lastUsedAt: number }>`。
    - 根目录缓存介质默认：IndexedDB。
    - 必须存在按 `rootId` 恢复根目录与按历史项执行跨根导航的能力入口（例如：`openCachedRoot(rootId)`、`openHistoryEntry(entry)`）。
-5. 复制路径口径
+5. `rootPath` 绑定模型
+   - 持久化模型必须为：`{ version: 3; byRootId: Record<string, string> }`。
+   - 不再保留 `byRootLabel` 持久化字段。
+6. 复制路径口径
    - 必须提供复制文本生成能力，遵循第 5 章复制路径语义。
 
 ## 11. 默认值与一致性约束 (Defaults & Consistency)

@@ -6,7 +6,7 @@ export type SystemToolName = string
 interface DispatchSystemToolOptions {
   toolName: SystemToolName
   rootHandle: FileSystemDirectoryHandle | null
-  rootId?: string | null
+  rootId: string
   additionalArgs?: Record<string, unknown>
 }
 
@@ -42,7 +42,7 @@ export async function dispatchSystemTool({
   rootId,
   additionalArgs,
 }: DispatchSystemToolOptions): Promise<DispatchSystemToolResult> {
-  if (!toolName || !rootHandle) {
+  if (!toolName || !rootHandle || !rootId) {
     return {
       toolName,
       ok: false,

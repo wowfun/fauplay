@@ -141,11 +141,7 @@ async function findMatchingRootId(
     }
   }
 
-  // Fallback strategy when isSameEntry is unavailable or unsupported.
-  const byName = records.filter((item) => (item.handle.name || '根目录') === (handle.name || '根目录'))
-  if (byName.length === 1) {
-    return byName[0].rootId
-  }
+  // Do not fallback to name-based matching, otherwise same-name roots in different paths can be conflated.
   return null
 }
 

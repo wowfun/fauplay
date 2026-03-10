@@ -275,7 +275,7 @@ export function usePluginRuntime({
     tool: GatewayToolDescriptor,
     options: RunToolCallOptions
   ): Promise<PluginToolCallOutcome> => {
-    if (!rootHandle || !baseArguments) return 'skipped'
+    if (!rootHandle || !rootId || !baseArguments) return 'skipped'
     if (canRunTool && !canRunTool(tool)) return 'skipped'
 
     const toolOptionArgs = toToolOptionArguments(tool, workbenchState.optionValuesByTool)
@@ -467,13 +467,13 @@ export function usePluginRuntime({
             trigger: 'manual',
           })
         },
-        disabled: latestQueueItem?.status === 'loading' || !rootHandle || !runnableInContext,
-        actionState: resolveToolActionState(currentQueue, tool.name, Boolean(rootHandle && runnableInContext)),
+        disabled: latestQueueItem?.status === 'loading' || !rootHandle || !rootId || !runnableInContext,
+        actionState: resolveToolActionState(currentQueue, tool.name, Boolean(rootHandle && rootId && runnableInContext)),
         error: toRailErrorHint(latestQueueItem),
         iconName: tool.iconName,
       }
     })
-  }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, rootHandle, runToolCall, scopedTools])
+  }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, rootHandle, rootId, runToolCall, scopedTools])
 
   const getRequestSignature = useCallback((tool: GatewayToolDescriptor, params?: {
     actionKey?: string

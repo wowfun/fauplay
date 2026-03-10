@@ -5,6 +5,7 @@
 - 新增 `specs/105-plugin-runtime-interaction/spec.md`：重建 105 主题为“插件运行时交互总则”，统一 `workspace/file` 同构实例、三段式交互、面板折叠状态（`workspaceToolPanelCollapsed` / `previewToolPanelCollapsed`）、本地持久化与侧栏/全屏一致性契约。
 
 ### Changed
+- 修复同名根目录缓存混淆并完成 `rootPath` 存储清理迁移：`src/lib/reveal.ts` 将 `fauplay:host-root-path-map` 固定为 `v3`（仅 `byRootId`）且不再兼容 `v2`/`byRootLabel`/旧 `rootLabel -> path` 结构（读取旧结构按空映射处理）；`src/lib/rootHandleCache.ts` 移除按目录名匹配缓存项的回退逻辑，`src/lib/actionDispatcher.ts` 与插件运行时调用链改为“缺失 `rootId` 即阻断调用”，`src/App.tsx` 的兜底会话 `rootId` 改为按目录句柄生成唯一值，避免“同名不同路径”根目录在插件调用阶段互相串绑；同步更新 `specs/102-address-bar-navigation/spec.md` 新增隔离约束与验收条款。
 - 落地 `105-plugin-runtime-interaction` 折叠能力：`PluginActionRail` 新增面板收起/展开开关（顶部入口），`WorkspacePluginHost` 与 `PreviewPluginHost` 在收起态隐藏 `PluginToolResultPanel` 并保留动作入口；`ExplorerWorkspaceLayout` 新增 `workspace/preview` 两套独立折叠状态及 localStorage 持久化，且预览侧栏与全屏共享同一 `preview` 折叠状态。
 - 更新 `specs/002-contracts/spec.md`：在 “Server 注册配置（Host Registration）” 吸收旧 105 的稳定约束，明确 `tools/mcp/<plugin>/server.*` 目录口径、主配置与本地覆盖层合并优先级、本地覆盖 JSON 非法失败启动与旧路径兼容层禁止策略。
 - 更新 `docs/mcp-inspector.md`：强化“通用调试指引”定位，并补充到 `specs/002-contracts/spec.md` 的契约引用。

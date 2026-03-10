@@ -1,24 +1,25 @@
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
 
-interface RootPathMapV2 {
-  version: 2
+interface RootPathMapV3 {
+  version: 3
   byRootId: Record<string, string>
-  byRootLabel: Record<string, string>
 }
-
-type LegacyRootPathMap = Record<string, string>
 
 interface EnsureRootPathOptions {
   rootLabel: string
-  rootId?: string | null
+  rootId: string
   promptIfMissing?: boolean
 }
 
-function toEmptyMap(): RootPathMapV2 {
+interface ParsedRootPathMap {
+  map: RootPathMapV3
+  shouldRewrite: boolean
+}
+
+function toEmptyMap(): RootPathMapV3 {
   return {
-    version: 2,
+    version: 3,
     byRootId: {},
-    byRootLabel: {},
   }
 }
 
@@ -27,54 +28,72 @@ function sanitizePath(path: string): string | null {
   return trimmed ? trimmed : null
 }
 
-function parseRootPathMap(raw: string | null): RootPathMapV2 {
-  if (!raw) return toEmptyMap()
+function sanitizeRootIdMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {}
+
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'string') continue
+    const normalized = sanitizePath(value)
+    if (!normalized) continue
+    next[key] = normalized
+  }
+  return next
+}
+
+function parseRootPathMap(raw: string | null): ParsedRootPathMap {
+  if (!raw) {
+    return {
+      map: toEmptyMap(),
+      shouldRewrite: false,
+    }
+  }
 
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') return toEmptyMap()
-
-    const candidate = parsed as Partial<RootPathMapV2>
-    if (candidate.version === 2) {
-      const byRootId = candidate.byRootId && typeof candidate.byRootId === 'object'
-        ? candidate.byRootId as Record<string, string>
-        : {}
-      const byRootLabel = candidate.byRootLabel && typeof candidate.byRootLabel === 'object'
-        ? candidate.byRootLabel as Record<string, string>
-        : {}
+    if (!parsed || typeof parsed !== 'object') {
       return {
-        version: 2,
-        byRootId,
-        byRootLabel,
+        map: toEmptyMap(),
+        shouldRewrite: true,
       }
     }
 
-    // Legacy payload: Record<rootLabel, rootPath>
-    const legacy = parsed as LegacyRootPathMap
-    const byRootLabel: Record<string, string> = {}
-    for (const [key, value] of Object.entries(legacy)) {
-      if (typeof value !== 'string') continue
-      const normalized = sanitizePath(value)
-      if (!normalized) continue
-      byRootLabel[key] = normalized
+    const candidate = parsed as Partial<RootPathMapV3>
+    if (candidate.version !== 3 || !candidate.byRootId || typeof candidate.byRootId !== 'object') {
+      return {
+        map: toEmptyMap(),
+        shouldRewrite: true,
+      }
     }
 
+    const byRootId = sanitizeRootIdMap(candidate.byRootId)
+    const rawByRootId = candidate.byRootId as Record<string, unknown>
+    const hasInvalidEntries = Object.keys(rawByRootId).length !== Object.keys(byRootId).length
     return {
-      version: 2,
-      byRootId: {},
-      byRootLabel,
+      map: {
+        version: 3,
+        byRootId,
+      },
+      shouldRewrite: hasInvalidEntries,
     }
   } catch {
-    return toEmptyMap()
+    return {
+      map: toEmptyMap(),
+      shouldRewrite: true,
+    }
   }
 }
 
-function getRootPathMap(): RootPathMapV2 {
+function getRootPathMap(): RootPathMapV3 {
   const raw = localStorage.getItem(ROOT_PATH_STORAGE_KEY)
-  return parseRootPathMap(raw)
+  const parsed = parseRootPathMap(raw)
+  if (parsed.shouldRewrite) {
+    setRootPathMap(parsed.map)
+  }
+  return parsed.map
 }
 
-function setRootPathMap(pathMap: RootPathMapV2): void {
+function setRootPathMap(pathMap: RootPathMapV3): void {
   localStorage.setItem(ROOT_PATH_STORAGE_KEY, JSON.stringify(pathMap))
 }
 
@@ -87,24 +106,15 @@ function askRootPath(rootLabel: string, existing: string): string | null {
   return sanitizePath(input)
 }
 
-function resolveExistingPath(
-  pathMap: RootPathMapV2,
-  rootId: string | null | undefined,
-  rootLabel: string
-): string {
-  if (rootId && pathMap.byRootId[rootId]) {
-    return pathMap.byRootId[rootId]
-  }
-  return pathMap.byRootLabel[rootLabel] || ''
-}
-
 export function ensureRootPath({
   rootLabel,
   rootId,
   promptIfMissing = true,
 }: EnsureRootPathOptions): string | null {
+  if (!rootId) return null
+
   const pathMap = getRootPathMap()
-  const existing = resolveExistingPath(pathMap, rootId, rootLabel)
+  const existing = pathMap.byRootId[rootId] || ''
 
   if (!existing && !promptIfMissing) {
     return null
@@ -113,22 +123,16 @@ export function ensureRootPath({
   const next = existing || askRootPath(rootLabel, existing)
   if (!next) return null
 
-  const nextByRootId = rootId
-    ? { ...pathMap.byRootId, [rootId]: next }
-    : pathMap.byRootId
-  const nextByRootLabel = { ...pathMap.byRootLabel, [rootLabel]: next }
-
-  const shouldWrite = (
-    nextByRootLabel[rootLabel] !== pathMap.byRootLabel[rootLabel]
-    || (rootId ? nextByRootId[rootId] !== pathMap.byRootId[rootId] : false)
-    || pathMap.version !== 2
-  )
+  const shouldWrite = pathMap.byRootId[rootId] !== next
 
   if (shouldWrite) {
+    const nextByRootId = {
+      ...pathMap.byRootId,
+      [rootId]: next,
+    }
     setRootPathMap({
-      version: 2,
+      version: 3,
       byRootId: nextByRootId,
-      byRootLabel: nextByRootLabel,
     })
   }
 

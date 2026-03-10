@@ -8,6 +8,18 @@ const WorkspaceShell = lazy(async () => {
   return { default: mod.WorkspaceShell }
 })
 
+const fallbackSessionRootIdByHandle = new WeakMap<FileSystemDirectoryHandle, string>()
+
+function getFallbackSessionRootId(handle: FileSystemDirectoryHandle): string {
+  const existing = fallbackSessionRootIdByHandle.get(handle)
+  if (existing) return existing
+
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const next = `session:${handle.name}:${suffix}`
+  fallbackSessionRootIdByHandle.set(handle, next)
+  return next
+}
+
 function WorkspaceLoadingFallback({ rootName }: { rootName: string }) {
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center p-8 overflow-hidden">
@@ -76,7 +88,7 @@ function App() {
     <Suspense fallback={<WorkspaceLoadingFallback rootName={rootHandle.name} />}>
       <WorkspaceShell
         rootHandle={rootHandle}
-        rootId={rootId ?? `session:${rootHandle.name}`}
+        rootId={rootId ?? getFallbackSessionRootId(rootHandle)}
         files={files}
         currentPath={currentPath}
         isFlattenView={isFlattenView}
