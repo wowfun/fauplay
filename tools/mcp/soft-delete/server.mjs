@@ -10,7 +10,7 @@ const TRASH_DIR_NAME = '.trash'
 const TOOL_DEFINITIONS = [
   {
     name: 'fs.softDelete',
-    description: '软删除（文件/批量）',
+    description: '软删除（文件/目录/批量）',
     inputSchema: {
       type: 'object',
       properties: {
@@ -42,7 +42,7 @@ const TOOL_DEFINITIONS = [
         {
           key: 'commit',
           label: '执行软删除',
-          description: '移动文件到 .trash',
+          description: '移动目标项到 .trash',
           intent: 'accent',
           arguments: { confirm: true },
         },
@@ -195,6 +195,24 @@ function parseConfirm(input) {
   return input
 }
 
+function isSameOrDescendantPath(candidatePath, ancestorPath) {
+  return candidatePath === ancestorPath || candidatePath.startsWith(`${ancestorPath}/`)
+}
+
+function compactRelativePathsForBatch(paths) {
+  let compacted = []
+
+  for (const pathItem of paths) {
+    if (compacted.includes(pathItem)) continue
+    if (compacted.some((existing) => isSameOrDescendantPath(pathItem, existing))) continue
+
+    compacted = compacted.filter((existing) => !isSameOrDescendantPath(existing, pathItem))
+    compacted.push(pathItem)
+  }
+
+  return compacted
+}
+
 function parseTargets(args) {
   const hasRelativePath = Object.prototype.hasOwnProperty.call(args, 'relativePath')
   const hasRelativePaths = Object.prototype.hasOwnProperty.call(args, 'relativePaths')
@@ -208,14 +226,21 @@ function parseTargets(args) {
   }
 
   if (hasRelativePath) {
-    return [normalizeRelativePath(args.relativePath)]
+    return {
+      mode: 'single',
+      relativePaths: [normalizeRelativePath(args.relativePath)],
+    }
   }
 
   if (!Array.isArray(args.relativePaths) || args.relativePaths.length === 0) {
     throw toInvalidParamsError('relativePaths must be a non-empty string[]')
   }
 
-  return args.relativePaths.map((item) => normalizeRelativePath(item))
+  const normalizedRelativePaths = args.relativePaths.map((item) => normalizeRelativePath(item))
+  return {
+    mode: 'batch',
+    relativePaths: compactRelativePathsForBatch(normalizedRelativePaths),
+  }
 }
 
 async function pathExists(targetPath) {
@@ -249,7 +274,7 @@ async function allocateDedupedTrashPath({ sourceAbsolutePath, candidateAbsoluteP
   }
 }
 
-async function buildSoftDeletePlans({ rootPath, relativePaths }) {
+async function buildSoftDeletePlans({ rootPath, relativePaths, mode }) {
   const plans = []
   const reservedTargetPaths = new Set()
 
@@ -271,13 +296,26 @@ async function buildSoftDeletePlans({ rootPath, relativePaths }) {
         continue
       }
 
-      if (!stat.isFile()) {
+      const sourceIsFile = stat.isFile()
+      const sourceIsDirectory = stat.isDirectory()
+      if (!sourceIsFile && !sourceIsDirectory) {
         plans.push({
           relativePath: normalizedRelativePath,
           ok: false,
           skipped: false,
           reasonCode: 'SOFT_DELETE_UNSUPPORTED_KIND',
-          error: 'only file items are supported',
+          error: 'only file and directory items are supported',
+        })
+        continue
+      }
+
+      if (mode === 'single' && sourceIsDirectory) {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'SOFT_DELETE_UNSUPPORTED_KIND',
+          error: 'relativePath only supports file items',
         })
         continue
       }
@@ -317,12 +355,13 @@ async function buildSoftDeletePlans({ rootPath, relativePaths }) {
 async function runSoftDelete(args) {
   const rootPath = resolveRootPath(args.rootPath)
   const normalizedRootPath = path.resolve(rootPath)
-  const relativePaths = parseTargets(args)
+  const targetInfo = parseTargets(args)
   const confirm = parseConfirm(args.confirm)
 
   const items = await buildSoftDeletePlans({
     rootPath: normalizedRootPath,
-    relativePaths,
+    relativePaths: targetInfo.relativePaths,
+    mode: targetInfo.mode,
   })
 
   if (confirm) {

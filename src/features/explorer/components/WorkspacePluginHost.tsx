@@ -43,6 +43,12 @@ export function WorkspacePluginHost({
 }: WorkspacePluginHostProps) {
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
 
+  const selectedEntryPaths = useMemo(() => {
+    return visibleFiles
+      .filter((file) => selectedPathSet.has(file.path))
+      .map((file) => file.path)
+  }, [selectedPathSet, visibleFiles])
+
   const selectedFilePaths = useMemo(() => {
     return visibleFiles
       .filter((file) => file.kind === 'file' && selectedPathSet.has(file.path))
@@ -63,7 +69,8 @@ export function WorkspacePluginHost({
   }, [selectedFilePaths, visibleFilePaths])
 
   const hasTargets = targetPaths.length > 0
-  const hasSelectedTargets = selectedFilePaths.length > 0
+  const hasSelectedEntries = selectedEntryPaths.length > 0
+  const hasRenderableTargets = hasTargets || hasSelectedEntries
   const contextKey = currentPath || '/'
 
   const runtime = usePluginRuntime({
@@ -77,21 +84,72 @@ export function WorkspacePluginHost({
     workbenchState,
     setWorkbenchState,
     buildBaseArguments: useCallback(() => {
-      if (!hasTargets) return null
+      if (!hasTargets) return {}
       return { relativePaths: targetPaths }
     }, [hasTargets, targetPaths]),
     canRunTool: useCallback((tool: GatewayToolDescriptor) => {
       if (tool.name === 'fs.softDelete') {
-        return hasSelectedTargets
+        return hasSelectedEntries
       }
       return hasTargets
-    }, [hasSelectedTargets, hasTargets]),
+    }, [hasSelectedEntries, hasTargets]),
     onMutationCommitted: onMutationCommitted
       ? async () => {
         await onMutationCommitted()
       }
       : undefined,
   })
+
+  const toolByName = useMemo(() => {
+    const map = new Map<string, GatewayToolDescriptor>()
+    for (const tool of runtime.scopedTools) {
+      map.set(tool.name, tool)
+    }
+    return map
+  }, [runtime.scopedTools])
+
+  const softDeleteArgs = useMemo<Record<string, unknown>>(() => ({
+    relativePaths: selectedEntryPaths,
+  }), [selectedEntryPaths])
+
+  const handleWorkbenchRunAction = useCallback((tool: GatewayToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
+    if (tool.name !== 'fs.softDelete') {
+      runtime.handleRunWorkbenchAction(tool, action)
+      return
+    }
+
+    runtime.handleWorkbenchContextChange(tool.name)
+    void runtime.runToolCall(tool, {
+      trigger: 'manual',
+      actionKey: action.key,
+      actionLabel: action.label,
+      additionalArgs: {
+        ...softDeleteArgs,
+        ...(action.arguments ?? {}),
+      },
+    })
+  }, [runtime, softDeleteArgs])
+
+  const railActions = useMemo(() => (
+    runtime.railActions.map((action) => {
+      if (action.toolName !== 'fs.softDelete') {
+        return action
+      }
+
+      return {
+        ...action,
+        onClick: () => {
+          const tool = toolByName.get(action.toolName)
+          if (!tool) return
+          runtime.handleWorkbenchContextChange(tool.name)
+          void runtime.runToolCall(tool, {
+            trigger: 'manual',
+            additionalArgs: softDeleteArgs,
+          })
+        },
+      }
+    })
+  ), [runtime, softDeleteArgs, toolByName])
 
   if (runtime.scopedTools.length === 0) {
     return null
@@ -104,7 +162,7 @@ export function WorkspacePluginHost({
         tool={activeTool}
         optionValues={workbenchState.optionValuesByTool[activeTool.name]}
         onOptionChange={runtime.handleWorkbenchOptionChange}
-        onRunAction={runtime.handleRunWorkbenchAction}
+        onRunAction={handleWorkbenchRunAction}
         surfaceVariant="workspace-grid"
         subzone="WorkspaceToolWorkbench"
       />
@@ -121,11 +179,11 @@ export function WorkspacePluginHost({
           surfaceVariant="workspace-grid"
           side="right"
           subzone="WorkspaceToolResultPanel"
-          emptyHint={hasTargets ? '点击右侧工具按钮后，结果会显示在这里。' : '当前目录没有可处理文件。'}
+          emptyHint={hasRenderableTargets ? '点击右侧工具按钮后，结果会显示在这里。' : '当前目录没有可处理项目。'}
         />
       )}
       <PluginActionRail
-        actions={runtime.railActions}
+        actions={railActions}
         surfaceVariant="workspace-grid"
         side="right"
         subzone="WorkspaceActionRail"

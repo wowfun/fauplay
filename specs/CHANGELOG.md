@@ -10,6 +10,7 @@
 - 更新工作区/预览插件运行时：`WorkspacePluginHost` 对 `fs.softDelete` 改为“仅选中文件可执行”；预览插件链路补齐 mutation 提交后的目录刷新回调，确保软删除后文件列表与预览回退状态同步。
 - 更新 `src/lib/fileSystem.ts` 与 `src/hooks/useFileSystem.ts`：将 `.trash` 目录加入默认隐藏集合，目录读取与地址栏子目录枚举均不展示该系统目录。
 - 更新 `src/config/shortcuts.ts` 与 `docs/shortcuts.md`：新增预览软删除快捷键 `Delete`（触发 `fs.softDelete` 提交执行）。
+- 更新 `specs/109-soft-delete-plugin/spec.md`、`tools/mcp/soft-delete/server.mjs` 与 `WorkspacePluginHost`：`workspace` 作用域的 `fs.softDelete` 支持选中目录软删除（目录整体移动到 `.trash`），并在祖先/子路径同时输入时仅执行祖先目录；`preview` 的 `relativePath` 仍保持单文件语义。
 
 ## 2026-03-10
 ### Added

@@ -19,16 +19,16 @@
 1. 通过 MCP `stdio` Server 暴露 `fs.softDelete`。
 2. 单工具覆盖 `file`（单文件）与 `workspace`（批量）两种作用域。
 3. 支持 `confirm=false/true` 两阶段行为。
-4. 目标文件移动到 `rootPath/.trash/<relativePath>`，并支持同目录冲突自动序号去重。
+4. 目标项（文件/目录）移动到 `rootPath/.trash/<relativePath>`，并支持同目录冲突自动序号去重。
 5. 预览快捷键 `Delete` 触发当前预览文件软删除。
-6. `workspace` 软删除仅允许“选中文件集合”触发。
+6. `workspace` 软删除允许“选中项集合（文件+目录）”触发。
 7. `.trash` 在网格与地址栏子目录候选中默认隐藏。
 
 范围外：
 
 1. 恢复文件（restore）与清空回收目录（empty trash）。
 2. 调用系统回收站能力。
-3. 目录项软删除（本期仅支持文件项）。
+3. 预览作用域（`relativePath`）的目录软删除能力。
 
 ## 4. 用户可见行为契约 (User-visible Contract)
 
@@ -37,7 +37,7 @@
 3. `confirm=true` 时执行可执行项，逐项失败不得中断整批。
 4. ActionRail 点击 `fs.softDelete` 默认直接执行提交（不弹二次确认）。
 5. 预览插件栏支持单文件软删除；工作区插件栏支持批量软删除。
-6. 工作区无选中项时，`fs.softDelete` 必须禁用，不得默认删除当前目录全部可见文件。
+6. 工作区无选中项时，`fs.softDelete` 必须禁用，不得默认删除当前目录全部可见项。
 7. 执行成功后客户端必须刷新当前目录视图；若原预览文件不可用，应自动回退到可预览文件并保持预览面板状态。
 8. `Delete` 快捷键仅在预览文件上下文生效，输入态（Input/Textarea/Select/ContentEditable）不得触发。
 9. `.trash` 默认不显示在网格与地址栏子目录候选中。
@@ -58,7 +58,9 @@
 1. `relativePath` 与 `relativePaths` 必须二选一，且至少提供一项有效目标。
 2. `relativePaths` 为空数组或包含非法值时返回 `MCP_INVALID_PARAMS`。
 3. 请求目标必须位于 `rootPath` 内，禁止 `..` 越界。
-4. 目录项按逐项失败处理，其他文件项继续执行。
+4. `relativePath`（预览）输入目录项时必须逐项失败（仅支持单文件软删除）。
+5. `relativePaths`（工作区）输入允许文件与目录混合，且目录应按“整体移动目录”语义处理。
+6. 当 `relativePaths` 同时包含祖先目录和其子路径时，必须仅保留祖先目录执行，避免子路径噪声失败。
 
 路径与去重约束：
 
@@ -115,18 +117,22 @@
 7. `FR-SD-07` mutation 提交成功后，客户端必须刷新当前目录并保持预览可用性回退语义。
 8. `FR-SD-08` 预览快捷键 `Delete` 必须触发当前预览文件软删除。
 9. `FR-SD-09` `.trash` 必须在目录读取与地址栏子目录枚举中默认隐藏。
+10. `FR-SD-10` `workspace` 作用域必须支持目录软删除（目录整体移动到 `.trash`）。
+11. `FR-SD-11` `relativePaths` 同时包含祖先/子路径时，必须仅执行祖先目录。
 
 ## 8. 验收标准 (AC)
 
 1. `AC-SD-01` `confirm=false` 返回 `dryRun=true` 且文件系统无移动落盘。
-2. `AC-SD-02` `confirm=true` 后文件移动到 `.trash` 下，目录结构保持与原相对路径一致。
+2. `AC-SD-02` `confirm=true` 后目标项（文件/目录）移动到 `.trash` 下，目录结构保持与原相对路径一致。
 3. `AC-SD-03` 同名冲突时目标自动分配 ` (1)`、` (2)` 后缀。
-4. `AC-SD-04` 输入包含目录项时，目录项逐项失败，文件项仍可执行。
-5. `AC-SD-05` 路径越界请求返回 `MCP_INVALID_PARAMS` 或逐项 `SOFT_DELETE_INVALID_PATH`。
-6. `AC-SD-06` 预览插件执行软删除后，预览不被强制关闭，且能回退到可用文件。
-7. `AC-SD-07` 工作区无选中项时软删除工具为禁用态。
-8. `AC-SD-08` `Delete` 仅在预览上下文生效，输入焦点场景不触发。
-9. `AC-SD-09` `.trash` 不出现在网格和地址栏子目录候选中。
+4. `AC-SD-04` `relativePath` 输入目录项时返回逐项失败（`SOFT_DELETE_UNSUPPORTED_KIND`）。
+5. `AC-SD-05` `relativePaths` 输入包含目录项时，目录项与文件项均可执行并计入 `moved`。
+6. `AC-SD-06` `relativePaths` 同时包含祖先目录与子路径时，仅祖先目录执行，子路径不产生误报失败。
+7. `AC-SD-07` 路径越界请求返回 `MCP_INVALID_PARAMS` 或逐项 `SOFT_DELETE_INVALID_PATH`。
+8. `AC-SD-08` 预览插件执行软删除后，预览不被强制关闭，且能回退到可用文件。
+9. `AC-SD-09` 工作区无选中项时软删除工具为禁用态。
+10. `AC-SD-10` `Delete` 仅在预览上下文生效，输入焦点场景不触发。
+11. `AC-SD-11` `.trash` 不出现在网格和地址栏子目录候选中。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
