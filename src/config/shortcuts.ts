@@ -16,6 +16,9 @@ export const keyboardShortcuts = {
     togglePlaybackOrder: [
       { key: 't', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
+    softDelete: [
+      { key: 'delete', ctrl: false, meta: false, alt: false },
+    ] satisfies ShortcutBinding[],
     prev: [
       { code: 'bracketleft', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],

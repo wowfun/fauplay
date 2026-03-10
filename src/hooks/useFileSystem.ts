@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AddressPathHistoryEntry, CachedRootEntry, FileItem, FilterState } from '@/types'
-import { openDirectory, readDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import {
   getCachedRootHandle,
   listCachedRoots,
@@ -150,6 +150,7 @@ export function useFileSystem() {
     const directoryNames: string[] = []
     for await (const [name, handle] of directory.entries()) {
       if (handle.kind !== 'directory') continue
+      if (isHiddenSystemDirectory(name)) continue
       directoryNames.push(name)
     }
 

@@ -27,6 +27,7 @@ interface MediaLightboxModalProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  onMutationCommitted?: () => void | Promise<void>
 }
 
 export function MediaLightboxModal({
@@ -51,6 +52,7 @@ export function MediaLightboxModal({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  onMutationCommitted,
 }: MediaLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -77,6 +79,7 @@ export function MediaLightboxModal({
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
         toolPanelCollapsed={toolPanelCollapsed}
         onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+        onMutationCommitted={onMutationCommitted}
       />
     </div>
   )

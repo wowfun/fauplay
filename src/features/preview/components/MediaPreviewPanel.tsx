@@ -31,6 +31,7 @@ interface MediaPreviewPanelProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  onMutationCommitted?: () => void | Promise<void>
 }
 
 export function MediaPreviewPanel({
@@ -57,6 +58,7 @@ export function MediaPreviewPanel({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  onMutationCommitted,
 }: MediaPreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -164,6 +166,7 @@ export function MediaPreviewPanel({
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
         toolPanelCollapsed={toolPanelCollapsed}
         onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+        onMutationCommitted={onMutationCommitted}
       />
     </div>
   )

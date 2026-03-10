@@ -82,6 +82,7 @@ interface ExplorerWorkspaceLayoutProps {
   onGridSelectionChange: (selectedPaths: string[]) => void
   gridSelectedPaths: string[]
   onWorkspaceMutationCommitted: () => void | Promise<void>
+  onPreviewMutationCommitted: () => void | Promise<void>
   showPreviewPane: boolean
   hasOpenPreview: boolean
   contentRef: MutableRefObject<HTMLDivElement | null>
@@ -135,6 +136,7 @@ export function ExplorerWorkspaceLayout({
   onGridSelectionChange,
   gridSelectedPaths,
   onWorkspaceMutationCommitted,
+  onPreviewMutationCommitted,
   showPreviewPane,
   hasOpenPreview,
   contentRef,
@@ -302,6 +304,7 @@ export function ExplorerWorkspaceLayout({
                 onToggleToolPanelCollapsed={() => {
                   setPreviewToolPanelCollapsed((prev) => !prev)
                 }}
+                onMutationCommitted={onPreviewMutationCommitted}
               />
             </Suspense>
           </div>
@@ -346,6 +349,7 @@ export function ExplorerWorkspaceLayout({
             onToggleToolPanelCollapsed={() => {
               setPreviewToolPanelCollapsed((prev) => !prev)
             }}
+            onMutationCommitted={onPreviewMutationCommitted}
           />
         </Suspense>
       )}

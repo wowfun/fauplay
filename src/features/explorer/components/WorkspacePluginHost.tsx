@@ -43,21 +43,27 @@ export function WorkspacePluginHost({
 }: WorkspacePluginHostProps) {
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
 
-  const targetPaths = useMemo(() => {
-    const selectedFiles = visibleFiles
-      .filter((file) => file.kind === 'file' && selectedPathSet.has(file.path))
-      .map((file) => file.path)
-
-    if (selectedFiles.length > 0) {
-      return selectedFiles
-    }
-
+  const selectedFilePaths = useMemo(() => {
     return visibleFiles
-      .filter((file) => file.kind === 'file')
+      .filter((file) => file.kind === 'file' && selectedPathSet.has(file.path))
       .map((file) => file.path)
   }, [selectedPathSet, visibleFiles])
 
+  const visibleFilePaths = useMemo(() => {
+    return visibleFiles
+      .filter((file) => file.kind === 'file')
+      .map((file) => file.path)
+  }, [visibleFiles])
+
+  const targetPaths = useMemo(() => {
+    if (selectedFilePaths.length > 0) {
+      return selectedFilePaths
+    }
+    return visibleFilePaths
+  }, [selectedFilePaths, visibleFilePaths])
+
   const hasTargets = targetPaths.length > 0
+  const hasSelectedTargets = selectedFilePaths.length > 0
   const contextKey = currentPath || '/'
 
   const runtime = usePluginRuntime({
@@ -74,7 +80,12 @@ export function WorkspacePluginHost({
       if (!hasTargets) return null
       return { relativePaths: targetPaths }
     }, [hasTargets, targetPaths]),
-    canRunTool: useCallback(() => hasTargets, [hasTargets]),
+    canRunTool: useCallback((tool: GatewayToolDescriptor) => {
+      if (tool.name === 'fs.softDelete') {
+        return hasSelectedTargets
+      }
+      return hasTargets
+    }, [hasSelectedTargets, hasTargets]),
     onMutationCommitted: onMutationCommitted
       ? async () => {
         await onMutationCommitted()

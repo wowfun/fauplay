@@ -1,5 +1,6 @@
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
+const HIDDEN_SYSTEM_DIRECTORIES = new Set(['.trash'])
 
 export function isImageFile(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() || ''
@@ -13,6 +14,10 @@ export function isVideoFile(name: string): boolean {
 
 export function isMediaFile(name: string): boolean {
   return isImageFile(name) || isVideoFile(name)
+}
+
+export function isHiddenSystemDirectory(name: string): boolean {
+  return HIDDEN_SYSTEM_DIRECTORIES.has(name)
 }
 
 export function getMimeType(name: string): string {
@@ -96,6 +101,9 @@ export async function readDirectory(
         files.push(fileItem)
       }
     } else if (entry.kind === 'directory') {
+      if (isHiddenSystemDirectory(entry.name)) {
+        continue
+      }
       const directoryHandle = entry as FileSystemDirectoryHandle
       let isEmpty = true
       for await (const _ of directoryHandle.values()) {

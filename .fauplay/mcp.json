@@ -21,6 +21,13 @@
       "args": [
         "tools/mcp/batch-rename/server.mjs"
       ]
+    },
+    "soft-delete": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "tools/mcp/soft-delete/server.mjs"
+      ]
     }
   }
 }

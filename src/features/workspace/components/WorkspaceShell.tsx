@@ -509,6 +509,7 @@ export function WorkspaceShell({
       onGridSelectionChange={setGridSelectedPaths}
       gridSelectedPaths={gridSelectedPaths}
       onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
+      onPreviewMutationCommitted={handleWorkspaceMutationCommitted}
       showPreviewPane={showPreviewPane}
       hasOpenPreview={hasOpenPreview}
       contentRef={contentRef}

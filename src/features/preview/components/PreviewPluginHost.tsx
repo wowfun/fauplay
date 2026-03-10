@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
+import { keyboardShortcuts } from '@/config/shortcuts'
 import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxContinuousConcurrent } from '@/config/toolContinuousCall'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { FileItem } from '@/types'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
@@ -26,6 +28,7 @@ interface PreviewPluginHostProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  onMutationCommitted?: () => void | Promise<void>
 }
 
 interface ContinuousToolTask {
@@ -47,6 +50,7 @@ export function PreviewPluginHost({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  onMutationCommitted,
 }: PreviewPluginHostProps) {
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
   const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
@@ -67,9 +71,19 @@ export function PreviewPluginHost({
       return { relativePath: file.path }
     }, [file.kind, file.path]),
     canRunTool: useCallback(() => file.kind === 'file', [file.kind]),
+    onMutationCommitted: onMutationCommitted
+      ? async () => {
+        await onMutationCommitted()
+      }
+      : undefined,
   })
+  const runToolCall = pluginRuntime.runToolCall
 
   const fileActionTools = pluginRuntime.scopedTools
+  const softDeleteTool = useMemo(
+    () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
+    [fileActionTools]
+  )
   const currentFileQueue = pluginRuntime.currentQueue
   const showActionRail = fileActionTools.length > 0
   const showResultPanel = fileActionTools.length > 0
@@ -169,6 +183,27 @@ export function PreviewPluginHost({
     if (!enableContinuousAutoRunOwner) return
     processContinuousQueue()
   }, [enableContinuousAutoRunOwner, processContinuousQueue])
+
+  useEffect(() => {
+    if (!enableContinuousAutoRunOwner) return
+    if (file.kind !== 'file') return
+    if (!softDeleteTool) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.repeat) return
+      if (isTypingTarget(event.target)) return
+      if (!matchesAnyShortcut(event, keyboardShortcuts.preview.softDelete)) return
+
+      event.preventDefault()
+      void runToolCall(softDeleteTool, {
+        trigger: 'manual',
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [enableContinuousAutoRunOwner, file.kind, runToolCall, softDeleteTool])
 
   const railActions = useMemo(
     () => pluginRuntime.railActions.map((action) => ({

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-03-11
+### Added
+- 新增 `specs/109-soft-delete-plugin/spec.md`：定义 `fs.softDelete` 单工具双作用域（`file/workspace`）契约、`confirm=false/true` 双阶段语义、`.trash` 软删除目标与预览快捷键触发规则。
+- 新增 `tools/mcp/soft-delete/server.mjs`：落地 `fs.softDelete` MCP server，支持单文件/批量输入、`dry-run/commit`、逐项结果与同目录 Windows 风格序号去重。
+
+### Changed
+- 更新 `.fauplay/mcp.json`：注册 `soft-delete` MCP server（`node tools/mcp/soft-delete/server.mjs`）。
+- 更新工作区/预览插件运行时：`WorkspacePluginHost` 对 `fs.softDelete` 改为“仅选中文件可执行”；预览插件链路补齐 mutation 提交后的目录刷新回调，确保软删除后文件列表与预览回退状态同步。
+- 更新 `src/lib/fileSystem.ts` 与 `src/hooks/useFileSystem.ts`：将 `.trash` 目录加入默认隐藏集合，目录读取与地址栏子目录枚举均不展示该系统目录。
+- 更新 `src/config/shortcuts.ts` 与 `docs/shortcuts.md`：新增预览软删除快捷键 `Delete`（触发 `fs.softDelete` 提交执行）。
+
 ## 2026-03-10
 ### Added
 - 新增 `specs/105-plugin-runtime-interaction/spec.md`：重建 105 主题为“插件运行时交互总则”，统一 `workspace/file` 同构实例、三段式交互、面板折叠状态（`workspaceToolPanelCollapsed` / `previewToolPanelCollapsed`）、本地持久化与侧栏/全屏一致性契约。

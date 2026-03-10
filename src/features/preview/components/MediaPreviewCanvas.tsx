@@ -26,6 +26,7 @@ interface MediaPreviewCanvasProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  onMutationCommitted?: () => void | Promise<void>
 }
 
 type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
@@ -55,6 +56,7 @@ export function MediaPreviewCanvas({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  onMutationCommitted,
 }: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -94,6 +96,7 @@ export function MediaPreviewCanvas({
             enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
             toolPanelCollapsed={toolPanelCollapsed}
             onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+            onMutationCommitted={onMutationCommitted}
           />
         </Suspense>
       )}
