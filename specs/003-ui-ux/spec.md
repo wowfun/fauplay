@@ -61,17 +61,14 @@
 3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PluginActionRail`、`PluginToolWorkbench`、`PluginToolResultPanel`、`PreviewMediaViewport`、`PreviewFeedbackOverlay`。
 4. 两种表现态允许差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）与焦点管理（Focus Management）。
 5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
-6. `PluginToolResultPanel` 在侧栏与全屏表现态下必须共享同一份运行时状态（单一事实源），禁止分别维护独立结果状态导致信息不一致。
-7. 在同一预览文件下切换侧栏/全屏表现态时，工具结果不得被重置；仅当“当前预览文件”变化时才允许切换队列上下文。
-8. `PluginToolWorkbench` 在侧栏与全屏表现态下必须共享同一份工具工作台状态（单一事实源），包括当前工具上下文与选项值。
+6. 插件运行时状态共享、折叠策略与三段式细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
 
-## 插件同构实例契约 (Plugin Isomorphic Runtime Contract)
+## 插件运行时引用契约 (Plugin Runtime Reference Contract)
 
-1. 系统必须将插件交互抽象为统一三段式：`PluginActionRail -> PluginToolWorkbench -> PluginToolResultPanel`。
-2. `workspace` 与 `file` 两类作用域必须复用同一三段式交互语义（上下文切换、选项维护、调用触发、结果入队、折叠展开、错误可见）。
-3. 两个实例必须保持资源与状态隔离：任一实例的 `activeTool`、`optionValues`、`resultQueue` 变更不得影响另一实例。
-4. B1 布局中动作入口必须位于文件网格区最右侧；其左侧必须承载工作台与结果队列。
-5. B2 布局可按预览表现态调整容器样式，但不得改变三段式语义。
+1. 插件运行时专属细则（同构语义、状态边界、折叠持久化、结果队列表现）统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
+2. 本规范仅保留 UI 分区、跨区交互优先级与可访问性最低要求，不重复定义插件运行时实现细则。
+3. B1 布局中动作入口必须位于文件网格区最右侧；其左侧承载工作台与结果队列容器。
+4. B2 布局可按预览表现态调整容器样式，但不得破坏 `003` 与 `105` 共同约束的语义一致性。
 
 ## 核心交互契约 (Core Interaction Contract)
 
@@ -99,20 +96,7 @@
 3. 工具动作运行态必须覆盖：`default`、`loading`、`error`、`disabled`。
 4. 错误状态必须用户可见，不得静默失败。
 5. 网格选择状态至少覆盖：活跃项（Active Item）与勾选集合（Checked Set）。
-6. 插件工具调用结果必须在对应分区可见展示（B1 或 B2），成功与失败均需可追踪（至少包含工具名、时间、结果或错误详情）。
-7. 工具结果展示应采用“调用队列平铺”语义：后调用结果在前，按时间倒序展示。
-8. 队列中每条结果项必须支持独立折叠/展开，不得依赖全局单选切换才能查看结果详情。
-9. 结果生命周期应按上下文维度维护最近队列：`file` 作用域按文件上下文，`workspace` 作用域按目录上下文；不要求跨会话持久化。
-10. 当工具声明 `annotations.toolOptions` 或 `annotations.toolActions` 时，对应实例应展示 `PluginToolWorkbench`；两者均为空时不展示工作台。
-11. `PluginToolWorkbench` 需支持“悬浮/聚焦动作图标即时切换上下文”，并将选项值按工具维度维护为会话态。
-12. `preview.continuousCall.enabled` 作为标准工具选项键时，切换预览文件后应在资源 `ready` 阶段自动调用该工具，并在动作图标提供激活态提示。
-13. 持续调用发起前应基于当前文件结果队列执行历史命中检查；若同 `tool + file + 请求签名` 已存在成功或失败记录，则本次持续调用静默跳过（不新增结果项）。
-14. `PluginToolResultPanel` 不展示面板级标题文案、描述文案与面板整体收起/展开控制，仅保留工作台区与结果队列区分层。
-15. 每条结果项头部文案格式应统一为：`<工具名>: <调用时间> <调用状态>`，其中调用状态取值为“运行中/成功/失败”。
-16. 工具结果详情应统一采用结构化 key-value 语义：简单类型展示 `<key>: <value>`，对象类型递归展示子键值，`list[dict]` 优先表格化展示，其余复杂类型提供 JSON 兜底视图；`result.ok` 仅用于状态判定，不在详情区重复展示。
-17. 当 `workspace` 作用域工具声明 `mutation=true` 且本次调用为真实执行（非 dry-run）并成功时，系统必须自动刷新当前目录视图，确保网格区与文件系统状态一致。
-18. 触发上述自动刷新时，若侧栏预览原本处于打开状态且刷新后仍存在可预览文件，系统不得强制关闭预览面板；应回退到可用文件并保持面板打开。
-19. `PluginActionRail` 动作图标必须优先消费 `annotations.icon`；当图标未声明、声明为空、不可解析或加载失败时，必须回退为工具名首字母缩写（最多 `3` 个字符，保持可读）。
+6. 插件调用可见性、结果队列、工作台、连续调用、折叠状态与 mutation 刷新联动细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
 
 ## 快捷键契约 (Keyboard Contract)
 
@@ -153,5 +137,6 @@
 - 上游基线：`000-foundation`
 - 架构边界：`001-architecture`
 - 协议契约：`002-contracts`
+- 插件运行时交互：`105-plugin-runtime-interaction`
 - 功能专题：`100+`
 - 网格多选：`103-grid-multi-selection`

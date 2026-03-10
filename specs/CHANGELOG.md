@@ -1,9 +1,20 @@
 # CHANGELOG
 
 ## 2026-03-10
+### Added
+- 新增 `specs/105-plugin-runtime-interaction/spec.md`：重建 105 主题为“插件运行时交互总则”，统一 `workspace/file` 同构实例、三段式交互、面板折叠状态（`workspaceToolPanelCollapsed` / `previewToolPanelCollapsed`）、本地持久化与侧栏/全屏一致性契约。
+
 ### Changed
+- 落地 `105-plugin-runtime-interaction` 折叠能力：`PluginActionRail` 新增面板收起/展开开关（顶部入口），`WorkspacePluginHost` 与 `PreviewPluginHost` 在收起态隐藏 `PluginToolResultPanel` 并保留动作入口；`ExplorerWorkspaceLayout` 新增 `workspace/preview` 两套独立折叠状态及 localStorage 持久化，且预览侧栏与全屏共享同一 `preview` 折叠状态。
+- 更新 `specs/002-contracts/spec.md`：在 “Server 注册配置（Host Registration）” 吸收旧 105 的稳定约束，明确 `tools/mcp/<plugin>/server.*` 目录口径、主配置与本地覆盖层合并优先级、本地覆盖 JSON 非法失败启动与旧路径兼容层禁止策略。
+- 更新 `docs/mcp-inspector.md`：强化“通用调试指引”定位，并补充到 `specs/002-contracts/spec.md` 的契约引用。
+- 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：抽离插件运行时专属细则到 `105-plugin-runtime-interaction`，`003` 收敛为 UI 高层分区与交互基线并改为单一引用入口。
+- 更新 `specs/107-stale-config-code-cleanup/spec.md`：关联主题由旧 `105-mcp-plugin-layout` 切换到新 `105-plugin-runtime-interaction`。
 - 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：`fs.batchRename` 移除 `prefix/suffix`，新增 `nameMask`（支持 `[N]/[P]/[G]/[C]`）、普通/正则查找替换（`replaceText` 允许空字符串）、`counterStart/counterStep/counterPad` 计数器参数，并将同目录命名冲突策略升级为 Windows 风格自动序号去重（`name.ext` -> `name (1).ext` ...）。
 - 更新 `specs/106-batch-rename-workspace/spec.md` 与 `tools/mcp/batch-rename/server.mjs`：将 `regexFlags` 从自由文本改为枚举选项（`g/gi/gm/gim/gu/giu/gs/gis`），工作台改为下拉选择并在服务端按枚举值校验。
+
+### Archived
+- 归档 `specs/105-mcp-plugin-layout/spec.md` 到 `specs/_archive/2026-03-10/105-mcp-plugin-layout/spec.md`：原 MCP 插件目录布局专题完成吸收并退出活动专题目录。
 
 ## 2026-03-08
 ### Added

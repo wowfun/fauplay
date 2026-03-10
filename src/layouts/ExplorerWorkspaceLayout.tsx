@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
+import { lazy, Suspense, useEffect, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
@@ -23,6 +23,35 @@ const MediaLightboxModal = lazy(async () => {
   const mod = await import('@/features/preview/components/MediaLightboxModal')
   return { default: mod.MediaLightboxModal }
 })
+
+const WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:workspace-tool-panel-collapsed'
+const PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:preview-tool-panel-collapsed'
+
+function readPersistedBoolean(key: string, defaultValue: boolean): boolean {
+  if (typeof window === 'undefined') return defaultValue
+
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (raw === null) return defaultValue
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+
+    const parsed = JSON.parse(raw) as unknown
+    return typeof parsed === 'boolean' ? parsed : defaultValue
+  } catch {
+    return defaultValue
+  }
+}
+
+function writePersistedBoolean(key: string, value: boolean): void {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(key, value ? 'true' : 'false')
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
 
 interface ExplorerWorkspaceLayoutProps {
   filter: FilterState
@@ -145,6 +174,20 @@ export function ExplorerWorkspaceLayout({
     activeToolName: null,
     optionValuesByTool: {},
   })
+  const [workspaceToolPanelCollapsed, setWorkspaceToolPanelCollapsed] = useState<boolean>(() => (
+    readPersistedBoolean(WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY, false)
+  ))
+  const [previewToolPanelCollapsed, setPreviewToolPanelCollapsed] = useState<boolean>(() => (
+    readPersistedBoolean(PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY, false)
+  ))
+
+  useEffect(() => {
+    writePersistedBoolean(WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY, workspaceToolPanelCollapsed)
+  }, [workspaceToolPanelCollapsed])
+
+  useEffect(() => {
+    writePersistedBoolean(PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY, previewToolPanelCollapsed)
+  }, [previewToolPanelCollapsed])
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -207,6 +250,10 @@ export function ExplorerWorkspaceLayout({
                     workbenchState={workspacePluginWorkbenchState}
                     setWorkbenchState={setWorkspacePluginWorkbenchState}
                     onMutationCommitted={onWorkspaceMutationCommitted}
+                    toolPanelCollapsed={workspaceToolPanelCollapsed}
+                    onToggleToolPanelCollapsed={() => {
+                      setWorkspaceToolPanelCollapsed((prev) => !prev)
+                    }}
                   />
                 </Suspense>
               )}
@@ -251,6 +298,10 @@ export function ExplorerWorkspaceLayout({
                 toolWorkbenchState={previewPluginWorkbenchState}
                 setToolWorkbenchState={setPreviewPluginWorkbenchState}
                 enableContinuousAutoRunOwner={showPreviewPane}
+                toolPanelCollapsed={previewToolPanelCollapsed}
+                onToggleToolPanelCollapsed={() => {
+                  setPreviewToolPanelCollapsed((prev) => !prev)
+                }}
               />
             </Suspense>
           </div>
@@ -291,6 +342,10 @@ export function ExplorerWorkspaceLayout({
             toolWorkbenchState={previewPluginWorkbenchState}
             setToolWorkbenchState={setPreviewPluginWorkbenchState}
             enableContinuousAutoRunOwner={!showPreviewPane}
+            toolPanelCollapsed={previewToolPanelCollapsed}
+            onToggleToolPanelCollapsed={() => {
+              setPreviewToolPanelCollapsed((prev) => !prev)
+            }}
           />
         </Suspense>
       )}

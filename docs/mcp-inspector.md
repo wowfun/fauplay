@@ -1,6 +1,7 @@
 # MCP Inspector 通用调试指引
 
 本文档提供 Fauplay MCP 插件的通用调试流程，不绑定具体插件清单。
+规范依据见 [`specs/002-contracts/spec.md`](../specs/002-contracts/spec.md) 的 “Server 注册配置（Host Registration）” 与生命周期契约章节。
 
 ## 1. 目标
 
@@ -15,6 +16,7 @@
 1. 已安装 Node.js（建议使用项目当前 LTS 版本）。
 2. 插件可执行命令在当前环境可用（如 `node`、`python3`）。
 3. 插件所需运行时依赖已安装（按插件自身要求准备）。
+4. 调试文档保持通用性：不在本文档维护固定插件名录与逐插件评估清单。
 
 ## 3. 启动 Inspector
 

@@ -22,6 +22,8 @@ interface WorkspacePluginHostProps {
   workbenchState: PluginWorkbenchState
   setWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   onMutationCommitted?: () => void | Promise<void>
+  toolPanelCollapsed: boolean
+  onToggleToolPanelCollapsed: () => void
 }
 
 export function WorkspacePluginHost({
@@ -36,6 +38,8 @@ export function WorkspacePluginHost({
   workbenchState,
   setWorkbenchState,
   onMutationCommitted,
+  toolPanelCollapsed,
+  onToggleToolPanelCollapsed,
 }: WorkspacePluginHostProps) {
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
 
@@ -98,21 +102,29 @@ export function WorkspacePluginHost({
 
   return (
     <>
-      <PluginToolResultPanel
-        workbench={workbenchNode}
-        items={runtime.currentQueue}
-        onToggleItemCollapsed={runtime.handleToggleResultItemCollapsed}
-        surfaceVariant="workspace-grid"
-        side="right"
-        subzone="WorkspaceToolResultPanel"
-        emptyHint={hasTargets ? '点击右侧工具按钮后，结果会显示在这里。' : '当前目录没有可处理文件。'}
-      />
+      {!toolPanelCollapsed && (
+        <PluginToolResultPanel
+          workbench={workbenchNode}
+          items={runtime.currentQueue}
+          onToggleItemCollapsed={runtime.handleToggleResultItemCollapsed}
+          surfaceVariant="workspace-grid"
+          side="right"
+          subzone="WorkspaceToolResultPanel"
+          emptyHint={hasTargets ? '点击右侧工具按钮后，结果会显示在这里。' : '当前目录没有可处理文件。'}
+        />
+      )}
       <PluginActionRail
         actions={runtime.railActions}
         surfaceVariant="workspace-grid"
         side="right"
         subzone="WorkspaceActionRail"
         onActionHoverChange={runtime.handleWorkbenchContextChange}
+        panelToggle={{
+          collapsed: toolPanelCollapsed,
+          onToggle: onToggleToolPanelCollapsed,
+          expandLabel: '展开工作区工具面板',
+          collapseLabel: '收起工作区工具面板',
+        }}
       />
     </>
   )

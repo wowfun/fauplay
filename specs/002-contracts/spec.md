@@ -54,13 +54,16 @@
 
 ### Server 注册配置（Host Registration）
 
-1. 网关从项目路径 `.fauplay/mcp.json` 读取主 MCP Server 注册信息（VS Code `mcp.json` 风格），并可选读取 `.fauplay/mcp.local.json` 作为本地覆盖层。
-2. 当前仅支持 `servers.<name>.type = "stdio"`。
-3. 内置能力需以独立 CLI 形式注册到 `servers` 中（不在网关内硬编码 inproc server）。
-4. `stdio` 条目必须提供 `command`（可选 `args/cwd/env`）。
-5. `disabled: true` 的 server 必须被跳过。
-6. 当主配置与本地覆盖层存在同名 `servers.<name>` 时，本地覆盖层必须优先。
-7. server 注册配置不改变 MCP 对外协议字段。
+1. MCP 插件活动目录基线为 `tools/mcp/<plugin>/server.*`，`servers.<name>` 的注册路径应与该目录布局语义对应。
+2. 网关从项目路径 `.fauplay/mcp.json` 读取主 MCP Server 注册信息（VS Code `mcp.json` 风格），并可选读取 `.fauplay/mcp.local.json` 作为本地覆盖层。
+3. 当前仅支持 `servers.<name>.type = "stdio"`。
+4. 内置能力需以独立 CLI 形式注册到 `servers` 中（不在网关内硬编码 inproc server）。
+5. `stdio` 条目必须提供 `command`（可选 `args/cwd/env`）。
+6. `disabled: true` 的 server 必须被跳过。
+7. 当主配置与本地覆盖层存在同名 `servers.<name>` 时，本地覆盖层必须优先，且按 server 维度完整覆盖主配置同名项。
+8. 本地覆盖层配置文件存在但 JSON 非法时，网关必须以配置错误失败启动并标注错误文件路径。
+9. 注册体系不得保留旧目录兼容层（软链接、跳转脚本或双路径并存注册）。
+10. Server 注册配置不改变 MCP 对外协议字段。
 
 ## 生命周期契约 (Lifecycle Contract)
 
@@ -276,3 +279,4 @@
 - 上游基线：`000-foundation`
 - 架构边界：`001-architecture`
 - 交互规范：`003-ui-ux`
+- 插件运行时交互：`105-plugin-runtime-interaction`

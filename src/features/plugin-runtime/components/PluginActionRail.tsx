@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import dynamicIconImports from 'lucide-react/dynamicIconImports'
 import { Button } from '@/ui/Button'
 import { cn } from '@/lib/utils'
 import type { PluginActionRailItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
+
+interface PluginPanelToggleControl {
+  collapsed: boolean
+  onToggle: () => void
+  expandLabel: string
+  collapseLabel: string
+}
 
 interface PluginActionRailProps {
   actions: PluginActionRailItem[]
@@ -10,6 +18,7 @@ interface PluginActionRailProps {
   side?: 'left' | 'right'
   subzone?: string
   onActionHoverChange?: (toolName: string) => void
+  panelToggle?: PluginPanelToggleControl
 }
 
 type DynamicIconName = keyof typeof dynamicIconImports
@@ -138,6 +147,7 @@ export function PluginActionRail({
   side = 'left',
   subzone,
   onActionHoverChange,
+  panelToggle,
 }: PluginActionRailProps) {
   const actionErrors = actions.filter((action) => Boolean(action.error))
   const isLightbox = surfaceVariant === 'preview-lightbox'
@@ -151,12 +161,37 @@ export function PluginActionRail({
     ? 'bg-white/20 ring-1 ring-white/60 translate-y-[1px]'
     : 'bg-accent/70 ring-1 ring-primary/60 translate-y-[1px]'
   const errorTextClass = isLightbox ? 'text-red-300' : 'text-destructive'
+  const panelToggleTitle = panelToggle
+    ? (panelToggle.collapsed ? panelToggle.expandLabel : panelToggle.collapseLabel)
+    : null
 
   return (
     <div
       className={`w-12 shrink-0 flex flex-col items-center gap-2 py-3 px-2 ${borderClass}`}
       data-plugin-subzone={subzone ?? 'PluginActionRail'}
     >
+      {panelToggle && panelToggleTitle && (
+        <Button
+          onClick={panelToggle.onToggle}
+          variant="ghost"
+          size="icon"
+          className={railButtonClass}
+          aria-label={panelToggleTitle}
+          title={panelToggleTitle}
+        >
+          {panelToggle.collapsed
+            ? (
+              side === 'left'
+                ? <ChevronRight className="w-4 h-4" aria-hidden />
+                : <ChevronLeft className="w-4 h-4" aria-hidden />
+            )
+            : (
+              side === 'left'
+                ? <ChevronLeft className="w-4 h-4" aria-hidden />
+                : <ChevronRight className="w-4 h-4" aria-hidden />
+            )}
+        </Button>
+      )}
       {actions.map((action) => {
         return (
           <Button

@@ -25,6 +25,8 @@ interface MediaLightboxModalProps {
   toolWorkbenchState: PluginWorkbenchState
   setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
+  toolPanelCollapsed: boolean
+  onToggleToolPanelCollapsed: () => void
 }
 
 export function MediaLightboxModal({
@@ -47,6 +49,8 @@ export function MediaLightboxModal({
   toolWorkbenchState,
   setToolWorkbenchState,
   enableContinuousAutoRunOwner,
+  toolPanelCollapsed,
+  onToggleToolPanelCollapsed,
 }: MediaLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -71,6 +75,8 @@ export function MediaLightboxModal({
         toolWorkbenchState={toolWorkbenchState}
         setToolWorkbenchState={setToolWorkbenchState}
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
+        toolPanelCollapsed={toolPanelCollapsed}
+        onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
       />
     </div>
   )

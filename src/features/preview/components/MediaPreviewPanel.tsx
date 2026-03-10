@@ -29,6 +29,8 @@ interface MediaPreviewPanelProps {
   toolWorkbenchState: PluginWorkbenchState
   setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
+  toolPanelCollapsed: boolean
+  onToggleToolPanelCollapsed: () => void
 }
 
 export function MediaPreviewPanel({
@@ -53,6 +55,8 @@ export function MediaPreviewPanel({
   toolWorkbenchState,
   setToolWorkbenchState,
   enableContinuousAutoRunOwner,
+  toolPanelCollapsed,
+  onToggleToolPanelCollapsed,
 }: MediaPreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -158,6 +162,8 @@ export function MediaPreviewPanel({
         toolWorkbenchState={toolWorkbenchState}
         setToolWorkbenchState={setToolWorkbenchState}
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
+        toolPanelCollapsed={toolPanelCollapsed}
+        onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
       />
     </div>
   )

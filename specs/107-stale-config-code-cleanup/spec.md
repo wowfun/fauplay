@@ -58,4 +58,4 @@
 
 - 架构边界：[`../001-architecture/spec.md`](../001-architecture/spec.md)
 - 契约规范：[`../002-contracts/spec.md`](../002-contracts/spec.md)
-- MCP 插件目录规范：[`../105-mcp-plugin-layout/spec.md`](../105-mcp-plugin-layout/spec.md)
+- 插件运行时交互：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)

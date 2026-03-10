@@ -24,6 +24,8 @@ interface MediaPreviewCanvasProps {
   toolWorkbenchState: PluginWorkbenchState
   setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
+  toolPanelCollapsed: boolean
+  onToggleToolPanelCollapsed: () => void
 }
 
 type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
@@ -51,6 +53,8 @@ export function MediaPreviewCanvas({
   toolWorkbenchState,
   setToolWorkbenchState,
   enableContinuousAutoRunOwner,
+  toolPanelCollapsed,
+  onToggleToolPanelCollapsed,
 }: MediaPreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -88,6 +92,8 @@ export function MediaPreviewCanvas({
             toolWorkbenchState={toolWorkbenchState}
             setToolWorkbenchState={setToolWorkbenchState}
             enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
+            toolPanelCollapsed={toolPanelCollapsed}
+            onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
           />
         </Suspense>
       )}

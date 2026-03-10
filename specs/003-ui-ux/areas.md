@@ -57,7 +57,7 @@
   - `features/preview/components/PreviewMediaViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
 - 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
-- 结果面板分层：工作台区与结果队列区同侧栏共存，使用分隔边界区分；不提供面板级标题、描述与整体收起控制。
+- 运行时细则：结果分层、折叠状态、侧栏/全屏一致性等约束见 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
 
 ### C 底部状态区（Status Bar Zone）
 
@@ -112,23 +112,9 @@
 | `Shift + 单击` | 范围 | 覆盖当前勾选集合 |
 | `Shift + 方向键` | 范围 | 扩展范围，预览在 `Shift` 松开后提交 |
 
-## 输入输出契约（Input/Output Contract）
+## 插件运行时细则引用（Plugin Runtime Reference）
 
-输入：
-
-1. 插件上下文资源（文件或工作区目标集合）
-2. 作用域实例状态（`workspace` 或 `file`）
-3. 工具元数据（Action Tool Metadata）
-4. 预览遍历状态（仅 `file` 实例）
-5. 自动播放状态（仅 `file` 实例）
-
-输出：
-
-1. 系统动作触发（按工具名发起 `tools/call`）
-2. 工作台事件（按工具切换上下文、工具选项变更、工作台操作触发）
-3. 结果面板事件（结果项折叠/展开、按上下文恢复最近队列）
-4. 预览控制事件（自动播放开关、遍历模式切换、间隔调整，仅 `file` 实例）
-5. 展示切换事件（打开全屏、关闭预览，仅 `file` 实例）
+插件三段式实例的输入输出、状态边界、折叠持久化与跨表现态一致性细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)；本文件仅维护 UI 分区职责与落位映射。
 
 ## 状态矩阵（State Matrix）
 

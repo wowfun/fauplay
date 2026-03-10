@@ -24,6 +24,8 @@ interface PreviewPluginHostProps {
   toolWorkbenchState: PluginWorkbenchState
   setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
+  toolPanelCollapsed: boolean
+  onToggleToolPanelCollapsed: () => void
 }
 
 interface ContinuousToolTask {
@@ -43,6 +45,8 @@ export function PreviewPluginHost({
   toolWorkbenchState,
   setToolWorkbenchState,
   enableContinuousAutoRunOwner,
+  toolPanelCollapsed,
+  onToggleToolPanelCollapsed,
 }: PreviewPluginHostProps) {
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
   const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
@@ -209,10 +213,16 @@ export function PreviewPluginHost({
           side="left"
           subzone="PreviewActionRail"
           onActionHoverChange={pluginRuntime.handleWorkbenchContextChange}
+          panelToggle={{
+            collapsed: toolPanelCollapsed,
+            onToggle: onToggleToolPanelCollapsed,
+            expandLabel: '展开预览工具面板',
+            collapseLabel: '收起预览工具面板',
+          }}
         />
       )}
 
-      {showResultPanel && (
+      {showResultPanel && !toolPanelCollapsed && (
         <PluginToolResultPanel
           workbench={workbenchNode}
           items={currentFileQueue}
