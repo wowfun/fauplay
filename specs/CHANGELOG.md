@@ -8,6 +8,7 @@
 - 新增 `src/config/app.json` 与 `src/config/appConfig.ts`：引入应用级配置文件机制，提供 `favorites.maxItems` 配置项并在非法值时回退默认 `100`（安全钳制 `1..1000`）。
 
 ### Changed
+- 更新 `specs/102-address-bar-navigation/spec.md` 与 `ExplorerToolbar` 地址栏编辑态：新增提示补全能力（当前输入父路径子目录 + 跨根收藏 + 跨根历史），支持 `ArrowUp/ArrowDown` 选择、`Tab` 接受候选、`Enter` 高亮优先提交；命中跨根候选时先切根再导航；候选来源标签改为与路径同一行右对齐显示；补全读取失败可见但不阻断手动提交。
 - 更新 `.fauplay/mcp.json`：注册 `soft-delete` MCP server（`node tools/mcp/soft-delete/server.mjs`）。
 - 更新工作区/预览插件运行时：`WorkspacePluginHost` 对 `fs.softDelete` 改为“仅选中文件可执行”；预览插件链路补齐 mutation 提交后的目录刷新回调，确保软删除后文件列表与预览回退状态同步。
 - 更新 `src/lib/fileSystem.ts` 与 `src/hooks/useFileSystem.ts`：将 `.trash` 目录加入默认隐藏集合，目录读取与地址栏子目录枚举均不展示该系统目录。

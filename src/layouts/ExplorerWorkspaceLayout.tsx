@@ -210,6 +210,7 @@ export function ExplorerWorkspaceLayout({
       <ExplorerToolbar
         filter={filter}
         onFilterChange={onFilterChange}
+        rootId={rootId}
         rootName={rootName}
         currentPath={currentPath}
         onNavigateToPath={onNavigateToPath}

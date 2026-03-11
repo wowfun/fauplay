@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   ArrowUpDown,
   Check,
@@ -37,6 +37,7 @@ interface SegmentDropdownState {
 interface ExplorerToolbarProps {
   filter: FilterState
   onFilterChange: (filter: FilterState) => void
+  rootId?: string | null
   rootName: string
   currentPath: string
   onNavigateToPath: (path: string) => Promise<boolean>
@@ -68,9 +69,93 @@ function buildCopyPathText(rootLabel: string, relativePath: string): string {
   return relativePath ? `${rootLabel}/${relativePath}` : rootLabel
 }
 
+function suggestionSourceLabel(source: AddressSuggestionSource): string {
+  if (source === 'directory') return '目录'
+  if (source === 'favorite') return '收藏'
+  return '历史'
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.split('/').filter(Boolean).join('/')
+}
+
+function toLower(value: string): string {
+  return value.toLocaleLowerCase()
+}
+
+interface DraftPathSuggestionContext {
+  basePath: string
+  prefix: string
+  normalizedInput: string
+  hasTrailingSlash: boolean
+}
+
+function parseDraftPathSuggestionContext(path: string): DraftPathSuggestionContext {
+  const hasTrailingSlash = path.endsWith('/')
+  const segments = path.split('/').filter(Boolean)
+  if (hasTrailingSlash) {
+    return {
+      basePath: segments.join('/'),
+      prefix: '',
+      normalizedInput: normalizeRelativePath(path),
+      hasTrailingSlash,
+    }
+  }
+  if (segments.length === 0) {
+    return {
+      basePath: '',
+      prefix: '',
+      normalizedInput: '',
+      hasTrailingSlash,
+    }
+  }
+
+  const prefix = segments[segments.length - 1] ?? ''
+  return {
+    basePath: segments.slice(0, -1).join('/'),
+    prefix,
+    normalizedInput: normalizeRelativePath(path),
+    hasTrailingSlash,
+  }
+}
+
+function buildAddressSuggestionDisplayPath(
+  suggestion: AddressSuggestionItem,
+  currentRootId: string | null | undefined,
+  currentRootLabel: string
+): string {
+  const isCrossRoot = (
+    suggestion.rootId
+    && currentRootId
+    && suggestion.rootId !== currentRootId
+  )
+  if (!isCrossRoot) {
+    return suggestion.path || currentRootLabel
+  }
+
+  const targetRootLabel = suggestion.rootName || currentRootLabel
+  return suggestion.path ? `${targetRootLabel}/${suggestion.path}` : targetRootLabel
+}
+
+type AddressSuggestionSource = 'directory' | 'favorite' | 'history'
+
+interface AddressSuggestionItem {
+  path: string
+  source: AddressSuggestionSource
+  rootId: string | null
+  rootName: string
+  favoriteEntry: FavoriteFolderEntry | null
+  historyEntry: AddressPathHistoryEntry | null
+}
+
+type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+const MAX_ADDRESS_SUGGESTION_ITEMS = 12
+
 export function ExplorerToolbar({
   filter,
   onFilterChange,
+  rootId,
   rootName,
   currentPath,
   onNavigateToPath,
@@ -102,6 +187,10 @@ export function ExplorerToolbar({
   const [isNavigatingByAddressBar, setIsNavigatingByAddressBar] = useState(false)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [segmentDropdownStateByPath, setSegmentDropdownStateByPath] = useState<Record<string, SegmentDropdownState>>({})
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestionItem[]>([])
+  const [addressSuggestionStatus, setAddressSuggestionStatus] = useState<AddressSuggestionStatus>('idle')
+  const [addressSuggestionError, setAddressSuggestionError] = useState<string | null>(null)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
 
   const pathSegments = currentPath.split('/').filter(Boolean)
   const rootLabel = rootName || '根目录'
@@ -124,6 +213,7 @@ export function ExplorerToolbar({
 
   const addressBarRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const suggestionRequestSeqRef = useRef(0)
 
   useEffect(() => {
     if (addressBarMode !== 'breadcrumb') return
@@ -166,6 +256,102 @@ export function ExplorerToolbar({
     const timer = window.setTimeout(() => setCopyState('idle'), 1200)
     return () => window.clearTimeout(timer)
   }, [copyState])
+
+  const loadAddressSuggestions = useCallback(async (draftValue: string): Promise<void> => {
+    const requestSeq = ++suggestionRequestSeqRef.current
+    const context = parseDraftPathSuggestionContext(draftValue)
+    const { basePath, prefix, normalizedInput, hasTrailingSlash } = context
+
+    setAddressSuggestionStatus('loading')
+    setAddressSuggestionError(null)
+
+    const prefixLower = toLower(prefix)
+    const normalizedInputLower = toLower(normalizedInput)
+
+    const matchPathByInput = (candidatePath: string): boolean => {
+      const normalizedCandidatePath = normalizeRelativePath(candidatePath)
+      if (!normalizedInputLower) return true
+      if (!toLower(normalizedCandidatePath).startsWith(normalizedInputLower)) return false
+      if (hasTrailingSlash && normalizedCandidatePath === normalizedInput) return false
+      return true
+    }
+
+    try {
+      const childDirectories = await onListChildDirectories(basePath)
+      if (requestSeq !== suggestionRequestSeqRef.current) return
+
+      const directorySuggestions = childDirectories
+        .filter((name) => !prefixLower || toLower(name).startsWith(prefixLower))
+        .map<AddressSuggestionItem>((name) => ({
+          path: basePath ? `${basePath}/${name}` : name,
+          source: 'directory',
+          rootId: rootId ?? null,
+          rootName: rootLabel,
+          favoriteEntry: null,
+          historyEntry: null,
+        }))
+
+      const favoriteSuggestions = sortedFavorites
+        .filter((item) => matchPathByInput(item.path))
+        .map<AddressSuggestionItem>((item) => ({
+          path: normalizeRelativePath(item.path),
+          source: 'favorite',
+          rootId: item.rootId,
+          rootName: item.rootName || rootLabel,
+          favoriteEntry: item,
+          historyEntry: null,
+        }))
+
+      const historySuggestions = sortedHistory
+        .filter((item) => matchPathByInput(item.path))
+        .map<AddressSuggestionItem>((item) => ({
+          path: normalizeRelativePath(item.path),
+          source: 'history',
+          rootId: item.rootId,
+          rootName: item.rootName || rootLabel,
+          favoriteEntry: null,
+          historyEntry: item,
+        }))
+
+      const dedupedSuggestions: AddressSuggestionItem[] = []
+      const seenPathSet = new Set<string>()
+      for (const candidate of [...directorySuggestions, ...favoriteSuggestions, ...historySuggestions]) {
+        const normalizedCandidatePath = normalizeRelativePath(candidate.path)
+        if (!normalizedCandidatePath && normalizedInput) continue
+        const key = `${candidate.rootId || '__current__'}:${normalizedCandidatePath}`
+        if (seenPathSet.has(key)) continue
+        seenPathSet.add(key)
+        dedupedSuggestions.push({
+          ...candidate,
+          path: normalizedCandidatePath,
+        })
+        if (dedupedSuggestions.length >= MAX_ADDRESS_SUGGESTION_ITEMS) break
+      }
+
+      setAddressSuggestions(dedupedSuggestions)
+      setAddressSuggestionStatus('ready')
+      setAddressSuggestionError(null)
+      setActiveSuggestionIndex(-1)
+    } catch (error) {
+      if (requestSeq !== suggestionRequestSeqRef.current) return
+      const message = error instanceof Error ? error.message : '读取补全候选失败'
+      setAddressSuggestions([])
+      setAddressSuggestionStatus('error')
+      setAddressSuggestionError(message)
+      setActiveSuggestionIndex(-1)
+    }
+  }, [onListChildDirectories, rootId, rootLabel, sortedFavorites, sortedHistory])
+
+  useEffect(() => {
+    if (addressBarMode !== 'edit') {
+      setAddressSuggestionStatus('idle')
+      setAddressSuggestionError(null)
+      setAddressSuggestions([])
+      setActiveSuggestionIndex(-1)
+      return
+    }
+    void loadAddressSuggestions(draftPath)
+  }, [addressBarMode, draftPath, loadAddressSuggestions])
 
   const enterEditMode = () => {
     setAddressBarMode('edit')
@@ -249,14 +435,60 @@ export function ExplorerToolbar({
     setOpenSegmentPath(null)
   }
 
-  const handleSubmitEdit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const ok = await navigateByAddressBar(draftPath)
-    if (ok) {
-      setAddressBarMode('breadcrumb')
+  const submitAddressPath = async (path: string): Promise<void> => {
+    const ok = await navigateByAddressBar(path)
+    if (!ok) {
+      setEditError('路径无效或不可访问')
       return
     }
-    setEditError('路径无效或不可访问')
+    setAddressBarMode('breadcrumb')
+    setAddressSuggestionStatus('idle')
+    setAddressSuggestionError(null)
+    setAddressSuggestions([])
+    setActiveSuggestionIndex(-1)
+  }
+
+  const submitAddressSuggestion = async (suggestion: AddressSuggestionItem): Promise<void> => {
+    if (suggestion.source === 'favorite' && suggestion.favoriteEntry) {
+      const ok = await onOpenFavoriteFolder(suggestion.favoriteEntry)
+      if (!ok) {
+        setEditError('路径无效或不可访问')
+        return
+      }
+      setAddressBarMode('breadcrumb')
+      setAddressSuggestionStatus('idle')
+      setAddressSuggestionError(null)
+      setAddressSuggestions([])
+      setActiveSuggestionIndex(-1)
+      return
+    }
+
+    if (suggestion.source === 'history' && suggestion.historyEntry) {
+      const ok = await onNavigateHistoryEntry(suggestion.historyEntry)
+      if (!ok) {
+        setEditError('路径无效或不可访问')
+        return
+      }
+      setAddressBarMode('breadcrumb')
+      setAddressSuggestionStatus('idle')
+      setAddressSuggestionError(null)
+      setAddressSuggestions([])
+      setActiveSuggestionIndex(-1)
+      return
+    }
+
+    await submitAddressPath(suggestion.path)
+  }
+
+  const handleSubmitEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const hasActiveSuggestion = activeSuggestionIndex >= 0 && activeSuggestionIndex < addressSuggestions.length
+    const targetSuggestion = hasActiveSuggestion ? addressSuggestions[activeSuggestionIndex] : null
+    if (targetSuggestion) {
+      await submitAddressSuggestion(targetSuggestion)
+      return
+    }
+    await submitAddressPath(draftPath)
   }
 
   const handleToggleHistory = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -355,6 +587,13 @@ export function ExplorerToolbar({
     )
   }
 
+  const shouldShowAddressSuggestionPanel = addressBarMode === 'edit' && (
+    addressSuggestionStatus === 'ready'
+    || addressSuggestionStatus === 'loading'
+    || addressSuggestionStatus === 'error'
+    || addressSuggestions.length > 0
+  )
+
   return (
     <div className="flex items-center gap-4 p-4 border-b border-border">
       {currentPath && (
@@ -378,6 +617,7 @@ export function ExplorerToolbar({
                 value={draftPath}
                 onChange={(event) => {
                   setDraftPath(event.target.value)
+                  setActiveSuggestionIndex(-1)
                   if (editError) {
                     setEditError(null)
                   }
@@ -386,6 +626,34 @@ export function ExplorerToolbar({
                   if (event.key === 'Escape') {
                     event.preventDefault()
                     cancelEditMode()
+                    return
+                  }
+                  if (event.key === 'ArrowDown') {
+                    if (addressSuggestions.length === 0) return
+                    event.preventDefault()
+                    setActiveSuggestionIndex((previous) => {
+                      if (previous < 0) return 0
+                      return (previous + 1) % addressSuggestions.length
+                    })
+                    return
+                  }
+                  if (event.key === 'ArrowUp') {
+                    if (addressSuggestions.length === 0) return
+                    event.preventDefault()
+                    setActiveSuggestionIndex((previous) => {
+                      if (previous < 0) return addressSuggestions.length - 1
+                      return (previous - 1 + addressSuggestions.length) % addressSuggestions.length
+                    })
+                    return
+                  }
+                  if (event.key === 'Tab') {
+                    if (addressSuggestions.length === 0) return
+                    event.preventDefault()
+                    const targetIndex = activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0
+                    const target = addressSuggestions[targetIndex]
+                    if (!target) return
+                    setDraftPath(target.path)
+                    setActiveSuggestionIndex(targetIndex)
                   }
                 }}
                 className="h-7 min-w-0 flex-1"
@@ -558,6 +826,51 @@ export function ExplorerToolbar({
             </Button>
           </div>
         </div>
+        {shouldShowAddressSuggestionPanel && (
+          <div
+            className="absolute left-0 top-full z-30 mt-1 w-full rounded-md border border-border bg-background p-1 shadow-md"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {addressSuggestionStatus === 'loading' && (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">补全加载中...</div>
+            )}
+            {addressSuggestionStatus === 'error' && (
+              <div className="px-2 py-1.5 text-xs text-destructive" title={addressSuggestionError ?? undefined}>
+                读取补全失败
+              </div>
+            )}
+            {addressSuggestionStatus === 'ready' && addressSuggestions.length === 0 && (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">无匹配路径</div>
+            )}
+            {addressSuggestionStatus === 'ready' && addressSuggestions.length > 0 && (
+              <div className="max-h-64 overflow-auto">
+                {addressSuggestions.map((item, index) => (
+                  <button
+                    key={`${item.source}:${item.rootId || '__current__'}:${item.path}`}
+                    type="button"
+                    className={`block w-full rounded px-2 py-1.5 text-left ${
+                      index === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent'
+                    }`}
+                    onMouseEnter={() => setActiveSuggestionIndex(index)}
+                    onClick={() => {
+                      void submitAddressSuggestion(item)
+                    }}
+                    title={buildAddressSuggestionDisplayPath(item, rootId, rootLabel)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {buildAddressSuggestionDisplayPath(item, rootId, rootLabel)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {suggestionSourceLabel(item.source)}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {editError && (
           <div className="absolute left-0 top-full mt-1 text-xs text-destructive">{editError}</div>
         )}
