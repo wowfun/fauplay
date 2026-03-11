@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AddressPathHistoryEntry, CachedRootEntry, FileItem, FilterState } from '@/types'
+import { appConfig } from '@/config/appConfig'
+import type {
+  AddressPathHistoryEntry,
+  CachedRootEntry,
+  FavoriteFolderEntry,
+  FileItem,
+  FilterState,
+} from '@/types'
 import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import {
   getCachedRootHandle,
@@ -12,6 +19,9 @@ import { ensureRootPath } from '@/lib/reveal'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
+const FAVORITE_FOLDERS_STORAGE_KEY = 'fauplay:favorite-folders'
+const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
+const ROOT_LABEL_FALLBACK = '根目录'
 
 function withBasePath(items: FileItem[], basePath: string): FileItem[] {
   if (!basePath) return items
@@ -34,10 +44,109 @@ interface NavigateToPathOptions {
   resetFlattenView?: boolean
 }
 
+function dedupeFavoriteFolders(entries: FavoriteFolderEntry[]): FavoriteFolderEntry[] {
+  const latestEntryByKey = new Map<string, FavoriteFolderEntry>()
+
+  for (const item of entries) {
+    if (!item.rootId) continue
+    const normalizedPath = normalizeRelativePath(item.path)
+    const favoritedAt = Number.isFinite(item.favoritedAt) ? item.favoritedAt : 0
+    const key = `${item.rootId}:${normalizedPath}`
+    const existing = latestEntryByKey.get(key)
+    if (!existing || favoritedAt > existing.favoritedAt) {
+      latestEntryByKey.set(key, {
+        rootId: item.rootId,
+        rootName: item.rootName || ROOT_LABEL_FALLBACK,
+        path: normalizedPath,
+        favoritedAt,
+      })
+    }
+  }
+
+  return [...latestEntryByKey.values()]
+    .sort((left, right) => right.favoritedAt - left.favoritedAt)
+    .slice(0, FAVORITE_FOLDERS_MAX_ITEMS)
+}
+
+interface ParsedFavoriteFolders {
+  entries: FavoriteFolderEntry[]
+  shouldRewrite: boolean
+}
+
+function parseFavoriteFolders(raw: string | null): ParsedFavoriteFolders {
+  if (!raw) return { entries: [], shouldRewrite: false }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return { entries: [], shouldRewrite: true }
+
+    let hasInvalidEntry = false
+    let hasFallbackRootName = false
+    const validEntries: FavoriteFolderEntry[] = []
+
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') {
+        hasInvalidEntry = true
+        continue
+      }
+      const candidate = item as Partial<FavoriteFolderEntry>
+      if (
+        typeof candidate.rootId !== 'string'
+        || typeof candidate.path !== 'string'
+        || typeof candidate.favoritedAt !== 'number'
+      ) {
+        hasInvalidEntry = true
+        continue
+      }
+
+      if (typeof candidate.rootName !== 'string') {
+        hasFallbackRootName = true
+      }
+      validEntries.push({
+        rootId: candidate.rootId,
+        rootName: candidate.rootName || ROOT_LABEL_FALLBACK,
+        path: candidate.path,
+        favoritedAt: candidate.favoritedAt,
+      })
+    }
+
+    const dedupedEntries = dedupeFavoriteFolders(validEntries)
+    return {
+      entries: dedupedEntries,
+      shouldRewrite: hasInvalidEntry || hasFallbackRootName || dedupedEntries.length !== validEntries.length,
+    }
+  } catch {
+    return { entries: [], shouldRewrite: true }
+  }
+}
+
+function saveFavoriteFolders(entries: FavoriteFolderEntry[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(FAVORITE_FOLDERS_STORAGE_KEY, JSON.stringify(entries))
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
+function loadFavoriteFolders(): FavoriteFolderEntry[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed = parseFavoriteFolders(window.localStorage.getItem(FAVORITE_FOLDERS_STORAGE_KEY))
+    if (parsed.shouldRewrite) {
+      saveFavoriteFolders(parsed.entries)
+    }
+    return parsed.entries
+  } catch {
+    return []
+  }
+}
+
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [rootId, setRootId] = useState<string | null>(null)
   const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
+  const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => loadFavoriteFolders())
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isFlattenView, setIsFlattenView] = useState(false)
@@ -52,6 +161,10 @@ export function useFileSystem() {
   useEffect(() => {
     void refreshCachedRoots()
   }, [refreshCachedRoots])
+
+  useEffect(() => {
+    saveFavoriteFolders(favoriteFolders)
+  }, [favoriteFolders])
 
   const loadDirectoryItems = useCallback(async (
     dirHandle: FileSystemDirectoryHandle,
@@ -242,11 +355,11 @@ export function useFileSystem() {
     }
   }, [rootHandle, isFlattenView, getDirectoryHandleByPath, loadDirectoryItems])
 
-  const openHistoryEntry = useCallback(async (entry: AddressPathHistoryEntry): Promise<boolean> => {
-    if (!entry.rootId) return false
+  const openPathInRoot = useCallback(async (targetRootId: string, targetPath: string): Promise<boolean> => {
+    if (!targetRootId) return false
 
-    const normalizedPath = normalizeRelativePath(entry.path)
-    if (rootHandle && rootId === entry.rootId) {
+    const normalizedPath = normalizeRelativePath(targetPath)
+    if (rootHandle && rootId === targetRootId) {
       return navigateToPath(normalizedPath, { resetFlattenView: true })
     }
 
@@ -254,9 +367,9 @@ export function useFileSystem() {
     setError(null)
 
     try {
-      const cachedHandle = await getCachedRootHandle(entry.rootId)
+      const cachedHandle = await getCachedRootHandle(targetRootId)
       if (!cachedHandle) {
-        await removeCachedRoot(entry.rootId)
+        await removeCachedRoot(targetRootId)
         await refreshCachedRoots()
         setError(ROOT_CACHE_MISS_MESSAGE)
         return false
@@ -264,15 +377,15 @@ export function useFileSystem() {
 
       const granted = await ensureDirectoryReadable(cachedHandle)
       if (!granted) {
-        await removeCachedRoot(entry.rootId)
+        await removeCachedRoot(targetRootId)
         await refreshCachedRoots()
         setError(ROOT_PERMISSION_DENIED_MESSAGE)
         return false
       }
 
-      await activateRootHandle(cachedHandle, entry.rootId, normalizedPath)
-      await markCachedRootAsUsed(entry.rootId)
-      warmupRootPathBinding(entry.rootId, cachedHandle.name)
+      await activateRootHandle(cachedHandle, targetRootId, normalizedPath)
+      await markCachedRootAsUsed(targetRootId)
+      warmupRootPathBinding(targetRootId, cachedHandle.name)
       await refreshCachedRoots()
       return true
     } catch (err) {
@@ -281,7 +394,79 @@ export function useFileSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [activateRootHandle, ensureDirectoryReadable, navigateToPath, refreshCachedRoots, rootHandle, rootId, warmupRootPathBinding])
+  }, [
+    activateRootHandle,
+    ensureDirectoryReadable,
+    navigateToPath,
+    refreshCachedRoots,
+    rootHandle,
+    rootId,
+    warmupRootPathBinding,
+  ])
+
+  const openHistoryEntry = useCallback((entry: AddressPathHistoryEntry): Promise<boolean> => {
+    return openPathInRoot(entry.rootId, entry.path)
+  }, [openPathInRoot])
+
+  const openFavoriteFolder = useCallback((entry: FavoriteFolderEntry): Promise<boolean> => {
+    return openPathInRoot(entry.rootId, entry.path)
+  }, [openPathInRoot])
+
+  const removeFavoriteFolder = useCallback((entry: FavoriteFolderEntry): void => {
+    const targetPath = normalizeRelativePath(entry.path)
+    const targetKey = `${entry.rootId}:${targetPath}`
+    setFavoriteFolders((previous) => previous.filter((item) => {
+      const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
+      return key !== targetKey
+    }))
+  }, [])
+
+  const toggleCurrentFolderFavorite = useCallback((): void => {
+    if (!rootId) return
+    const normalizedPath = normalizeRelativePath(currentPath)
+    const targetKey = `${rootId}:${normalizedPath}`
+
+    setFavoriteFolders((previous) => {
+      const alreadyFavorited = previous.some((item) => {
+        const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
+        return key === targetKey
+      })
+      if (alreadyFavorited) {
+        return previous.filter((item) => {
+          const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
+          return key !== targetKey
+        })
+      }
+
+      return dedupeFavoriteFolders([{
+        rootId,
+        rootName: rootHandle?.name || ROOT_LABEL_FALLBACK,
+        path: normalizedPath,
+        favoritedAt: Date.now(),
+      }, ...previous])
+    })
+  }, [currentPath, rootHandle, rootId])
+
+  useEffect(() => {
+    if (!rootId) return
+    const latestRootName = rootHandle?.name || ROOT_LABEL_FALLBACK
+
+    setFavoriteFolders((previous) => {
+      let hasChanged = false
+      const updated = previous.map((item) => {
+        if (item.rootId !== rootId || item.rootName === latestRootName) {
+          return item
+        }
+        hasChanged = true
+        return {
+          ...item,
+          rootName: latestRootName,
+        }
+      })
+      if (!hasChanged) return previous
+      return dedupeFavoriteFolders(updated)
+    })
+  }, [rootHandle, rootId])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
     const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
@@ -362,10 +547,20 @@ export function useFileSystem() {
     return result
   }, [])
 
+  const isCurrentPathFavorited = (() => {
+    if (!rootId) return false
+    const normalizedPath = normalizeRelativePath(currentPath)
+    return favoriteFolders.some((item) => {
+      return item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
+    })
+  })()
+
   return {
     rootHandle,
     rootId,
     cachedRoots,
+    favoriteFolders,
+    isCurrentPathFavorited,
     files,
     currentPath,
     isFlattenView,
@@ -373,6 +568,9 @@ export function useFileSystem() {
     error,
     selectDirectory,
     openCachedRoot,
+    openFavoriteFolder,
+    removeFavoriteFolder,
+    toggleCurrentFolderFavorite,
     openHistoryEntry,
     navigateToPath,
     navigateToDirectory,

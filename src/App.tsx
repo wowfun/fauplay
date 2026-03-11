@@ -37,6 +37,8 @@ function App() {
     rootHandle,
     rootId,
     cachedRoots,
+    favoriteFolders,
+    isCurrentPathFavorited,
     files,
     currentPath,
     isFlattenView,
@@ -44,6 +46,9 @@ function App() {
     error,
     selectDirectory,
     openCachedRoot,
+    openFavoriteFolder,
+    removeFavoriteFolder,
+    toggleCurrentFolderFavorite,
     openHistoryEntry,
     navigateToPath,
     navigateToDirectory,
@@ -77,9 +82,14 @@ function App() {
         error={error}
         onSelectDirectory={selectDirectory}
         cachedRoots={cachedRoots}
+        favoriteFolders={favoriteFolders}
         onOpenCachedRoot={(nextRootId) => {
           void openCachedRoot(nextRootId)
         }}
+        onOpenFavoriteFolder={(entry) => {
+          void openFavoriteFolder(entry)
+        }}
+        onRemoveFavoriteFolder={removeFavoriteFolder}
       />
     )
   }
@@ -95,6 +105,11 @@ function App() {
         isLoading={isLoading}
         error={error}
         selectDirectory={selectDirectory}
+        favoriteFolders={favoriteFolders}
+        isCurrentPathFavorited={isCurrentPathFavorited}
+        openFavoriteFolder={openFavoriteFolder}
+        removeFavoriteFolder={removeFavoriteFolder}
+        toggleCurrentFolderFavorite={toggleCurrentFolderFavorite}
         openHistoryEntry={openHistoryEntry}
         navigateToPath={navigateToPath}
         navigateToDirectory={navigateToDirectory}

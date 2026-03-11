@@ -40,3 +40,4 @@
 ## 当前专题入口（示例）
 
 - 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)
+- 收藏夹目录专题：[`110-folder-favorites/spec.md`](./110-folder-favorites/spec.md)

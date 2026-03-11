@@ -6,7 +6,7 @@ import type { FileBrowserGridHandle } from '@/features/explorer/components/FileB
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
 const WorkspacePluginHost = lazy(async () => {
@@ -63,6 +63,11 @@ interface ExplorerWorkspaceLayoutProps {
   onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
   recentPathHistory: AddressPathHistoryEntry[]
+  favoriteFolders: FavoriteFolderEntry[]
+  isCurrentPathFavorited: boolean
+  onOpenFavoriteFolder: (entry: FavoriteFolderEntry) => Promise<boolean>
+  onRemoveFavoriteFolder: (entry: FavoriteFolderEntry) => void
+  onToggleCurrentPathFavorite: () => void
   onNavigateUp: () => void
   isFlattenView: boolean
   onToggleFlattenView: () => void
@@ -119,6 +124,11 @@ export function ExplorerWorkspaceLayout({
   onNavigateHistoryEntry,
   onListChildDirectories,
   recentPathHistory,
+  favoriteFolders,
+  isCurrentPathFavorited,
+  onOpenFavoriteFolder,
+  onRemoveFavoriteFolder,
+  onToggleCurrentPathFavorite,
   onNavigateUp,
   isFlattenView,
   onToggleFlattenView,
@@ -206,6 +216,11 @@ export function ExplorerWorkspaceLayout({
         onNavigateHistoryEntry={onNavigateHistoryEntry}
         onListChildDirectories={onListChildDirectories}
         recentPathHistory={recentPathHistory}
+        favoriteFolders={favoriteFolders}
+        isCurrentPathFavorited={isCurrentPathFavorited}
+        onOpenFavoriteFolder={onOpenFavoriteFolder}
+        onRemoveFavoriteFolder={onRemoveFavoriteFolder}
+        onToggleCurrentPathFavorite={onToggleCurrentPathFavorite}
         onNavigateUp={onNavigateUp}
         isFlattenView={isFlattenView}
         onToggleFlattenView={onToggleFlattenView}

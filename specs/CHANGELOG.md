@@ -4,6 +4,8 @@
 ### Added
 - 新增 `specs/109-soft-delete/spec.md`：定义 `fs.softDelete` 单工具双作用域（`file/workspace`）契约、`confirm=false/true` 双阶段语义、`.trash` 软删除目标与预览快捷键触发规则。
 - 新增 `tools/mcp/soft-delete/server.mjs`：落地 `fs.softDelete` MCP server，支持单文件/批量输入、`dry-run/commit`、逐项结果与同目录 Windows 风格序号去重。
+- 新增 `specs/110-folder-favorites/spec.md`：定义“收藏指定文件夹”契约，覆盖星标收藏切换、收藏列表回访、跨根目录恢复、失败保留与容量上限配置语义。
+- 新增 `src/config/app.json` 与 `src/config/appConfig.ts`：引入应用级配置文件机制，提供 `favorites.maxItems` 配置项并在非法值时回退默认 `100`（安全钳制 `1..1000`）。
 
 ### Changed
 - 更新 `.fauplay/mcp.json`：注册 `soft-delete` MCP server（`node tools/mcp/soft-delete/server.mjs`）。
@@ -13,6 +15,8 @@
 - 更新 `specs/109-soft-delete/spec.md`、`tools/mcp/soft-delete/server.mjs` 与 `WorkspacePluginHost`：`workspace` 作用域的 `fs.softDelete` 支持选中目录软删除（目录整体移动到 `.trash`），并在祖先/子路径同时输入时仅执行祖先目录；`preview` 的 `relativePath` 仍保持单文件语义。
 - 更新 `specs/109-soft-delete/spec.md`、`tools/mcp/soft-delete/server.mjs` 与工作区 Toolbar：新增回收站入口与 `fs.restore` 还原能力（Gateway 执行链路），支持回收站浏览、选中项还原、冲突自动序号去重，并将 109 主题目录从 `109-soft-delete-plugin` 重命名为 `109-soft-delete`。
 - 更新 `specs/109-soft-delete/spec.md`、`tools/mcp/soft-delete/server.mjs`、`WorkspacePluginHost` 与 `PreviewPluginHost`：还原能力改为插件驱动（`fs.restore` 支持 `file/workspace`），移除 Toolbar 还原按钮，并在回收站上下文切换为“显示还原/隐藏软删”（非回收站反向）。
+- 更新 `src/hooks/useFileSystem.ts`、`src/features/explorer/components/ExplorerToolbar.tsx`、`src/layouts/DirectorySelectionLayout.tsx`、`src/App.tsx` 与工作区布局接线：新增收藏夹能力（当前目录星标收藏/取消、收藏下拉打开与移除、开始页收藏入口、跨根目录收藏打开），收藏数据持久化到 `localStorage.fauplay:favorite-folders` 并按 `rootId+path` 去重、最近收藏优先排序、按配置上限截断。
+- 更新 `specs/README.md`：增加 `110-folder-favorites` 专题入口。
 
 ## 2026-03-10
 ### Added

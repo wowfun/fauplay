@@ -10,10 +10,12 @@ import {
   Image,
   Rows3,
   Search,
+  Star,
   Trash2,
   Video,
+  X,
 } from 'lucide-react'
-import type { AddressPathHistoryEntry, FilterState, ThumbnailSizePreset } from '@/types'
+import type { AddressPathHistoryEntry, FavoriteFolderEntry, FilterState, ThumbnailSizePreset } from '@/types'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 import { Select } from '@/ui/Select'
@@ -41,6 +43,11 @@ interface ExplorerToolbarProps {
   onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
   recentPathHistory: AddressPathHistoryEntry[]
+  favoriteFolders: FavoriteFolderEntry[]
+  isCurrentPathFavorited: boolean
+  onOpenFavoriteFolder: (entry: FavoriteFolderEntry) => Promise<boolean>
+  onRemoveFavoriteFolder: (entry: FavoriteFolderEntry) => void
+  onToggleCurrentPathFavorite: () => void
   onNavigateUp: () => void
   isFlattenView: boolean
   onToggleFlattenView: () => void
@@ -70,6 +77,11 @@ export function ExplorerToolbar({
   onNavigateHistoryEntry,
   onListChildDirectories,
   recentPathHistory,
+  favoriteFolders,
+  isCurrentPathFavorited,
+  onOpenFavoriteFolder,
+  onRemoveFavoriteFolder,
+  onToggleCurrentPathFavorite,
   onNavigateUp,
   isFlattenView,
   onToggleFlattenView,
@@ -86,6 +98,7 @@ export function ExplorerToolbar({
   const [editError, setEditError] = useState<string | null>(null)
   const [openSegmentPath, setOpenSegmentPath] = useState<string | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [isFavoritesOpen, setIsFavoritesOpen] = useState(false)
   const [isNavigatingByAddressBar, setIsNavigatingByAddressBar] = useState(false)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [segmentDropdownStateByPath, setSegmentDropdownStateByPath] = useState<Record<string, SegmentDropdownState>>({})
@@ -105,6 +118,9 @@ export function ExplorerToolbar({
   const sortedHistory = useMemo(() => {
     return [...recentPathHistory].sort((left, right) => right.visitedAt - left.visitedAt)
   }, [recentPathHistory])
+  const sortedFavorites = useMemo(() => {
+    return [...favoriteFolders].sort((left, right) => right.favoritedAt - left.favoritedAt)
+  }, [favoriteFolders])
 
   const addressBarRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -124,6 +140,7 @@ export function ExplorerToolbar({
   useEffect(() => {
     setOpenSegmentPath(null)
     setIsHistoryOpen(false)
+    setIsFavoritesOpen(false)
   }, [currentPath])
 
   useEffect(() => {
@@ -132,6 +149,7 @@ export function ExplorerToolbar({
       if (addressBarRef.current?.contains(target)) return
       setOpenSegmentPath(null)
       setIsHistoryOpen(false)
+      setIsFavoritesOpen(false)
       if (addressBarMode === 'edit' && event.button === 0) {
         setAddressBarMode('breadcrumb')
         setDraftPath(currentPath)
@@ -155,6 +173,7 @@ export function ExplorerToolbar({
     setEditError(null)
     setOpenSegmentPath(null)
     setIsHistoryOpen(false)
+    setIsFavoritesOpen(false)
   }
 
   const cancelEditMode = () => {
@@ -218,6 +237,7 @@ export function ExplorerToolbar({
 
     setOpenSegmentPath(path)
     setIsHistoryOpen(false)
+    setIsFavoritesOpen(false)
     await loadSegmentDirectories(path)
   }
 
@@ -242,6 +262,7 @@ export function ExplorerToolbar({
   const handleToggleHistory = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     setOpenSegmentPath(null)
+    setIsFavoritesOpen(false)
     setIsHistoryOpen((previous) => !previous)
   }
 
@@ -250,6 +271,30 @@ export function ExplorerToolbar({
     if (!ok) return
     setAddressBarMode('breadcrumb')
     setIsHistoryOpen(false)
+  }
+
+  const handleToggleFavorites = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setOpenSegmentPath(null)
+    setIsHistoryOpen(false)
+    setIsFavoritesOpen((previous) => !previous)
+  }
+
+  const handleOpenFavoriteFolder = async (entry: FavoriteFolderEntry) => {
+    const ok = await onOpenFavoriteFolder(entry)
+    if (!ok) return
+    setAddressBarMode('breadcrumb')
+    setIsFavoritesOpen(false)
+  }
+
+  const handleRemoveFavoriteFolder = (event: ReactMouseEvent<HTMLButtonElement>, entry: FavoriteFolderEntry) => {
+    event.stopPropagation()
+    onRemoveFavoriteFolder(entry)
+  }
+
+  const handleToggleCurrentFavorite = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onToggleCurrentPathFavorite()
   }
 
   const handleCopyPath = async (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -396,6 +441,71 @@ export function ExplorerToolbar({
           )}
 
           <div className="flex items-center gap-1">
+            <Button
+              onClick={handleToggleCurrentFavorite}
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              title={isCurrentPathFavorited ? '取消收藏当前目录' : '收藏当前目录'}
+            >
+              <Star
+                className={`h-3.5 w-3.5 ${isCurrentPathFavorited ? 'fill-current text-amber-500' : ''}`}
+              />
+            </Button>
+
+            <div className="relative">
+              <Button
+                onClick={handleToggleFavorites}
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title="收藏夹"
+              >
+                <Star className="h-3.5 w-3.5" />
+              </Button>
+              {isFavoritesOpen && (
+                <div
+                  className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-border bg-background p-1 shadow-md"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {sortedFavorites.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">暂无收藏目录</div>
+                  ) : (
+                    <div className="max-h-64 overflow-auto">
+                      {sortedFavorites.map((item) => {
+                        const displayPath = buildCopyPathText(item.rootName || rootLabel, item.path)
+                        return (
+                          <div
+                            key={`${item.rootId}:${item.path}`}
+                            className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleOpenFavoriteFolder(item)
+                              }}
+                              className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-sm"
+                              title={displayPath}
+                            >
+                              {displayPath}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => handleRemoveFavoriteFolder(event, item)}
+                              className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                              title="移除收藏"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="relative">
               <Button
                 onClick={handleToggleHistory}

@@ -7,7 +7,7 @@ import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
-import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
@@ -23,12 +23,17 @@ let previewPanelModulesPreloaded = false
 interface WorkspaceShellProps {
   rootHandle: FileSystemDirectoryHandle
   rootId: string
+  favoriteFolders: FavoriteFolderEntry[]
+  isCurrentPathFavorited: boolean
   files: FileItem[]
   currentPath: string
   isFlattenView: boolean
   isLoading: boolean
   error: string | null
   selectDirectory: () => Promise<void>
+  openFavoriteFolder: (entry: FavoriteFolderEntry) => Promise<boolean>
+  removeFavoriteFolder: (entry: FavoriteFolderEntry) => void
+  toggleCurrentFolderFavorite: () => void
   openHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   navigateToPath: (
     targetPath: string,
@@ -177,12 +182,17 @@ function preloadPreviewModules(): void {
 export function WorkspaceShell({
   rootHandle,
   rootId,
+  favoriteFolders,
+  isCurrentPathFavorited,
   files,
   currentPath,
   isFlattenView,
   isLoading,
   error,
   selectDirectory,
+  openFavoriteFolder,
+  removeFavoriteFolder,
+  toggleCurrentFolderFavorite,
   openHistoryEntry,
   navigateToPath,
   navigateToDirectory,
@@ -530,6 +540,11 @@ export function WorkspaceShell({
       onOpenTrash={handleOpenTrash}
       error={error}
       isLoading={isLoading}
+      favoriteFolders={favoriteFolders}
+      isCurrentPathFavorited={isCurrentPathFavorited}
+      onOpenFavoriteFolder={openFavoriteFolder}
+      onRemoveFavoriteFolder={removeFavoriteFolder}
+      onToggleCurrentPathFavorite={toggleCurrentFolderFavorite}
       files={filteredFiles}
       rootHandle={rootHandle}
       fileGridRef={fileGridRef}

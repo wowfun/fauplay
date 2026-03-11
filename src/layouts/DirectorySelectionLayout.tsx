@@ -1,13 +1,20 @@
-import { FolderOpen, Loader2 } from 'lucide-react'
-import type { CachedRootEntry } from '@/types'
+import { FolderOpen, Loader2, Star, X } from 'lucide-react'
+import type { CachedRootEntry, FavoriteFolderEntry } from '@/types'
 import { Button } from '@/ui/Button'
+
+function buildDisplayPath(rootName: string, relativePath: string): string {
+  return relativePath ? `${rootName}/${relativePath}` : rootName
+}
 
 interface DirectorySelectionLayoutProps {
   isLoading: boolean
   error: string | null
   onSelectDirectory: () => void
   cachedRoots: CachedRootEntry[]
+  favoriteFolders: FavoriteFolderEntry[]
   onOpenCachedRoot: (rootId: string) => void
+  onOpenFavoriteFolder: (entry: FavoriteFolderEntry) => void
+  onRemoveFavoriteFolder: (entry: FavoriteFolderEntry) => void
 }
 
 export function DirectorySelectionLayout({
@@ -15,7 +22,10 @@ export function DirectorySelectionLayout({
   error,
   onSelectDirectory,
   cachedRoots,
+  favoriteFolders,
   onOpenCachedRoot,
+  onOpenFavoriteFolder,
+  onRemoveFavoriteFolder,
 }: DirectorySelectionLayoutProps) {
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center p-8 overflow-hidden">
@@ -63,6 +73,43 @@ export function DirectorySelectionLayout({
                   {root.rootName}
                 </Button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {favoriteFolders.length > 0 && (
+          <div className="mt-6 text-left">
+            <p className="mb-2 text-xs text-muted-foreground">收藏夹</p>
+            <div className="space-y-2">
+              {favoriteFolders.map((entry) => {
+                const rootName = entry.rootName || '根目录'
+                const displayPath = buildDisplayPath(rootName, entry.path)
+                return (
+                  <div key={`${entry.rootId}:${entry.path}`} className="flex items-center gap-1">
+                    <Button
+                      onClick={() => onOpenFavoriteFolder(entry)}
+                      disabled={isLoading}
+                      variant="ghost"
+                      size="md"
+                      className="min-w-0 flex-1 justify-start gap-2 truncate"
+                      title={displayPath}
+                    >
+                      <Star className="h-3.5 w-3.5 shrink-0 fill-current text-amber-500" />
+                      <span className="truncate">{displayPath}</span>
+                    </Button>
+                    <Button
+                      onClick={() => onRemoveFavoriteFolder(entry)}
+                      disabled={isLoading}
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      title="移除收藏"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

@@ -45,6 +45,13 @@ export interface AddressPathHistoryEntry {
   visitedAt: number
 }
 
+export interface FavoriteFolderEntry {
+  rootId: string
+  rootName: string
+  path: string
+  favoritedAt: number
+}
+
 export interface CachedRootEntry {
   rootId: string
   rootName: string
