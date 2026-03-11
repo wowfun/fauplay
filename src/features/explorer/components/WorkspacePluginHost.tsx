@@ -41,6 +41,21 @@ export function WorkspacePluginHost({
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
 }: WorkspacePluginHostProps) {
+  const normalizedCurrentPath = useMemo(
+    () => currentPath.split('/').filter(Boolean).join('/'),
+    [currentPath]
+  )
+  const isTrashContext = useMemo(
+    () => normalizedCurrentPath === '.trash' || normalizedCurrentPath.startsWith('.trash/'),
+    [normalizedCurrentPath]
+  )
+  const contextualTools = useMemo(() => (
+    tools.filter((tool) => {
+      if (tool.name === 'fs.softDelete') return !isTrashContext
+      if (tool.name === 'fs.restore') return isTrashContext
+      return true
+    })
+  ), [isTrashContext, tools])
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
 
   const selectedEntryPaths = useMemo(() => {
@@ -75,7 +90,7 @@ export function WorkspacePluginHost({
 
   const runtime = usePluginRuntime({
     scope: 'workspace',
-    tools,
+    tools: contextualTools,
     contextKey,
     rootHandle,
     rootId,
@@ -88,7 +103,7 @@ export function WorkspacePluginHost({
       return { relativePaths: targetPaths }
     }, [hasTargets, targetPaths]),
     canRunTool: useCallback((tool: GatewayToolDescriptor) => {
-      if (tool.name === 'fs.softDelete') {
+      if (tool.name === 'fs.softDelete' || tool.name === 'fs.restore') {
         return hasSelectedEntries
       }
       return hasTargets
@@ -108,12 +123,16 @@ export function WorkspacePluginHost({
     return map
   }, [runtime.scopedTools])
 
-  const softDeleteArgs = useMemo<Record<string, unknown>>(() => ({
+  const selectedEntriesArgs = useMemo<Record<string, unknown>>(() => ({
     relativePaths: selectedEntryPaths,
   }), [selectedEntryPaths])
 
+  const isSelectedEntriesTool = useCallback((toolName: string) => (
+    toolName === 'fs.softDelete' || toolName === 'fs.restore'
+  ), [])
+
   const handleWorkbenchRunAction = useCallback((tool: GatewayToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
-    if (tool.name !== 'fs.softDelete') {
+    if (!isSelectedEntriesTool(tool.name)) {
       runtime.handleRunWorkbenchAction(tool, action)
       return
     }
@@ -124,15 +143,15 @@ export function WorkspacePluginHost({
       actionKey: action.key,
       actionLabel: action.label,
       additionalArgs: {
-        ...softDeleteArgs,
+        ...selectedEntriesArgs,
         ...(action.arguments ?? {}),
       },
     })
-  }, [runtime, softDeleteArgs])
+  }, [isSelectedEntriesTool, runtime, selectedEntriesArgs])
 
   const railActions = useMemo(() => (
     runtime.railActions.map((action) => {
-      if (action.toolName !== 'fs.softDelete') {
+      if (!isSelectedEntriesTool(action.toolName)) {
         return action
       }
 
@@ -144,12 +163,12 @@ export function WorkspacePluginHost({
           runtime.handleWorkbenchContextChange(tool.name)
           void runtime.runToolCall(tool, {
             trigger: 'manual',
-            additionalArgs: softDeleteArgs,
+            additionalArgs: selectedEntriesArgs,
           })
         },
       }
     })
-  ), [runtime, softDeleteArgs, toolByName])
+  ), [isSelectedEntriesTool, runtime, selectedEntriesArgs, toolByName])
 
   if (runtime.scopedTools.length === 0) {
     return null

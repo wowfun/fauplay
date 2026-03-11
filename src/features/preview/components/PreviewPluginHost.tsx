@@ -55,10 +55,25 @@ export function PreviewPluginHost({
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
   const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
   const continuousInFlightCountRef = useRef(0)
+  const normalizedFilePath = useMemo(
+    () => file.path.split('/').filter(Boolean).join('/'),
+    [file.path]
+  )
+  const isTrashContext = useMemo(
+    () => normalizedFilePath === '.trash' || normalizedFilePath.startsWith('.trash/'),
+    [normalizedFilePath]
+  )
+  const contextualTools = useMemo(() => (
+    previewActionTools.filter((tool) => {
+      if (tool.name === 'fs.softDelete') return !isTrashContext
+      if (tool.name === 'fs.restore') return isTrashContext
+      return true
+    })
+  ), [isTrashContext, previewActionTools])
 
   const pluginRuntime = usePluginRuntime({
     scope: 'file',
-    tools: previewActionTools,
+    tools: contextualTools,
     contextKey: file.path,
     rootHandle,
     rootId,

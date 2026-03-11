@@ -49,6 +49,47 @@ const TOOL_DEFINITIONS = [
       ],
     },
   },
+  {
+    name: 'fs.restore',
+    description: '回收站还原（单文件/批量）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string' },
+        relativePath: { type: 'string' },
+        relativePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+        },
+        confirm: { type: 'boolean' },
+      },
+      required: ['rootPath'],
+      additionalProperties: false,
+    },
+    annotations: {
+      title: '还原',
+      mutation: true,
+      icon: 'undo-2',
+      scopes: ['file', 'workspace'],
+      toolActions: [
+        {
+          key: 'dryRun',
+          label: '预演',
+          description: '仅预演，不落盘',
+          intent: 'primary',
+          arguments: { confirm: false },
+        },
+        {
+          key: 'commit',
+          label: '执行还原',
+          description: '将回收站项还原到原路径',
+          intent: 'accent',
+          arguments: { confirm: true },
+        },
+      ],
+    },
+  },
 ]
 
 function isWindowsPath(input) {
@@ -213,7 +254,15 @@ function compactRelativePathsForBatch(paths) {
   return compacted
 }
 
-function parseTargets(args) {
+function parseBatchRelativePaths(input) {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw toInvalidParamsError('relativePaths must be a non-empty string[]')
+  }
+
+  return compactRelativePathsForBatch(input.map((item) => normalizeRelativePath(item)))
+}
+
+function parseSoftDeleteTargets(args) {
   const hasRelativePath = Object.prototype.hasOwnProperty.call(args, 'relativePath')
   const hasRelativePaths = Object.prototype.hasOwnProperty.call(args, 'relativePaths')
 
@@ -232,14 +281,34 @@ function parseTargets(args) {
     }
   }
 
-  if (!Array.isArray(args.relativePaths) || args.relativePaths.length === 0) {
-    throw toInvalidParamsError('relativePaths must be a non-empty string[]')
-  }
-
-  const normalizedRelativePaths = args.relativePaths.map((item) => normalizeRelativePath(item))
   return {
     mode: 'batch',
-    relativePaths: compactRelativePathsForBatch(normalizedRelativePaths),
+    relativePaths: parseBatchRelativePaths(args.relativePaths),
+  }
+}
+
+function parseRestoreTargets(args) {
+  const hasRelativePath = Object.prototype.hasOwnProperty.call(args, 'relativePath')
+  const hasRelativePaths = Object.prototype.hasOwnProperty.call(args, 'relativePaths')
+
+  if (hasRelativePath && hasRelativePaths) {
+    throw toInvalidParamsError('relativePath and relativePaths are mutually exclusive')
+  }
+
+  if (!hasRelativePath && !hasRelativePaths) {
+    throw toInvalidParamsError('relativePath or relativePaths is required')
+  }
+
+  if (hasRelativePath) {
+    return {
+      mode: 'single',
+      relativePaths: [normalizeRelativePath(args.relativePath)],
+    }
+  }
+
+  return {
+    mode: 'batch',
+    relativePaths: parseBatchRelativePaths(args.relativePaths),
   }
 }
 
@@ -252,7 +321,7 @@ async function pathExists(targetPath) {
   }
 }
 
-async function allocateDedupedTrashPath({ sourceAbsolutePath, candidateAbsolutePath, reservedTargetPaths }) {
+async function allocateDedupedPath({ sourceAbsolutePath, candidateAbsolutePath, reservedTargetPaths }) {
   const parsed = path.parse(candidateAbsolutePath)
   let attemptPath = candidateAbsolutePath
   let suffixIndex = 1
@@ -322,7 +391,7 @@ async function buildSoftDeletePlans({ rootPath, relativePaths, mode }) {
 
       const candidateRelativePath = `${TRASH_DIR_NAME}/${normalizedRelativePath}`
       const candidateAbsolutePath = resolvePathWithinRoot(rootPath, candidateRelativePath)
-      const targetAbsolutePath = await allocateDedupedTrashPath({
+      const targetAbsolutePath = await allocateDedupedPath({
         sourceAbsolutePath,
         candidateAbsolutePath,
         reservedTargetPaths,
@@ -352,10 +421,155 @@ async function buildSoftDeletePlans({ rootPath, relativePaths, mode }) {
   return plans
 }
 
+async function buildRestorePlans({ rootPath, relativePaths, mode }) {
+  const plans = []
+  const reservedTargetPaths = new Set()
+
+  for (const normalizedRelativePath of relativePaths) {
+    try {
+      if (!normalizedRelativePath.startsWith(`${TRASH_DIR_NAME}/`)) {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'RESTORE_INVALID_SOURCE',
+          error: 'restore source must be under .trash',
+        })
+        continue
+      }
+
+      const sourceAbsolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
+
+      let stat
+      try {
+        stat = await fs.lstat(sourceAbsolutePath)
+      } catch {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'RESTORE_SOURCE_NOT_FOUND',
+          error: 'restore source not found',
+        })
+        continue
+      }
+
+      const sourceIsFile = stat.isFile()
+      const sourceIsDirectory = stat.isDirectory()
+      if (!sourceIsFile && !sourceIsDirectory) {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'RESTORE_UNSUPPORTED_KIND',
+          error: 'only file and directory items are supported',
+        })
+        continue
+      }
+      if (mode === 'single' && sourceIsDirectory) {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'RESTORE_UNSUPPORTED_KIND',
+          error: 'relativePath only supports file items',
+        })
+        continue
+      }
+
+      const restoredRelativePath = normalizedRelativePath.slice(TRASH_DIR_NAME.length + 1)
+      if (!restoredRelativePath) {
+        plans.push({
+          relativePath: normalizedRelativePath,
+          ok: false,
+          skipped: false,
+          reasonCode: 'RESTORE_INVALID_SOURCE',
+          error: 'restore source must be under .trash',
+        })
+        continue
+      }
+
+      const candidateAbsolutePath = resolvePathWithinRoot(rootPath, restoredRelativePath)
+      const targetAbsolutePath = await allocateDedupedPath({
+        sourceAbsolutePath,
+        candidateAbsolutePath,
+        reservedTargetPaths,
+      })
+      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
+
+      plans.push({
+        relativePath: normalizedRelativePath,
+        nextRelativePath: targetRelativePath,
+        sourceAbsolutePath,
+        targetAbsolutePath,
+        ok: true,
+        skipped: false,
+      })
+      reservedTargetPaths.add(targetAbsolutePath)
+    } catch (error) {
+      plans.push({
+        relativePath: normalizedRelativePath,
+        ok: false,
+        skipped: false,
+        reasonCode: 'RESTORE_INVALID_PATH',
+        error: error instanceof Error ? error.message : 'invalid path',
+      })
+    }
+  }
+
+  return plans
+}
+
+async function commitPlans({ items, targetExistsReasonCode, commitFailedReasonCode, commitFailedMessage }) {
+  for (const item of items) {
+    if (!item.ok || item.skipped || !item.sourceAbsolutePath || !item.targetAbsolutePath) {
+      continue
+    }
+
+    try {
+      await fs.mkdir(path.dirname(item.targetAbsolutePath), { recursive: true })
+
+      if (await pathExists(item.targetAbsolutePath)) {
+        item.ok = false
+        item.skipped = false
+        item.reasonCode = targetExistsReasonCode
+        item.error = 'target path already exists'
+        continue
+      }
+
+      await fs.rename(item.sourceAbsolutePath, item.targetAbsolutePath)
+    } catch (error) {
+      item.ok = false
+      item.skipped = false
+      item.reasonCode = commitFailedReasonCode
+      item.error = error instanceof Error ? error.message : commitFailedMessage
+    }
+  }
+}
+
+function toResponseItems(items) {
+  return items.map((item) => ({
+    relativePath: item.relativePath,
+    nextRelativePath: item.nextRelativePath,
+    ok: item.ok,
+    skipped: item.skipped,
+    reasonCode: item.reasonCode,
+    error: item.error,
+  }))
+}
+
+function countOutcomeItems(items) {
+  return {
+    success: items.filter((item) => item.ok && item.skipped !== true).length,
+    skipped: items.filter((item) => item.skipped === true).length,
+    failed: items.filter((item) => item.ok !== true && item.skipped !== true).length,
+  }
+}
+
 async function runSoftDelete(args) {
   const rootPath = resolveRootPath(args.rootPath)
   const normalizedRootPath = path.resolve(rootPath)
-  const targetInfo = parseTargets(args)
+  const targetInfo = parseSoftDeleteTargets(args)
   const confirm = parseConfirm(args.confirm)
 
   const items = await buildSoftDeletePlans({
@@ -365,51 +579,57 @@ async function runSoftDelete(args) {
   })
 
   if (confirm) {
-    for (const item of items) {
-      if (!item.ok || item.skipped || !item.sourceAbsolutePath || !item.targetAbsolutePath) {
-        continue
-      }
-
-      try {
-        await fs.mkdir(path.dirname(item.targetAbsolutePath), { recursive: true })
-
-        if (await pathExists(item.targetAbsolutePath)) {
-          item.ok = false
-          item.skipped = false
-          item.reasonCode = 'SOFT_DELETE_TARGET_EXISTS'
-          item.error = 'target path already exists'
-          continue
-        }
-
-        await fs.rename(item.sourceAbsolutePath, item.targetAbsolutePath)
-      } catch (error) {
-        item.ok = false
-        item.skipped = false
-        item.reasonCode = 'SOFT_DELETE_SOURCE_NOT_FOUND'
-        item.error = error instanceof Error ? error.message : 'soft delete failed'
-      }
-    }
+    await commitPlans({
+      items,
+      targetExistsReasonCode: 'SOFT_DELETE_TARGET_EXISTS',
+      commitFailedReasonCode: 'SOFT_DELETE_SOURCE_NOT_FOUND',
+      commitFailedMessage: 'soft delete failed',
+    })
   }
 
-  const responseItems = items.map((item) => ({
-    relativePath: item.relativePath,
-    nextRelativePath: item.nextRelativePath,
-    ok: item.ok,
-    skipped: item.skipped,
-    reasonCode: item.reasonCode,
-    error: item.error,
-  }))
-
-  const moved = responseItems.filter((item) => item.ok && item.skipped !== true).length
-  const skipped = responseItems.filter((item) => item.skipped === true).length
-  const failed = responseItems.filter((item) => item.ok !== true && item.skipped !== true).length
+  const responseItems = toResponseItems(items)
+  const counts = countOutcomeItems(responseItems)
 
   return {
     dryRun: !confirm,
     total: responseItems.length,
-    moved,
-    skipped,
-    failed,
+    moved: counts.success,
+    skipped: counts.skipped,
+    failed: counts.failed,
+    items: responseItems,
+  }
+}
+
+async function runRestore(args) {
+  const rootPath = resolveRootPath(args.rootPath)
+  const normalizedRootPath = path.resolve(rootPath)
+  const targetInfo = parseRestoreTargets(args)
+  const confirm = parseConfirm(args.confirm)
+
+  const items = await buildRestorePlans({
+    rootPath: normalizedRootPath,
+    relativePaths: targetInfo.relativePaths,
+    mode: targetInfo.mode,
+  })
+
+  if (confirm) {
+    await commitPlans({
+      items,
+      targetExistsReasonCode: 'RESTORE_TARGET_EXISTS',
+      commitFailedReasonCode: 'RESTORE_SOURCE_NOT_FOUND',
+      commitFailedMessage: 'restore failed',
+    })
+  }
+
+  const responseItems = toResponseItems(items)
+  const counts = countOutcomeItems(responseItems)
+
+  return {
+    dryRun: !confirm,
+    total: responseItems.length,
+    restored: counts.success,
+    skipped: counts.skipped,
+    failed: counts.failed,
     items: responseItems,
   }
 }
@@ -444,6 +664,9 @@ async function handleRequest(request) {
 
     if (toolName === 'fs.softDelete') {
       return runSoftDelete(args || {})
+    }
+    if (toolName === 'fs.restore') {
+      return runRestore(args || {})
     }
 
     const error = new Error(`Unsupported tool: ${toolName}`)

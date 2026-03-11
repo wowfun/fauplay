@@ -71,6 +71,8 @@ interface ExplorerWorkspaceLayoutProps {
   videoCount: number
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
+  canOpenTrash: boolean
+  onOpenTrash: () => void
   error: string | null
   isLoading: boolean
   files: FileItem[]
@@ -125,6 +127,8 @@ export function ExplorerWorkspaceLayout({
   videoCount,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
+  canOpenTrash,
+  onOpenTrash,
   error,
   isLoading,
   files,
@@ -210,6 +214,8 @@ export function ExplorerWorkspaceLayout({
         videoCount={videoCount}
         thumbnailSizePreset={thumbnailSizePreset}
         onThumbnailSizePresetChange={onThumbnailSizePresetChange}
+        canOpenTrash={canOpenTrash}
+        onOpenTrash={onOpenTrash}
       />
 
       {error && (

@@ -10,6 +10,7 @@ import {
   Image,
   Rows3,
   Search,
+  Trash2,
   Video,
 } from 'lucide-react'
 import type { AddressPathHistoryEntry, FilterState, ThumbnailSizePreset } from '@/types'
@@ -48,6 +49,8 @@ interface ExplorerToolbarProps {
   videoCount: number
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
+  canOpenTrash: boolean
+  onOpenTrash: () => void
 }
 
 function segmentKey(path: string): string {
@@ -75,6 +78,8 @@ export function ExplorerToolbar({
   videoCount,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
+  canOpenTrash,
+  onOpenTrash,
 }: ExplorerToolbarProps) {
   const [addressBarMode, setAddressBarMode] = useState<AddressBarMode>('breadcrumb')
   const [draftPath, setDraftPath] = useState(currentPath)
@@ -446,6 +451,20 @@ export function ExplorerToolbar({
         {editError && (
           <div className="absolute left-0 top-full mt-1 text-xs text-destructive">{editError}</div>
         )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={onOpenTrash}
+          variant="ghost"
+          size="md"
+          className="flex items-center gap-1"
+          disabled={!canOpenTrash}
+          title={canOpenTrash ? '进入回收站' : '回收站为空或不可用'}
+        >
+          <Trash2 className="w-4 h-4" />
+          <span>回收站</span>
+        </Button>
       </div>
 
       <div className="flex items-center gap-2">

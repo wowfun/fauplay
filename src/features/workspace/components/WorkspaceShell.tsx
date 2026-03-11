@@ -5,7 +5,7 @@ import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requi
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { keyboardShortcuts } from '@/config/shortcuts'
-import { isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { AddressPathHistoryEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
@@ -16,6 +16,7 @@ const DEFAULT_PANE_WIDTH_RATIO = 0.375
 const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
 const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
+const TRASH_RELATIVE_PATH = '.trash'
 
 let previewPanelModulesPreloaded = false
 
@@ -196,6 +197,7 @@ export function WorkspaceShell({
   const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
+  const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(false)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
@@ -222,7 +224,6 @@ export function WorkspaceShell({
     if (selectedGridItems.length !== 1) return null
     return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
   }, [selectedGridItems])
-
   const {
     selectedFile,
     previewFile,
@@ -276,6 +277,11 @@ export function WorkspaceShell({
     await navigateToPath(currentPath)
   }, [currentPath, navigateToPath])
 
+  const handleOpenTrash = useCallback(() => {
+    if (!hasTrashEntries) return
+    void navigateToPath(TRASH_RELATIVE_PATH, { resetFlattenView: true })
+  }, [hasTrashEntries, navigateToPath])
+
   useEffect(() => {
     if (!rootId) return
     setRecentPathHistory((previous) => upsertAddressPathHistory(previous, {
@@ -288,6 +294,28 @@ export function WorkspaceShell({
   useEffect(() => {
     saveAddressPathHistory(recentPathHistory)
   }, [recentPathHistory])
+
+  useEffect(() => {
+    let disposed = false
+
+    const refreshTrashAvailability = async () => {
+      try {
+        const itemCount = await getDirectoryItemCount(rootHandle, TRASH_RELATIVE_PATH, 1)
+        if (!disposed) {
+          setHasTrashEntries(itemCount > 0)
+        }
+      } catch {
+        if (!disposed) {
+          setHasTrashEntries(false)
+        }
+      }
+    }
+
+    void refreshTrashAvailability()
+    return () => {
+      disposed = true
+    }
+  }, [files, rootHandle])
 
   useEffect(() => {
     let disposed = false
@@ -498,6 +526,8 @@ export function WorkspaceShell({
       videoCount={videoCount}
       thumbnailSizePreset={thumbnailSizePreset}
       onThumbnailSizePresetChange={setThumbnailSizePreset}
+      canOpenTrash={hasTrashEntries}
+      onOpenTrash={handleOpenTrash}
       error={error}
       isLoading={isLoading}
       files={filteredFiles}
