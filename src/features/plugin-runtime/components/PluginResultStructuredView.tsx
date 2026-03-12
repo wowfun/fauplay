@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import { Button } from '@/ui/Button'
 import { PluginResultJsonViewer } from './PluginResultJsonViewer'
 
 type JsonObject = Record<string, unknown>
@@ -5,6 +7,7 @@ type JsonObject = Record<string, unknown>
 interface PluginResultStructuredViewProps {
   value: unknown
   surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
+  onAction?: (action: StructuredToolCallAction) => void
 }
 
 function isSimpleValue(value: unknown): value is string | number | boolean | null {
@@ -17,6 +20,40 @@ function isObject(value: unknown): value is JsonObject {
 
 function isObjectArray(value: unknown): value is JsonObject[] {
   return Array.isArray(value) && value.every((item) => isObject(item))
+}
+
+export interface StructuredToolCallAction {
+  type: 'tool-call'
+  label: string
+  arguments?: Record<string, unknown>
+  execution?: 'silent' | 'enqueue'
+}
+
+interface StructuredResultTable {
+  columns?: string[]
+  rows: JsonObject[]
+}
+
+function isStructuredToolCallAction(value: unknown): value is StructuredToolCallAction {
+  if (!isObject(value)) return false
+  if (value.type !== 'tool-call') return false
+  if (typeof value.label !== 'string' || !value.label.trim()) return false
+  if (typeof value.arguments !== 'undefined' && !isObject(value.arguments)) return false
+  if (
+    typeof value.execution !== 'undefined'
+    && value.execution !== 'silent'
+    && value.execution !== 'enqueue'
+  ) {
+    return false
+  }
+  return true
+}
+
+function isStructuredResultTable(value: unknown): value is StructuredResultTable {
+  if (!isObject(value)) return false
+  if (!Array.isArray(value.rows) || !value.rows.every((item) => isObject(item))) return false
+  if (typeof value.columns === 'undefined') return true
+  return Array.isArray(value.columns) && value.columns.every((item) => typeof item === 'string')
 }
 
 function formatSimpleValue(value: string | number | boolean | null): string {
@@ -42,7 +79,13 @@ function toCompactJson(value: unknown): string {
   }
 }
 
-function collectTableColumns(rows: JsonObject[]): string[] {
+function collectTableColumns(rows: JsonObject[], preferredColumns?: string[]): string[] {
+  if (Array.isArray(preferredColumns) && preferredColumns.length > 0) {
+    return preferredColumns.filter((item, index, self) => (
+      typeof item === 'string' && item && self.indexOf(item) === index
+    ))
+  }
+
   const columns = new Set<string>()
   for (const row of rows) {
     for (const key of Object.keys(row)) {
@@ -53,7 +96,29 @@ function collectTableColumns(rows: JsonObject[]): string[] {
   return [...columns].sort((a, b) => a.localeCompare(b))
 }
 
-function renderTableCell(value: unknown): string {
+function renderTableCell(
+  value: unknown,
+  onAction: ((action: StructuredToolCallAction) => void) | undefined
+): ReactNode {
+  if (isStructuredToolCallAction(value)) {
+    if (!onAction) {
+      return value.label
+    }
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-6 px-2 text-xs"
+        onClick={() => {
+          onAction(value)
+        }}
+      >
+        {value.label}
+      </Button>
+    )
+  }
+
   if (isSimpleValue(value)) {
     return formatSimpleValue(value)
   }
@@ -62,11 +127,13 @@ function renderTableCell(value: unknown): string {
 
 interface PluginResultRecordTableProps {
   rows: JsonObject[]
+  columns?: string[]
   surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
+  onAction?: (action: StructuredToolCallAction) => void
 }
 
-function PluginResultRecordTable({ rows, surfaceVariant }: PluginResultRecordTableProps) {
-  const columns = collectTableColumns(rows)
+function PluginResultRecordTable({ rows, columns: preferredColumns, surfaceVariant, onAction }: PluginResultRecordTableProps) {
+  const columns = collectTableColumns(rows, preferredColumns)
   if (columns.length === 0) {
     return <PluginResultJsonViewer value={rows} title="JSON 兜底视图" surfaceVariant={surfaceVariant} />
   }
@@ -100,7 +167,7 @@ function PluginResultRecordTable({ rows, surfaceVariant }: PluginResultRecordTab
             <tr key={`result-row-${rowIndex}`} className={rowClassName}>
               {columns.map((column) => (
                 <td key={`${rowIndex}-${column}`} className={`px-3 py-2 break-all align-top ${cellClassName}`}>
-                  {renderTableCell(row[column])}
+                  {renderTableCell(row[column], onAction)}
                 </td>
               ))}
             </tr>
@@ -114,9 +181,10 @@ function PluginResultRecordTable({ rows, surfaceVariant }: PluginResultRecordTab
 interface PluginResultFieldsProps {
   value: JsonObject
   surfaceVariant: 'preview-panel' | 'preview-lightbox' | 'workspace-grid'
+  onAction?: (action: StructuredToolCallAction) => void
 }
 
-function PluginResultFields({ value, surfaceVariant }: PluginResultFieldsProps) {
+function PluginResultFields({ value, surfaceVariant, onAction }: PluginResultFieldsProps) {
   const entries = Object.entries(value).filter(([key]) => key !== 'ok')
   const isLightbox = surfaceVariant === 'preview-lightbox'
   const keyClassName = isLightbox ? 'font-medium text-white' : 'font-medium text-foreground'
@@ -139,11 +207,25 @@ function PluginResultFields({ value, surfaceVariant }: PluginResultFieldsProps) 
         }
 
         if (isObject(fieldValue)) {
+          if (isStructuredResultTable(fieldValue)) {
+            return (
+              <div key={key} className="space-y-1">
+                <p className={keyClassName}>{key}:</p>
+                <PluginResultRecordTable
+                  rows={fieldValue.rows}
+                  columns={fieldValue.columns}
+                  surfaceVariant={surfaceVariant}
+                  onAction={onAction}
+                />
+              </div>
+            )
+          }
+
           return (
             <div key={key} className="space-y-1">
               <p className={keyClassName}>{key}:</p>
               <div className={nestedBorderClassName}>
-                <PluginResultFields value={fieldValue} surfaceVariant={surfaceVariant} />
+                <PluginResultFields value={fieldValue} surfaceVariant={surfaceVariant} onAction={onAction} />
               </div>
             </div>
           )
@@ -153,7 +235,7 @@ function PluginResultFields({ value, surfaceVariant }: PluginResultFieldsProps) 
           return (
             <div key={key} className="space-y-1">
               <p className={keyClassName}>{key}:</p>
-              <PluginResultRecordTable rows={fieldValue} surfaceVariant={surfaceVariant} />
+              <PluginResultRecordTable rows={fieldValue} surfaceVariant={surfaceVariant} onAction={onAction} />
             </div>
           )
         }
@@ -169,18 +251,29 @@ function PluginResultFields({ value, surfaceVariant }: PluginResultFieldsProps) 
   )
 }
 
-export function PluginResultStructuredView({ value, surfaceVariant }: PluginResultStructuredViewProps) {
+export function PluginResultStructuredView({ value, surfaceVariant, onAction }: PluginResultStructuredViewProps) {
   if (isSimpleValue(value)) {
     const valueClassName = surfaceVariant === 'preview-lightbox' ? 'text-white/80' : 'text-muted-foreground'
     return <p className={`text-xs break-all ${valueClassName}`}>{formatSimpleValue(value)}</p>
   }
 
+  if (isStructuredResultTable(value)) {
+    return (
+      <PluginResultRecordTable
+        rows={value.rows}
+        columns={value.columns}
+        surfaceVariant={surfaceVariant}
+        onAction={onAction}
+      />
+    )
+  }
+
   if (isObject(value)) {
-    return <PluginResultFields value={value} surfaceVariant={surfaceVariant} />
+    return <PluginResultFields value={value} surfaceVariant={surfaceVariant} onAction={onAction} />
   }
 
   if (isObjectArray(value)) {
-    return <PluginResultRecordTable rows={value} surfaceVariant={surfaceVariant} />
+    return <PluginResultRecordTable rows={value} surfaceVariant={surfaceVariant} onAction={onAction} />
   }
 
   return <PluginResultJsonViewer value={value} title="JSON 兜底视图" surfaceVariant={surfaceVariant} />

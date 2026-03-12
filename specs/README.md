@@ -42,3 +42,4 @@
 - 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)
 - 收藏夹目录专题：[`110-folder-favorites/spec.md`](./110-folder-favorites/spec.md)
 - 本地文件浏览器转向专题：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)
+- 相同时长视频搜索专题：[`112-video-same-duration-search/spec.md`](./112-video-same-duration-search/spec.md)

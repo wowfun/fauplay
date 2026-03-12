@@ -26,6 +26,9 @@ const FileLightboxModal = lazy(async () => {
 
 const WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:workspace-tool-panel-collapsed'
 const PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:preview-tool-panel-collapsed'
+const SAME_DURATION_SCOPE_STORAGE_KEY = 'fauplay:media-search-same-duration-scope'
+const SAME_DURATION_TOOL_NAME = 'media.searchSameDurationVideos'
+const SAME_DURATION_SCOPE_OPTION_KEY = 'search.scope'
 
 function readPersistedBoolean(key: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') return defaultValue
@@ -48,6 +51,26 @@ function writePersistedBoolean(key: string, value: boolean): void {
 
   try {
     window.localStorage.setItem(key, value ? 'true' : 'false')
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
+function readPersistedSameDurationScope(): 'global' | 'root' | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(SAME_DURATION_SCOPE_STORAGE_KEY)
+    if (raw === 'global' || raw === 'root') return raw
+    return null
+  } catch {
+    return null
+  }
+}
+
+function writePersistedSameDurationScope(value: 'global' | 'root'): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SAME_DURATION_SCOPE_STORAGE_KEY, value)
   } catch {
     // Ignore storage write failures and keep runtime state available.
   }
@@ -178,9 +201,19 @@ export function ExplorerWorkspaceLayout({
     byContextKey: {},
     contextOrder: [],
   })
-  const [previewPluginWorkbenchState, setPreviewPluginWorkbenchState] = useState<PluginWorkbenchState>({
-    activeToolName: null,
-    optionValuesByTool: {},
+  const [previewPluginWorkbenchState, setPreviewPluginWorkbenchState] = useState<PluginWorkbenchState>(() => {
+    const persistedSameDurationScope = readPersistedSameDurationScope()
+    const optionValuesByTool: PluginWorkbenchState['optionValuesByTool'] = {}
+    if (persistedSameDurationScope) {
+      optionValuesByTool[SAME_DURATION_TOOL_NAME] = {
+        [SAME_DURATION_SCOPE_OPTION_KEY]: persistedSameDurationScope,
+      }
+    }
+
+    return {
+      activeToolName: null,
+      optionValuesByTool,
+    }
   })
   const [workspacePluginResultQueueState, setWorkspacePluginResultQueueState] = useState<PluginResultQueueState>({
     byContextKey: {},
@@ -204,6 +237,13 @@ export function ExplorerWorkspaceLayout({
   useEffect(() => {
     writePersistedBoolean(PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY, previewToolPanelCollapsed)
   }, [previewToolPanelCollapsed])
+
+  useEffect(() => {
+    const scopeValue = previewPluginWorkbenchState.optionValuesByTool[SAME_DURATION_TOOL_NAME]?.[SAME_DURATION_SCOPE_OPTION_KEY]
+    if (scopeValue === 'global' || scopeValue === 'root') {
+      writePersistedSameDurationScope(scopeValue)
+    }
+  }, [previewPluginWorkbenchState.optionValuesByTool])
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">

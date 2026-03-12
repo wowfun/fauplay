@@ -28,6 +28,14 @@
       "args": [
         "tools/mcp/soft-delete/server.mjs"
       ]
+    },
+    "video-same-duration": {
+      "type": "stdio",
+      "command": "node",
+      "callTimeoutMs": 20000,
+      "args": [
+        "tools/mcp/video-same-duration/server.mjs"
+      ]
     }
   }
 }

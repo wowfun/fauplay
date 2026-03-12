@@ -5,6 +5,7 @@ const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_TOOL_TIMEOUT_MS = 5000
 const ML_CLASSIFY_TOOL_TIMEOUT_MS = 120000
+const VIDEO_SAME_DURATION_TIMEOUT_MS = 20000
 const MCP_CLIENT_INFO = {
   name: 'fauplay-web',
   version: '0.0.1',
@@ -149,6 +150,10 @@ function resolveToolTimeoutMs(toolName: string, timeoutMs?: number): number {
 
   if (toolName.startsWith('ml.classify')) {
     return ML_CLASSIFY_TOOL_TIMEOUT_MS
+  }
+
+  if (toolName === 'media.searchSameDurationVideos') {
+    return VIDEO_SAME_DURATION_TIMEOUT_MS
   }
 
   return DEFAULT_TOOL_TIMEOUT_MS

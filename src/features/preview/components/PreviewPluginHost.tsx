@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxContinuousConcurrent } from '@/config/toolContinuousCall'
+import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { FileItem } from '@/types'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
+import type { StructuredToolCallAction } from '@/features/plugin-runtime/components/PluginResultStructuredView'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
 import {
@@ -97,6 +99,13 @@ export function PreviewPluginHost({
   const runToolCall = pluginRuntime.runToolCall
 
   const fileActionTools = pluginRuntime.scopedTools
+  const toolByName = useMemo(() => {
+    const map = new Map<string, GatewayToolDescriptor>()
+    for (const tool of fileActionTools) {
+      map.set(tool.name, tool)
+    }
+    return map
+  }, [fileActionTools])
   const softDeleteTool = useMemo(
     () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
     [fileActionTools]
@@ -252,6 +261,30 @@ export function PreviewPluginHost({
     toolWorkbenchState.optionValuesByTool,
   ])
 
+  const handleResultAction = useCallback((params: { item: { toolName: string }; action: StructuredToolCallAction }) => {
+    const { item, action } = params
+    if (action.type !== 'tool-call') return
+
+    const targetTool = toolByName.get(item.toolName)
+    if (!targetTool) return
+
+    if (action.execution === 'enqueue') {
+      void pluginRuntime.runToolCall(targetTool, {
+        trigger: 'manual',
+        additionalArgs: action.arguments,
+      })
+      return
+    }
+
+    if (!rootHandle || !rootId) return
+    void dispatchSystemTool({
+      toolName: item.toolName,
+      rootHandle,
+      rootId,
+      additionalArgs: action.arguments ?? {},
+    })
+  }, [pluginRuntime, rootHandle, rootId, toolByName])
+
   if (!showActionRail && !showResultPanel) {
     return null
   }
@@ -279,6 +312,7 @@ export function PreviewPluginHost({
           workbench={workbenchNode}
           items={currentFileQueue}
           onToggleItemCollapsed={pluginRuntime.handleToggleResultItemCollapsed}
+          onResultAction={handleResultAction}
           surfaceVariant={surfaceVariant}
           side="left"
           subzone="PreviewToolResultPanel"

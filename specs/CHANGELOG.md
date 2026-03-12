@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-03-13
+### Added
+- 新增 `specs/112-video-same-duration-search/spec.md`：定义 `media.searchSameDurationVideos` 文件级插件契约，覆盖 `search/openPath/openEverything` 三操作、`search.scope`（`global|root`）选项语义、表格化结果与行级打开动作，以及持续调用命中历史静默跳过规则。
+- 新增 `tools/mcp/video-same-duration/`：提供 `server.mjs` 与 `config.json`，支持基于 ES 的相同时长视频检索、系统默认应用打开与 Everything 搜索唤起能力。
+
+### Changed
+- 更新 `.fauplay/mcp.json`：注册 `video-same-duration` MCP server。
+- 更新插件结果渲染链路：结构化结果支持表格单元格动作按钮（用于行级“打开”）。
+- 更新预览插件状态管理：仅对 `media.searchSameDurationVideos.search.scope` 增加 LocalStorage 持久化与刷新恢复。
+- 更新 `tools/mcp/video-same-duration/server.mjs` 与配置契约：ES 输出解析改为固定 `UTF-8/GBK` 自动识别（不再暴露手工编码配置项），修复中文路径乱码导致的“打开失败”问题。
+- 更新 `tools/mcp/video-same-duration/config.json` 与 `server.mjs`：容差字段从 `toleranceSeconds` 切换为 `toleranceMs`（默认 `500`），匹配判定升级为毫秒级（无向后兼容字段读取）。
+- 更新 `tools/mcp/video-same-duration/config.json` 与专题规范：`esPath` 默认值迁移为共享路径 `tools/bin/everything/es.exe`，用于后续多场景复用。
+
 ## 2026-03-12
 ### Added
 - 新增 `specs/111-local-file-browser/spec.md`：定义“本地文件浏览器转向”MVP 契约，覆盖全文件枚举、统一预览能力矩阵（`image/video/text/unsupported`）、文本预览 `1MB` 上限与二进制降级、非媒体文件信息面板与媒体快捷键守卫语义。

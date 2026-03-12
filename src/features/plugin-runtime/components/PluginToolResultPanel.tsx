@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import type { PluginResultQueueItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
-import { PluginResultStructuredView } from './PluginResultStructuredView'
+import { PluginResultStructuredView, type StructuredToolCallAction } from './PluginResultStructuredView'
 
 interface PluginToolResultPanelProps {
   workbench?: ReactNode
@@ -11,6 +11,7 @@ interface PluginToolResultPanelProps {
   side?: 'left' | 'right'
   subzone?: string
   emptyHint?: string
+  onResultAction?: (params: { item: PluginResultQueueItem; action: StructuredToolCallAction }) => void
 }
 
 function formatTimestamp(value?: number): string {
@@ -50,6 +51,7 @@ export function PluginToolResultPanel({
   side = 'left',
   subzone,
   emptyHint,
+  onResultAction,
 }: PluginToolResultPanelProps) {
   const isLightbox = surfaceVariant === 'preview-lightbox'
   const borderClass = side === 'left'
@@ -117,7 +119,15 @@ export function PluginToolResultPanel({
                           {item.errorCode && <p>错误码: {item.errorCode}</p>}
                         </div>
                       ) : typeof item.result !== 'undefined' ? (
-                        <PluginResultStructuredView value={item.result} surfaceVariant={surfaceVariant} />
+                        <PluginResultStructuredView
+                          value={item.result}
+                          surfaceVariant={surfaceVariant}
+                          onAction={onResultAction
+                            ? (action) => {
+                              onResultAction({ item, action })
+                            }
+                            : undefined}
+                        />
                       ) : (
                         <p className={`text-xs ${statusClassName}`}>工具未返回结果。</p>
                       )}

@@ -42,4 +42,5 @@ __pycache__/
 # Local
 .fauplay/mcp.local.json
 tools/mcp-local/
+config.local.json
 _local/
