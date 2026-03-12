@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getMediaType } from '@/lib/thumbnail'
+import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import {
   getExactCachedThumbnailFromPipeline,
@@ -71,7 +71,8 @@ export function FileGridCard({
   onToggleChecked,
 }: FileGridCardProps) {
   const isDir = file.kind === 'directory'
-  const mediaType = getMediaType(file.name)
+  const previewKind = getFilePreviewKind(file.name)
+  const mediaType = previewKind === 'image' || previewKind === 'video' ? previewKind : null
   const fileLastModifiedMs = file.lastModified?.getTime()
   const thumbnailBoxSize = THUMBNAIL_BOX_SIZE_BY_PRESET[thumbnailSizePreset]
   const iconSize = ICON_SIZE_BY_PRESET[thumbnailSizePreset]
@@ -248,8 +249,8 @@ export function FileGridCard({
   const getIcon = () => {
     if (isDir) return <FolderOpen size={iconSize} className="text-yellow-500" />
     if (displayedThumbnailUrl) return null
-    if (mediaType === 'image') return <Image size={iconSize} className="text-green-500" />
-    if (mediaType === 'video') return <Video size={iconSize} className="text-blue-500" />
+    if (previewKind === 'image') return <Image size={iconSize} className="text-green-500" />
+    if (previewKind === 'video') return <Video size={iconSize} className="text-blue-500" />
     return <File size={iconSize} className="text-gray-500" />
   }
 

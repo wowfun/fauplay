@@ -32,8 +32,9 @@
 ## 基础定位
 
 1. Fauplay 是本地优先（Local-First）的浏览器应用。
-2. 核心浏览链路（Core Browsing Flow）默认不依赖后端服务。
-3. 本地能力网关（Local Capability Gateway）是可选增强能力，不是核心流程前置条件。
+2. 产品定位为“本地文件浏览器”，媒体预览（图片/视频）属于文件预览能力子集。
+3. 核心浏览链路（Core Browsing Flow）默认不依赖后端服务。
+4. 本地能力网关（Local Capability Gateway）是可选增强能力，不是核心流程前置条件。
 
 ## 技术栈基线
 

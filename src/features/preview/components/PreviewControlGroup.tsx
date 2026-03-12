@@ -5,6 +5,7 @@ import { Button } from '@/ui/Button'
 
 interface PreviewControlGroupProps {
   isFullscreen: boolean
+  showPlaybackControls: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
@@ -16,6 +17,7 @@ interface PreviewControlGroupProps {
 
 export function PreviewControlGroup({
   isFullscreen,
+  showPlaybackControls,
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
@@ -29,14 +31,16 @@ export function PreviewControlGroup({
       className="mt-2 flex flex-nowrap items-center gap-2 overflow-x-auto [&>*]:shrink-0"
       data-preview-subzone="PreviewControlGroup"
     >
-      <MediaPlaybackControls
-        autoPlayEnabled={autoPlayEnabled}
-        autoPlayIntervalSec={autoPlayIntervalSec}
-        onToggleAutoPlay={onToggleAutoPlay}
-        playbackOrder={playbackOrder}
-        onTogglePlaybackOrder={onTogglePlaybackOrder}
-        onAutoPlayIntervalChange={onAutoPlayIntervalChange}
-      />
+      {showPlaybackControls && (
+        <MediaPlaybackControls
+          autoPlayEnabled={autoPlayEnabled}
+          autoPlayIntervalSec={autoPlayIntervalSec}
+          onToggleAutoPlay={onToggleAutoPlay}
+          playbackOrder={playbackOrder}
+          onTogglePlaybackOrder={onTogglePlaybackOrder}
+          onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+        />
+      )}
       <Button
         onClick={onClose}
         variant="ghost"

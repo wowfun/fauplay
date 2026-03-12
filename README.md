@@ -1,6 +1,6 @@
 # Fauplay - 本地文件浏览器
 
-Fauplay 是一个本地优先（Local-First）的浏览器图片/视频浏览工具，核心浏览链路纯 Web 可用；本地能力网关（Gateway）用于可选的系统集成增强能力。
+Fauplay 是一个本地优先（Local-First）的浏览器本地文件浏览工具，核心浏览链路纯 Web 可用；本地能力网关（Gateway）用于可选的系统集成增强能力。
 
 ## 项目定位
 
@@ -38,7 +38,9 @@ npm run build
 
 - 文件夹授权与目录浏览（File System Access API）
 - 网格浏览与虚拟列表渲染（`react-window`）
+- 全文件类型浏览（图片/视频/文本/压缩包等）
 - 图片/视频缩略图加载（运行时缓存，刷新后重建）
+- 按能力预览（媒体内嵌预览、文本预览、不可预览文件信息面板）
 - 搜索、类型筛选、排序（名称/日期/大小）
 - 侧栏预览与全屏预览（共享同一预览语义）
 - 预览遍历与自动播放（顺序/随机，快捷键驱动）
@@ -72,6 +74,7 @@ npm run build
 - 预览播放专题：[`specs/100-preview-playback/spec.md`](specs/100-preview-playback/spec.md)
 - 缩略图管线专题：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
 - 地址栏导航专题：[`specs/102-address-bar-navigation/spec.md`](specs/102-address-bar-navigation/spec.md)
+- 本地文件浏览器转向专题：[`specs/111-local-file-browser/spec.md`](specs/111-local-file-browser/spec.md)
 - 规范变更日志：[`specs/CHANGELOG.md`](specs/CHANGELOG.md)
 
 ## 项目结构

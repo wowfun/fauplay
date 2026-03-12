@@ -1,15 +1,13 @@
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']
-const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
+import { isImageFile as isImagePreviewFile, isVideoFile as isVideoPreviewFile } from '@/lib/filePreview'
+
 const HIDDEN_SYSTEM_DIRECTORIES = new Set(['.trash'])
 
 export function isImageFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTENSIONS.includes(ext)
+  return isImagePreviewFile(name)
 }
 
 export function isVideoFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return VIDEO_EXTENSIONS.includes(ext)
+  return isVideoPreviewFile(name)
 }
 
 export function isMediaFile(name: string): boolean {
@@ -37,6 +35,42 @@ export function getMimeType(name: string): string {
     avi: 'video/x-msvideo',
     mkv: 'video/x-matroska',
     ogg: 'video/ogg',
+    txt: 'text/plain',
+    md: 'text/markdown',
+    markdown: 'text/markdown',
+    json: 'application/json',
+    yaml: 'application/yaml',
+    yml: 'application/yaml',
+    xml: 'application/xml',
+    csv: 'text/csv',
+    log: 'text/plain',
+    js: 'text/javascript',
+    jsx: 'text/javascript',
+    ts: 'text/typescript',
+    tsx: 'text/typescript',
+    css: 'text/css',
+    scss: 'text/x-scss',
+    less: 'text/x-less',
+    html: 'text/html',
+    htm: 'text/html',
+    py: 'text/x-python',
+    sh: 'text/x-shellscript',
+    bash: 'text/x-shellscript',
+    zsh: 'text/x-shellscript',
+    ini: 'text/plain',
+    conf: 'text/plain',
+    toml: 'application/toml',
+    sql: 'application/sql',
+    c: 'text/x-c',
+    cc: 'text/x-c++',
+    cpp: 'text/x-c++',
+    h: 'text/x-c',
+    hpp: 'text/x-c++',
+    java: 'text/x-java-source',
+    go: 'text/x-go',
+    rs: 'text/x-rust',
+    vue: 'text/plain',
+    svelte: 'text/plain',
   }
   return mimeTypes[ext] || 'application/octet-stream'
 }
@@ -83,23 +117,21 @@ export async function readDirectory(
 
   for await (const entry of dirHandle.values()) {
     if (entry.kind === 'file') {
-      if (recursive || isMediaFile(entry.name)) {
-        const fileItem: import('@/types').FileItem = {
-          name: entry.name,
-          path: entry.name,
-          kind: 'file',
-          mimeType: getMimeType(entry.name),
-        }
-
-        if (includeMetadata) {
-          const fileHandle = entry as FileSystemFileHandle
-          const file = await fileHandle.getFile()
-          fileItem.size = file.size
-          fileItem.lastModified = file.lastModified ? new Date(file.lastModified) : undefined
-        }
-
-        files.push(fileItem)
+      const fileItem: import('@/types').FileItem = {
+        name: entry.name,
+        path: entry.name,
+        kind: 'file',
+        mimeType: getMimeType(entry.name),
       }
+
+      if (includeMetadata) {
+        const fileHandle = entry as FileSystemFileHandle
+        const file = await fileHandle.getFile()
+        fileItem.size = file.size
+        fileItem.lastModified = file.lastModified ? new Date(file.lastModified) : undefined
+      }
+
+      files.push(fileItem)
     } else if (entry.kind === 'directory') {
       if (isHiddenSystemDirectory(entry.name)) {
         continue

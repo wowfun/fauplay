@@ -5,6 +5,7 @@ import type { PlaybackOrder } from '@/features/preview/types/playback'
 interface PreviewHeaderBarProps {
   fileName: string
   isFullscreen: boolean
+  showPlaybackControls: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   onToggleAutoPlay: () => void
@@ -17,6 +18,7 @@ interface PreviewHeaderBarProps {
 export function PreviewHeaderBar({
   fileName,
   isFullscreen,
+  showPlaybackControls,
   autoPlayEnabled,
   autoPlayIntervalSec,
   onToggleAutoPlay,
@@ -33,6 +35,7 @@ export function PreviewHeaderBar({
       <PreviewTitleRow fileName={fileName} />
       <PreviewControlGroup
         isFullscreen={isFullscreen}
+        showPlaybackControls={showPlaybackControls}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}

@@ -3,9 +3,9 @@ import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import { MediaPreviewPanel } from './MediaPreviewPanel'
+import { FilePreviewPanel } from './FilePreviewPanel'
 
-interface MediaLightboxModalProps {
+interface FileLightboxModalProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
@@ -30,7 +30,7 @@ interface MediaLightboxModalProps {
   onMutationCommitted?: () => void | Promise<void>
 }
 
-export function MediaLightboxModal({
+export function FileLightboxModal({
   file,
   rootHandle,
   rootId,
@@ -53,10 +53,10 @@ export function MediaLightboxModal({
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
   onMutationCommitted,
-}: MediaLightboxModalProps) {
+}: FileLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      <MediaPreviewPanel
+      <FilePreviewPanel
         file={file}
         rootHandle={rootHandle}
         rootId={rootId}

@@ -12,7 +12,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │ B. 主内容区（Main Content Zone）                            │
 │   ├─ B1. 文件网格区（File Browser Grid Zone）               │
-│   └─ B2. 预览面板区（Media Preview Panel Zone，可折叠）      │
+│   └─ B2. 预览面板区（File Preview Panel Zone，可折叠）       │
 ├─────────────────────────────────────────────────────────────┤
 │ C. 底部状态区（Status Bar Zone）                            │
 └─────────────────────────────────────────────────────────────┘
@@ -44,17 +44,17 @@
 - 选择约束：B1 同时维护活跃项与勾选集合，二者语义不得混淆。
 - 布局约束：B1 内部从左到右顺序固定为 `FileGridViewport | WorkspaceToolPanel | WorkspaceActionRail`，动作入口在最右侧，工作台与结果队列在其左侧。
 
-### B2 预览面板区（Media Preview Panel Zone）
+### B2 预览面板区（File Preview Panel Zone）
 
-- 职责：当前选中文件预览、遍历控制、自动播放控制、预览插件动作入口、工具工作台展示（选项+操作）、按调用队列平铺的工具结果展示。
+- 职责：当前选中文件预览、遍历控制、自动播放控制、非媒体文件信息展示、预览插件动作入口、工具工作台展示（选项+操作）、按调用队列平铺的工具结果展示。
 - 当前组件：
-  - `features/preview/components/MediaPreviewPanel`
+  - `features/preview/components/FilePreviewPanel`
   - `features/preview/components/PreviewHeaderBar`
   - `features/preview/components/PreviewControlGroup`
   - `features/plugin-runtime/components/PluginActionRail`
   - `features/plugin-runtime/components/PluginToolWorkbench`
   - `features/plugin-runtime/components/PluginToolResultPanel`
-  - `features/preview/components/PreviewMediaViewport`
+  - `features/preview/components/FilePreviewViewport`
   - `features/preview/components/PreviewFeedbackOverlay`
 - 边界：由预览域状态驱动，不反向控制网格渲染策略；预览插件仅面向当前预览文件。
 - 运行时细则：结果分层、折叠状态、侧栏/全屏一致性等约束见 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
@@ -67,8 +67,8 @@
 
 ### D 全屏预览区（Lightbox Modal Zone）
 
-- 职责：沉浸式媒体查看，复用预览域逻辑。
-- 当前组件：`features/preview/components/MediaLightboxModal`
+- 职责：沉浸式文件查看，复用预览域逻辑。
+- 当前组件：`features/preview/components/FileLightboxModal`
 - 边界：作为覆盖层，不改变底层 A/B1/C 布局状态。
 
 ## 插件三段式子分区命名规范（Canonical Plugin Sub-zones）
@@ -83,7 +83,7 @@
 - `workspace` 与 `preview` 必须共享上述三段式交互语义；可使用作用域前缀形成实例化子区名（如 `WorkspaceActionRail`、`PreviewActionRail`）。
 - `data-plugin-subzone` 作为推荐（SHOULD）标记方式，可用于测试与调试，但本轮不设为强制。
 
-## 预览媒体子分区与全屏对应关系 (Sub-zone Mapping)
+## 文件预览子分区与全屏对应关系 (Sub-zone Mapping)
 
 | 面板态子分区 | 全屏态对应区 | 语义一致性要求 |
 | --- | --- | --- |
@@ -92,7 +92,7 @@
 | `PluginActionRail` | 全屏动作入口区 | MUST |
 | `PluginToolWorkbench` | 全屏工具工作台区 | MUST |
 | `PluginToolResultPanel` | 全屏结果面板区 | MUST |
-| `PreviewMediaViewport` | 全屏媒体视口 | MUST |
+| `FilePreviewViewport` | 全屏文件视口 | MUST |
 | `PreviewFeedbackOverlay` | 全屏反馈层 | MUST |
 
 ## 插件作用域与入口映射 (Plugin Scope-to-Zone Mapping)

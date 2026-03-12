@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { getFilePreviewKind } from '@/lib/filePreview'
 import type { FileItem } from '@/types'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 
@@ -42,7 +42,11 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const mediaFiles = useMemo(
     () =>
       filteredFiles.filter(
-        (file): file is FileItem => file.kind === 'file' && (isImageFile(file.name) || isVideoFile(file.name))
+        (file): file is FileItem => {
+          if (file.kind !== 'file') return false
+          const previewKind = getFilePreviewKind(file.name)
+          return previewKind === 'image' || previewKind === 'video'
+        }
       ),
     [filteredFiles]
   )
@@ -187,10 +191,11 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const hasOpenPreview = !!previewFile || showPreviewPane
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
   const activeMediaIndex = getMediaIndex(activeMediaFile)
+  const hasActiveMediaPreview = activeMediaIndex >= 0
   const isAutoPlayEligible =
     autoPlayEnabled &&
     !autoPlayPausedByVisibility &&
-    activeMediaIndex >= 0 &&
+    hasActiveMediaPreview &&
     mediaFiles.length > 1
 
   const showFileInPane = useCallback((file: FileItem) => {
@@ -202,7 +207,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   const openFileInModal = useCallback((file: FileItem) => {
     if (file.kind !== 'file') return
-    setPreviewAutoPlayOnOpen(isVideoFile(file.name))
+    setPreviewAutoPlayOnOpen(getFilePreviewKind(file.name) === 'video')
     setPreviewFile(file)
   }, [])
 
@@ -217,7 +222,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   const openFullscreenFromPane = useCallback(() => {
     if (selectedFile?.kind !== 'file') return
-    setPreviewAutoPlayOnOpen(isVideoFile(selectedFile.name))
+    setPreviewAutoPlayOnOpen(getFilePreviewKind(selectedFile.name) === 'video')
     setPreviewFile(selectedFile)
   }, [selectedFile])
 
@@ -282,13 +287,13 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   const handleAutoPlayVideoEnded = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
-    if (!isVideoFile(activeMediaFile.name)) return
+    if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
     navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   const handleAutoPlayVideoPlaybackError = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
-    if (!isVideoFile(activeMediaFile.name)) return
+    if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
     navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
@@ -386,6 +391,13 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [previewFile, showPreviewPane])
 
   useEffect(() => {
+    if (!hasOpenPreview) return
+    if (!hasActiveMediaPreview && autoPlayEnabled) {
+      setAutoPlayEnabled(false)
+    }
+  }, [autoPlayEnabled, hasActiveMediaPreview, hasOpenPreview])
+
+  useEffect(() => {
     const syncVisibilityState = () => {
       setAutoPlayPausedByVisibility(document.visibilityState !== 'visible')
     }
@@ -423,7 +435,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') {
       return
     }
-    if (isVideoFile(activeMediaFile.name)) {
+    if (getFilePreviewKind(activeMediaFile.name) === 'video') {
       return
     }
 
@@ -449,6 +461,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     autoPlayIntervalSec,
     playbackOrder,
     hasOpenPreview,
+    hasActiveMediaPreview,
     showFileInPane,
     openFileInModal,
     closePreviewModal,

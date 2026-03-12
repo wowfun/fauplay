@@ -1,17 +1,21 @@
 import { lazy, Suspense, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import { getMediaType } from '@/lib/thumbnail'
-import type { FileItem } from '@/types'
+import { getFilePreviewKind } from '@/lib/filePreview'
+import type { FileItem, TextPreviewPayload } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
-import { PreviewMediaViewport } from './PreviewMediaViewport'
+import { FilePreviewViewport } from './FilePreviewViewport'
 
-interface MediaPreviewCanvasProps {
+interface FilePreviewCanvasProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   previewUrl: string | null
+  textPreview: TextPreviewPayload
+  fileMimeType: string | null
+  fileSizeBytes: number | null
+  fileLastModifiedMs: number | null
   isLoading: boolean
   error: string | null
   onOpenFullscreen?: () => void
@@ -29,19 +33,23 @@ interface MediaPreviewCanvasProps {
   onMutationCommitted?: () => void | Promise<void>
 }
 
-type MediaPreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
+type FilePreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
 
 const PreviewPluginHost = lazy(async () => {
   const mod = await import('./PreviewPluginHost')
   return { default: mod.PreviewPluginHost }
 })
 
-export function MediaPreviewCanvas({
+export function FilePreviewCanvas({
   file,
   rootHandle,
   rootId,
   previewActionTools,
   previewUrl,
+  textPreview,
+  fileMimeType,
+  fileSizeBytes,
+  fileLastModifiedMs,
   isLoading,
   error,
   onOpenFullscreen,
@@ -57,22 +65,25 @@ export function MediaPreviewCanvas({
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
   onMutationCommitted,
-}: MediaPreviewCanvasProps) {
+}: FilePreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
-  const isImage = getMediaType(file.name) === 'image'
-  const isVideo = getMediaType(file.name) === 'video'
+  const previewKind = getFilePreviewKind(file.name)
+  const isImage = previewKind === 'image'
+  const isVideo = previewKind === 'video'
   const emptyTextClass = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
   const errorTextClass = isFullscreen ? 'text-red-300' : 'text-destructive'
   const surfaceVariant = isFullscreen ? 'preview-lightbox' : 'preview-panel'
   const showPreviewPluginHost = previewActionTools.length > 0
-  const previewViewState: MediaPreviewViewState = isLoading
+  const previewViewState: FilePreviewViewState = isLoading
     ? 'loading'
     : error
       ? 'error'
-      : previewUrl && (isImage || isVideo)
-        ? 'ready'
-        : 'empty'
+      : isImage || isVideo
+        ? (previewUrl ? 'ready' : 'empty')
+        : previewKind === 'text'
+          ? (textPreview.status === 'idle' || textPreview.status === 'loading' ? 'loading' : 'ready')
+          : 'empty'
 
   useEffect(() => {
     setPlaybackError(false)
@@ -101,13 +112,16 @@ export function MediaPreviewCanvas({
         </Suspense>
       )}
 
-      <PreviewMediaViewport
+      <FilePreviewViewport
         file={file}
+        previewKind={previewKind}
         previewUrl={previewUrl}
+        textPreview={textPreview}
+        fileMimeType={fileMimeType}
+        fileSizeBytes={fileSizeBytes}
+        fileLastModifiedMs={fileLastModifiedMs}
         isLoading={isLoading}
         error={error}
-        isImage={isImage}
-        isVideo={isVideo}
         emptyTextClass={emptyTextClass}
         errorTextClass={errorTextClass}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
@@ -119,7 +133,7 @@ export function MediaPreviewCanvas({
         }}
       >
         <PreviewFeedbackOverlay showPlaybackError={playbackError && isVideo} />
-      </PreviewMediaViewport>
+      </FilePreviewViewport>
     </div>
   )
 }

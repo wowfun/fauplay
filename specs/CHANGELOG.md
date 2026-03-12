@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2026-03-12
+### Added
+- 新增 `specs/111-local-file-browser/spec.md`：定义“本地文件浏览器转向”MVP 契约，覆盖全文件枚举、统一预览能力矩阵（`image/video/text/unsupported`）、文本预览 `1MB` 上限与二进制降级、非媒体文件信息面板与媒体快捷键守卫语义。
+
+### Changed
+- 更新 `specs/000-foundation/spec.md`、`specs/003-ui-ux/spec.md`、`specs/003-ui-ux/areas.md`、`specs/100-preview-playback/spec.md`、`specs/101-thumbnail-pipeline/spec.md` 与 `specs/README.md`：将产品主定位收敛为“本地文件浏览器”，并将 `100/101` 明确为文件浏览主链路下的媒体子能力专题；同步将预览主链路组件命名语义从 `MediaPreview*` 切换为 `FilePreview*`。
+- 更新 `src/lib/fileSystem.ts` 与 `src/hooks/useFileSystem.ts`：目录读取改为默认纳入所有文件类型，类型筛选保持 `all/image/video` 三档不变。
+- 新增 `src/lib/filePreview.ts` 并更新网格/预览/遍历链路：统一文件能力识别（`FilePreviewKind`），新增文本白名单判定与 `TEXT_PREVIEW_MAX_BYTES=1MB`。
+- 重构预览组件命名与实现：`MediaPreviewPanel/Canvas/Lightbox/Viewport` 重命名为 `FilePreviewPanel/Canvas/Lightbox/Viewport`，并新增文本预览、超限/二进制降级提示与不可预览文件信息面板。
+- 更新 `usePreviewTraversal` 与 `WorkspaceShell` 快捷键守卫：`P/T/[ / ]` 与自动播放仅在媒体预览下触发，非媒体文件不响应播放控制。
+- 更新 `README.md`、`src/layouts/DirectorySelectionLayout.tsx` 与 `docs/shortcuts.md`：文案与说明同步到“本地文件浏览”定位，快捷键键位不变，仅补充媒体适用条件。
+
 ## 2026-03-11
 ### Added
 - 新增 `specs/109-soft-delete/spec.md`：定义 `fs.softDelete` 单工具双作用域（`file/workspace`）契约、`confirm=false/true` 双阶段语义、`.trash` 软删除目标与预览快捷键触发规则。

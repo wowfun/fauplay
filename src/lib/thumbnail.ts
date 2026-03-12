@@ -1,10 +1,8 @@
 import type { ThumbnailSizePreset } from '@/types'
+import { getFilePreviewKind, isImageFile, isVideoFile } from '@/lib/filePreview'
 
 const DEFAULT_THUMBNAIL_SIZE = 180
 const VIDEO_THUMBNAIL_TIMEOUT_MS = 4000
-
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
-const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg']
 
 const thumbnailCache = new Map<string, string>()
 
@@ -31,16 +29,6 @@ function buildCacheKey(
 ): string {
   const fileVersion = `${file.lastModified}:${file.size}`
   return `${filePath}::${fileVersion}::${sizePreset}::${size}`
-}
-
-export function isImageFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTENSIONS.includes(ext)
-}
-
-export function isVideoFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return VIDEO_EXTENSIONS.includes(ext)
 }
 
 export function isMediaFile(name: string): boolean {
@@ -221,7 +209,7 @@ async function generateVideoThumbnail(file: File, maxSize: number): Promise<stri
 }
 
 export function getMediaType(name: string): 'image' | 'video' | null {
-  if (isImageFile(name)) return 'image'
-  if (isVideoFile(name)) return 'video'
+  const kind = getFilePreviewKind(name)
+  if (kind === 'image' || kind === 'video') return kind
   return null
 }

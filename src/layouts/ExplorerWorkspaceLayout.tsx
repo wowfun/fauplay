@@ -14,14 +14,14 @@ const WorkspacePluginHost = lazy(async () => {
   return { default: mod.WorkspacePluginHost }
 })
 
-const MediaPreviewPanel = lazy(async () => {
-  const mod = await import('@/features/preview/components/MediaPreviewPanel')
-  return { default: mod.MediaPreviewPanel }
+const FilePreviewPanel = lazy(async () => {
+  const mod = await import('@/features/preview/components/FilePreviewPanel')
+  return { default: mod.FilePreviewPanel }
 })
 
-const MediaLightboxModal = lazy(async () => {
-  const mod = await import('@/features/preview/components/MediaLightboxModal')
-  return { default: mod.MediaLightboxModal }
+const FileLightboxModal = lazy(async () => {
+  const mod = await import('@/features/preview/components/FileLightboxModal')
+  return { default: mod.FileLightboxModal }
 })
 
 const WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:workspace-tool-panel-collapsed'
@@ -302,7 +302,7 @@ export function ExplorerWorkspaceLayout({
                 </div>
               )}
             >
-              <MediaPreviewPanel
+              <FilePreviewPanel
                 file={selectedFile}
                 rootHandle={rootHandle}
                 rootId={rootId}
@@ -347,7 +347,7 @@ export function ExplorerWorkspaceLayout({
             </div>
           )}
         >
-          <MediaLightboxModal
+          <FileLightboxModal
             file={previewFile}
             rootHandle={rootHandle}
             rootId={rootId}

@@ -63,7 +63,7 @@
 5. `FR-DCSP-05` 本专题不得引入运行时代码公共 API 变更。
 6. `FR-DCSP-06` 目录首轮读取不得为每个媒体文件强制读取完整 `File` 对象。
 7. `FR-DCSP-07` 视频缩略图任务在不可解码或异常场景下必须在可控时间内失败并释放临时资源。
-8. `FR-DCSP-08` 工作区基础视图渲染不得依赖 `WorkspacePluginHost`、`MediaPreviewPanel`、`MediaLightboxModal` 的模块加载完成。
+8. `FR-DCSP-08` 工作区基础视图渲染不得依赖 `WorkspacePluginHost`、`FilePreviewPanel`、`FileLightboxModal` 的模块加载完成。
 9. `FR-DCSP-09` 预览面板中媒体渲染主路径不得依赖 `usePluginRuntime` 与插件结果面板组件的模块加载完成。
 10. `FR-DCSP-10` 未启动 gateway 且工具列表为空时，首次打开预览不得主动请求插件运行时模块链路。
 

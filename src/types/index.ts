@@ -30,6 +30,18 @@ export type SortBy = 'name' | 'date' | 'size'
 export type SortOrder = 'asc' | 'desc'
 export type ThumbnailSizePreset = 'auto' | '256' | '512'
 
+export type FilePreviewKind = 'image' | 'video' | 'text' | 'unsupported'
+
+export type TextPreviewStatus = 'idle' | 'loading' | 'ready' | 'too_large' | 'binary' | 'error'
+
+export interface TextPreviewPayload {
+  status: TextPreviewStatus
+  content: string | null
+  fileSizeBytes: number | null
+  sizeLimitBytes: number
+  error: string | null
+}
+
 export interface FilterState {
   search: string
   type: 'all' | 'image' | 'video'

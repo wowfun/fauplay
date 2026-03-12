@@ -32,7 +32,7 @@ export function DirectorySelectionLayout({
       <div className="text-center max-w-md w-full">
         <h1 className="text-4xl font-bold mb-4">Fauplay</h1>
         <p className="text-muted-foreground mb-8">
-          选择一个本地文件夹开始浏览图片和视频
+          选择一个本地文件夹开始浏览文件
         </p>
 
         {error && (

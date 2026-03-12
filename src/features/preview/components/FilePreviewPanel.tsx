@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef, useCallback, type Dispatch, type SetStateAction } from 'react'
-import { createObjectUrlForFile, getFileFromPath } from '@/lib/fileSystem'
-import type { FileItem } from '@/types'
+import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
+import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
+import type { FileItem, TextPreviewPayload } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import { MediaPreviewCanvas } from './MediaPreviewCanvas'
+import { FilePreviewCanvas } from './FilePreviewCanvas'
 import { PreviewHeaderBar } from './PreviewHeaderBar'
 
-interface MediaPreviewPanelProps {
+interface FilePreviewPanelProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
@@ -34,7 +35,22 @@ interface MediaPreviewPanelProps {
   onMutationCommitted?: () => void | Promise<void>
 }
 
-export function MediaPreviewPanel({
+const INITIAL_TEXT_PREVIEW: TextPreviewPayload = {
+  status: 'idle',
+  content: null,
+  fileSizeBytes: null,
+  sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+  error: null,
+}
+
+function containsNullByte(bytes: Uint8Array): boolean {
+  for (const byte of bytes) {
+    if (byte === 0) return true
+  }
+  return false
+}
+
+export function FilePreviewPanel({
   file,
   rootHandle,
   rootId,
@@ -59,8 +75,12 @@ export function MediaPreviewPanel({
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
   onMutationCommitted,
-}: MediaPreviewPanelProps) {
+}: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
+  const [fileMimeType, setFileMimeType] = useState<string | null>(null)
+  const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null)
+  const [fileLastModifiedMs, setFileLastModifiedMs] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
@@ -77,25 +97,99 @@ export function MediaPreviewPanel({
   useEffect(() => {
     if (!file || !rootHandle) {
       replacePreviewUrl(null)
+      setTextPreview(INITIAL_TEXT_PREVIEW)
+      setFileMimeType(null)
+      setFileSizeBytes(null)
+      setFileLastModifiedMs(null)
       return
     }
 
     let cancelled = false
+    const previewKind = getFilePreviewKind(file.name)
 
     const loadFile = async () => {
       setIsLoading(true)
       setError(null)
+      setTextPreview(
+        previewKind === 'text'
+          ? {
+            ...INITIAL_TEXT_PREVIEW,
+            status: 'loading',
+          }
+          : INITIAL_TEXT_PREVIEW
+      )
 
       try {
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (cancelled) return
 
-        const nextUrl = createObjectUrlForFile(fileObj, file.name)
-        if (cancelled) {
-          URL.revokeObjectURL(nextUrl)
+        setFileMimeType(fileObj.type || getMimeType(file.name))
+        setFileSizeBytes(fileObj.size)
+        setFileLastModifiedMs(fileObj.lastModified || null)
+
+        if (previewKind === 'text') {
+          replacePreviewUrl(null)
+          if (fileObj.size > TEXT_PREVIEW_MAX_BYTES) {
+            if (cancelled) return
+            setTextPreview({
+              status: 'too_large',
+              content: null,
+              fileSizeBytes: fileObj.size,
+              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+              error: null,
+            })
+            return
+          }
+
+          try {
+            const bytes = new Uint8Array(await fileObj.arrayBuffer())
+            if (cancelled) return
+            if (containsNullByte(bytes)) {
+              setTextPreview({
+                status: 'binary',
+                content: null,
+                fileSizeBytes: fileObj.size,
+                sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+                error: null,
+              })
+              return
+            }
+
+            const content = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+            if (cancelled) return
+            setTextPreview({
+              status: 'ready',
+              content,
+              fileSizeBytes: fileObj.size,
+              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+              error: null,
+            })
+          } catch (textError) {
+            if (cancelled) return
+            setTextPreview({
+              status: 'error',
+              content: null,
+              fileSizeBytes: fileObj.size,
+              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+              error: (textError as Error).message,
+            })
+          }
           return
         }
-        replacePreviewUrl(nextUrl)
+
+        setTextPreview(INITIAL_TEXT_PREVIEW)
+
+        if (previewKind === 'image' || previewKind === 'video') {
+          const nextUrl = createObjectUrlForFile(fileObj, file.name)
+          if (cancelled) {
+            URL.revokeObjectURL(nextUrl)
+            return
+          }
+          replacePreviewUrl(nextUrl)
+          return
+        }
+
+        replacePreviewUrl(null)
       } catch (err) {
         if (!cancelled) {
           setError((err as Error).message)
@@ -132,11 +226,15 @@ export function MediaPreviewPanel({
     )
   }
 
+  const previewKind = getFilePreviewKind(file.name)
+  const isMediaPreview = isMediaPreviewKind(previewKind)
+
   return (
     <div className={isFullscreen ? 'flex flex-col h-full bg-background' : 'flex flex-col h-full bg-card border-l border-border'}>
       <PreviewHeaderBar
         fileName={file.name}
         isFullscreen={isFullscreen}
+        showPlaybackControls={isMediaPreview}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         onToggleAutoPlay={onToggleAutoPlay}
@@ -146,16 +244,20 @@ export function MediaPreviewPanel({
         onClose={onClose}
       />
 
-      <MediaPreviewCanvas
+      <FilePreviewCanvas
         file={file}
         rootHandle={rootHandle}
         rootId={rootId}
         previewActionTools={previewActionTools}
         previewUrl={previewUrl}
+        textPreview={textPreview}
+        fileMimeType={fileMimeType}
+        fileSizeBytes={fileSizeBytes}
+        fileLastModifiedMs={fileLastModifiedMs}
         isLoading={isLoading}
         error={error}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
-        autoPlayVideo={autoPlayEnabled || forceAutoPlayOnOpen}
+        autoPlayVideo={isMediaPreview && (autoPlayEnabled || forceAutoPlayOnOpen)}
         isFullscreen={isFullscreen}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}

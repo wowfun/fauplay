@@ -56,9 +56,9 @@
 
 ## 预览面板与全屏关系契约 (Panel-Fullscreen Relation Contract)
 
-1. 全屏预览区（Lightbox Modal Zone）是 B2 预览面板区（Media Preview Panel Zone）的全屏表现状态（Fullscreen Presentation State），不是独立业务域。
+1. 全屏预览区（Lightbox Modal Zone）是 B2 预览面板区（File Preview Panel Zone）的全屏表现状态（Fullscreen Presentation State），不是独立业务域。
 2. 侧栏预览与全屏预览必须共享同一套预览业务逻辑（Traversal / Auto-play / Action），禁止并行维护两套状态机。
-3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PluginActionRail`、`PluginToolWorkbench`、`PluginToolResultPanel`、`PreviewMediaViewport`、`PreviewFeedbackOverlay`。
+3. 预览子分区语义在两种表现态下必须一致：`PreviewHeaderBar`、`PreviewControlGroup`、`PluginActionRail`、`PluginToolWorkbench`、`PluginToolResultPanel`、`FilePreviewViewport`、`PreviewFeedbackOverlay`。
 4. 两种表现态允许差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）与焦点管理（Focus Management）。
 5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
 6. 插件运行时状态共享、折叠策略与三段式细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
@@ -77,11 +77,12 @@
 3. 双击文件打开全屏预览。
 4. `Esc` 关闭优先级必须为：全屏预览 -> 侧栏预览。
 5. 侧栏与全屏共享“上一项/下一项、顺序/随机、自动播放”语义。
-6. 工作区插件主要作用于当前工作目录或当前选中文件列表，不以“当前预览文件”作为唯一上下文。
-7. 预览插件主要作用于当前预览文件，不扩展为目录级批处理入口。
-8. 文件网格区应支持复选框多选，且文件与目录均可被勾选。
-9. 网格区应支持范围选择（`Shift + 单击`、`Shift + 方向键`），默认覆盖当前勾选集合。
-10. `Ctrl/Cmd + 单击` 网格项应仅切换勾选态，不触发目录进入或预览打开。
+6. 非媒体文件（如文本/压缩包）必须允许进入预览域；不可内嵌预览时提供可见提示与文件信息面板。
+7. 工作区插件主要作用于当前工作目录或当前选中文件列表，不以“当前预览文件”作为唯一上下文。
+8. 预览插件主要作用于当前预览文件，不扩展为目录级批处理入口。
+9. 文件网格区应支持复选框多选，且文件与目录均可被勾选。
+10. 网格区应支持范围选择（`Shift + 单击`、`Shift + 方向键`），默认覆盖当前勾选集合。
+11. `Ctrl/Cmd + 单击` 网格项应仅切换勾选态，不触发目录进入或预览打开。
 
 ## 布局默认值契约 (Layout Default Contract)
 
@@ -91,7 +92,7 @@
 
 ## 状态契约 (State Contract)
 
-1. 预览可视状态必须覆盖：`idle`、`loading`、`ready`、`error`。
+1. 预览可视状态必须覆盖：`idle`、`loading`、`ready`、`error`；其中 `ready` 允许媒体与文本预览两类内容态。
 2. 预览导航触发过程可进入 `navigating` 过渡态。
 3. 工具动作运行态必须覆盖：`default`、`loading`、`error`、`disabled`。
 4. 错误状态必须用户可见，不得静默失败。
@@ -124,7 +125,7 @@
 
 1. 分层遵循：`ui` / `features` / `layouts`。
 2. 命名应表达语义职责，避免过度抽象命名。
-3. 预览媒体域子分区采用 `Preview*` 前缀命名；插件三段式子分区采用 `Plugin*` 前缀命名。
+3. 文件预览子分区采用 `*Preview*` 命名族（如 `FilePreviewViewport`）；插件三段式子分区采用 `Plugin*` 前缀命名。
 
 ## 非目标
 

@@ -164,13 +164,13 @@ function preloadPreviewModules(): void {
   previewPanelModulesPreloaded = true
 
   const preloaders = [
-    () => import('@/features/preview/components/MediaPreviewPanel'),
-    () => import('@/features/preview/components/MediaPreviewCanvas'),
+    () => import('@/features/preview/components/FilePreviewPanel'),
+    () => import('@/features/preview/components/FilePreviewCanvas'),
     () => import('@/features/preview/components/PreviewHeaderBar'),
     () => import('@/features/preview/components/PreviewControlGroup'),
     () => import('@/features/preview/components/PreviewTitleRow'),
     () => import('@/features/preview/components/MediaPlaybackControls'),
-    () => import('@/features/preview/components/PreviewMediaViewport'),
+    () => import('@/features/preview/components/FilePreviewViewport'),
     () => import('@/features/preview/components/PreviewFeedbackOverlay'),
   ]
 
@@ -243,6 +243,7 @@ export function WorkspaceShell({
     autoPlayIntervalSec,
     playbackOrder,
     hasOpenPreview,
+    hasActiveMediaPreview,
     showFileInPane,
     openFileInModal,
     closePreviewModal,
@@ -391,13 +392,13 @@ export function WorkspaceShell({
 
       if (isTyping) return
 
-      if (matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
+      if (hasActiveMediaPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
         event.preventDefault()
         toggleAutoPlay()
         return
       }
 
-      if (hasOpenPreview) {
+      if (hasActiveMediaPreview) {
         if (matchesAnyShortcut(event, keyboardShortcuts.preview.togglePlaybackOrder)) {
           event.preventDefault()
           togglePlaybackOrder()
@@ -447,6 +448,7 @@ export function WorkspaceShell({
   }, [
     closePreviewModal,
     closePreviewPane,
+    hasActiveMediaPreview,
     currentPath,
     hasOpenPreview,
     navigateMediaFromModal,
