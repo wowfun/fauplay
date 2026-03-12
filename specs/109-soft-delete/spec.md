@@ -39,11 +39,12 @@
 4. ActionRail 点击 `fs.softDelete` 默认直接执行提交（不弹二次确认）。
 5. 预览插件栏在非回收站支持单文件软删除，`Delete` 快捷键触发提交执行。
 6. 回收站上下文显示还原插件并隐藏软删除插件；非回收站显示软删除插件并隐藏还原插件。
-7. `workspace` 作用域还原支持选中项批量还原（文件+目录）。
-8. `file` 作用域还原支持当前预览文件还原。
-9. 回收站上下文下 `Delete` 不触发任何操作（由于 `fs.softDelete` 隐藏）。
-10. Toolbar 仅保留“回收站”按钮；当 `.trash` 不存在或为空时禁用。
-11. Gateway 离线时，回收站可浏览，插件能力按现有降级不可用。
+7. 非回收站上下文下，`workspace` 与 `preview` 两处 `PluginActionRail` 中 `fs.softDelete` 按钮必须固定显示在最后一个位置。
+8. `workspace` 作用域还原支持选中项批量还原（文件+目录）。
+9. `file` 作用域还原支持当前预览文件还原。
+10. 回收站上下文下 `Delete` 不触发任何操作（由于 `fs.softDelete` 隐藏）。
+11. Toolbar 仅保留“回收站”按钮；当 `.trash` 不存在或为空时禁用。
+12. Gateway 离线时，回收站可浏览，插件能力按现有降级不可用。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -146,6 +147,7 @@
 9. `FR-SD-09` 回收站上下文必须隐藏 `fs.softDelete` 并显示 `fs.restore`。
 10. `FR-SD-10` 非回收站上下文必须显示 `fs.softDelete` 并隐藏 `fs.restore`。
 11. `FR-SD-11` 回收站上下文下 `Delete` 快捷键不得触发软删除。
+12. `FR-SD-12` 非回收站上下文下，`workspace` 与 `preview` 的 ActionRail 按钮顺序必须满足 `fs.softDelete` 固定置尾。
 
 ## 8. 验收标准 (AC)
 
@@ -161,6 +163,7 @@
 10. `AC-SD-10` 回收站上下文下按 `Delete` 不触发操作。
 11. `AC-SD-11` Toolbar 无“还原”按钮，仅保留“回收站”入口。
 12. `AC-SD-12` `.trash` 不出现在网格和地址栏子目录候选中。
+13. `AC-SD-13` 非回收站上下文中，不论网关返回工具顺序如何，`workspace` 与 `preview` ActionRail 内 `fs.softDelete` 均显示在最后一个按钮位。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 

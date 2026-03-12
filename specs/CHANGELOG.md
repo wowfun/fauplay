@@ -11,6 +11,7 @@
 - 重构预览组件命名与实现：`MediaPreviewPanel/Canvas/Lightbox/Viewport` 重命名为 `FilePreviewPanel/Canvas/Lightbox/Viewport`，并新增文本预览、超限/二进制降级提示与不可预览文件信息面板。
 - 更新 `usePreviewTraversal` 与 `WorkspaceShell` 快捷键守卫：`P/T/[ / ]` 与自动播放仅在媒体预览下触发，非媒体文件不响应播放控制。
 - 更新 `README.md`、`src/layouts/DirectorySelectionLayout.tsx` 与 `docs/shortcuts.md`：文案与说明同步到“本地文件浏览”定位，快捷键键位不变，仅补充媒体适用条件。
+- 更新 `specs/109-soft-delete/spec.md`、`WorkspacePluginHost` 与 `PreviewPluginHost`：新增 `fs.softDelete` 动作栏置尾约束，确保非回收站上下文下软删除按钮在工作区/预览 ActionRail 永远位于最后一位。
 
 ## 2026-03-11
 ### Added

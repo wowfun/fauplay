@@ -8,6 +8,7 @@ import {
   hasWorkbenchMetadata,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
+import { orderToolsWithSoftDeleteLast } from '@/features/plugin-runtime/utils/toolOrdering'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 
 interface WorkspacePluginHostProps {
@@ -49,13 +50,14 @@ export function WorkspacePluginHost({
     () => normalizedCurrentPath === '.trash' || normalizedCurrentPath.startsWith('.trash/'),
     [normalizedCurrentPath]
   )
-  const contextualTools = useMemo(() => (
-    tools.filter((tool) => {
+  const contextualTools = useMemo(() => {
+    const filteredTools = tools.filter((tool) => {
       if (tool.name === 'fs.softDelete') return !isTrashContext
       if (tool.name === 'fs.restore') return isTrashContext
       return true
     })
-  ), [isTrashContext, tools])
+    return orderToolsWithSoftDeleteLast(filteredTools)
+  }, [isTrashContext, tools])
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
 
   const selectedEntryPaths = useMemo(() => {

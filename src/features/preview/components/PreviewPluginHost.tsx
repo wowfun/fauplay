@@ -12,6 +12,7 @@ import {
   isBooleanToolOptionEnabled,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
+import { orderToolsWithSoftDeleteLast } from '@/features/plugin-runtime/utils/toolOrdering'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 
 interface PreviewPluginHostProps {
@@ -63,13 +64,14 @@ export function PreviewPluginHost({
     () => normalizedFilePath === '.trash' || normalizedFilePath.startsWith('.trash/'),
     [normalizedFilePath]
   )
-  const contextualTools = useMemo(() => (
-    previewActionTools.filter((tool) => {
+  const contextualTools = useMemo(() => {
+    const filteredTools = previewActionTools.filter((tool) => {
       if (tool.name === 'fs.softDelete') return !isTrashContext
       if (tool.name === 'fs.restore') return isTrashContext
       return true
     })
-  ), [isTrashContext, previewActionTools])
+    return orderToolsWithSoftDeleteLast(filteredTools)
+  }, [isTrashContext, previewActionTools])
 
   const pluginRuntime = usePluginRuntime({
     scope: 'file',
