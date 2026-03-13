@@ -40,6 +40,23 @@ interface ContinuousToolTask {
   tool: GatewayToolDescriptor
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.split('/').filter(Boolean).join('/')
+}
+
+function readFirstResultRelativePath(result: unknown): string | null {
+  if (!isRecord(result)) return null
+  if (!Array.isArray(result.items) || result.items.length === 0) return null
+  const first = result.items[0]
+  if (!isRecord(first) || typeof first.relativePath !== 'string') return null
+  const normalized = normalizeRelativePath(first.relativePath)
+  return normalized || null
+}
+
 export function PreviewPluginHost({
   file,
   rootHandle,
@@ -92,8 +109,14 @@ export function PreviewPluginHost({
     }, [file.kind, file.path]),
     canRunTool: useCallback(() => file.kind === 'file', [file.kind]),
     onMutationCommitted: onMutationCommitted
-      ? async () => {
-        await onMutationCommitted()
+      ? async ({ tool, result }) => {
+        const mutationParams: PreviewMutationCommitParams = {
+          mutationToolName: tool.name,
+        }
+        if (tool.name === 'fs.softDelete') {
+          mutationParams.deletedRelativePath = readFirstResultRelativePath(result.result) ?? file.path
+        }
+        await onMutationCommitted(mutationParams)
       }
       : undefined,
   })

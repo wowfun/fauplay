@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-03-14
+### Changed
+- 更新 `specs/109-soft-delete/spec.md`：新增“预览软删除提交后自动续选”契约，明确当前预览文件删除成功后不得回退首项；媒体文件复用预览遍历模式（顺序/随机），非媒体文件按当前列表顺序前进且末项回绕到首项。
+- 更新 `src/features/preview/types/mutation.ts`、`PreviewPluginHost.tsx` 与 `WorkspaceShell.tsx`：预览 mutation 回调新增 `mutationToolName/deletedRelativePath` 上下文透传，`fs.softDelete` 成功后在目录刷新前先完成目标续选（媒体走 `next` 遍历，非媒体走列表 next + wrap），修复删除后光标回到首项的问题。
+
 ## 2026-03-13
 ### Added
 - 新增 `specs/113-preview-inline-rename/spec.md`：定义预览标题点击重命名契约，覆盖侧栏/全屏同构交互、`Enter/失焦` 提交与 `Esc` 取消、严格冲突失败语义（禁止自动序号去重提交）、以及刷新后预览回绑约束。

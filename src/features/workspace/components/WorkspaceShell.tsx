@@ -6,6 +6,7 @@ import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversa
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { keyboardShortcuts } from '@/config/shortcuts'
+import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
@@ -235,6 +236,10 @@ export function WorkspaceShell({
     if (selectedGridItems.length !== 1) return null
     return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
   }, [selectedGridItems])
+  const filteredFileItems = useMemo(
+    () => filteredFiles.filter((file): file is FileItem => file.kind === 'file'),
+    [filteredFiles]
+  )
   const {
     selectedFile,
     previewFile,
@@ -290,13 +295,70 @@ export function WorkspaceShell({
     await navigateToPath(currentPath)
   }, [currentPath, navigateToPath])
 
+  const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
+    const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
+    if (!normalizedDeletedPath || filteredFileItems.length <= 1) return null
+
+    const deletedIndex = filteredFileItems.findIndex((file) => (
+      normalizeRelativePath(file.path) === normalizedDeletedPath
+    ))
+    if (deletedIndex < 0) return null
+
+    const nextIndex = (deletedIndex + 1) % filteredFileItems.length
+    const nextFile = filteredFileItems[nextIndex]
+    if (!nextFile) return null
+    if (normalizeRelativePath(nextFile.path) === normalizedDeletedPath) return null
+    return nextFile
+  }, [filteredFileItems])
+
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
     const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
+      await navigateToPath(currentPath)
+      return
     }
+
+    if (params?.mutationToolName === 'fs.softDelete') {
+      const deletedRelativePath = normalizeRelativePath(params.deletedRelativePath || '')
+      const activePreviewFile = previewFile ?? selectedFile
+      const activePreviewPath = activePreviewFile?.kind === 'file'
+        ? normalizeRelativePath(activePreviewFile.path)
+        : ''
+
+      if (
+        deletedRelativePath
+        && activePreviewFile?.kind === 'file'
+        && activePreviewPath === deletedRelativePath
+      ) {
+        const previewKind = getFilePreviewKind(activePreviewFile.name)
+        if (isMediaPreviewKind(previewKind)) {
+          if (previewFile) {
+            navigateMediaFromModal('next')
+          } else {
+            navigateMediaFromPane('next')
+          }
+        } else {
+          const nextFile = resolveNextFileAfterDelete(deletedRelativePath)
+          if (nextFile) {
+            showFileInPane(nextFile)
+          }
+        }
+      }
+    }
+
     await navigateToPath(currentPath)
-  }, [alignPreviewToPath, currentPath, navigateToPath])
+  }, [
+    alignPreviewToPath,
+    currentPath,
+    navigateMediaFromModal,
+    navigateMediaFromPane,
+    navigateToPath,
+    previewFile,
+    resolveNextFileAfterDelete,
+    selectedFile,
+    showFileInPane,
+  ])
 
   const handleOpenTrash = useCallback(() => {
     if (!hasTrashEntries) return
