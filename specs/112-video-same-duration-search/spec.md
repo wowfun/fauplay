@@ -14,6 +14,7 @@
 3. 预览工作台支持持续调用与搜索范围选项。
 4. 结果区支持表格行级“打开”按钮动作。
 5. 仅对 `search.scope` 选项做 LocalStorage 持久化。
+6. WSL 下挂载失效（`No such device`）时支持自动重挂载并单次重试。
 
 范围外：
 
@@ -95,6 +96,9 @@
 5. 同时长判定以毫秒为准：候选项需满足 `|candidateDurationMs - targetDurationMs| <= toleranceMs`。
 6. 大小容差启用条件：`toleranceSize >= 0`；启用后候选项需满足 `|candidateSizeBytes - targetSizeBytes| <= toleranceSize * 1024`。
 7. `openEverything` 生成的查询条件需与插件内搜索等价；启用大小容差时必须包含对应 `size` 条件。
+8. 当目标文件位于 `/mnt/<drive>/...` 且探测阶段报错包含 `No such device` 时，系统需尝试执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并仅重试一次。
+9. 自动重挂载仅使用环境变量 `SUDO_PASSWORD`；不支持 `sudo_password` 兼容读取。
+10. 探测与自动重挂载流程需设置超时并快速失败，避免长时间阻塞导致前端 `MCP_CLIENT_TIMEOUT`。
 
 ## 6. 持续调用与去重语义
 
@@ -115,6 +119,9 @@
 7. `FR-SDS-07` 连续调用必须支持历史命中静默跳过，手动调用必须强制重算。
 8. `FR-SDS-08` 系统必须支持 `toleranceSize` 配置项，`-1` 表示忽略大小容差，`0` 表示精确大小匹配，正整数表示 KB 容差范围匹配。
 9. `FR-SDS-09` `openEverything` 必须复用与 `search` 相同的大小容差条件生成等价查询。
+10. `FR-SDS-10` 探测阶段命中 `No such device` 时，系统必须按 `/mnt/<drive>` 自动重挂载并单次重试。
+11. `FR-SDS-11` 当 `SUDO_PASSWORD` 缺失或挂载失败时，系统必须返回可读错误（含盘符与操作建议）。
+12. `FR-SDS-12` 重挂载或探测超时时，系统必须在单次工具调用内快速返回 `MCP_TOOL_CALL_FAILED`，而不是等待客户端超时。
 
 ## 8. 验收标准 (AC)
 
@@ -127,6 +134,9 @@
 7. `AC-SDS-07` 手动重复执行同参数请求时仍生成新结果项。
 8. `AC-SDS-08` `toleranceSize=-1` 时搜索结果不受大小容差过滤；`toleranceSize=0` 时仅命中与目标文件大小一致的结果。
 9. `AC-SDS-09` `toleranceSize>0` 时，`search` 与 `openEverything` 均应用相同大小容差范围。
+10. `AC-SDS-10` `/mnt/e/...` 场景首次探测报 `No such device` 时，可自动重挂载后重试成功。
+11. `AC-SDS-11` 未配置 `SUDO_PASSWORD` 时返回明确报错，且不尝试读取 `sudo_password`。
+12. `AC-SDS-12` 模拟重挂载命令卡住时，工具在预设超时内返回可读错误，不出现 `Gateway request timed out after 20s`。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 

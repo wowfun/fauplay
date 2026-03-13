@@ -3,6 +3,6 @@
   "everythingPath": "/mnt/c/Program Files/Everything 1.5a/Everything64.exe",
   "instanceName": "1.5a",
   "toleranceMs": 500,
-  "toleranceSize": -1,
+  "toleranceSize": 512,
   "maxResults": 200
 }

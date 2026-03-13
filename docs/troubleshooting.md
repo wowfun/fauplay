@@ -141,6 +141,51 @@ cat .fauplay/mcp.json
 
 3. 重启网关并重新执行 `tools/list` 验证。
 
+## 1.3) 相同时长插件报 `No such device`（WSL 盘符挂载失效）
+
+### 现象
+
+- `media.searchSameDurationVideos` 执行失败，报错类似：
+  - `Failed to probe video duration: ... No such device`
+  - 错误码 `MCP_TOOL_CALL_FAILED`
+
+### 原因
+
+- WSL 下 `/mnt/<drive>` 的 `drvfs` 挂载失效（常见于移动硬盘、休眠恢复后）。
+
+### 机制
+
+- 插件在探测视频时长/文件大小阶段，若命中 `/mnt/<drive>` + `No such device`，会自动执行：
+
+```bash
+sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>
+```
+
+- 挂载成功后自动重试一次。
+- 该机制只读取 `SUDO_PASSWORD`，不支持 `sudo_password`。
+
+### 配置
+
+`.fauplay/mcp.local.json` 对同名 server 为“整项覆盖”（非深合并），因此需保留完整 `stdio` 条目再附加 `env`：
+
+```json
+{
+  "servers": {
+    "video-same-duration": {
+      "type": "stdio",
+      "command": "node",
+      "callTimeoutMs": 20000,
+      "args": [
+        "tools/mcp/video-same-duration/server.mjs"
+      ],
+      "env": {
+        "SUDO_PASSWORD": "<your_sudo_password>"
+      }
+    }
+  }
+}
+```
+
 ## 2) 选择文件夹后无法进入子目录
 
 ### 现象
@@ -246,4 +291,3 @@ cat .fauplay/mcp.json
 - `Open`（遗留问题，未在应用层最终修复）
 - 首次记录：`2026-03-09`
 - 处理策略：`Deferred`（先记录，后续按网关目录枚举能力专题处理）
-

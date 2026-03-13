@@ -13,6 +13,8 @@
 - 更新 `tools/mcp/video-same-duration/config.json` 与 `server.mjs`：容差字段从 `toleranceSeconds` 切换为 `toleranceMs`（默认 `500`），匹配判定升级为毫秒级（无向后兼容字段读取）。
 - 更新 `tools/mcp/video-same-duration/config.json` 与专题规范：`esPath` 默认值迁移为共享路径 `tools/bin/everything/es.exe`，用于后续多场景复用。
 - 更新 `tools/mcp/video-same-duration/config.json`、`server.mjs` 与专题规范：新增 `toleranceSize`（KB）大小容差配置；`-1` 表示忽略大小容差，`>=0` 时按 `size` 容差范围参与 `search/openEverything` 等价查询与结果过滤。
+- 更新 `tools/mcp/video-same-duration/server.mjs` 与专题规范：新增 WSL `drvfs` 挂载失效自动修复（命中 `No such device` 时自动执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并单次重试），密码来源仅 `SUDO_PASSWORD`（不兼容 `sudo_password`）。
+- 更新 `tools/mcp/video-same-duration/server.mjs` 与专题规范：为 `ffprobe/stat` 与自动重挂载流程增加超时与失败短路，避免挂载异常时触发前端 `MCP_CLIENT_TIMEOUT`。
 
 ## 2026-03-12
 ### Added

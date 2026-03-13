@@ -15,6 +15,8 @@ const DEFAULT_INSTANCE_NAME = '1.5a'
 const DEFAULT_TOLERANCE_MS = 500
 const DEFAULT_TOLERANCE_SIZE_KB = -1
 const DEFAULT_MAX_RESULTS = 200
+const PROBE_TIMEOUT_MS = 4000
+const SUDO_COMMAND_TIMEOUT_MS = 3000
 const MIN_MAX_RESULTS = 1
 const MAX_MAX_RESULTS = 5000
 const MAX_TOLERANCE_MS = 60 * 60 * 1000
@@ -27,6 +29,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'config.json')
 const LOCAL_CONFIG_PATH = path.resolve(__dirname, 'config.local.json')
+const remountFailureByDrive = new Map()
 
 const TOOL_DEFINITIONS = [
   {
@@ -404,9 +407,98 @@ async function toUnixPath(targetPath) {
   return stdout.trim()
 }
 
-async function probeVideoDurationMs(rawPath) {
+function getErrorDetail(error) {
+  return `${error?.message || ''}\n${error?.stderr || ''}`.trim()
+}
+
+function isNoSuchDeviceError(error) {
+  return /No such device/i.test(getErrorDetail(error))
+}
+
+function extractDrvfsMountPoint(unixPath) {
+  if (typeof unixPath !== 'string') return null
+  const normalized = unixPath.replace(/\\/g, '/')
+  const match = normalized.match(/^\/mnt\/([a-zA-Z])(?:\/|$)/)
+  if (!match) return null
+  const driveLower = match[1].toLowerCase()
+  return {
+    driveLower,
+    driveUpper: driveLower.toUpperCase(),
+    mountPoint: `/mnt/${driveLower}`,
+  }
+}
+
+async function mountDrvfsWithSudo(remountTarget) {
+  const previousFailure = remountFailureByDrive.get(remountTarget.driveLower)
+  if (previousFailure) {
+    throw toToolCallError(
+      `Skip remount ${remountTarget.driveUpper}: previous remount failed. ${previousFailure}`
+    )
+  }
+
+  const sudoPassword = process.env.SUDO_PASSWORD
+  if (typeof sudoPassword !== 'string' || !sudoPassword) {
+    throw toToolCallError(
+      `Missing SUDO_PASSWORD for drvfs remount: sudo -S mount -t drvfs ${remountTarget.driveUpper}: ${remountTarget.mountPoint}`
+    )
+  }
+
+  const sudoOptions = {
+    input: `${sudoPassword}\n`,
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    timeout: SUDO_COMMAND_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  }
+
   try {
-    const absolutePath = await toUnixPath(rawPath)
+    await execFileAsync(
+      'sudo',
+      ['-S', 'mount', '-t', 'drvfs', `${remountTarget.driveUpper}:`, remountTarget.mountPoint],
+      sudoOptions
+    )
+  } catch (error) {
+    const detail = getErrorDetail(error) || 'unknown remount error'
+    const passwordHint = /password for/i.test(detail)
+      ? ' Verify SUDO_PASSWORD is correct and can run sudo non-interactively.'
+      : ''
+    remountFailureByDrive.set(remountTarget.driveLower, detail)
+    throw toToolCallError(
+      `Failed to remount ${remountTarget.driveUpper}: at ${remountTarget.mountPoint}. ${detail}${passwordHint}`
+    )
+  }
+}
+
+async function withMountRetry(rawPath, actionName, action) {
+  const absolutePath = await toUnixPath(rawPath)
+  try {
+    return await action(absolutePath)
+  } catch (firstError) {
+    if (!isNoSuchDeviceError(firstError)) {
+      throw toToolCallError(`Failed to ${actionName}: ${getErrorDetail(firstError) || 'unknown error'}`)
+    }
+
+    const remountTarget = extractDrvfsMountPoint(absolutePath)
+    if (!remountTarget) {
+      throw toToolCallError(
+        `Failed to ${actionName}: ${getErrorDetail(firstError) || 'unknown error'}`
+      )
+    }
+
+    await mountDrvfsWithSudo(remountTarget)
+
+    try {
+      return await action(absolutePath)
+    } catch (retryError) {
+      throw toToolCallError(
+        `Failed to ${actionName} after remount ${remountTarget.driveUpper}: ${getErrorDetail(retryError) || 'unknown error'}`
+      )
+    }
+  }
+}
+
+async function probeVideoDurationMs(rawPath) {
+  return withMountRetry(rawPath, 'probe video duration', async (absolutePath) => {
     const { stdout } = await execFileAsync('ffprobe', [
       '-v',
       'error',
@@ -415,28 +507,28 @@ async function probeVideoDurationMs(rawPath) {
       '-of',
       'default=noprint_wrappers=1:nokey=1',
       absolutePath,
-    ])
+    ], {
+      timeout: PROBE_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+    })
     const durationFloat = Number(stdout.trim())
     if (!Number.isFinite(durationFloat) || durationFloat < 0) {
       throw new Error('invalid ffprobe duration')
     }
     return Math.max(0, Math.round(durationFloat * 1000))
-  } catch (error) {
-    throw toToolCallError(`Failed to probe video duration: ${error instanceof Error ? error.message : 'unknown error'}`)
-  }
+  })
 }
 
 async function probeFileSizeBytes(rawPath) {
-  try {
-    const absolutePath = await toUnixPath(rawPath)
-    const fileStat = await stat(absolutePath)
+  return withMountRetry(rawPath, 'probe file size', async (absolutePath) => {
+    const fileStat = await stat(absolutePath, {
+      bigint: false,
+    })
     if (!Number.isFinite(fileStat.size) || fileStat.size < 0) {
       throw new Error('invalid file size')
     }
     return Math.round(fileStat.size)
-  } catch (error) {
-    throw toToolCallError(`Failed to probe file size: ${error instanceof Error ? error.message : 'unknown error'}`)
-  }
+  })
 }
 
 function parseEsRows(stdout, { targetWindowsPath }) {
