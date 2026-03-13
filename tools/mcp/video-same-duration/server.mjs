@@ -1,7 +1,7 @@
 /* global process */
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import { Buffer } from 'node:buffer'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -13,10 +13,12 @@ const SERVER_NAME = 'fauplay-video-same-duration'
 const SERVER_VERSION = '0.1.0'
 const DEFAULT_INSTANCE_NAME = '1.5a'
 const DEFAULT_TOLERANCE_MS = 500
+const DEFAULT_TOLERANCE_SIZE_KB = -1
 const DEFAULT_MAX_RESULTS = 200
 const MIN_MAX_RESULTS = 1
 const MAX_MAX_RESULTS = 5000
 const MAX_TOLERANCE_MS = 60 * 60 * 1000
+const MAX_TOLERANCE_SIZE_KB = 1024 * 1024 * 1024
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'flv', 'wmv', 'mpg', 'mpeg', 'ts'])
 const TABLE_COLUMNS = ['duration', 'size', 'path', 'openAction']
 
@@ -185,6 +187,13 @@ function clampInt(value, min, max, defaultValue) {
   return Math.min(Math.max(value, min), max)
 }
 
+function parseToleranceSizeKB(value) {
+  if (!Number.isInteger(value) || value < -1) {
+    return DEFAULT_TOLERANCE_SIZE_KB
+  }
+  return Math.min(value, MAX_TOLERANCE_SIZE_KB)
+}
+
 async function loadConfig() {
   const baseConfig = asConfigObject(await readJsonFileSafe(DEFAULT_CONFIG_PATH, true))
   const localConfig = asConfigObject(await readJsonFileSafe(LOCAL_CONFIG_PATH, false))
@@ -209,6 +218,7 @@ async function loadConfig() {
       MAX_TOLERANCE_MS,
       DEFAULT_TOLERANCE_MS
     ),
+    toleranceSizeKB: parseToleranceSizeKB(Number(merged.toleranceSize)),
     maxResults: clampInt(
       Number(merged.maxResults),
       MIN_MAX_RESULTS,
@@ -362,13 +372,29 @@ function buildLengthTerms(targetDurationMs, toleranceMs) {
   ]
 }
 
-function buildEverythingSearchText({ searchScope, rootWindowsPath, lengthTerms }) {
+function buildSizeTerms(targetSizeBytes, toleranceSizeKB) {
+  if (toleranceSizeKB < 0) {
+    return []
+  }
+
+  const sizeToleranceBytes = toleranceSizeKB * 1024
+  const lowerBytes = Math.max(0, targetSizeBytes - sizeToleranceBytes)
+  const upperBytes = Math.max(0, targetSizeBytes + sizeToleranceBytes)
+  if (lowerBytes === upperBytes) {
+    return [`size:${lowerBytes}`]
+  }
+
+  return [`size:>=${lowerBytes}`, `size:<=${upperBytes}`]
+}
+
+function buildEverythingSearchText({ searchScope, rootWindowsPath, lengthTerms, sizeTerms }) {
   const parts = []
   if (searchScope === 'root') {
     parts.push(`"${rootWindowsPath}"`)
   }
   parts.push('video:')
   parts.push(...lengthTerms)
+  parts.push(...sizeTerms)
   return parts.join(' ')
 }
 
@@ -400,6 +426,19 @@ async function probeVideoDurationMs(rawPath) {
   }
 }
 
+async function probeFileSizeBytes(rawPath) {
+  try {
+    const absolutePath = await toUnixPath(rawPath)
+    const fileStat = await stat(absolutePath)
+    if (!Number.isFinite(fileStat.size) || fileStat.size < 0) {
+      throw new Error('invalid file size')
+    }
+    return Math.round(fileStat.size)
+  } catch (error) {
+    throw toToolCallError(`Failed to probe file size: ${error instanceof Error ? error.message : 'unknown error'}`)
+  }
+}
+
 function parseEsRows(stdout, { targetWindowsPath }) {
   const rows = []
   const normalizedTarget = targetWindowsPath.toLowerCase()
@@ -412,13 +451,16 @@ function parseEsRows(stdout, { targetWindowsPath }) {
 
     const duration = match[1]
     const size = match[2]
+    const sizeBytes = Number(size.replace(/,/g, ''))
     const absolutePath = match[3]
     if (!absolutePath) continue
+    if (!Number.isFinite(sizeBytes) || sizeBytes < 0) continue
     if (absolutePath.toLowerCase() === normalizedTarget) continue
 
     rows.push({
       duration,
       size,
+      sizeBytes,
       path: absolutePath,
     })
   }
@@ -426,11 +468,16 @@ function parseEsRows(stdout, { targetWindowsPath }) {
   return rows
 }
 
-async function filterRowsByDurationTolerance(rows, params) {
-  const { targetDurationMs, toleranceMs, maxResults } = params
+async function filterRowsByTolerance(rows, params) {
+  const { targetDurationMs, toleranceMs, targetSizeBytes, toleranceSizeKB, maxResults } = params
   const filteredRows = []
+  const sizeToleranceBytes = toleranceSizeKB >= 0 ? toleranceSizeKB * 1024 : -1
 
   for (const row of rows) {
+    if (sizeToleranceBytes >= 0) {
+      if (Math.abs(row.sizeBytes - targetSizeBytes) > sizeToleranceBytes) continue
+    }
+
     let candidateDurationMs = 0
     try {
       candidateDurationMs = await probeVideoDurationMs(row.path)
@@ -440,7 +487,9 @@ async function filterRowsByDurationTolerance(rows, params) {
     if (Math.abs(candidateDurationMs - targetDurationMs) > toleranceMs) continue
 
     filteredRows.push({
-      ...row,
+      duration: row.duration,
+      size: row.size,
+      path: row.path,
       openAction: {
         type: 'tool-call',
         label: '打开',
@@ -478,7 +527,9 @@ async function runEsSearch({
   rootWindowsPath,
   targetWindowsPath,
   lengthTerms,
+  sizeTerms,
   targetDurationMs,
+  targetSizeBytes,
 }) {
   const args = []
   if (config.instanceName) {
@@ -489,6 +540,7 @@ async function runEsSearch({
   }
   args.push('video:')
   args.push(...lengthTerms)
+  args.push(...sizeTerms)
   args.push('-double-quote')
   args.push('-sort', 'size-descending')
   args.push('-n', String(config.maxResults))
@@ -513,9 +565,11 @@ async function runEsSearch({
     targetWindowsPath,
   })
 
-  return filterRowsByDurationTolerance(rows, {
+  return filterRowsByTolerance(rows, {
     targetDurationMs,
     toleranceMs: config.toleranceMs,
+    targetSizeBytes,
+    toleranceSizeKB: config.toleranceSizeKB,
     maxResults: config.maxResults,
   })
 }
@@ -530,17 +584,21 @@ async function handleSearch(args, config) {
 
   const absolutePath = resolvePathWithinRoot(rootPath, relativePath)
   const targetDurationMs = await probeVideoDurationMs(absolutePath)
+  const targetSizeBytes = await probeFileSizeBytes(absolutePath)
   const targetSeconds = Math.floor(targetDurationMs / 1000)
   const rootWindowsPath = await toWindowsPath(rootPath)
   const targetWindowsPath = await toWindowsPath(absolutePath)
   const lengthTerms = buildLengthTerms(targetDurationMs, config.toleranceMs)
+  const sizeTerms = buildSizeTerms(targetSizeBytes, config.toleranceSizeKB)
   const rows = await runEsSearch({
     config,
     searchScope,
     rootWindowsPath,
     targetWindowsPath,
     lengthTerms,
+    sizeTerms,
     targetDurationMs,
+    targetSizeBytes,
   })
 
   return {
@@ -549,13 +607,15 @@ async function handleSearch(args, config) {
     targetDuration: formatDurationLabel(targetSeconds),
     targetDurationMs,
     toleranceMs: config.toleranceMs,
+    toleranceSizeKB: config.toleranceSizeKB,
+    targetSizeBytes,
     resultsTable: {
       columns: TABLE_COLUMNS,
       rows,
     },
     count: rows.length,
     query: {
-      terms: ['video:', ...lengthTerms],
+      terms: ['video:', ...lengthTerms, ...sizeTerms],
     },
   }
 }
@@ -579,12 +639,15 @@ async function handleOpenEverything(args, config) {
 
   const absolutePath = resolvePathWithinRoot(rootPath, relativePath)
   const targetDurationMs = await probeVideoDurationMs(absolutePath)
+  const targetSizeBytes = await probeFileSizeBytes(absolutePath)
   const rootWindowsPath = await toWindowsPath(rootPath)
   const lengthTerms = buildLengthTerms(targetDurationMs, config.toleranceMs)
+  const sizeTerms = buildSizeTerms(targetSizeBytes, config.toleranceSizeKB)
   const searchText = buildEverythingSearchText({
     searchScope,
     rootWindowsPath,
     lengthTerms,
+    sizeTerms,
   })
 
   await launchDetached(config.everythingPath, ['-sort', 'size-descending', '-s', searchText], 'Failed to launch Everything')

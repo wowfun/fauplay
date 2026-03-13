@@ -12,6 +12,7 @@
 - 更新 `tools/mcp/video-same-duration/server.mjs` 与配置契约：ES 输出解析改为固定 `UTF-8/GBK` 自动识别（不再暴露手工编码配置项），修复中文路径乱码导致的“打开失败”问题。
 - 更新 `tools/mcp/video-same-duration/config.json` 与 `server.mjs`：容差字段从 `toleranceSeconds` 切换为 `toleranceMs`（默认 `500`），匹配判定升级为毫秒级（无向后兼容字段读取）。
 - 更新 `tools/mcp/video-same-duration/config.json` 与专题规范：`esPath` 默认值迁移为共享路径 `tools/bin/everything/es.exe`，用于后续多场景复用。
+- 更新 `tools/mcp/video-same-duration/config.json`、`server.mjs` 与专题规范：新增 `toleranceSize`（KB）大小容差配置；`-1` 表示忽略大小容差，`>=0` 时按 `size` 容差范围参与 `search/openEverything` 等价查询与结果过滤。
 
 ## 2026-03-12
 ### Added

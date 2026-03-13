@@ -2,7 +2,7 @@
 
 ## 1. 目的 (Purpose)
 
-定义 `media.searchSameDurationVideos` 插件契约：针对当前预览视频按“同秒/容差秒”检索相同时长视频，提供结构化结果表格、行级打开动作、Everything 搜索入口，以及持续调用一致性语义。
+定义 `media.searchSameDurationVideos` 插件契约：针对当前预览视频按“同秒/容差秒 + 容差大小”检索相同时长视频，提供结构化结果表格、行级打开动作、Everything 搜索入口，以及持续调用一致性语义。
 实现与排障时可参考文档：[`../../docs/everything-search.md`](../../docs/everything-search.md)。
 
 ## 2. 范围与非目标 (In Scope / Out of Scope)
@@ -58,8 +58,9 @@
 
 1. `search` 返回结构化对象，包含 `resultsTable.columns` 和 `resultsTable.rows`。
 2. 每行 `openAction` 字段为可执行动作对象（触发本工具 `openPath`）。
-3. `openAction` 默认采用静默执行（不新增结果队列项）。
-4. `openPath/openEverything` 返回 `{ ok: true }` 语义结果。
+3. `search` 返回 `toleranceSizeKB` 与 `targetSizeBytes` 字段，用于展示本次大小容差与目标文件大小。
+4. `openAction` 默认采用静默执行（不新增结果队列项）。
+5. `openPath/openEverything` 返回 `{ ok: true }` 语义结果。
 
 工具注解：
 
@@ -82,7 +83,8 @@
 2. `everythingPath: string`
 3. `instanceName: string`（默认 `1.5a`）
 4. `toleranceMs: integer`（默认 `500`，最小 `0`）
-5. `maxResults: integer`（默认 `200`，最小 `1`）
+5. `toleranceSize: integer`（单位 KB，默认 `-1`，最小 `-1`；`-1` 表示忽略大小容差）
+6. `maxResults: integer`（默认 `200`，最小 `1`）
 
 规则：
 
@@ -91,6 +93,8 @@
 3. `searchScope=root` 时仅检索当前 `rootPath` 范围。
 4. ES 输出解码固定为自动判定（原始字节在 UTF-8 与 GBK 之间择优解码），不暴露手工编码配置项。
 5. 同时长判定以毫秒为准：候选项需满足 `|candidateDurationMs - targetDurationMs| <= toleranceMs`。
+6. 大小容差启用条件：`toleranceSize >= 0`；启用后候选项需满足 `|candidateSizeBytes - targetSizeBytes| <= toleranceSize * 1024`。
+7. `openEverything` 生成的查询条件需与插件内搜索等价；启用大小容差时必须包含对应 `size` 条件。
 
 ## 6. 持续调用与去重语义
 
@@ -109,6 +113,8 @@
 5. `FR-SDS-05` 行级 `openAction` 必须可触发系统默认应用打开目标文件。
 6. `FR-SDS-06` Everything 搜索入口必须位于工作台 `toolActions`，不在结果区顶部重复提供。
 7. `FR-SDS-07` 连续调用必须支持历史命中静默跳过，手动调用必须强制重算。
+8. `FR-SDS-08` 系统必须支持 `toleranceSize` 配置项，`-1` 表示忽略大小容差，`0` 表示精确大小匹配，正整数表示 KB 容差范围匹配。
+9. `FR-SDS-09` `openEverything` 必须复用与 `search` 相同的大小容差条件生成等价查询。
 
 ## 8. 验收标准 (AC)
 
@@ -119,14 +125,17 @@
 5. `AC-SDS-05` 刷新页面后 `search.scope` 恢复上次值；其他工具选项不要求持久化。
 6. `AC-SDS-06` 开启持续调用后切换文件自动执行；命中历史成功/失败时静默跳过。
 7. `AC-SDS-07` 手动重复执行同参数请求时仍生成新结果项。
+8. `AC-SDS-08` `toleranceSize=-1` 时搜索结果不受大小容差过滤；`toleranceSize=0` 时仅命中与目标文件大小一致的结果。
+9. `AC-SDS-09` `toleranceSize>0` 时，`search` 与 `openEverything` 均应用相同大小容差范围。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
 1. 默认 `esPath = tools/bin/everything/es.exe`。
 2. 默认 `search.scope = global`。
 3. 默认 `toleranceMs = 500`。
-4. 默认 `maxResults = 200`。
-5. 本专题不新增快捷键，`src/config/shortcuts.ts` 与 `docs/shortcuts.md` 不变。
+4. 默认 `toleranceSize = -1`（忽略大小容差）。
+5. 默认 `maxResults = 200`。
+6. 本专题不新增快捷键，`src/config/shortcuts.ts` 与 `docs/shortcuts.md` 不变。
 
 ## 10. 关联主题 (Related Specs)
 
