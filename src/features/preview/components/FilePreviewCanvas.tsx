@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type Dispatch, type SetStateAction
 import { getFilePreviewKind } from '@/lib/filePreview'
 import type { FileItem, TextPreviewPayload } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
 import { FilePreviewViewport } from './FilePreviewViewport'
@@ -30,7 +31,7 @@ interface FilePreviewCanvasProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
-  onMutationCommitted?: () => void | Promise<void>
+  onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
 type FilePreviewViewState = 'loading' | 'error' | 'ready' | 'empty'

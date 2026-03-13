@@ -1,5 +1,5 @@
 import { PreviewControlGroup } from './PreviewControlGroup'
-import { PreviewTitleRow } from './PreviewTitleRow'
+import { PreviewTitleRow, type PreviewRenameResult } from './PreviewTitleRow'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 
 interface PreviewHeaderBarProps {
@@ -13,6 +13,10 @@ interface PreviewHeaderBarProps {
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onClose: () => void
+  canRenameFileName: boolean
+  renameInFlight: boolean
+  renameUnavailableReason?: string | null
+  onSubmitFileNameRename: (nextBaseName: string) => Promise<PreviewRenameResult>
 }
 
 export function PreviewHeaderBar({
@@ -26,13 +30,23 @@ export function PreviewHeaderBar({
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
   onClose,
+  canRenameFileName,
+  renameInFlight,
+  renameUnavailableReason,
+  onSubmitFileNameRename,
 }: PreviewHeaderBarProps) {
   return (
     <div
       className={`p-3 border-b flex-shrink-0 ${isFullscreen ? 'border-white/10' : 'border-border'}`}
       data-preview-subzone="PreviewHeaderBar"
     >
-      <PreviewTitleRow fileName={fileName} />
+      <PreviewTitleRow
+        fileName={fileName}
+        canRename={canRenameFileName}
+        renameInFlight={renameInFlight}
+        renameUnavailableReason={renameUnavailableReason}
+        onSubmitRename={onSubmitFileNameRename}
+      />
       <PreviewControlGroup
         isFullscreen={isFullscreen}
         showPlaybackControls={showPlaybackControls}

@@ -5,6 +5,7 @@ import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { FileItem } from '@/types'
+import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import type { StructuredToolCallAction } from '@/features/plugin-runtime/components/PluginResultStructuredView'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
@@ -31,7 +32,7 @@ interface PreviewPluginHostProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
-  onMutationCommitted?: () => void | Promise<void>
+  onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
 interface ContinuousToolTask {

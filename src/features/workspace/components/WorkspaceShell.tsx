@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requiredGridWidthForColumns } from '@/features/explorer/constants/gridLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
+import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { keyboardShortcuts } from '@/config/shortcuts'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
@@ -256,6 +257,7 @@ export function WorkspaceShell({
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
+    alignPreviewToPath,
   } = usePreviewTraversal({ filteredFiles })
 
   const handleDirectoryClick = useCallback((dirName: string) => {
@@ -287,6 +289,14 @@ export function WorkspaceShell({
   const handleWorkspaceMutationCommitted = useCallback(async () => {
     await navigateToPath(currentPath)
   }, [currentPath, navigateToPath])
+
+  const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
+    const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
+    if (preferredPreviewPath) {
+      alignPreviewToPath(preferredPreviewPath)
+    }
+    await navigateToPath(currentPath)
+  }, [alignPreviewToPath, currentPath, navigateToPath])
 
   const handleOpenTrash = useCallback(() => {
     if (!hasTrashEntries) return
@@ -556,7 +566,7 @@ export function WorkspaceShell({
       onGridSelectionChange={setGridSelectedPaths}
       gridSelectedPaths={gridSelectedPaths}
       onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
-      onPreviewMutationCommitted={handleWorkspaceMutationCommitted}
+      onPreviewMutationCommitted={handlePreviewMutationCommitted}
       showPreviewPane={showPreviewPane}
       hasOpenPreview={hasOpenPreview}
       contentRef={contentRef}

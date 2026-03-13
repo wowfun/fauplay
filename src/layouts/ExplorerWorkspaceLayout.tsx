@@ -5,6 +5,7 @@ import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
+import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
@@ -112,7 +113,7 @@ interface ExplorerWorkspaceLayoutProps {
   onGridSelectionChange: (selectedPaths: string[]) => void
   gridSelectedPaths: string[]
   onWorkspaceMutationCommitted: () => void | Promise<void>
-  onPreviewMutationCommitted: () => void | Promise<void>
+  onPreviewMutationCommitted: (params?: PreviewMutationCommitParams) => void | Promise<void>
   showPreviewPane: boolean
   hasOpenPreview: boolean
   contentRef: MutableRefObject<HTMLDivElement | null>

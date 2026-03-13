@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import type { FileItem } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
+import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import { FilePreviewPanel } from './FilePreviewPanel'
 
@@ -27,7 +28,7 @@ interface FileLightboxModalProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
-  onMutationCommitted?: () => void | Promise<void>
+  onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
 export function FileLightboxModal({

@@ -38,6 +38,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
   const [shuffleHistory, setShuffleHistory] = useState<string[]>([])
   const autoPlayTimerRef = useRef<number | null>(null)
+  const preferredPreviewPathRef = useRef<string | null>(null)
 
   const mediaFiles = useMemo(
     () =>
@@ -200,10 +201,34 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   const showFileInPane = useCallback((file: FileItem) => {
     if (file.kind !== 'file') return
+    preferredPreviewPathRef.current = null
     setSelectedFile(file)
     setShowPreviewPane(true)
     setPreviewFile((current) => (current ? file : current))
   }, [])
+
+  const alignPreviewToPath = useCallback((path: string | null) => {
+    const normalizedPath = (path || '').split('/').filter(Boolean).join('/')
+    if (!normalizedPath) {
+      preferredPreviewPathRef.current = null
+      return
+    }
+
+    preferredPreviewPathRef.current = normalizedPath
+    const preferredFile = filteredFiles.find((item): item is FileItem => item.kind === 'file' && item.path === normalizedPath) ?? null
+    if (!preferredFile) {
+      return
+    }
+
+    setSelectedFile(preferredFile)
+    if (previewFile) {
+      setPreviewFile(preferredFile)
+    }
+    if (previewFile || showPreviewPane) {
+      setShowPreviewPane(true)
+    }
+    preferredPreviewPathRef.current = null
+  }, [filteredFiles, previewFile, showPreviewPane])
 
   const openFileInModal = useCallback((file: FileItem) => {
     if (file.kind !== 'file') return
@@ -299,11 +324,29 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
 
   useEffect(() => {
     if (filteredFiles.length === 0) {
+      preferredPreviewPathRef.current = null
       setSelectedFile(null)
       setShowPreviewPane(false)
       setPreviewFile(null)
       return
     }
+
+    const preferredPreviewPath = preferredPreviewPathRef.current
+    if (preferredPreviewPath) {
+      const preferredFile = filteredFiles.find((item): item is FileItem => item.kind === 'file' && item.path === preferredPreviewPath) ?? null
+      if (preferredFile) {
+        setSelectedFile(preferredFile)
+        if (showPreviewPane) {
+          setShowPreviewPane(true)
+        }
+        if (previewFile) {
+          setPreviewFile(preferredFile)
+        }
+        preferredPreviewPathRef.current = null
+        return
+      }
+    }
+
     if (!selectedFile) return
     const stillExists = filteredFiles.some((item) => item.path === selectedFile.path)
     if (!stillExists) {
@@ -474,5 +517,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
+    alignPreviewToPath,
   }
 }

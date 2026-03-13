@@ -2,10 +2,12 @@
 
 ## 2026-03-13
 ### Added
+- 新增 `specs/113-preview-inline-rename/spec.md`：定义预览标题点击重命名契约，覆盖侧栏/全屏同构交互、`Enter/失焦` 提交与 `Esc` 取消、严格冲突失败语义（禁止自动序号去重提交）、以及刷新后预览回绑约束。
 - 新增 `specs/112-video-same-duration-search/spec.md`：定义 `media.searchSameDurationVideos` 文件级插件契约，覆盖 `search/openPath/openEverything` 三操作、`search.scope`（`global|root`）选项语义、表格化结果与行级打开动作，以及持续调用命中历史静默跳过规则。
 - 新增 `tools/mcp/video-same-duration/`：提供 `server.mjs` 与 `config.json`，支持基于 ES 的相同时长视频检索、系统默认应用打开与 Everything 搜索唤起能力。
 
 ### Changed
+- 更新 `src/features/preview/components/FilePreviewPanel.tsx`、`PreviewHeaderBar.tsx`、`PreviewTitleRow.tsx`、`usePreviewTraversal.ts`、`WorkspaceShell.tsx` 与预览布局接线：新增预览标题内联重命名（复用 `fs.batchRename` 的 `dry-run -> 校验 -> commit` 链路），并在重命名成功后通过 `preferredPreviewPath` 优先回绑当前预览文件。
 - 更新 `.fauplay/mcp.json`：注册 `video-same-duration` MCP server。
 - 更新插件结果渲染链路：结构化结果支持表格单元格动作按钮（用于行级“打开”）。
 - 更新预览插件状态管理：仅对 `media.searchSameDurationVideos.search.scope` 增加 LocalStorage 持久化与刷新恢复。
