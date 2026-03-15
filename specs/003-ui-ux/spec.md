@@ -116,6 +116,9 @@
 4. 网关离线时，工作区插件与预览插件入口均可隐藏或禁用，但不得阻断核心浏览与预览链路。
 5. 网格多选能力不得依赖网关在线状态。
 6. 返回结构化 JSON 的 `file` 作用域工具应提供统一结构化结果展示与 JSON 兜底能力，不依赖按工具名定制渲染器。
+7. 顶部工具区“标签过滤相关 UI”显示必须由 sidecar 快照门控（`hasSidecarFile && hasAnyFilterableAnnotation`）；任一条件不满足时必须完全隐藏该 UI 区块。
+8. 当标签过滤 UI 因门控失效被隐藏时，系统必须自动将标签过滤状态回退到 `all`，避免不可见过滤残留。
+9. 顶部标签过滤不提供手动 `all/boolean` 切换控件；过滤模式由 include/exclude 条件自动推导（任一非空=`boolean`，全空=`all`）。
 
 ## 可访问性基线 (Accessibility Baseline)
 

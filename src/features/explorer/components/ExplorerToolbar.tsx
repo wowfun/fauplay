@@ -11,11 +11,19 @@ import {
   Rows3,
   Search,
   Star,
+  Tags,
   Trash2,
   Video,
   X,
 } from 'lucide-react'
-import type { AddressPathHistoryEntry, FavoriteFolderEntry, FilterState, ThumbnailSizePreset } from '@/types'
+import {
+  ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
+  type AddressPathHistoryEntry,
+  type AnnotationFilterTagOption,
+  type FavoriteFolderEntry,
+  type FilterState,
+  type ThumbnailSizePreset,
+} from '@/types'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 import { Select } from '@/ui/Select'
@@ -55,6 +63,8 @@ interface ExplorerToolbarProps {
   totalCount: number
   imageCount: number
   videoCount: number
+  showAnnotationFilterControls: boolean
+  annotationFilterTagOptions: AnnotationFilterTagOption[]
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
@@ -81,6 +91,26 @@ function normalizeRelativePath(path: string): string {
 
 function toLower(value: string): string {
   return value.toLocaleLowerCase()
+}
+
+function annotationTagDisplayLabel(option: AnnotationFilterTagOption): string {
+  if (option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
+    return '未标注'
+  }
+  return `${option.fieldKey}: ${option.value}`
+}
+
+function annotationTagSummaryText(
+  selectedTagKeys: string[],
+  optionByTagKey: Map<string, AnnotationFilterTagOption>,
+  emptyText: string
+): string {
+  if (selectedTagKeys.length === 0) return emptyText
+  if (selectedTagKeys.length === 1) {
+    const option = optionByTagKey.get(selectedTagKeys[0] || '')
+    return option ? annotationTagDisplayLabel(option) : '已选 1 项'
+  }
+  return `已选 ${selectedTagKeys.length} 项`
 }
 
 interface DraftPathSuggestionContext {
@@ -173,6 +203,8 @@ export function ExplorerToolbar({
   totalCount,
   imageCount,
   videoCount,
+  showAnnotationFilterControls,
+  annotationFilterTagOptions,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
   canOpenTrash,
@@ -191,6 +223,8 @@ export function ExplorerToolbar({
   const [addressSuggestionStatus, setAddressSuggestionStatus] = useState<AddressSuggestionStatus>('idle')
   const [addressSuggestionError, setAddressSuggestionError] = useState<string | null>(null)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
+  const [isAnnotationIncludeOpen, setIsAnnotationIncludeOpen] = useState(false)
+  const [isAnnotationExcludeOpen, setIsAnnotationExcludeOpen] = useState(false)
 
   const pathSegments = currentPath.split('/').filter(Boolean)
   const rootLabel = rootName || '根目录'
@@ -212,8 +246,13 @@ export function ExplorerToolbar({
   }, [favoriteFolders])
 
   const addressBarRef = useRef<HTMLDivElement>(null)
+  const annotationFilterRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionRequestSeqRef = useRef(0)
+  const annotationFilterOptionByTagKey = useMemo(
+    () => new Map(annotationFilterTagOptions.map((item) => [item.tagKey, item])),
+    [annotationFilterTagOptions]
+  )
 
   useEffect(() => {
     if (addressBarMode !== 'breadcrumb') return
@@ -234,6 +273,12 @@ export function ExplorerToolbar({
   }, [currentPath])
 
   useEffect(() => {
+    if (showAnnotationFilterControls) return
+    setIsAnnotationIncludeOpen(false)
+    setIsAnnotationExcludeOpen(false)
+  }, [showAnnotationFilterControls])
+
+  useEffect(() => {
     const handleGlobalPointerDown = (event: MouseEvent) => {
       const target = event.target as Node
       if (addressBarRef.current?.contains(target)) return
@@ -250,6 +295,18 @@ export function ExplorerToolbar({
     window.addEventListener('mousedown', handleGlobalPointerDown)
     return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
   }, [addressBarMode, currentPath])
+
+  useEffect(() => {
+    const handleGlobalPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (annotationFilterRef.current?.contains(target)) return
+      setIsAnnotationIncludeOpen(false)
+      setIsAnnotationExcludeOpen(false)
+    }
+
+    window.addEventListener('mousedown', handleGlobalPointerDown)
+    return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
+  }, [])
 
   useEffect(() => {
     if (copyState === 'idle') return
@@ -542,6 +599,103 @@ export function ExplorerToolbar({
     } catch {
       setCopyState('failed')
     }
+  }
+
+  const toggleTagKeySelection = (currentKeys: string[], nextTagKey: string): string[] => {
+    const keySet = new Set(currentKeys)
+    if (keySet.has(nextTagKey)) {
+      keySet.delete(nextTagKey)
+    } else {
+      keySet.add(nextTagKey)
+    }
+    return [...keySet]
+  }
+
+  const handleToggleAnnotationIncludeTag = (tagKey: string) => {
+    const nextIncludeTagKeys = toggleTagKeySelection(filter.annotationIncludeTagKeys, tagKey)
+    onFilterChange({
+      ...filter,
+      annotationIncludeTagKeys: nextIncludeTagKeys,
+    })
+  }
+
+  const handleToggleAnnotationExcludeTag = (tagKey: string) => {
+    const nextExcludeTagKeys = toggleTagKeySelection(filter.annotationExcludeTagKeys, tagKey)
+    onFilterChange({
+      ...filter,
+      annotationExcludeTagKeys: nextExcludeTagKeys,
+    })
+  }
+
+  const clearAnnotationIncludeTags = () => {
+    onFilterChange({
+      ...filter,
+      annotationIncludeTagKeys: [],
+    })
+  }
+
+  const clearAnnotationExcludeTags = () => {
+    onFilterChange({
+      ...filter,
+      annotationExcludeTagKeys: [],
+    })
+  }
+
+  const renderAnnotationTagPanel = (
+    selectedTagKeys: string[],
+    onToggleTag: (tagKey: string) => void,
+    onClear: () => void
+  ) => {
+    return (
+      <div
+        className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border border-border bg-background p-1 shadow-md"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {annotationFilterTagOptions.length === 0 ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">无可选标签</div>
+        ) : (
+          <>
+            <div className="mb-1 flex items-center justify-between px-2 py-1">
+              <span className="text-[11px] text-muted-foreground">多选</span>
+              <button
+                type="button"
+                className="text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={onClear}
+              >
+                清空
+              </button>
+            </div>
+            <div className="max-h-64 overflow-auto">
+              {annotationFilterTagOptions.map((option) => {
+                const checked = selectedTagKeys.includes(option.tagKey)
+                const optionLabel = annotationTagDisplayLabel(option)
+                return (
+                  <button
+                    key={option.tagKey}
+                    type="button"
+                    onClick={() => onToggleTag(option.tagKey)}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent"
+                    title={optionLabel}
+                  >
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                        checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+                      }`}
+                    >
+                      {checked && <Check className="h-3 w-3" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm">{optionLabel}</span>
+                    {typeof option.fileCount === 'number' && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">({option.fileCount})</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    )
   }
 
   const renderSegmentDropdown = (path: string) => {
@@ -940,6 +1094,80 @@ export function ExplorerToolbar({
           <span className="text-xs opacity-80">({formatCount(videoCount)})</span>
         </Button>
       </div>
+
+      {showAnnotationFilterControls && (
+        <div ref={annotationFilterRef} className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
+          <Select
+            value={filter.annotationIncludeMatchMode}
+            onChange={(event) => {
+              const nextMode = event.target.value as FilterState['annotationIncludeMatchMode']
+              onFilterChange({
+                ...filter,
+                annotationIncludeMatchMode: nextMode,
+              })
+            }}
+            className="h-8 w-[72px]"
+            title="包含标签匹配模式"
+          >
+            <option value="or">OR</option>
+            <option value="and">AND</option>
+          </Select>
+
+          <div className="relative">
+            <Button
+              onClick={() => {
+                setIsAnnotationIncludeOpen((previous) => !previous)
+                setIsAnnotationExcludeOpen(false)
+              }}
+              variant={filter.annotationIncludeTagKeys.length > 0 ? 'default' : 'ghost'}
+              size="md"
+              className="h-8 max-w-40 justify-start gap-1"
+              title="包含标签（多选）"
+            >
+              <Tags className="h-4 w-4 shrink-0" />
+              <span className="truncate text-xs">
+                {annotationTagSummaryText(
+                  filter.annotationIncludeTagKeys,
+                  annotationFilterOptionByTagKey,
+                  '包含标签'
+                )}
+              </span>
+            </Button>
+            {isAnnotationIncludeOpen && renderAnnotationTagPanel(
+              filter.annotationIncludeTagKeys,
+              handleToggleAnnotationIncludeTag,
+              clearAnnotationIncludeTags
+            )}
+          </div>
+
+          <div className="relative">
+            <Button
+              onClick={() => {
+                setIsAnnotationExcludeOpen((previous) => !previous)
+                setIsAnnotationIncludeOpen(false)
+              }}
+              variant={filter.annotationExcludeTagKeys.length > 0 ? 'default' : 'ghost'}
+              size="md"
+              className="h-8 max-w-40 justify-start gap-1"
+              title="排除标签（NOT，多选）"
+            >
+              <X className="h-4 w-4 shrink-0" />
+              <span className="truncate text-xs">
+                {annotationTagSummaryText(
+                  filter.annotationExcludeTagKeys,
+                  annotationFilterOptionByTagKey,
+                  '排除标签'
+                )}
+              </span>
+            </Button>
+            {isAnnotationExcludeOpen && renderAnnotationTagPanel(
+              filter.annotationExcludeTagKeys,
+              handleToggleAnnotationExcludeTag,
+              clearAnnotationExcludeTags
+            )}
+          </div>
+        </div>
+      )}
 
       <Button
         onClick={() => onFilterChange({ ...filter, hideEmptyFolders: !filter.hideEmptyFolders })}

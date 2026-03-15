@@ -54,6 +54,10 @@
 11. 预览头部标签展示必须与 `meta.annotation` 插件启用状态解耦；网关离线或工具未注册时，若 sidecar 存在且匹配当前文件，仍应展示标签。
 12. 预览头部标签位于“文件名同行右侧”，默认展示当前文件 `active` 记录中的全部字段标签。
 13. 文件名进入重命名编辑态时，右侧标签仍保持可见，输入框按剩余宽度自适应。
+14. 顶部工具栏标签过滤 UI（`OR/AND/NOT + 未标注`）展示必须基于 sidecar 快照门控：仅当 `hasSidecarFile=true` 且 `hasAnyFilterableAnnotation=true` 时可见。
+15. 标签过滤模式为自动判定：`annotationIncludeTagKeys` 或 `annotationExcludeTagKeys` 任一非空时等价 `boolean`，两者均空时等价 `all`；不提供手动 `all/boolean` 切换控件。
+16. 当前 root 无 `.fauplay`、无 `.annotations.v1.json` 或无可参与过滤的标注数据时，顶部工具栏不得展示任何标签过滤相关 UI。
+17. 当标签过滤 UI 从可见切换为隐藏时，过滤状态必须自动回退到 `all`，禁止“不可见过滤”继续生效。
 
 ## 5. 数据与存储契约 (Data & Storage Contract)
 
@@ -259,6 +263,9 @@
 14. `FR-MA-14` 客户端必须支持基于 `rootHandle` 的 sidecar 相对路径读取能力，并在根目录就绪后后台异步预加载当前 root 标注快照。
 15. `FR-MA-15` 预览头部标签展示判定必须仅依赖 `rootId + 当前文件路径 + sidecar 快照`，不得依赖 `tools/list` 中是否存在 `meta.annotation`。
 16. `FR-MA-16` 预览头部标签默认仅展示 `status=active` 记录；`orphan/conflict` 不进入头部标签展示。
+17. `FR-MA-17` 标签过滤 UI 的显示判定必须仅依赖当前 root 的 sidecar 快照元数据（`hasSidecarDir/hasSidecarFile/hasAnyFilterableAnnotation`），不得依赖 `meta.annotation` 工具启用状态。
+18. `FR-MA-18` 标签过滤模式必须由 include/exclude 条件自动推导（非空=`boolean`，全空=`all`），`OR/AND` 单独切换不得触发模式切换。
+19. `FR-MA-19` 标签过滤 UI 隐藏时，过滤状态必须回退 `all`；显示后允许 `OR/AND/NOT + 未标注` 条件过滤生效。
 
 ## 11. 验收标准 (AC)
 
@@ -278,6 +285,11 @@
 14. `AC-MA-14` 在网关离线或 `meta.annotation` 未注册时，若 sidecar 存在匹配当前文件的 `active` 标注，预览头部仍可展示标签。
 15. `AC-MA-15` 预览头部标签与文件名处于同一行且右侧对齐；进入重命名编辑态后标签不消失。
 16. `AC-MA-16` sidecar 缺失或 JSON 非法时，标签区静默降级为空，不阻塞预览打开与交互。
+17. `AC-MA-17` root 无 `.fauplay` 或无 `.annotations.v1.json` 时，顶部工具栏不展示标签过滤相关 UI。
+18. `AC-MA-18` sidecar 存在但无可参与过滤的标注数据时，顶部工具栏不展示标签过滤相关 UI。
+19. `AC-MA-19` 无 include/exclude 条件时，过滤结果等价 `all`；仅切换 `OR/AND` 不改变结果集。
+20. `AC-MA-20` include/exclude 任一非空时自动进入等价布尔过滤；清空最后一个 include/exclude 后自动回到等价 `all`。
+21. `AC-MA-21` 运行时从“可展示”切换到“不可展示”后，标签过滤状态自动回退 `all`，文件列表不保留隐式过滤结果。
 
 ## 12. 默认值与一致性约束 (Defaults & Consistency)
 

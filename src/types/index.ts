@@ -29,6 +29,16 @@ export type ViewMode = 'grid' | 'list'
 export type SortBy = 'name' | 'date' | 'size'
 export type SortOrder = 'asc' | 'desc'
 export type ThumbnailSizePreset = 'auto' | '256' | '512'
+export type AnnotationFilterMode = 'all' | 'boolean'
+export type AnnotationIncludeMatchMode = 'or' | 'and'
+export const ANNOTATION_FILTER_UNANNOTATED_TAG_KEY = '__ANNOTATION_UNANNOTATED__'
+
+export interface AnnotationFilterTagOption {
+  tagKey: string
+  fieldKey: string
+  value: string
+  fileCount?: number
+}
 
 export type FilePreviewKind = 'image' | 'video' | 'text' | 'unsupported'
 
@@ -48,6 +58,10 @@ export interface FilterState {
   hideEmptyFolders: boolean
   sortBy: SortBy
   sortOrder: SortOrder
+  annotationFilterMode: AnnotationFilterMode
+  annotationIncludeMatchMode: AnnotationIncludeMatchMode
+  annotationIncludeTagKeys: string[]
+  annotationExcludeTagKeys: string[]
 }
 
 export interface AddressPathHistoryEntry {

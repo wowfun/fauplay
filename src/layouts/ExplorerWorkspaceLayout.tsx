@@ -7,7 +7,14 @@ import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatus
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import type {
+  AddressPathHistoryEntry,
+  AnnotationFilterTagOption,
+  FavoriteFolderEntry,
+  FileItem,
+  FilterState,
+  ThumbnailSizePreset,
+} from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 
 const WorkspacePluginHost = lazy(async () => {
@@ -132,6 +139,8 @@ interface ExplorerWorkspaceLayoutProps {
   totalCount: number
   imageCount: number
   videoCount: number
+  showAnnotationFilterControls: boolean
+  annotationFilterTagOptions: AnnotationFilterTagOption[]
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
@@ -193,6 +202,8 @@ export function ExplorerWorkspaceLayout({
   totalCount,
   imageCount,
   videoCount,
+  showAnnotationFilterControls,
+  annotationFilterTagOptions,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
   canOpenTrash,
@@ -317,6 +328,8 @@ export function ExplorerWorkspaceLayout({
         totalCount={totalCount}
         imageCount={imageCount}
         videoCount={videoCount}
+        showAnnotationFilterControls={showAnnotationFilterControls}
+        annotationFilterTagOptions={annotationFilterTagOptions}
         thumbnailSizePreset={thumbnailSizePreset}
         onThumbnailSizePresetChange={onThumbnailSizePresetChange}
         canOpenTrash={canOpenTrash}

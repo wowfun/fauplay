@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requiredGridWidthForColumns } from '@/features/explorer/constants/gridLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
@@ -9,8 +9,23 @@ import { keyboardShortcuts } from '@/config/shortcuts'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
-import { preloadAnnotationDisplaySnapshot } from '@/features/preview/utils/annotationDisplayStore'
-import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
+import {
+  getAnnotationDisplayStoreVersion,
+  getFileAnnotationTagKeys,
+  getRootAnnotationFilterTagOptions,
+  isAnnotationFilterUiVisible,
+  preloadAnnotationDisplaySnapshot,
+  subscribeAnnotationDisplayStore,
+} from '@/features/preview/utils/annotationDisplayStore'
+import {
+  ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
+  type AddressPathHistoryEntry,
+  type AnnotationFilterTagOption,
+  type FavoriteFolderEntry,
+  type FileItem,
+  type FilterState,
+  type ThumbnailSizePreset,
+} from '@/types'
 import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
@@ -56,6 +71,10 @@ const defaultFilter: FilterState = {
   hideEmptyFolders: true,
   sortBy: 'name',
   sortOrder: 'asc',
+  annotationFilterMode: 'all',
+  annotationIncludeMatchMode: 'or',
+  annotationIncludeTagKeys: [],
+  annotationExcludeTagKeys: [],
 }
 
 interface PersistedPreviewPaneWidthState {
@@ -115,6 +134,56 @@ function savePersistedPreviewPaneWidthRatio(value: number): void {
 
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+function isAnnotationFilterAtDefault(filter: FilterState): boolean {
+  return (
+    filter.annotationFilterMode === 'all'
+    && filter.annotationIncludeMatchMode === 'or'
+    && filter.annotationIncludeTagKeys.length === 0
+    && filter.annotationExcludeTagKeys.length === 0
+  )
+}
+
+function isAnnotationBooleanFilterActive(filter: FilterState): boolean {
+  return filter.annotationIncludeTagKeys.length > 0 || filter.annotationExcludeTagKeys.length > 0
+}
+
+function withSyncedAnnotationFilterMode(filter: FilterState): FilterState {
+  const nextMode: FilterState['annotationFilterMode'] = isAnnotationBooleanFilterActive(filter) ? 'boolean' : 'all'
+  if (filter.annotationFilterMode === nextMode) {
+    return filter
+  }
+  return {
+    ...filter,
+    annotationFilterMode: nextMode,
+  }
+}
+
+function fileMatchesAnnotationTag(tagSet: Set<string>, tagKey: string): boolean {
+  if (tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
+    return tagSet.size === 0
+  }
+  return tagSet.has(tagKey)
+}
+
+function matchesBooleanAnnotationFilter(filter: FilterState, fileTagKeys: string[]): boolean {
+  const includeTagKeys = filter.annotationIncludeTagKeys
+  const excludeTagKeys = filter.annotationExcludeTagKeys
+  if (includeTagKeys.length === 0 && excludeTagKeys.length === 0) {
+    return true
+  }
+
+  const tagSet = new Set(fileTagKeys)
+  const includeMatched = includeTagKeys.length === 0
+    ? true
+    : filter.annotationIncludeMatchMode === 'and'
+      ? includeTagKeys.every((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
+      : includeTagKeys.some((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
+
+  if (!includeMatched) return false
+
+  return !excludeTagKeys.some((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
 }
 
 function dedupeAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
@@ -260,6 +329,11 @@ export function WorkspaceShell({
   setFlattenView,
   filterFiles,
 }: WorkspaceShellProps) {
+  const annotationDisplayStoreVersion = useSyncExternalStore(
+    subscribeAnnotationDisplayStore,
+    getAnnotationDisplayStoreVersion,
+    getAnnotationDisplayStoreVersion
+  )
   const initialPreviewPaneWidthStateRef = useRef<PersistedPreviewPaneWidthState>(loadPersistedPreviewPaneWidthState())
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
@@ -271,10 +345,39 @@ export function WorkspaceShell({
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
+  const handleFilterChange = useCallback((nextFilter: FilterState) => {
+    setFilter(withSyncedAnnotationFilterMode(nextFilter))
+  }, [])
+  const showAnnotationFilterControls = isAnnotationFilterUiVisible(rootId)
+  const annotationFilterTagOptions = useMemo<AnnotationFilterTagOption[]>(() => {
+    // Depend on external store version so tag options refresh with sidecar snapshot updates.
+    void annotationDisplayStoreVersion
+    if (!showAnnotationFilterControls) return []
+    const rootTagOptions = getRootAnnotationFilterTagOptions(rootId)
+    return [
+      {
+        tagKey: ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
+        fieldKey: '',
+        value: '未标注',
+      },
+      ...rootTagOptions,
+    ]
+  }, [annotationDisplayStoreVersion, rootId, showAnnotationFilterControls])
 
   const filteredFiles = useMemo(() => {
-    return filterFiles(files, filter)
-  }, [files, filter, filterFiles])
+    // Depend on external store version so file filtering reflects latest annotation snapshot.
+    void annotationDisplayStoreVersion
+    const baseFilteredFiles = filterFiles(files, filter)
+    if (!isAnnotationBooleanFilterActive(filter)) {
+      return baseFilteredFiles
+    }
+
+    return baseFilteredFiles.filter((file) => {
+      if (file.kind !== 'file') return true
+      const fileTagKeys = getFileAnnotationTagKeys(rootId, file.path)
+      return matchesBooleanAnnotationFilter(filter, fileTagKeys)
+    })
+  }, [annotationDisplayStoreVersion, files, filter, filterFiles, rootId])
 
   const totalCount = useMemo(() => files.length, [files])
   const imageCount = useMemo(
@@ -496,6 +599,20 @@ export function WorkspaceShell({
   }, [rootHandle, rootId])
 
   useEffect(() => {
+    if (showAnnotationFilterControls) return
+    setFilter((previous) => {
+      if (isAnnotationFilterAtDefault(previous)) return previous
+      return {
+        ...previous,
+        annotationFilterMode: 'all',
+        annotationIncludeMatchMode: 'or',
+        annotationIncludeTagKeys: [],
+        annotationExcludeTagKeys: [],
+      }
+    })
+  }, [showAnnotationFilterControls])
+
+  useEffect(() => {
     let disposed = false
     let refreshTimerId: number | null = null
     let loadSnapshot: (() => Promise<GatewayCapabilitiesSnapshot>) | null = null
@@ -700,7 +817,7 @@ export function WorkspaceShell({
   return (
     <ExplorerWorkspaceLayout
       filter={filter}
-      onFilterChange={setFilter}
+      onFilterChange={handleFilterChange}
       rootName={rootHandle.name}
       currentPath={currentPath}
       rootId={rootId}
@@ -716,6 +833,8 @@ export function WorkspaceShell({
       totalCount={totalCount}
       imageCount={imageCount}
       videoCount={videoCount}
+      showAnnotationFilterControls={showAnnotationFilterControls}
+      annotationFilterTagOptions={annotationFilterTagOptions}
       thumbnailSizePreset={thumbnailSizePreset}
       onThumbnailSizePresetChange={setThumbnailSizePreset}
       canOpenTrash={hasTrashEntries}
