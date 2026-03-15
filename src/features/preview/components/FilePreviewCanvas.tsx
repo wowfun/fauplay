@@ -31,6 +31,8 @@ interface FilePreviewCanvasProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  toolPanelWidthPx: number
+  onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
@@ -65,6 +67,8 @@ export function FilePreviewCanvas({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  toolPanelWidthPx,
+  onToolPanelWidthChange,
   onMutationCommitted,
 }: FilePreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
@@ -108,6 +112,8 @@ export function FilePreviewCanvas({
             enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
             toolPanelCollapsed={toolPanelCollapsed}
             onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+            toolPanelWidthPx={toolPanelWidthPx}
+            onToolPanelWidthChange={onToolPanelWidthChange}
             onMutationCommitted={onMutationCommitted}
           />
         </Suspense>

@@ -27,9 +27,14 @@ const FileLightboxModal = lazy(async () => {
 
 const WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:workspace-tool-panel-collapsed'
 const PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:preview-tool-panel-collapsed'
+const WORKSPACE_TOOL_PANEL_WIDTH_STORAGE_KEY = 'fauplay:workspace-tool-panel-width'
+const PREVIEW_TOOL_PANEL_WIDTH_STORAGE_KEY = 'fauplay:preview-tool-panel-width'
 const SAME_DURATION_SCOPE_STORAGE_KEY = 'fauplay:media-search-same-duration-scope'
 const SAME_DURATION_TOOL_NAME = 'media.searchSameDurationVideos'
 const SAME_DURATION_SCOPE_OPTION_KEY = 'search.scope'
+const DEFAULT_TOOL_PANEL_WIDTH_PX = 320
+const MIN_TOOL_PANEL_WIDTH_PX = 320
+const MAX_TOOL_PANEL_WIDTH_PX = 640
 
 function readPersistedBoolean(key: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') return defaultValue
@@ -52,6 +57,35 @@ function writePersistedBoolean(key: string, value: boolean): void {
 
   try {
     window.localStorage.setItem(key, value ? 'true' : 'false')
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
+function clampToolPanelWidthPx(value: number): number {
+  return Math.min(MAX_TOOL_PANEL_WIDTH_PX, Math.max(MIN_TOOL_PANEL_WIDTH_PX, value))
+}
+
+function readPersistedToolPanelWidthPx(key: string): number {
+  if (typeof window === 'undefined') return DEFAULT_TOOL_PANEL_WIDTH_PX
+
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (raw === null) return DEFAULT_TOOL_PANEL_WIDTH_PX
+
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return DEFAULT_TOOL_PANEL_WIDTH_PX
+    return clampToolPanelWidthPx(parsed)
+  } catch {
+    return DEFAULT_TOOL_PANEL_WIDTH_PX
+  }
+}
+
+function writePersistedToolPanelWidthPx(key: string, value: number): void {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(key, String(clampToolPanelWidthPx(value)))
   } catch {
     // Ignore storage write failures and keep runtime state available.
   }
@@ -230,6 +264,12 @@ export function ExplorerWorkspaceLayout({
   const [previewToolPanelCollapsed, setPreviewToolPanelCollapsed] = useState<boolean>(() => (
     readPersistedBoolean(PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY, false)
   ))
+  const [workspaceToolPanelWidthPx, setWorkspaceToolPanelWidthPx] = useState<number>(() => (
+    readPersistedToolPanelWidthPx(WORKSPACE_TOOL_PANEL_WIDTH_STORAGE_KEY)
+  ))
+  const [previewToolPanelWidthPx, setPreviewToolPanelWidthPx] = useState<number>(() => (
+    readPersistedToolPanelWidthPx(PREVIEW_TOOL_PANEL_WIDTH_STORAGE_KEY)
+  ))
 
   useEffect(() => {
     writePersistedBoolean(WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY, workspaceToolPanelCollapsed)
@@ -238,6 +278,14 @@ export function ExplorerWorkspaceLayout({
   useEffect(() => {
     writePersistedBoolean(PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY, previewToolPanelCollapsed)
   }, [previewToolPanelCollapsed])
+
+  useEffect(() => {
+    writePersistedToolPanelWidthPx(WORKSPACE_TOOL_PANEL_WIDTH_STORAGE_KEY, workspaceToolPanelWidthPx)
+  }, [workspaceToolPanelWidthPx])
+
+  useEffect(() => {
+    writePersistedToolPanelWidthPx(PREVIEW_TOOL_PANEL_WIDTH_STORAGE_KEY, previewToolPanelWidthPx)
+  }, [previewToolPanelWidthPx])
 
   useEffect(() => {
     const scopeValue = previewPluginWorkbenchState.optionValuesByTool[SAME_DURATION_TOOL_NAME]?.[SAME_DURATION_SCOPE_OPTION_KEY]
@@ -319,6 +367,10 @@ export function ExplorerWorkspaceLayout({
                     onToggleToolPanelCollapsed={() => {
                       setWorkspaceToolPanelCollapsed((prev) => !prev)
                     }}
+                    toolPanelWidthPx={workspaceToolPanelWidthPx}
+                    onToolPanelWidthChange={(nextWidthPx) => {
+                      setWorkspaceToolPanelWidthPx(clampToolPanelWidthPx(nextWidthPx))
+                    }}
                   />
                 </Suspense>
               )}
@@ -367,6 +419,10 @@ export function ExplorerWorkspaceLayout({
                 onToggleToolPanelCollapsed={() => {
                   setPreviewToolPanelCollapsed((prev) => !prev)
                 }}
+                toolPanelWidthPx={previewToolPanelWidthPx}
+                onToolPanelWidthChange={(nextWidthPx) => {
+                  setPreviewToolPanelWidthPx(clampToolPanelWidthPx(nextWidthPx))
+                }}
                 onMutationCommitted={onPreviewMutationCommitted}
               />
             </Suspense>
@@ -411,6 +467,10 @@ export function ExplorerWorkspaceLayout({
             toolPanelCollapsed={previewToolPanelCollapsed}
             onToggleToolPanelCollapsed={() => {
               setPreviewToolPanelCollapsed((prev) => !prev)
+            }}
+            toolPanelWidthPx={previewToolPanelWidthPx}
+            onToolPanelWidthChange={(nextWidthPx) => {
+              setPreviewToolPanelWidthPx(clampToolPanelWidthPx(nextWidthPx))
             }}
             onMutationCommitted={onPreviewMutationCommitted}
           />

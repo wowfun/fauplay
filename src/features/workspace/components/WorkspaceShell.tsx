@@ -15,6 +15,7 @@ import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/g
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
 const DEFAULT_PANE_WIDTH_RATIO = 0.375
+const PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY = 'fauplay:preview-pane-width-ratio'
 const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
 const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
@@ -54,6 +55,61 @@ const defaultFilter: FilterState = {
   hideEmptyFolders: true,
   sortBy: 'name',
   sortOrder: 'asc',
+}
+
+interface PersistedPreviewPaneWidthState {
+  ratio: number
+  isManual: boolean
+}
+
+function clampPaneWidthRatio(value: number): number {
+  return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, value))
+}
+
+function loadPersistedPreviewPaneWidthState(): PersistedPreviewPaneWidthState {
+  if (typeof window === 'undefined') {
+    return {
+      ratio: DEFAULT_PANE_WIDTH_RATIO,
+      isManual: false,
+    }
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY)
+    if (raw === null) {
+      return {
+        ratio: DEFAULT_PANE_WIDTH_RATIO,
+        isManual: false,
+      }
+    }
+
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      return {
+        ratio: DEFAULT_PANE_WIDTH_RATIO,
+        isManual: false,
+      }
+    }
+
+    return {
+      ratio: clampPaneWidthRatio(parsed),
+      isManual: true,
+    }
+  } catch {
+    return {
+      ratio: DEFAULT_PANE_WIDTH_RATIO,
+      isManual: false,
+    }
+  }
+}
+
+function savePersistedPreviewPaneWidthRatio(value: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY, String(clampPaneWidthRatio(value)))
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
 }
 
 function normalizeRelativePath(path: string): string {
@@ -203,15 +259,16 @@ export function WorkspaceShell({
   setFlattenView,
   filterFiles,
 }: WorkspaceShellProps) {
+  const initialPreviewPaneWidthStateRef = useRef<PersistedPreviewPaneWidthState>(loadPersistedPreviewPaneWidthState())
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
-  const [paneWidthRatio, setPaneWidthRatio] = useState(DEFAULT_PANE_WIDTH_RATIO)
+  const [paneWidthRatio, setPaneWidthRatio] = useState(initialPreviewPaneWidthStateRef.current.ratio)
   const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
-  const isPaneWidthManualRef = useRef(false)
+  const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
 
   const filteredFiles = useMemo(() => {
@@ -605,6 +662,11 @@ export function WorkspaceShell({
     return () => window.removeEventListener('resize', applyAdaptiveDefault)
   }, [showPreviewPane, getAdaptiveDefaultPaneWidthRatio])
 
+  useEffect(() => {
+    if (!isPaneWidthManualRef.current) return
+    savePersistedPreviewPaneWidthRatio(paneWidthRatio)
+  }, [paneWidthRatio])
+
   const handlePreviewPaneResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
     isPaneWidthManualRef.current = true
@@ -615,7 +677,7 @@ export function WorkspaceShell({
       const containerWidth = contentRef.current?.parentElement?.offsetWidth || window.innerWidth
       const delta = (startX - moveEvent.clientX) / containerWidth
       const newRatio = startRatio + delta
-      setPaneWidthRatio(Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, newRatio)))
+      setPaneWidthRatio(clampPaneWidthRatio(newRatio))
     }
 
     const handleMouseUp = () => {

@@ -33,6 +33,8 @@ interface PreviewPluginHostProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  toolPanelWidthPx: number
+  onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
@@ -72,6 +74,8 @@ export function PreviewPluginHost({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  toolPanelWidthPx,
+  onToolPanelWidthChange,
   onMutationCommitted,
 }: PreviewPluginHostProps) {
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
@@ -394,6 +398,10 @@ export function PreviewPluginHost({
           side="left"
           subzone="PreviewToolResultPanel"
           emptyHint="点击左侧工具按钮后，结果会显示在这里。"
+          panelWidthPx={toolPanelWidthPx}
+          minPanelWidthPx={320}
+          maxPanelWidthPx={640}
+          onPanelWidthChange={onToolPanelWidthChange}
         />
       )}
     </>

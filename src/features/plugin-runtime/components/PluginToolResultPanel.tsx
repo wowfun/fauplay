@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import type { PluginResultQueueItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 import { PluginResultStructuredView, type StructuredToolCallAction } from './PluginResultStructuredView'
@@ -12,6 +12,16 @@ interface PluginToolResultPanelProps {
   subzone?: string
   emptyHint?: string
   onResultAction?: (params: { item: PluginResultQueueItem; action: StructuredToolCallAction }) => void
+  panelWidthPx?: number
+  minPanelWidthPx?: number
+  maxPanelWidthPx?: number
+  onPanelWidthChange?: (nextWidthPx: number) => void
+}
+
+const DEFAULT_PANEL_WIDTH_PX = 320
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 function formatTimestamp(value?: number): string {
@@ -52,8 +62,16 @@ export function PluginToolResultPanel({
   subzone,
   emptyHint,
   onResultAction,
+  panelWidthPx = DEFAULT_PANEL_WIDTH_PX,
+  minPanelWidthPx = DEFAULT_PANEL_WIDTH_PX,
+  maxPanelWidthPx = DEFAULT_PANEL_WIDTH_PX,
+  onPanelWidthChange,
 }: PluginToolResultPanelProps) {
   const isLightbox = surfaceVariant === 'preview-lightbox'
+  const minWidthPx = Math.max(1, minPanelWidthPx)
+  const maxWidthPx = Math.max(minWidthPx, maxPanelWidthPx)
+  const resolvedWidthPx = clamp(panelWidthPx, minWidthPx, maxWidthPx)
+  const isResizable = typeof onPanelWidthChange === 'function' && maxWidthPx > minWidthPx
   const borderClass = side === 'left'
     ? (isLightbox ? 'border-r border-white/10' : 'border-r border-border')
     : (isLightbox ? 'border-l border-white/10' : 'border-l border-border')
@@ -66,12 +84,48 @@ export function PluginToolResultPanel({
     : 'rounded-md border border-border/80 bg-muted/20'
   const headerHoverClassName = isLightbox ? 'hover:bg-white/10' : 'hover:bg-accent/40'
   const statusClassName = isLightbox ? 'text-white/70' : 'text-muted-foreground'
+  const resizeHandleClassName = side === 'left'
+    ? 'absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 bg-transparent transition-colors z-20'
+    : 'absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 bg-transparent transition-colors z-20'
+
+  const handleResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!isResizable || !onPanelWidthChange) return
+
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidthPx = resolvedWidthPx
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX
+      const signedDelta = side === 'right' ? -deltaX : deltaX
+      const nextWidthPx = clamp(startWidthPx + signedDelta, minWidthPx, maxWidthPx)
+      onPanelWidthChange(nextWidthPx)
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [isResizable, maxWidthPx, minWidthPx, onPanelWidthChange, resolvedWidthPx, side])
 
   return (
     <aside
-      className={`w-80 shrink-0 min-h-0 flex flex-col ${borderClass} ${backgroundClass}`}
+      className={`relative shrink-0 min-h-0 flex flex-col ${borderClass} ${backgroundClass}`}
+      style={{ width: `${resolvedWidthPx}px` }}
       data-plugin-subzone={subzone ?? 'PluginToolResultPanel'}
     >
+      {isResizable && (
+        <div
+          className={resizeHandleClassName}
+          onMouseDown={handleResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整工具面板宽度"
+        />
+      )}
       <div className="flex-1 min-h-0 flex flex-col">
         {workbench && (
           <div className="p-3 border-b border-inherit">

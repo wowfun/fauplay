@@ -28,6 +28,8 @@ interface FileLightboxModalProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  toolPanelWidthPx: number
+  onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
@@ -53,6 +55,8 @@ export function FileLightboxModal({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  toolPanelWidthPx,
+  onToolPanelWidthChange,
   onMutationCommitted,
 }: FileLightboxModalProps) {
   return (
@@ -80,6 +84,8 @@ export function FileLightboxModal({
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
         toolPanelCollapsed={toolPanelCollapsed}
         onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+        toolPanelWidthPx={toolPanelWidthPx}
+        onToolPanelWidthChange={onToolPanelWidthChange}
         onMutationCommitted={onMutationCommitted}
       />
     </div>

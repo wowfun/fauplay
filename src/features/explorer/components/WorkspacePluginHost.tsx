@@ -25,6 +25,8 @@ interface WorkspacePluginHostProps {
   onMutationCommitted?: () => void | Promise<void>
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  toolPanelWidthPx: number
+  onToolPanelWidthChange: (nextWidthPx: number) => void
 }
 
 export function WorkspacePluginHost({
@@ -41,6 +43,8 @@ export function WorkspacePluginHost({
   onMutationCommitted,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  toolPanelWidthPx,
+  onToolPanelWidthChange,
 }: WorkspacePluginHostProps) {
   const normalizedCurrentPath = useMemo(
     () => currentPath.split('/').filter(Boolean).join('/'),
@@ -214,6 +218,10 @@ export function WorkspacePluginHost({
           side="right"
           subzone="WorkspaceToolResultPanel"
           emptyHint={hasRenderableTargets ? '点击右侧工具按钮后，结果会显示在这里。' : '当前目录没有可处理项目。'}
+          panelWidthPx={toolPanelWidthPx}
+          minPanelWidthPx={320}
+          maxPanelWidthPx={640}
+          onPanelWidthChange={onToolPanelWidthChange}
         />
       )}
       <PluginActionRail

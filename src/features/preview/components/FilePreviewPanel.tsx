@@ -35,6 +35,8 @@ interface FilePreviewPanelProps {
   enableContinuousAutoRunOwner: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
+  toolPanelWidthPx: number
+  onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
 }
 
@@ -140,6 +142,8 @@ export function FilePreviewPanel({
   enableContinuousAutoRunOwner,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
+  toolPanelWidthPx,
+  onToolPanelWidthChange,
   onMutationCommitted,
 }: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -445,6 +449,8 @@ export function FilePreviewPanel({
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
         toolPanelCollapsed={toolPanelCollapsed}
         onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
+        toolPanelWidthPx={toolPanelWidthPx}
+        onToolPanelWidthChange={onToolPanelWidthChange}
         onMutationCommitted={onMutationCommitted}
       />
     </div>

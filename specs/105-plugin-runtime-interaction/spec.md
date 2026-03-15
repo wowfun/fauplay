@@ -15,6 +15,8 @@
 - 工具结果面板（`PluginToolResultPanel`）
 - 工作区工具面板折叠状态（`workspaceToolPanelCollapsed`）
 - 预览工具面板折叠状态（`previewToolPanelCollapsed`）
+- 工作区工具面板宽度状态（`workspaceToolPanelWidthPx`）
+- 预览工具面板宽度状态（`previewToolPanelWidthPx`）
 - 表现态（Presentation Surface）：`preview-panel` / `preview-lightbox` / `workspace-grid`
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
@@ -23,7 +25,7 @@
 
 1. `workspace` 与 `file` 两类插件实例的统一交互语义。
 2. 三段式子分区（ActionRail / Workbench / ResultPanel）的职责边界。
-3. 工具面板展开/收起状态的默认值、持久化与跨表现态一致性。
+3. 工具面板展开/收起与宽度状态的默认值、持久化与跨表现态一致性。
 4. 结果队列与工作台状态在同一资源上下文下的一致性约束。
 5. 与 `003-ui-ux` 的分工边界与引用关系。
 
@@ -42,7 +44,10 @@
 5. 收起/展开开关必须放置于各自 `PluginActionRail` 顶部，不得放在 `PluginToolResultPanel` 内。
 6. `preview` 实例在侧栏与全屏之间切换时，折叠状态必须共享并保持一致。
 7. `workspace` 与 `preview` 的折叠状态必须彼此隔离，互不影响。
-8. 本专题不新增快捷键契约；快捷键规则仍由 `003-ui-ux` 与 `src/config/shortcuts.ts` 管理。
+8. 工具结果面板必须支持横向拖拽调宽，默认 `320px`，可调范围固定为 `320..640px`。
+9. `workspace` 与 `preview` 的面板宽度状态必须彼此隔离，互不影响。
+10. `preview` 实例在侧栏与全屏之间切换时，面板宽度状态必须共享并保持一致。
+11. 本专题不新增快捷键契约；快捷键规则仍由 `003-ui-ux` 与 `src/config/shortcuts.ts` 管理。
 
 ## 5. 运行时同构与状态边界契约 (Runtime Isomorphism Contract)
 
@@ -71,7 +76,20 @@
 6. `PluginToolResultPanel` 不承担面板级开关职责，不得内置“面板整体收起/展开”控制。
 7. 收起与展开仅改变面板可见性，不得清空已存在结果队列与工作台选项值。
 
-## 7. 功能需求 (FR)
+## 7. 面板宽度契约 (Panel Width Contract)
+
+1. 系统必须暴露两个独立宽度状态接口：
+   - `workspaceToolPanelWidthPx`
+   - `previewToolPanelWidthPx`
+2. 两个状态默认值均为 `320`（单位：像素）。
+3. 两个状态必须支持拖拽调宽，且宽度范围固定为 `320..640`。
+4. 拖拽计算后的宽度必须执行边界钳制（clamp），不得越界。
+5. `workspaceToolPanelWidthPx` 仅影响 B1 工作区插件的工作台与结果面板容器。
+6. `previewToolPanelWidthPx` 同时影响侧栏预览与全屏预览中的插件工作台与结果面板容器。
+7. 两个宽度状态必须持久化到 localStorage；读取失败或值非法时必须回退默认 `320`。
+8. 收起/展开工具面板不得重置已记忆的面板宽度值。
+
+## 8. 功能需求 (FR)
 
 1. `FR-PRI-01` 系统必须提供统一三段式插件交互结构。
 2. `FR-PRI-02` `workspace` 与 `file` 两类实例必须复用同构交互语义。
@@ -87,8 +105,14 @@
 12. `FR-PRI-12` `workspace` 作用域 `mutation=true` 且真实执行成功时，系统必须自动刷新当前目录视图。
 13. `FR-PRI-13` mutation 自动刷新后若仍存在可预览文件，系统不得强制关闭已打开的侧栏预览。
 14. `FR-PRI-14` 结果项头部文案与结构化结果详情渲染必须遵循统一格式约束。
+15. `FR-PRI-15` 系统必须提供 `workspaceToolPanelWidthPx` 与 `previewToolPanelWidthPx` 两个独立宽度状态接口。
+16. `FR-PRI-16` 两个宽度状态默认值必须为 `320`，并支持 `320..640` 区间拖拽调宽。
+17. `FR-PRI-17` 宽度状态必须持久化到 localStorage，并在读取异常或值非法时安全降级为 `320`。
+18. `FR-PRI-18` `preview` 实例在侧栏与全屏表现态下必须共享同一宽度状态。
+19. `FR-PRI-19` 收起/展开行为不得重置面板宽度状态。
+20. `FR-PRI-20` 面板宽度更新必须执行边界钳制，不得越过 `320..640`。
 
-## 8. 验收标准 (AC)
+## 9. 验收标准 (AC)
 
 1. `AC-PRI-01` 在 B1 点击收起后，仅隐藏工作台与结果面板，`WorkspaceActionRail` 仍可见且可点击恢复。
 2. `AC-PRI-02` 在预览侧栏点击收起后，切换到全屏仍保持收起；从全屏返回侧栏状态一致。
@@ -102,8 +126,14 @@
 10. `AC-PRI-10` `workspace` mutation 工具真实执行成功后，网格区自动刷新为最新文件系统状态。
 11. `AC-PRI-11` mutation 自动刷新后，若目录仍有可预览文件，侧栏预览保持打开并回退到可用文件。
 12. `AC-PRI-12` 结果项头部格式与结构化详情渲染符合统一约束，`result.ok` 不在详情区重复展示。
+13. `AC-PRI-13` 在 B1 可通过拖拽调宽工具面板，宽度始终落在 `320..640`。
+14. `AC-PRI-14` 在预览侧栏可通过拖拽调宽工具面板，宽度始终落在 `320..640`。
+15. `AC-PRI-15` 在预览侧栏调宽后切换到全屏，宽度保持一致；返回侧栏仍一致。
+16. `AC-PRI-16` `workspace` 与 `preview` 宽度状态可独立调整，互不联动。
+17. `AC-PRI-17` 刷新页面后，宽度状态可从 localStorage 恢复。
+18. `AC-PRI-18` 收起后再展开，面板恢复收起前宽度值，不发生重置。
 
-## 9. 公共接口与类型影响 (Public Interfaces & Types)
+## 10. 公共接口与类型影响 (Public Interfaces & Types)
 
 说明：本节定义规范层约束，不限定具体实现文件结构。
 
@@ -116,21 +146,33 @@
    - 必须存在 localStorage 读写与容错策略。
 4. 预览状态共享
    - `preview-panel` 与 `preview-lightbox` 必须消费同一 `previewToolPanelCollapsed` 数据源。
+5. 宽度状态接口
+   - `workspaceToolPanelWidthPx: number`
+   - `previewToolPanelWidthPx: number`
+6. 宽度状态切换入口
+   - 必须存在对应更新能力（例如 `setWorkspaceToolPanelWidthPx`、`setPreviewToolPanelWidthPx`）。
+7. 宽度状态持久化
+   - 必须存在 localStorage 读写、边界钳制与容错策略。
+8. 预览宽度状态共享
+   - `preview-panel` 与 `preview-lightbox` 必须消费同一 `previewToolPanelWidthPx` 数据源。
 
-## 10. 失败与降级行为 (Failure & Degradation)
+## 11. 失败与降级行为 (Failure & Degradation)
 
 1. localStorage 读写失败时，系统应降级为会话态内存状态，不得阻断核心浏览与插件调用链路。
 2. 折叠开关异常（如图标加载失败）不得阻断动作入口，必须保留文本可访问名称。
 3. 当工具不可用或网关离线时，可隐藏或禁用动作入口，但不得破坏非插件核心浏览流程。
+4. 宽度拖拽交互异常时，系统应保留可用默认宽度（`320`）并继续允许工具调用。
 
-## 11. 默认值与一致性约束 (Defaults & Consistency)
+## 12. 默认值与一致性约束 (Defaults & Consistency)
 
 1. 主题编号固定为 `105`，主题目录固定为 `105-plugin-runtime-interaction`。
 2. 折叠状态默认值固定为展开（`false`）。
 3. `preview` 折叠状态在侧栏与全屏必须共享同一事实源。
-4. 规范职责分工：`003-ui-ux` 维护 UI 高层分区与交互基线，本规范维护插件运行时交互细则。
+4. 面板宽度默认值固定为 `320`，最小值固定为 `320`，最大值固定为 `640`。
+5. `preview` 宽度状态在侧栏与全屏必须共享同一事实源。
+6. 规范职责分工：`003-ui-ux` 维护 UI 高层分区与交互基线，本规范维护插件运行时交互细则。
 
-## 12. 关联主题 (Related Specs)
+## 13. 关联主题 (Related Specs)
 
 - 上游基线：[`../000-foundation/spec.md`](../000-foundation/spec.md)
 - 架构边界：[`../001-architecture/spec.md`](../001-architecture/spec.md)
