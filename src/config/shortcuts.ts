@@ -16,6 +16,9 @@ export const keyboardShortcuts = {
     togglePlaybackOrder: [
       { key: 't', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
+    toggleVideoPlayPause: [
+      { key: 'space', ctrl: false, meta: false, alt: false, shift: false },
+    ] satisfies ShortcutBinding[],
     softDelete: [
       { key: 'delete', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],

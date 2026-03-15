@@ -96,14 +96,14 @@ export function PreviewTitleRow({
   }
 
   return (
-    <div className="min-w-0" data-preview-subzone="PreviewTitleRow">
+    <div className="min-w-0 w-full" data-preview-subzone="PreviewTitleRow">
       {isEditing ? (
         <>
           <Input
             ref={inputRef}
             value={draftBaseName}
             disabled={renameInFlight}
-            className="h-8 px-2 text-sm"
+            className="h-8 w-full max-w-full px-2 text-sm"
             onChange={(event) => {
               setDraftBaseName(event.target.value)
               if (renameError) {

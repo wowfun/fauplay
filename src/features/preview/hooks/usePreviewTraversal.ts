@@ -397,14 +397,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     const hasMediaSetChanged = lastShuffleMediaSetKeyRef.current !== mediaSetKey
 
     if (!activePath) {
-      const fallback = mediaFiles[0]
-      setSelectedFile(fallback)
-      if (previewFile) {
-        setPreviewFile(fallback)
-      }
-      setShowPreviewPane(true)
-      initializeShuffleState(fallback.path)
-      lastShuffleMediaSetKeyRef.current = mediaSetKey
       return
     }
 

@@ -8,6 +8,7 @@ interface FilePreviewViewportProps {
   file: FileItem
   previewKind: FilePreviewKind
   previewUrl: string | null
+  videoSurface?: 'panel' | 'lightbox'
   textPreview: TextPreviewPayload
   fileMimeType: string | null
   fileSizeBytes: number | null
@@ -57,6 +58,7 @@ export function FilePreviewViewport({
   file,
   previewKind,
   previewUrl,
+  videoSurface = 'panel',
   textPreview,
   fileMimeType,
   fileSizeBytes,
@@ -106,6 +108,8 @@ export function FilePreviewViewport({
               src={previewUrl}
               controls
               autoPlay={autoPlayVideo}
+              data-preview-video="true"
+              data-preview-video-surface={videoSurface}
               className={PREVIEW_MEDIA_CONTENT_CLASS}
               onEnded={onVideoEnded}
               onError={onVideoRenderError}

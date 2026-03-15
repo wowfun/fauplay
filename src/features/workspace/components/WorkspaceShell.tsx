@@ -264,6 +264,36 @@ export function WorkspaceShell({
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
   } = usePreviewTraversal({ filteredFiles })
+  const hasActiveVideoPreview = useMemo(() => {
+    const activePreviewFile = previewFile ?? (showPreviewPane ? selectedFile : null)
+    if (!activePreviewFile || activePreviewFile.kind !== 'file') {
+      return false
+    }
+    return getFilePreviewKind(activePreviewFile.name) === 'video'
+  }, [previewFile, selectedFile, showPreviewPane])
+
+  const toggleActivePreviewVideoPlayback = useCallback((): boolean => {
+    const preferredSurface = previewFile ? 'lightbox' : 'panel'
+    const preferredSelector = `video[data-preview-video="true"][data-preview-video-surface="${preferredSurface}"]`
+    const videoElement =
+      document.querySelector<HTMLVideoElement>(preferredSelector)
+      ?? document.querySelector<HTMLVideoElement>('video[data-preview-video="true"]')
+
+    if (!videoElement) {
+      return false
+    }
+
+    if (videoElement.paused || videoElement.ended) {
+      const playPromise = videoElement.play()
+      if (playPromise && typeof playPromise.catch === 'function') {
+        void playPromise.catch(() => {})
+      }
+      return true
+    }
+
+    videoElement.pause()
+    return true
+  }, [previewFile])
 
   const handleDirectoryClick = useCallback((dirName: string) => {
     void navigateToDirectory(dirName)
@@ -464,6 +494,13 @@ export function WorkspaceShell({
 
       if (isTyping) return
 
+      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleVideoPlayPause)) {
+        event.preventDefault()
+        if (event.repeat) return
+        toggleActivePreviewVideoPlayback()
+        return
+      }
+
       if (hasActiveMediaPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
         event.preventDefault()
         toggleAutoPlay()
@@ -521,14 +558,15 @@ export function WorkspaceShell({
     closePreviewModal,
     closePreviewPane,
     hasActiveMediaPreview,
+    hasActiveVideoPreview,
     currentPath,
-    hasOpenPreview,
     navigateMediaFromModal,
     navigateMediaFromPane,
     navigateUp,
     previewFile,
     selectDirectory,
     showPreviewPane,
+    toggleActivePreviewVideoPlayback,
     toggleAutoPlay,
     togglePlaybackOrder,
   ])

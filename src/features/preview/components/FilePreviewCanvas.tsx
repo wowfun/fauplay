@@ -117,6 +117,7 @@ export function FilePreviewCanvas({
         file={file}
         previewKind={previewKind}
         previewUrl={previewUrl}
+        videoSurface={isFullscreen ? 'lightbox' : 'panel'}
         textPreview={textPreview}
         fileMimeType={fileMimeType}
         fileSizeBytes={fileSizeBytes}

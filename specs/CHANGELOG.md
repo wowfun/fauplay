@@ -2,6 +2,9 @@
 
 ## 2026-03-15
 ### Changed
+- 更新 `specs/100-preview-playback/spec.md`、`src/config/shortcuts.ts`、`docs/shortcuts.md`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/features/preview/components/FilePreviewCanvas.tsx` 与 `src/features/preview/components/FilePreviewViewport.tsx`：新增预览态 `Space` 视频播放/暂停快捷键，优先控制全屏视频，其次控制侧栏视频，并与侧栏/全屏快捷键语义保持一致。
+- 更新 `specs/113-preview-inline-rename/spec.md` 与 `src/features/preview/components/PreviewTitleRow.tsx`：重命名编辑态输入框改为占满标题区可用宽度，避免默认 `20ch` 窄输入框影响长文件名编辑。
+- 更新 `specs/113-preview-inline-rename/spec.md` 与 `src/features/preview/hooks/usePreviewTraversal.ts`：修复随机遍历模式下重命名后误回退首项的问题；当刷新窗口出现短暂状态不一致时不再强制回落到媒体首项，保持重命名文件的预览锚点。
 - 更新 `specs/114-metadata-annotation/spec.md`：将指纹执行约束从“必须前端 Web Worker”调整为“必须后台异步队列（前端 Worker 或 MCP server 队列均可）”，并明确当前实现推荐服务端队列以减少前后端双实现成本。
 - 更新 `specs/114-metadata-annotation/spec.md` 与 `specs/114-metadata-annotation/plan.md`：sidecar 路径统一为 `.fauplay/.annotations.v1.json`。
 - 更新 `src/features/plugin-runtime/components/AnnotationQuickTagPanel.tsx`：修复字段编辑器输入时因不稳定 React key 导致的逐字符失焦问题。
