@@ -58,6 +58,7 @@
 15. 标签过滤模式为自动判定：`annotationIncludeTagKeys` 或 `annotationExcludeTagKeys` 任一非空时等价 `boolean`，两者均空时等价 `all`；不提供手动 `all/boolean` 切换控件。
 16. 当前 root 无 `.fauplay`、无 `.annotations.v1.json` 或无可参与过滤的标注数据时，顶部工具栏不得展示任何标签过滤相关 UI。
 17. 当标签过滤 UI 从可见切换为隐藏时，过滤状态必须自动回退到 `all`，禁止“不可见过滤”继续生效。
+18. 在随机遍历模式 + `未标注` 过滤下，当前预览文件打标后若被移出结果集，预览续播必须沿用随机队列语义，不得退化为顺序回退。
 
 ## 5. 数据与存储契约 (Data & Storage Contract)
 
@@ -266,6 +267,7 @@
 17. `FR-MA-17` 标签过滤 UI 的显示判定必须仅依赖当前 root 的 sidecar 快照元数据（`hasSidecarDir/hasSidecarFile/hasAnyFilterableAnnotation`），不得依赖 `meta.annotation` 工具启用状态。
 18. `FR-MA-18` 标签过滤模式必须由 include/exclude 条件自动推导（非空=`boolean`，全空=`all`），`OR/AND` 单独切换不得触发模式切换。
 19. `FR-MA-19` 标签过滤 UI 隐藏时，过滤状态必须回退 `all`；显示后允许 `OR/AND/NOT + 未标注` 条件过滤生效。
+20. `FR-MA-20` 标注写入导致当前预览项从过滤结果集中移除时，若随机遍历模式开启，预览续播必须沿用随机队列下一项语义。
 
 ## 11. 验收标准 (AC)
 
@@ -290,6 +292,7 @@
 19. `AC-MA-19` 无 include/exclude 条件时，过滤结果等价 `all`；仅切换 `OR/AND` 不改变结果集。
 20. `AC-MA-20` include/exclude 任一非空时自动进入等价布尔过滤；清空最后一个 include/exclude 后自动回到等价 `all`。
 21. `AC-MA-21` 运行时从“可展示”切换到“不可展示”后，标签过滤状态自动回退 `all`，文件列表不保留隐式过滤结果。
+22. `AC-MA-22` 随机遍历 + “包含标签：未标注”过滤下，当前文件打标后移出结果集时，预览自动切换到随机队列下一项，不回退到顺序列表项。
 
 ## 12. 默认值与一致性约束 (Defaults & Consistency)
 

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-03-16
+### Changed
+- 更新 `specs/100-preview-playback/spec.md`、`specs/114-metadata-annotation/spec.md` 与 `src/features/preview/hooks/usePreviewTraversal.ts`：修复随机遍历 + “包含标签：未标注”过滤下当前文件打标后的续播退化问题；当当前项因过滤移出结果集时，随机模式优先沿用 `shuffleQueue` 续播下一项，不再回退到顺序列表项。
+
 ## 2026-03-15
 ### Changed
 - 更新 `specs/100-preview-playback/spec.md`、`src/config/shortcuts.ts`、`docs/shortcuts.md`、`src/features/preview/hooks/usePreviewTraversal.ts`、`src/features/workspace/components/WorkspaceShell.tsx` 与预览组件链路：新增视频快捷键 `J/L/R`（快退/快进/循环倍速），新增预览头部“快进步长（3/5/10s）”与“倍速（0.5/1/3/5x）”下拉并与快捷键联动；步长与倍速状态支持 localStorage 持久化并在侧栏/全屏共享。

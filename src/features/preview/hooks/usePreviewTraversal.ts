@@ -440,6 +440,32 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     if (!selectedFile) return
     const stillExists = filteredFiles.some((item) => item.path === selectedFile.path)
     if (!stillExists) {
+      if (playbackOrder === 'shuffle' && selectedFile.kind === 'file') {
+        const nextShufflePath = shuffleQueue.find((path) => mediaIndexByPath.has(path))
+        const nextShuffleFile = nextShufflePath ? mediaFileByPath.get(nextShufflePath) ?? null : null
+
+        if (nextShuffleFile) {
+          setSelectedFile(nextShuffleFile)
+          if (showPreviewPane) {
+            setShowPreviewPane(true)
+          }
+          if (previewFile) {
+            setPreviewFile(nextShuffleFile)
+          }
+          setShuffleQueue((previous) => {
+            return previous.filter((path) => mediaIndexByPath.has(path) && path !== nextShuffleFile.path)
+          })
+          setShuffleHistory((previous) => {
+            const validHistory = previous.filter((path) => mediaIndexByPath.has(path))
+            if (validHistory[validHistory.length - 1] === nextShuffleFile.path) {
+              return validHistory
+            }
+            return [...validHistory, nextShuffleFile.path]
+          })
+          return
+        }
+      }
+
       const fallbackFile = filteredFiles.find((item): item is FileItem => item.kind === 'file') ?? null
 
       if (fallbackFile) {
@@ -459,7 +485,16 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
         setPreviewFile(null)
       }
     }
-  }, [filteredFiles, previewFile, selectedFile, showPreviewPane])
+  }, [
+    filteredFiles,
+    mediaFileByPath,
+    mediaIndexByPath,
+    playbackOrder,
+    previewFile,
+    selectedFile,
+    showPreviewPane,
+    shuffleQueue,
+  ])
 
   useEffect(() => {
     if (playbackOrder !== 'shuffle') {
