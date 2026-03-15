@@ -105,6 +105,9 @@ export function WorkspacePluginHost({
       return { relativePaths: targetPaths }
     }, [hasTargets, targetPaths]),
     canRunTool: useCallback((tool: GatewayToolDescriptor) => {
+      if (tool.name === 'meta.annotation') {
+        return true
+      }
       if (tool.name === 'fs.softDelete' || tool.name === 'fs.restore') {
         return hasSelectedEntries
       }
@@ -184,6 +187,16 @@ export function WorkspacePluginHost({
         optionValues={workbenchState.optionValuesByTool[activeTool.name]}
         onOptionChange={runtime.handleWorkbenchOptionChange}
         onRunAction={handleWorkbenchRunAction}
+        onRunCustomToolCall={(toolItem, params) => {
+          runtime.handleWorkbenchContextChange(toolItem.name)
+          void runtime.runToolCall(toolItem, {
+            trigger: 'manual',
+            actionLabel: params.actionLabel,
+            additionalArgs: params.additionalArgs,
+          })
+        }}
+        rootId={rootId}
+        annotationTargetPath={null}
         surfaceVariant="workspace-grid"
         subzone="WorkspaceToolWorkbench"
       />

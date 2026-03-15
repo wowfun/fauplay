@@ -19,6 +19,18 @@ export const keyboardShortcuts = {
     softDelete: [
       { key: 'delete', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
+    annotationAssignByDigit: [
+      { key: '0', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '1', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '2', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '3', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '4', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '5', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '6', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '7', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '8', ctrl: false, meta: false, alt: false, shift: false },
+      { key: '9', ctrl: false, meta: false, alt: false, shift: false },
+    ] satisfies ShortcutBinding[],
     prev: [
       { code: 'bracketleft', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],

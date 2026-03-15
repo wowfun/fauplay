@@ -2,12 +2,16 @@ import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation 
 import type { PluginSurfaceVariant, ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
+import { AnnotationQuickTagPanel } from '@/features/plugin-runtime/components/AnnotationQuickTagPanel'
 
 interface PluginToolWorkbenchProps {
   tool: GatewayToolDescriptor | null
   optionValues?: Record<string, ToolWorkbenchOptionValue>
   onOptionChange: (toolName: string, optionKey: string, value: ToolWorkbenchOptionValue) => void
   onRunAction: (tool: GatewayToolDescriptor, action: ToolActionAnnotation) => void
+  onRunCustomToolCall?: (tool: GatewayToolDescriptor, params: { additionalArgs: Record<string, unknown>; actionLabel?: string }) => void
+  rootId?: string | null
+  annotationTargetPath?: string | null
   surfaceVariant: PluginSurfaceVariant
   subzone?: string
 }
@@ -49,6 +53,9 @@ export function PluginToolWorkbench({
   optionValues,
   onOptionChange,
   onRunAction,
+  onRunCustomToolCall,
+  rootId,
+  annotationTargetPath,
   surfaceVariant,
   subzone,
 }: PluginToolWorkbenchProps) {
@@ -164,6 +171,28 @@ export function PluginToolWorkbench({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tool.name === 'meta.annotation' && (
+        <div className={hasOptions || hasActions ? 'mt-3' : 'mt-0'}>
+          <AnnotationQuickTagPanel
+            rootId={rootId}
+            targetPath={annotationTargetPath}
+            surfaceVariant={surfaceVariant}
+            onSetValue={({ fieldKey, value, source }) => {
+              if (!onRunCustomToolCall) return
+              onRunCustomToolCall(tool, {
+                actionLabel: `${fieldKey}=${value}`,
+                additionalArgs: {
+                  operation: 'setValue',
+                  fieldKey,
+                  value,
+                  source,
+                },
+              })
+            }}
+          />
         </div>
       )}
     </section>

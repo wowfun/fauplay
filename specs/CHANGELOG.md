@@ -1,9 +1,27 @@
 # CHANGELOG
 
+## 2026-03-15
+### Changed
+- 更新 `specs/114-metadata-annotation/spec.md`：将指纹执行约束从“必须前端 Web Worker”调整为“必须后台异步队列（前端 Worker 或 MCP server 队列均可）”，并明确当前实现推荐服务端队列以减少前后端双实现成本。
+- 更新 `specs/114-metadata-annotation/spec.md` 与 `specs/114-metadata-annotation/plan.md`：sidecar 路径统一为 `.fauplay/.annotations.v1.json`。
+- 更新 `src/features/plugin-runtime/components/AnnotationQuickTagPanel.tsx`：修复字段编辑器输入时因不稳定 React key 导致的逐字符失焦问题。
+- 更新 `tools/mcp/metadata-annotation/server.mjs`：sidecar 写入迁移到 `.fauplay/.annotations.v1.json`（读取兼容旧路径 `.fauplay.annotations.v1.json`），并为目录扫描/指纹计算增加 `EIO/EACCES/EPERM/ENOENT` 容错跳过，避免 `refreshBindings` 因单路径 I/O 异常整体失败。
+- 更新 `.fauplay/mcp.json` 与 `src/lib/gateway.ts`：为 `meta.annotation` 提升调用超时预算到 `120000ms`，避免 `refreshBindings` 在大目录下触发 `MCP_SERVER_TIMEOUT`。
+- 更新 `specs/114-metadata-annotation/spec.md`：刷新语义重构为“逐标注项校验（size/mtime 快照）+ ES 候选搜索 + bindingFp 比对”，并新增 `fileSizeBytes/fileMtimeMs` 与 `orphanReason=search_unavailable` 契约，明确不再兼容旧 sidecar 路径。
+- 更新 `tools/mcp/metadata-annotation/server.mjs`：`refreshBindings` 移除 root 递归全量指纹索引构建，改为逐条标注重绑；`setValue` 新增 `fileSizeBytes/fileMtimeMs` 落盘；sidecar 读取仅保留 `.fauplay/.annotations.v1.json`。
+- 新增 `tools/mcp/metadata-annotation/config.json`：为 `meta.annotation` 提供独立 ES 配置入口（`esPath/instanceName/maxCandidates`）。
+
 ## 2026-03-14
+### Added
+- 新增 `specs/114-metadata-annotation/spec.md`：定义 `meta.annotation` 标注插件规范，覆盖 sidecar 标注库、`bindingFp/exactFp/simFp` 分层指纹（去除 `mtime` 依赖）、Web Worker 按需懒计算队列、orphan/conflict 重绑语义，以及预览态 enum 字段 `0..9` 自动快捷打标契约。
+
 ### Changed
 - 更新 `specs/109-soft-delete/spec.md`：新增“预览软删除提交后自动续选”契约，明确当前预览文件删除成功后不得回退首项；媒体文件复用预览遍历模式（顺序/随机），非媒体文件按当前列表顺序前进且末项回绕到首项。
 - 更新 `src/features/preview/types/mutation.ts`、`PreviewPluginHost.tsx` 与 `WorkspaceShell.tsx`：预览 mutation 回调新增 `mutationToolName/deletedRelativePath` 上下文透传，`fs.softDelete` 成功后在目录刷新前先完成目标续选（媒体走 `next` 遍历，非媒体走列表 next + wrap），修复删除后光标回到首项的问题。
+- 更新 `.fauplay/mcp.json`：注册 `metadata-annotation` MCP server（`node tools/mcp/metadata-annotation/server.mjs`）。
+- 更新 `tools/mcp/metadata-annotation/server.mjs`：落地 `meta.annotation` 插件基础能力，支持 `setValue/refreshBindings/cleanupOrphans/findExactDuplicates/findSimilarImages`、sidecar 标注库 `.fauplay.annotations.v1.json` 读写、`bindingFp`（无 `mtime` 依赖）与可选 `exact/sim` 指纹计算、orphan/conflict 重绑语义。
+- 更新 `src/features/plugin-runtime/components/PluginToolWorkbench.tsx`、`AnnotationQuickTagPanel.tsx` 与 `PreviewPluginHost.tsx`：新增标注字段配置入口（全局默认 + root 覆盖）与预览态 enum 值快捷打标链路（点击值按钮或数字键触发 `meta.annotation.setValue`）。
+- 更新 `src/config/shortcuts.ts` 与 `docs/shortcuts.md`：新增预览态 `0-9` 快捷标注规则（仅激活字段、按定义顺序映射前 10 个枚举值）。
 
 ## 2026-03-13
 ### Added

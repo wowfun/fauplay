@@ -29,6 +29,14 @@
         "tools/mcp/soft-delete/server.mjs"
       ]
     },
+    "metadata-annotation": {
+      "type": "stdio",
+      "command": "node",
+      "callTimeoutMs": 120000,
+      "args": [
+        "tools/mcp/metadata-annotation/server.mjs"
+      ]
+    },
     "video-same-duration": {
       "type": "stdio",
       "command": "node",

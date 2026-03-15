@@ -16,6 +16,7 @@ import {
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
 import { orderToolsWithSoftDeleteLast } from '@/features/plugin-runtime/utils/toolOrdering'
+import { resolveActiveDigitAssignment } from '@/features/plugin-runtime/utils/annotationSchema'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 
 interface PreviewPluginHostProps {
@@ -132,6 +133,10 @@ export function PreviewPluginHost({
   }, [fileActionTools])
   const softDeleteTool = useMemo(
     () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
+    [fileActionTools]
+  )
+  const annotationTool = useMemo(
+    () => fileActionTools.find((tool) => tool.name === 'meta.annotation') ?? null,
     [fileActionTools]
   )
   const currentFileQueue = pluginRuntime.currentQueue
@@ -255,6 +260,43 @@ export function PreviewPluginHost({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [enableContinuousAutoRunOwner, file.kind, runToolCall, softDeleteTool])
 
+  useEffect(() => {
+    if (!enableContinuousAutoRunOwner) return
+    if (file.kind !== 'file') return
+    if (!annotationTool) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.repeat) return
+      if (isTypingTarget(event.target)) return
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+      if (!matchesAnyShortcut(event, keyboardShortcuts.preview.annotationAssignByDigit)) return
+
+      const digit = event.key
+      if (!/^[0-9]$/.test(digit)) return
+
+      const assignment = resolveActiveDigitAssignment(rootId)
+      if (!assignment) return
+      const value = assignment.valueByDigit[digit]
+      if (!value) return
+
+      event.preventDefault()
+      void runToolCall(annotationTool, {
+        trigger: 'manual',
+        actionLabel: `${assignment.fieldKey}=${value}`,
+        additionalArgs: {
+          operation: 'setValue',
+          fieldKey: assignment.fieldKey,
+          value,
+          source: 'hotkey',
+        },
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [annotationTool, enableContinuousAutoRunOwner, file.kind, rootId, runToolCall])
+
   const railActions = useMemo(
     () => pluginRuntime.railActions.map((action) => ({
       ...action,
@@ -273,14 +315,25 @@ export function PreviewPluginHost({
         optionValues={toolWorkbenchState.optionValuesByTool[tool.name]}
         onOptionChange={pluginRuntime.handleWorkbenchOptionChange}
         onRunAction={pluginRuntime.handleRunWorkbenchAction}
+        onRunCustomToolCall={(toolItem, params) => {
+          pluginRuntime.handleWorkbenchContextChange(toolItem.name)
+          void pluginRuntime.runToolCall(toolItem, {
+            trigger: 'manual',
+            actionLabel: params.actionLabel,
+            additionalArgs: params.additionalArgs,
+          })
+        }}
+        rootId={rootId}
+        annotationTargetPath={file.kind === 'file' ? file.path : null}
         surfaceVariant={surfaceVariant}
         subzone="PreviewToolWorkbench"
       />
     )
   }, [
-    pluginRuntime.activeWorkbenchTool,
-    pluginRuntime.handleRunWorkbenchAction,
-    pluginRuntime.handleWorkbenchOptionChange,
+    file.kind,
+    file.path,
+    pluginRuntime,
+    rootId,
     surfaceVariant,
     toolWorkbenchState.optionValuesByTool,
   ])

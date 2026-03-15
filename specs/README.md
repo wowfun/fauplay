@@ -44,3 +44,4 @@
 - 本地文件浏览器转向专题：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)
 - 相同时长视频搜索专题：[`112-video-same-duration-search/spec.md`](./112-video-same-duration-search/spec.md)
 - 预览标题点击重命名专题：[`113-preview-inline-rename/spec.md`](./113-preview-inline-rename/spec.md)
+- 标注插件专题：[`114-metadata-annotation/spec.md`](./114-metadata-annotation/spec.md)
