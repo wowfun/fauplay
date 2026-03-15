@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
@@ -7,8 +7,16 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
+import { resolveAnnotationSchema } from '@/features/plugin-runtime/utils/annotationSchema'
+import {
+  getAnnotationDisplayStoreVersion,
+  getFileAnnotationFieldValues,
+  patchAnnotationSetValue,
+  preloadAnnotationDisplaySnapshot,
+  subscribeAnnotationDisplayStore,
+} from '@/features/preview/utils/annotationDisplayStore'
 import { FilePreviewCanvas } from './FilePreviewCanvas'
-import { PreviewHeaderBar } from './PreviewHeaderBar'
+import { PreviewHeaderBar, type PreviewHeaderAnnotationTag } from './PreviewHeaderBar'
 import type { PreviewRenameResult } from './PreviewTitleRow'
 
 interface FilePreviewPanelProps {
@@ -46,6 +54,12 @@ interface BatchRenameItemResult {
   skipped?: boolean
   reasonCode?: string
   error?: string
+}
+
+interface MetaAnnotationSetValueResult {
+  relativePath: string
+  fieldKey: string
+  value: string
 }
 
 const INITIAL_TEXT_PREVIEW: TextPreviewPayload = {
@@ -118,6 +132,23 @@ function toConflictAwareErrorMessage(item: BatchRenameItemResult, fallback: stri
   return item.error || fallback
 }
 
+function readMetaAnnotationSetValueResult(result: unknown): MetaAnnotationSetValueResult | null {
+  if (!isRecord(result)) return null
+
+  const relativePath = typeof result.relativePath === 'string' ? result.relativePath : ''
+  const fieldKey = typeof result.fieldKey === 'string' ? result.fieldKey : ''
+  const value = typeof result.value === 'string' ? result.value : ''
+  if (!relativePath || !fieldKey || !value) {
+    return null
+  }
+
+  return {
+    relativePath,
+    fieldKey,
+    value,
+  }
+}
+
 export function FilePreviewPanel({
   file,
   rootHandle,
@@ -155,7 +186,13 @@ export function FilePreviewPanel({
   const [isRenaming, setIsRenaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
+  const handledMetaAnnotationQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
+  useSyncExternalStore(
+    subscribeAnnotationDisplayStore,
+    getAnnotationDisplayStoreVersion,
+    getAnnotationDisplayStoreVersion
+  )
 
   const hasBatchRenameTool = useMemo(
     () => previewActionTools.some((tool) => tool.name === 'fs.batchRename'),
@@ -176,6 +213,14 @@ export function FilePreviewPanel({
   }, [file, hasBatchRenameTool, rootHandle, rootId])
 
   const canRenameFileName = renameUnavailableReason === null
+
+  useEffect(() => {
+    if (!rootId || !rootHandle) return
+    void preloadAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+    })
+  }, [rootHandle, rootId])
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
     if (currentUrlRef.current) {
@@ -393,6 +438,72 @@ export function FilePreviewPanel({
     }
   }, [canRenameFileName, file, onMutationCommitted, renameUnavailableReason, rootHandle, rootId])
 
+  const currentFileQueue = useMemo(
+    () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
+    [file, toolResultQueueState.byContextKey]
+  )
+
+  useEffect(() => {
+    if (!file || file.kind !== 'file' || !rootId) {
+      handledMetaAnnotationQueueItemIdRef.current = null
+      return
+    }
+
+    const latestMetaAnnotationSuccess = currentFileQueue.find((item) => (
+      item.toolName === 'meta.annotation'
+      && item.status === 'success'
+    ))
+    if (!latestMetaAnnotationSuccess) return
+    if (handledMetaAnnotationQueueItemIdRef.current === latestMetaAnnotationSuccess.id) return
+    handledMetaAnnotationQueueItemIdRef.current = latestMetaAnnotationSuccess.id
+
+    const setValueResult = readMetaAnnotationSetValueResult(latestMetaAnnotationSuccess.result)
+    if (setValueResult) {
+      patchAnnotationSetValue({
+        rootId,
+        relativePath: setValueResult.relativePath,
+        fieldKey: setValueResult.fieldKey,
+        value: setValueResult.value,
+      })
+      return
+    }
+
+    if (!rootHandle) return
+    void preloadAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+      force: true,
+    })
+  }, [currentFileQueue, file, rootHandle, rootId])
+
+  const annotationTags: PreviewHeaderAnnotationTag[] = []
+  if (file && file.kind === 'file' && rootId) {
+    const fieldValues = getFileAnnotationFieldValues(rootId, file.path)
+    if (fieldValues) {
+      const { schema } = resolveAnnotationSchema(rootId)
+      const fieldOrder = new Map<string, number>()
+      const fieldLabelByKey = new Map<string, string>()
+      schema.fields.forEach((field, index) => {
+        fieldOrder.set(field.key, index)
+        fieldLabelByKey.set(field.key, field.label)
+      })
+
+      const entries = Object.entries(fieldValues)
+        .sort(([leftKey], [rightKey]) => {
+          const leftOrder = fieldOrder.get(leftKey) ?? Number.MAX_SAFE_INTEGER
+          const rightOrder = fieldOrder.get(rightKey) ?? Number.MAX_SAFE_INTEGER
+          if (leftOrder !== rightOrder) return leftOrder - rightOrder
+          return leftKey.localeCompare(rightKey)
+        })
+        .map(([fieldKey, value]) => ({
+          fieldKey,
+          fieldLabel: fieldLabelByKey.get(fieldKey) ?? fieldKey,
+          value,
+        }))
+      annotationTags.push(...entries)
+    }
+  }
+
   if (!file) {
     return (
       <div
@@ -423,6 +534,7 @@ export function FilePreviewPanel({
         renameInFlight={isRenaming}
         renameUnavailableReason={renameUnavailableReason}
         onSubmitFileNameRename={handleSubmitFileNameRename}
+        annotationTags={annotationTags}
       />
 
       <FilePreviewCanvas

@@ -2,6 +2,7 @@
 
 ## 2026-03-15
 ### Changed
+- 更新 `specs/114-metadata-annotation/spec.md`、`src/features/preview/utils/annotationDisplayStore.ts`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/features/preview/components/FilePreviewPanel.tsx` 与 `src/features/preview/components/PreviewHeaderBar.tsx`：预览头部标签展示改为独立于 `meta.annotation` 插件启用状态（基于当前 root 的 `.fauplay/.annotations.v1.json` 后台异步预加载），并调整为与文件名同行右侧展示；重命名编辑态下标签保持可见。
 - 更新 `specs/100-preview-playback/spec.md`、`src/config/shortcuts.ts`、`docs/shortcuts.md`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/features/preview/components/FilePreviewCanvas.tsx` 与 `src/features/preview/components/FilePreviewViewport.tsx`：新增预览态 `Space` 视频播放/暂停快捷键，优先控制全屏视频，其次控制侧栏视频，并与侧栏/全屏快捷键语义保持一致。
 - 更新 `specs/113-preview-inline-rename/spec.md` 与 `src/features/preview/components/PreviewTitleRow.tsx`：重命名编辑态输入框改为占满标题区可用宽度，避免默认 `20ch` 窄输入框影响长文件名编辑。
 - 更新 `specs/113-preview-inline-rename/spec.md` 与 `src/features/preview/hooks/usePreviewTraversal.ts`：修复随机遍历模式下重命名后误回退首项的问题；当刷新窗口出现短暂状态不一致时不再强制回落到媒体首项，保持重命名文件的预览锚点。

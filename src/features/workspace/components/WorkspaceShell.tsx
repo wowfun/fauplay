@@ -9,6 +9,7 @@ import { keyboardShortcuts } from '@/config/shortcuts'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { preloadAnnotationDisplaySnapshot } from '@/features/preview/utils/annotationDisplayStore'
 import type { AddressPathHistoryEntry, FavoriteFolderEntry, FileItem, FilterState, ThumbnailSizePreset } from '@/types'
 import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
 
@@ -486,6 +487,13 @@ export function WorkspaceShell({
       disposed = true
     }
   }, [files, rootHandle])
+
+  useEffect(() => {
+    void preloadAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+    })
+  }, [rootHandle, rootId])
 
   useEffect(() => {
     let disposed = false

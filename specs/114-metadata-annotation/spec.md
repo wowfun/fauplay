@@ -31,6 +31,7 @@
 3. fingerprint 分层模型与重绑语义。
 4. orphan 刷新与清理动作。
 5. 插件选项区的字段配置入口与 0-9 快捷打标。
+6. 预览头部已标注标签展示（基于 sidecar 快照，独立于工具启用状态）。
 
 范围外：
 
@@ -49,6 +50,10 @@
 7. 刷新标注（`refreshBindings`）会统一执行重绑并更新 `active/orphan/conflict` 状态。
 8. 清理失效标注（`cleanupOrphans`）仅删除 `orphan`，不删除 `conflict`。
 9. `exactFp/simFp` 由插件选项控制，默认关闭；关闭时不触发对应计算。
+10. 服务启动后应在后台异步尝试读取当前 root 下 `.fauplay/.annotations.v1.json`，不得阻塞 UI 主链路。
+11. 预览头部标签展示必须与 `meta.annotation` 插件启用状态解耦；网关离线或工具未注册时，若 sidecar 存在且匹配当前文件，仍应展示标签。
+12. 预览头部标签位于“文件名同行右侧”，默认展示当前文件 `active` 记录中的全部字段标签。
+13. 文件名进入重命名编辑态时，右侧标签仍保持可见，输入框按剩余宽度自适应。
 
 ## 5. 数据与存储契约 (Data & Storage Contract)
 
@@ -251,6 +256,9 @@
 11. `FR-MA-11` 配置作用域必须支持“全局默认 + root 覆盖全量替换”。
 12. `FR-MA-12` `simFp` 仅用于图片相似候选，不得用于自动重绑。
 13. `FR-MA-13` sidecar 不兼容旧路径 `.fauplay.annotations.v1.json`。
+14. `FR-MA-14` 客户端必须支持基于 `rootHandle` 的 sidecar 相对路径读取能力，并在根目录就绪后后台异步预加载当前 root 标注快照。
+15. `FR-MA-15` 预览头部标签展示判定必须仅依赖 `rootId + 当前文件路径 + sidecar 快照`，不得依赖 `tools/list` 中是否存在 `meta.annotation`。
+16. `FR-MA-16` 预览头部标签默认仅展示 `status=active` 记录；`orphan/conflict` 不进入头部标签展示。
 
 ## 11. 验收标准 (AC)
 
@@ -267,6 +275,9 @@
 11. `AC-MA-11` `refreshBindings` 不触发 root 递归全量扫描。
 12. `AC-MA-12` 本专题快捷键文档与配置同步更新（`src/config/shortcuts.ts` 与 `docs/shortcuts.md`）。
 13. `AC-MA-13` ES 不可用时，条目标记为 `orphan(search_unavailable)`，整次刷新不中断。
+14. `AC-MA-14` 在网关离线或 `meta.annotation` 未注册时，若 sidecar 存在匹配当前文件的 `active` 标注，预览头部仍可展示标签。
+15. `AC-MA-15` 预览头部标签与文件名处于同一行且右侧对齐；进入重命名编辑态后标签不消失。
+16. `AC-MA-16` sidecar 缺失或 JSON 非法时，标签区静默降级为空，不阻塞预览打开与交互。
 
 ## 12. 默认值与一致性约束 (Defaults & Consistency)
 
