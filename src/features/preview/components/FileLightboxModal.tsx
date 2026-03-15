@@ -15,10 +15,14 @@ interface FileLightboxModalProps {
   autoPlayOnOpen?: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
   toolResultQueueState: PluginResultQueueState
@@ -42,10 +46,14 @@ export function FileLightboxModal({
   autoPlayOnOpen = false,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
   onVideoEnded,
   onVideoPlaybackError,
   toolResultQueueState,
@@ -69,10 +77,14 @@ export function FileLightboxModal({
         onClose={onClose}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
+        videoSeekStepSec={videoSeekStepSec}
+        videoPlaybackRate={videoPlaybackRate}
         onToggleAutoPlay={onToggleAutoPlay}
         playbackOrder={playbackOrder}
         onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+        onVideoSeekStepChange={onVideoSeekStepChange}
+        onVideoPlaybackRateChange={onVideoPlaybackRateChange}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}
         presentation="lightbox"

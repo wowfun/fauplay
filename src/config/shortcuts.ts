@@ -19,6 +19,15 @@ export const keyboardShortcuts = {
     toggleVideoPlayPause: [
       { key: 'space', ctrl: false, meta: false, alt: false, shift: false },
     ] satisfies ShortcutBinding[],
+    seekBackward: [
+      { key: 'j', ctrl: false, meta: false, alt: false, shift: false },
+    ] satisfies ShortcutBinding[],
+    seekForward: [
+      { key: 'l', ctrl: false, meta: false, alt: false, shift: false },
+    ] satisfies ShortcutBinding[],
+    cycleVideoPlaybackRate: [
+      { key: 'r', ctrl: false, meta: false, alt: false, shift: false },
+    ] satisfies ShortcutBinding[],
     softDelete: [
       { key: 'delete', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],

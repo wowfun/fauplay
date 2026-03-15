@@ -3,21 +3,31 @@ import { Select } from '@/ui/Select'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 
 interface MediaPlaybackControlsProps {
+  isVideoPreview: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
 }
 
 export function MediaPlaybackControls({
+  isVideoPreview,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
 }: MediaPlaybackControlsProps) {
   return (
     <>
@@ -48,6 +58,33 @@ export function MediaPlaybackControls({
           </option>
         ))}
       </Select>
+      {isVideoPreview && (
+        <Select
+          value={videoSeekStepSec}
+          onChange={(event) => onVideoSeekStepChange(Number(event.target.value))}
+          className="h-8 text-xs"
+          aria-label="视频快进步长（秒）"
+          title="视频快进步长（秒）"
+        >
+          <option value={3}>步长 3s</option>
+          <option value={5}>步长 5s</option>
+          <option value={10}>步长 10s</option>
+        </Select>
+      )}
+      {isVideoPreview && (
+        <Select
+          value={videoPlaybackRate}
+          onChange={(event) => onVideoPlaybackRateChange(Number(event.target.value))}
+          className="h-8 text-xs"
+          aria-label="视频播放倍速"
+          title="视频播放倍速"
+        >
+          <option value={0.5}>0.5x</option>
+          <option value={1}>1x</option>
+          <option value={3}>3x</option>
+          <option value={5}>5x</option>
+        </Select>
+      )}
       <Button
         onClick={onToggleAutoPlay}
         variant={autoPlayEnabled ? 'default' : 'accent'}

@@ -408,6 +408,8 @@ export function WorkspaceShell({
     previewAutoPlayOnOpen,
     autoPlayEnabled,
     autoPlayIntervalSec,
+    videoSeekStepSec,
+    videoPlaybackRate,
     playbackOrder,
     hasOpenPreview,
     hasActiveMediaPreview,
@@ -419,6 +421,9 @@ export function WorkspaceShell({
     toggleAutoPlay,
     togglePlaybackOrder,
     setAutoPlayInterval,
+    setVideoSeekStep,
+    setVideoPlaybackRate,
+    cycleVideoPlaybackRate,
     navigateMediaFromPane,
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,
@@ -433,17 +438,34 @@ export function WorkspaceShell({
     return getFilePreviewKind(activePreviewFile.name) === 'video'
   }, [previewFile, selectedFile, showPreviewPane])
 
-  const toggleActivePreviewVideoPlayback = useCallback((): boolean => {
+  const getActivePreviewVideoElement = useCallback((): HTMLVideoElement | null => {
     const preferredSurface = previewFile ? 'lightbox' : 'panel'
     const preferredSelector = `video[data-preview-video="true"][data-preview-video-surface="${preferredSurface}"]`
-    const videoElement =
+    return (
       document.querySelector<HTMLVideoElement>(preferredSelector)
       ?? document.querySelector<HTMLVideoElement>('video[data-preview-video="true"]')
+    )
+  }, [previewFile])
 
+  const applyVideoPlaybackRateToElement = useCallback((videoElement: HTMLVideoElement, rate: number): void => {
+    videoElement.defaultPlaybackRate = rate
+    videoElement.playbackRate = rate
+  }, [])
+
+  const applyVideoPlaybackRateToActivePreviewVideo = useCallback((rate: number): boolean => {
+    const videoElement = getActivePreviewVideoElement()
     if (!videoElement) {
       return false
     }
+    applyVideoPlaybackRateToElement(videoElement, rate)
+    return true
+  }, [applyVideoPlaybackRateToElement, getActivePreviewVideoElement])
 
+  const toggleActivePreviewVideoPlayback = useCallback((): boolean => {
+    const videoElement = getActivePreviewVideoElement()
+    if (!videoElement) {
+      return false
+    }
     if (videoElement.paused || videoElement.ended) {
       const playPromise = videoElement.play()
       if (playPromise && typeof playPromise.catch === 'function') {
@@ -454,7 +476,19 @@ export function WorkspaceShell({
 
     videoElement.pause()
     return true
-  }, [previewFile])
+  }, [getActivePreviewVideoElement])
+
+  const seekActivePreviewVideo = useCallback((direction: 'backward' | 'forward'): boolean => {
+    const videoElement = getActivePreviewVideoElement()
+    if (!videoElement) return false
+
+    const baseCurrentTime = Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0
+    const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : Number.POSITIVE_INFINITY
+    const delta = direction === 'backward' ? -videoSeekStepSec : videoSeekStepSec
+    const nextTime = Math.min(duration, Math.max(0, baseCurrentTime + delta))
+    videoElement.currentTime = nextTime
+    return true
+  }, [getActivePreviewVideoElement, videoSeekStepSec])
 
   const handleDirectoryClick = useCallback((dirName: string) => {
     void navigateToDirectory(dirName)
@@ -664,6 +698,11 @@ export function WorkspaceShell({
   }, [selectedFile])
 
   useEffect(() => {
+    if (!hasActiveVideoPreview) return
+    applyVideoPlaybackRateToActivePreviewVideo(videoPlaybackRate)
+  }, [applyVideoPlaybackRateToActivePreviewVideo, hasActiveVideoPreview, videoPlaybackRate])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
       const isTyping = isTypingTarget(event.target)
@@ -680,6 +719,25 @@ export function WorkspaceShell({
         event.preventDefault()
         if (event.repeat) return
         toggleActivePreviewVideoPlayback()
+        return
+      }
+
+      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekBackward)) {
+        event.preventDefault()
+        seekActivePreviewVideo('backward')
+        return
+      }
+
+      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekForward)) {
+        event.preventDefault()
+        seekActivePreviewVideo('forward')
+        return
+      }
+
+      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.cycleVideoPlaybackRate)) {
+        event.preventDefault()
+        if (event.repeat) return
+        cycleVideoPlaybackRate()
         return
       }
 
@@ -746,8 +804,10 @@ export function WorkspaceShell({
     navigateMediaFromPane,
     navigateUp,
     previewFile,
+    seekActivePreviewVideo,
     selectDirectory,
     showPreviewPane,
+    cycleVideoPlaybackRate,
     toggleActivePreviewVideoPlayback,
     toggleAutoPlay,
     togglePlaybackOrder,
@@ -869,10 +929,14 @@ export function WorkspaceShell({
       onOpenFullscreenFromPane={openFullscreenFromPane}
       autoPlayEnabled={autoPlayEnabled}
       autoPlayIntervalSec={autoPlayIntervalSec}
+      videoSeekStepSec={videoSeekStepSec}
+      videoPlaybackRate={videoPlaybackRate}
       onToggleAutoPlay={toggleAutoPlay}
       playbackOrder={playbackOrder}
       onTogglePlaybackOrder={togglePlaybackOrder}
       onAutoPlayIntervalChange={setAutoPlayInterval}
+      onVideoSeekStepChange={setVideoSeekStep}
+      onVideoPlaybackRateChange={setVideoPlaybackRate}
       onVideoEnded={handleAutoPlayVideoEnded}
       onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
       previewFile={previewFile}

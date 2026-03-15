@@ -170,10 +170,14 @@ interface ExplorerWorkspaceLayoutProps {
   onOpenFullscreenFromPane: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
   previewFile: FileItem | null
@@ -233,10 +237,14 @@ export function ExplorerWorkspaceLayout({
   onOpenFullscreenFromPane,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
   onVideoEnded,
   onVideoPlaybackError,
   previewFile,
@@ -417,10 +425,14 @@ export function ExplorerWorkspaceLayout({
                 onOpenFullscreen={onOpenFullscreenFromPane}
                 autoPlayEnabled={autoPlayEnabled}
                 autoPlayIntervalSec={autoPlayIntervalSec}
+                videoSeekStepSec={videoSeekStepSec}
+                videoPlaybackRate={videoPlaybackRate}
                 onToggleAutoPlay={onToggleAutoPlay}
                 playbackOrder={playbackOrder}
                 onTogglePlaybackOrder={onTogglePlaybackOrder}
                 onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+                onVideoSeekStepChange={onVideoSeekStepChange}
+                onVideoPlaybackRateChange={onVideoPlaybackRateChange}
                 onVideoEnded={onVideoEnded}
                 onVideoPlaybackError={onVideoPlaybackError}
                 toolResultQueueState={previewPluginResultQueueState}
@@ -466,10 +478,14 @@ export function ExplorerWorkspaceLayout({
             autoPlayOnOpen={previewAutoPlayOnOpen}
             autoPlayEnabled={autoPlayEnabled}
             autoPlayIntervalSec={autoPlayIntervalSec}
+            videoSeekStepSec={videoSeekStepSec}
+            videoPlaybackRate={videoPlaybackRate}
             onToggleAutoPlay={onToggleAutoPlay}
             playbackOrder={playbackOrder}
             onTogglePlaybackOrder={onTogglePlaybackOrder}
             onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+            onVideoSeekStepChange={onVideoSeekStepChange}
+            onVideoPlaybackRateChange={onVideoPlaybackRateChange}
             onVideoEnded={onVideoEnded}
             onVideoPlaybackError={onVideoPlaybackError}
             toolResultQueueState={previewPluginResultQueueState}

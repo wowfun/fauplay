@@ -28,10 +28,14 @@ interface FilePreviewPanelProps {
   onOpenFullscreen?: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
   onVideoEnded: () => void
   onVideoPlaybackError: () => void
   presentation?: PreviewSurface
@@ -158,10 +162,14 @@ export function FilePreviewPanel({
   onOpenFullscreen,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
   onVideoEnded,
   onVideoPlaybackError,
   presentation = 'panel',
@@ -516,6 +524,7 @@ export function FilePreviewPanel({
 
   const previewKind = getFilePreviewKind(file.name)
   const isMediaPreview = isMediaPreviewKind(previewKind)
+  const isVideoPreview = previewKind === 'video'
 
   return (
     <div className={isFullscreen ? 'flex flex-col h-full bg-background' : 'flex flex-col h-full bg-card border-l border-border'}>
@@ -523,12 +532,17 @@ export function FilePreviewPanel({
         fileName={file.name}
         isFullscreen={isFullscreen}
         showPlaybackControls={isMediaPreview}
+        isVideoPreview={isVideoPreview}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
+        videoSeekStepSec={videoSeekStepSec}
+        videoPlaybackRate={videoPlaybackRate}
         onToggleAutoPlay={onToggleAutoPlay}
         playbackOrder={playbackOrder}
         onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+        onVideoSeekStepChange={onVideoSeekStepChange}
+        onVideoPlaybackRateChange={onVideoPlaybackRateChange}
         onClose={onClose}
         canRenameFileName={canRenameFileName}
         renameInFlight={isRenaming}
@@ -551,6 +565,7 @@ export function FilePreviewPanel({
         error={error}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
         autoPlayVideo={isMediaPreview && (autoPlayEnabled || forceAutoPlayOnOpen)}
+        videoPlaybackRate={videoPlaybackRate}
         isFullscreen={isFullscreen}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}

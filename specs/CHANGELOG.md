@@ -2,6 +2,7 @@
 
 ## 2026-03-15
 ### Changed
+- 更新 `specs/100-preview-playback/spec.md`、`src/config/shortcuts.ts`、`docs/shortcuts.md`、`src/features/preview/hooks/usePreviewTraversal.ts`、`src/features/workspace/components/WorkspaceShell.tsx` 与预览组件链路：新增视频快捷键 `J/L/R`（快退/快进/循环倍速），新增预览头部“快进步长（3/5/10s）”与“倍速（0.5/1/3/5x）”下拉并与快捷键联动；步长与倍速状态支持 localStorage 持久化并在侧栏/全屏共享。
 - 更新 `specs/114-metadata-annotation/spec.md`、`specs/003-ui-ux/spec.md`、`specs/003-ui-ux/areas.md`、`src/features/preview/utils/annotationDisplayStore.ts`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/layouts/ExplorerWorkspaceLayout.tsx` 与 `src/features/explorer/components/ExplorerToolbar.tsx`：顶部标签过滤改为自动模式判定（移除手动 `all/boolean` 切换）；当 include/exclude 任一非空时等价布尔过滤、均为空时等价 `all`，`OR/AND` 单独切换不触发过滤；继续保留 sidecar 门控隐藏与门控失效回退 `all` 语义。
 - 更新 `specs/114-metadata-annotation/spec.md`、`src/features/preview/utils/annotationDisplayStore.ts`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/features/preview/components/FilePreviewPanel.tsx` 与 `src/features/preview/components/PreviewHeaderBar.tsx`：预览头部标签展示改为独立于 `meta.annotation` 插件启用状态（基于当前 root 的 `.fauplay/.annotations.v1.json` 后台异步预加载），并调整为与文件名同行右侧展示；重命名编辑态下标签保持可见。
 - 更新 `specs/100-preview-playback/spec.md`、`src/config/shortcuts.ts`、`docs/shortcuts.md`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/features/preview/components/FilePreviewCanvas.tsx` 与 `src/features/preview/components/FilePreviewViewport.tsx`：新增预览态 `Space` 视频播放/暂停快捷键，优先控制全屏视频，其次控制侧栏视频，并与侧栏/全屏快捷键语义保持一致。

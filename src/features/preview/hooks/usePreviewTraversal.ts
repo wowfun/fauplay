@@ -6,6 +6,13 @@ import type { PlaybackOrder } from '@/features/preview/types/playback'
 const DEFAULT_AUTOPLAY_INTERVAL_SEC = 3
 const MIN_AUTOPLAY_INTERVAL_SEC = 1
 const MAX_AUTOPLAY_INTERVAL_SEC = 10
+const VIDEO_SEEK_STEP_OPTIONS = [3, 5, 10] as const
+const DEFAULT_VIDEO_SEEK_STEP_SEC = 5
+const VIDEO_PLAYBACK_RATE_OPTIONS = [0.5, 1, 3, 5] as const
+const VIDEO_PLAYBACK_RATE_CYCLE_ORDER = [1, 3, 5, 0.5] as const
+const DEFAULT_VIDEO_PLAYBACK_RATE = 1
+const VIDEO_SEEK_STEP_STORAGE_KEY = 'fauplay:preview-video-seek-step-sec'
+const VIDEO_PLAYBACK_RATE_STORAGE_KEY = 'fauplay:preview-video-playback-rate'
 const WRAP_AT_BOUNDARY = true
 
 type NavigateSource = 'pane' | 'modal' | 'autoplay'
@@ -26,6 +33,66 @@ interface UsePreviewTraversalOptions {
   filteredFiles: FileItem[]
 }
 
+function readPersistedVideoSeekStepSec(): number {
+  if (typeof window === 'undefined') return DEFAULT_VIDEO_SEEK_STEP_SEC
+  try {
+    const raw = window.localStorage.getItem(VIDEO_SEEK_STEP_STORAGE_KEY)
+    if (raw === null) return DEFAULT_VIDEO_SEEK_STEP_SEC
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return DEFAULT_VIDEO_SEEK_STEP_SEC
+    return VIDEO_SEEK_STEP_OPTIONS.includes(parsed as (typeof VIDEO_SEEK_STEP_OPTIONS)[number])
+      ? parsed
+      : DEFAULT_VIDEO_SEEK_STEP_SEC
+  } catch {
+    return DEFAULT_VIDEO_SEEK_STEP_SEC
+  }
+}
+
+function savePersistedVideoSeekStepSec(value: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(VIDEO_SEEK_STEP_STORAGE_KEY, String(value))
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
+function readPersistedVideoPlaybackRate(): number {
+  if (typeof window === 'undefined') return DEFAULT_VIDEO_PLAYBACK_RATE
+  try {
+    const raw = window.localStorage.getItem(VIDEO_PLAYBACK_RATE_STORAGE_KEY)
+    if (raw === null) return DEFAULT_VIDEO_PLAYBACK_RATE
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return DEFAULT_VIDEO_PLAYBACK_RATE
+    return VIDEO_PLAYBACK_RATE_OPTIONS.includes(parsed as (typeof VIDEO_PLAYBACK_RATE_OPTIONS)[number])
+      ? parsed
+      : DEFAULT_VIDEO_PLAYBACK_RATE
+  } catch {
+    return DEFAULT_VIDEO_PLAYBACK_RATE
+  }
+}
+
+function savePersistedVideoPlaybackRate(value: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(VIDEO_PLAYBACK_RATE_STORAGE_KEY, String(value))
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
+function toVideoSeekStepSec(value: number): number {
+  return VIDEO_SEEK_STEP_OPTIONS.includes(value as (typeof VIDEO_SEEK_STEP_OPTIONS)[number])
+    ? value
+    : DEFAULT_VIDEO_SEEK_STEP_SEC
+}
+
+function toVideoPlaybackRate(value: number): number {
+  return VIDEO_PLAYBACK_RATE_OPTIONS.includes(value as (typeof VIDEO_PLAYBACK_RATE_OPTIONS)[number])
+    ? value
+    : DEFAULT_VIDEO_PLAYBACK_RATE
+}
+
 export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOptions) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
@@ -33,6 +100,8 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const [previewAutoPlayOnOpen, setPreviewAutoPlayOnOpen] = useState(false)
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false)
   const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
+  const [videoSeekStepSec, setVideoSeekStepSec] = useState<number>(() => readPersistedVideoSeekStepSec())
+  const [videoPlaybackRate, setVideoPlaybackRateState] = useState<number>(() => readPersistedVideoPlaybackRate())
   const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
   const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>('sequential')
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
@@ -310,6 +379,27 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     setAutoPlayIntervalSec(nextValue)
   }, [])
 
+  const setVideoSeekStep = useCallback((value: number) => {
+    setVideoSeekStepSec(toVideoSeekStepSec(value))
+  }, [])
+
+  const setVideoPlaybackRate = useCallback((value: number) => {
+    setVideoPlaybackRateState(toVideoPlaybackRate(value))
+  }, [])
+
+  const cycleVideoPlaybackRate = useCallback(() => {
+    setVideoPlaybackRateState((previous) => {
+      const normalized = toVideoPlaybackRate(previous)
+      const currentIndex = VIDEO_PLAYBACK_RATE_CYCLE_ORDER.indexOf(
+        normalized as (typeof VIDEO_PLAYBACK_RATE_CYCLE_ORDER)[number]
+      )
+      if (currentIndex < 0) {
+        return DEFAULT_VIDEO_PLAYBACK_RATE
+      }
+      return VIDEO_PLAYBACK_RATE_CYCLE_ORDER[(currentIndex + 1) % VIDEO_PLAYBACK_RATE_CYCLE_ORDER.length]
+    })
+  }, [])
+
   const handleAutoPlayVideoEnded = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
     if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
@@ -426,6 +516,14 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [previewFile, showPreviewPane])
 
   useEffect(() => {
+    savePersistedVideoSeekStepSec(videoSeekStepSec)
+  }, [videoSeekStepSec])
+
+  useEffect(() => {
+    savePersistedVideoPlaybackRate(videoPlaybackRate)
+  }, [videoPlaybackRate])
+
+  useEffect(() => {
     if (!hasOpenPreview) return
     if (!hasActiveMediaPreview && autoPlayEnabled) {
       setAutoPlayEnabled(false)
@@ -494,6 +592,8 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     previewAutoPlayOnOpen,
     autoPlayEnabled,
     autoPlayIntervalSec,
+    videoSeekStepSec,
+    videoPlaybackRate,
     playbackOrder,
     hasOpenPreview,
     hasActiveMediaPreview,
@@ -505,6 +605,9 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     toggleAutoPlay,
     togglePlaybackOrder,
     setAutoPlayInterval,
+    setVideoSeekStep,
+    setVideoPlaybackRate,
+    cycleVideoPlaybackRate,
     navigateMediaFromPane,
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,

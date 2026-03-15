@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { File, Image as ImageIcon, Loader2, Video as VideoIcon } from 'lucide-react'
 import type { FileItem, FilePreviewKind, TextPreviewPayload } from '@/types'
 
@@ -19,6 +19,7 @@ interface FilePreviewViewportProps {
   errorTextClass: string
   onOpenFullscreen?: () => void
   autoPlayVideo: boolean
+  videoPlaybackRate: number
   onVideoEnded?: () => void
   onVideoRenderError?: () => void
   children?: ReactNode
@@ -69,6 +70,7 @@ export function FilePreviewViewport({
   errorTextClass,
   onOpenFullscreen,
   autoPlayVideo,
+  videoPlaybackRate,
   onVideoEnded,
   onVideoRenderError,
   children,
@@ -76,6 +78,15 @@ export function FilePreviewViewport({
   const isImage = previewKind === 'image'
   const isVideo = previewKind === 'video'
   const isText = previewKind === 'text'
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (!isVideo) return
+    const videoElement = videoRef.current
+    if (!videoElement) return
+    videoElement.defaultPlaybackRate = videoPlaybackRate
+    videoElement.playbackRate = videoPlaybackRate
+  }, [isVideo, videoPlaybackRate, previewUrl])
 
   return (
     <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden" data-preview-subzone="FilePreviewViewport">
@@ -105,12 +116,19 @@ export function FilePreviewViewport({
         <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
           <div className="inline-flex max-w-full max-h-full items-center justify-center">
             <video
+              ref={videoRef}
               src={previewUrl}
               controls
               autoPlay={autoPlayVideo}
               data-preview-video="true"
               data-preview-video-surface={videoSurface}
               className={PREVIEW_MEDIA_CONTENT_CLASS}
+              onLoadedMetadata={() => {
+                const videoElement = videoRef.current
+                if (!videoElement) return
+                videoElement.defaultPlaybackRate = videoPlaybackRate
+                videoElement.playbackRate = videoPlaybackRate
+              }}
               onEnded={onVideoEnded}
               onError={onVideoRenderError}
             >

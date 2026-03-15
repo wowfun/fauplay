@@ -21,6 +21,7 @@ interface FilePreviewCanvasProps {
   error: string | null
   onOpenFullscreen?: () => void
   autoPlayVideo?: boolean
+  videoPlaybackRate: number
   isFullscreen?: boolean
   onVideoEnded?: () => void
   onVideoPlaybackError?: () => void
@@ -57,6 +58,7 @@ export function FilePreviewCanvas({
   error,
   onOpenFullscreen,
   autoPlayVideo = false,
+  videoPlaybackRate,
   isFullscreen = false,
   onVideoEnded,
   onVideoPlaybackError,
@@ -134,6 +136,7 @@ export function FilePreviewCanvas({
         errorTextClass={errorTextClass}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
         autoPlayVideo={autoPlayVideo}
+        videoPlaybackRate={videoPlaybackRate}
         onVideoEnded={onVideoEnded}
         onVideoRenderError={() => {
           setPlaybackError(true)

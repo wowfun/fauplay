@@ -12,12 +12,17 @@ interface PreviewHeaderBarProps {
   fileName: string
   isFullscreen: boolean
   showPlaybackControls: boolean
+  isVideoPreview: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
   onClose: () => void
   canRenameFileName: boolean
   renameInFlight: boolean
@@ -30,12 +35,17 @@ export function PreviewHeaderBar({
   fileName,
   isFullscreen,
   showPlaybackControls,
+  isVideoPreview,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
   onClose,
   canRenameFileName,
   renameInFlight,
@@ -83,12 +93,17 @@ export function PreviewHeaderBar({
       <PreviewControlGroup
         isFullscreen={isFullscreen}
         showPlaybackControls={showPlaybackControls}
+        isVideoPreview={isVideoPreview}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
+        videoSeekStepSec={videoSeekStepSec}
+        videoPlaybackRate={videoPlaybackRate}
         onToggleAutoPlay={onToggleAutoPlay}
         playbackOrder={playbackOrder}
         onTogglePlaybackOrder={onTogglePlaybackOrder}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+        onVideoSeekStepChange={onVideoSeekStepChange}
+        onVideoPlaybackRateChange={onVideoPlaybackRateChange}
         onClose={onClose}
       />
     </div>

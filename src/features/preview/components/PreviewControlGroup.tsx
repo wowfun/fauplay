@@ -6,24 +6,34 @@ import { Button } from '@/ui/Button'
 interface PreviewControlGroupProps {
   isFullscreen: boolean
   showPlaybackControls: boolean
+  isVideoPreview: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
+  videoSeekStepSec: number
+  videoPlaybackRate: number
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
   onAutoPlayIntervalChange: (sec: number) => void
+  onVideoSeekStepChange: (sec: number) => void
+  onVideoPlaybackRateChange: (rate: number) => void
   onClose: () => void
 }
 
 export function PreviewControlGroup({
   isFullscreen,
   showPlaybackControls,
+  isVideoPreview,
   autoPlayEnabled,
   autoPlayIntervalSec,
+  videoSeekStepSec,
+  videoPlaybackRate,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
   onAutoPlayIntervalChange,
+  onVideoSeekStepChange,
+  onVideoPlaybackRateChange,
   onClose,
 }: PreviewControlGroupProps) {
   return (
@@ -33,12 +43,17 @@ export function PreviewControlGroup({
     >
       {showPlaybackControls && (
         <MediaPlaybackControls
+          isVideoPreview={isVideoPreview}
           autoPlayEnabled={autoPlayEnabled}
           autoPlayIntervalSec={autoPlayIntervalSec}
+          videoSeekStepSec={videoSeekStepSec}
+          videoPlaybackRate={videoPlaybackRate}
           onToggleAutoPlay={onToggleAutoPlay}
           playbackOrder={playbackOrder}
           onTogglePlaybackOrder={onTogglePlaybackOrder}
           onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+          onVideoSeekStepChange={onVideoSeekStepChange}
+          onVideoPlaybackRateChange={onVideoPlaybackRateChange}
         />
       )}
       <Button
