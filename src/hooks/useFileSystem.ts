@@ -539,6 +539,9 @@ export function useFileSystem() {
             cmp = a.size - b.size
           }
           break
+        case 'annotationTime':
+          cmp = a.name.localeCompare(b.name)
+          break
       }
 
       return filter.sortOrder === 'asc' ? cmp : -cmp

@@ -26,7 +26,7 @@ export interface FileState {
 
 export type ViewMode = 'grid' | 'list'
 
-export type SortBy = 'name' | 'date' | 'size'
+export type SortBy = 'name' | 'date' | 'size' | 'annotationTime'
 export type SortOrder = 'asc' | 'desc'
 export type ThumbnailSizePreset = 'auto' | '256' | '512'
 export type AnnotationFilterMode = 'all' | 'boolean'

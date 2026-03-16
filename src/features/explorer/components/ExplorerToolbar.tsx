@@ -1202,6 +1202,7 @@ export function ExplorerToolbar({
         <option value="name">名称</option>
         <option value="date">日期</option>
         <option value="size">大小</option>
+        <option value="annotationTime">标注时间</option>
       </Select>
 
       <Select

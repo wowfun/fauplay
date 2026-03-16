@@ -2,6 +2,7 @@
 
 ## 2026-03-16
 ### Changed
+- 更新 `specs/114-metadata-annotation/spec.md`、`src/types/index.ts`、`src/features/preview/utils/annotationDisplayStore.ts`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/hooks/useFileSystem.ts` 与 `src/features/explorer/components/ExplorerToolbar.tsx`：顶部排序条件新增“标注时间（`updatedAt`）”；应用该排序时已标注项按时间升降序排序，未标注项始终置底（不随升降序翻转），未标注组内按名称次级排序。
 - 更新 `specs/100-preview-playback/spec.md`、`specs/114-metadata-annotation/spec.md` 与 `src/features/preview/hooks/usePreviewTraversal.ts`：修复随机遍历 + “包含标签：未标注”过滤下当前文件打标后的续播退化问题；当当前项因过滤移出结果集时，随机模式优先沿用 `shuffleQueue` 续播下一项，不再回退到顺序列表项。
 
 ## 2026-03-15

@@ -14,6 +14,7 @@ type AnnotationFilterUiGateReason =
 interface RootAnnotationDisplaySnapshot {
   status: RootSnapshotStatus
   byPath: Record<string, Record<string, string>>
+  byPathUpdatedAt: Record<string, number>
   tagOptions: AnnotationFilterTagOption[]
   hasSidecarDir: boolean
   hasSidecarFile: boolean
@@ -31,6 +32,11 @@ interface SidecarAnnotationRecord {
 
 interface SidecarParsedPayload {
   annotations: SidecarAnnotationRecord[]
+}
+
+interface PathSnapshotByLatestRecord {
+  byPath: Record<string, Record<string, string>>
+  byPathUpdatedAt: Record<string, number>
 }
 
 interface SidecarReadResult {
@@ -125,7 +131,7 @@ function parseSidecarJson(raw: string): SidecarParsedPayload {
   return { annotations }
 }
 
-function buildPathSnapshotByLatestRecord(payload: SidecarParsedPayload): Record<string, Record<string, string>> {
+function buildPathSnapshotByLatestRecord(payload: SidecarParsedPayload): PathSnapshotByLatestRecord {
   const latestByPath = new Map<string, { updatedAt: number; fieldValues: Record<string, string> }>()
 
   for (const item of payload.annotations) {
@@ -143,10 +149,15 @@ function buildPathSnapshotByLatestRecord(payload: SidecarParsedPayload): Record<
   }
 
   const byPath: Record<string, Record<string, string>> = {}
+  const byPathUpdatedAt: Record<string, number> = {}
   for (const [path, item] of latestByPath.entries()) {
     byPath[path] = item.fieldValues
+    byPathUpdatedAt[path] = item.updatedAt
   }
-  return byPath
+  return {
+    byPath,
+    byPathUpdatedAt,
+  }
 }
 
 function buildFilterTagOptions(byPath: Record<string, Record<string, string>>): AnnotationFilterTagOption[] {
@@ -195,6 +206,7 @@ function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
   const next: RootAnnotationDisplaySnapshot = {
     status: 'idle',
     byPath: {},
+    byPathUpdatedAt: {},
     tagOptions: [],
     hasSidecarDir: false,
     hasSidecarFile: false,
@@ -273,9 +285,10 @@ export async function preloadAnnotationDisplaySnapshot({
   const loadTask = (async () => {
     const sidecarReadResult = await readSidecarFileText(rootHandle)
     const parsed = sidecarReadResult.text ? parseSidecarJson(sidecarReadResult.text) : { annotations: [] }
-    const byPath = buildPathSnapshotByLatestRecord(parsed)
+    const byPathSnapshot = buildPathSnapshotByLatestRecord(parsed)
     const target = ensureRootSnapshot(rootId)
-    target.byPath = byPath
+    target.byPath = byPathSnapshot.byPath
+    target.byPathUpdatedAt = byPathSnapshot.byPathUpdatedAt
     target.hasSidecarDir = sidecarReadResult.hasSidecarDir
     target.hasSidecarFile = sidecarReadResult.hasSidecarFile
     applyDerivedSnapshotFields(target)
@@ -285,6 +298,7 @@ export async function preloadAnnotationDisplaySnapshot({
     .catch(() => {
       const target = ensureRootSnapshot(rootId)
       target.byPath = {}
+      target.byPathUpdatedAt = {}
       target.hasSidecarDir = false
       target.hasSidecarFile = false
       applyDerivedSnapshotFields(target)
@@ -318,6 +332,10 @@ export function patchAnnotationSetValue(params: PatchAnnotationSetValueParams) {
       ...existing,
       [fieldKey]: value,
     },
+  }
+  snapshot.byPathUpdatedAt = {
+    ...snapshot.byPathUpdatedAt,
+    [relativePath]: Date.now(),
   }
   snapshot.hasSidecarDir = true
   snapshot.hasSidecarFile = true
@@ -396,6 +414,23 @@ export function getFileAnnotationFieldValues(
   const snapshot = rootSnapshots.get(rootId)
   if (!snapshot) return null
   return snapshot.byPath[normalizedPath] ?? null
+}
+
+export function getFileAnnotationUpdatedAt(
+  rootId: string | null | undefined,
+  relativePath: string | null | undefined
+): number | null {
+  if (!rootId || !relativePath) return null
+
+  const normalizedPath = normalizeRelativePath(relativePath)
+  if (!normalizedPath) return null
+
+  const snapshot = rootSnapshots.get(rootId)
+  if (!snapshot) return null
+
+  const updatedAt = snapshot.byPathUpdatedAt[normalizedPath]
+  if (!Number.isFinite(updatedAt)) return null
+  return updatedAt
 }
 
 export function subscribeAnnotationDisplayStore(listener: () => void): () => void {
