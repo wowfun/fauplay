@@ -9,6 +9,7 @@ interface EnsureRootPathOptions {
   rootLabel: string
   rootId: string
   promptIfMissing?: boolean
+  forcePrompt?: boolean
 }
 
 interface ParsedRootPathMap {
@@ -110,17 +111,20 @@ export function ensureRootPath({
   rootLabel,
   rootId,
   promptIfMissing = true,
+  forcePrompt = false,
 }: EnsureRootPathOptions): string | null {
   if (!rootId) return null
 
   const pathMap = getRootPathMap()
   const existing = pathMap.byRootId[rootId] || ''
 
-  if (!existing && !promptIfMissing) {
+  if (!existing && !promptIfMissing && !forcePrompt) {
     return null
   }
 
-  const next = existing || askRootPath(rootLabel, existing)
+  const next = forcePrompt
+    ? askRootPath(rootLabel, existing)
+    : (existing || askRootPath(rootLabel, existing))
   if (!next) return null
 
   const shouldWrite = pathMap.byRootId[rootId] !== next
@@ -137,4 +141,10 @@ export function ensureRootPath({
   }
 
   return next
+}
+
+export function getBoundRootPath(rootId: string): string | null {
+  if (!rootId) return null
+  const pathMap = getRootPathMap()
+  return pathMap.byRootId[rootId] || null
 }

@@ -13,6 +13,7 @@ interface DirectorySelectionLayoutProps {
   cachedRoots: CachedRootEntry[]
   favoriteFolders: FavoriteFolderEntry[]
   onOpenCachedRoot: (rootId: string) => void
+  onRebindCachedRootPath: (rootId: string) => void
   onOpenFavoriteFolder: (entry: FavoriteFolderEntry) => void
   onRemoveFavoriteFolder: (entry: FavoriteFolderEntry) => void
 }
@@ -24,6 +25,7 @@ export function DirectorySelectionLayout({
   cachedRoots,
   favoriteFolders,
   onOpenCachedRoot,
+  onRebindCachedRootPath,
   onOpenFavoriteFolder,
   onRemoveFavoriteFolder,
 }: DirectorySelectionLayoutProps) {
@@ -61,17 +63,33 @@ export function DirectorySelectionLayout({
             <p className="mb-2 text-xs text-muted-foreground">缓存目录</p>
             <div className="space-y-2">
               {cachedRoots.map((root) => (
-                <Button
-                  key={root.rootId}
-                  onClick={() => onOpenCachedRoot(root.rootId)}
-                  disabled={isLoading}
-                  variant="ghost"
-                  size="md"
-                  className="w-full justify-start truncate"
-                  title={root.rootName}
-                >
-                  {root.rootName}
-                </Button>
+                <div key={root.rootId} className="flex items-center gap-1">
+                  <Button
+                    onClick={() => onOpenCachedRoot(root.rootId)}
+                    disabled={isLoading}
+                    variant="ghost"
+                    size="md"
+                    className="min-w-0 flex-1 justify-start"
+                    title={`${root.rootName}\n${root.boundRootPath || '未绑定'}`}
+                  >
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="block truncate">{root.rootName}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {root.boundRootPath || '未绑定'}
+                      </span>
+                    </span>
+                  </Button>
+                  <Button
+                    onClick={() => onRebindCachedRootPath(root.rootId)}
+                    disabled={isLoading}
+                    variant="ghost"
+                    size="md"
+                    className="shrink-0 px-2"
+                    title="重绑路径"
+                  >
+                    重绑
+                  </Button>
+                </div>
               ))}
             </div>
           </div>

@@ -46,6 +46,7 @@ function App() {
     error,
     selectDirectory,
     openCachedRoot,
+    rebindCachedRootPath,
     openFavoriteFolder,
     removeFavoriteFolder,
     toggleCurrentFolderFavorite,
@@ -85,6 +86,9 @@ function App() {
         favoriteFolders={favoriteFolders}
         onOpenCachedRoot={(nextRootId) => {
           void openCachedRoot(nextRootId)
+        }}
+        onRebindCachedRootPath={(nextRootId) => {
+          void rebindCachedRootPath(nextRootId)
         }}
         onOpenFavoriteFolder={(entry) => {
           void openFavoriteFolder(entry)

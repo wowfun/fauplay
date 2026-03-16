@@ -82,4 +82,5 @@ export interface CachedRootEntry {
   rootId: string
   rootName: string
   lastUsedAt: number
+  boundRootPath?: string
 }

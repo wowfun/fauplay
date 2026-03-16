@@ -15,7 +15,7 @@ import {
   removeCachedRoot,
   upsertCachedRootHandle,
 } from '@/lib/rootHandleCache'
-import { ensureRootPath } from '@/lib/reveal'
+import { ensureRootPath, getBoundRootPath } from '@/lib/reveal'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -155,7 +155,10 @@ export function useFileSystem() {
 
   const refreshCachedRoots = useCallback(async () => {
     const entries = await listCachedRoots()
-    setCachedRoots(entries)
+    setCachedRoots(entries.map((entry) => ({
+      ...entry,
+      boundRootPath: getBoundRootPath(entry.rootId) ?? undefined,
+    })))
   }, [])
 
   useEffect(() => {
@@ -325,6 +328,29 @@ export function useFileSystem() {
       setIsLoading(false)
     }
   }, [activateRootHandle, ensureDirectoryReadable, refreshCachedRoots, warmupRootPathBinding])
+
+  const rebindCachedRootPath = useCallback(async (targetRootId: string): Promise<boolean> => {
+    if (!targetRootId) return false
+
+    const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
+    const rootLabel = targetRoot?.rootName || ROOT_LABEL_FALLBACK
+
+    try {
+      const nextPath = ensureRootPath({
+        rootId: targetRootId,
+        rootLabel,
+        promptIfMissing: true,
+        forcePrompt: true,
+      })
+      if (!nextPath) return false
+
+      await refreshCachedRoots()
+      return true
+    } catch (err) {
+      setError((err as Error).message)
+      return false
+    }
+  }, [cachedRoots, refreshCachedRoots])
 
   const navigateToPath = useCallback(async (
     targetPath: string,
@@ -571,6 +597,7 @@ export function useFileSystem() {
     error,
     selectDirectory,
     openCachedRoot,
+    rebindCachedRootPath,
     openFavoriteFolder,
     removeFavoriteFolder,
     toggleCurrentFolderFavorite,

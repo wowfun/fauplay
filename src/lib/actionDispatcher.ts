@@ -34,6 +34,17 @@ function toToolError(error: unknown): { message: string; code?: string } {
   return { message: '工具调用失败' }
 }
 
+function isLikelyRootPathError(error: { message: string; code?: string }): boolean {
+  const normalizedMessage = error.message.toLowerCase()
+  const normalizedCode = error.code?.toLowerCase() || ''
+  return (
+    normalizedMessage.includes('rootpath')
+    || normalizedMessage.includes('root path')
+    || normalizedCode.includes('rootpath')
+    || normalizedCode.includes('root_path')
+  )
+}
+
 // Dispatch system tools through a single entry to avoid feature components
 // coupling to specific gateway transport details.
 export async function dispatchSystemTool({
@@ -81,6 +92,23 @@ export async function dispatchSystemTool({
     }
   } catch (error) {
     const { message, code } = toToolError(error)
+    if (isLikelyRootPathError({ message, code })) {
+      const rebound = ensureRootPath({
+        rootLabel,
+        rootId,
+        promptIfMissing: true,
+        forcePrompt: true,
+      })
+      return {
+        toolName,
+        ok: false,
+        error: rebound
+          ? '检测到 rootPath 可能错误，已重绑路径，请手动重试当前操作'
+          : '检测到 rootPath 可能错误，请重绑路径后手动重试当前操作',
+        errorCode: 'TOOL_ROOT_PATH_REBIND_REQUIRED',
+      }
+    }
+
     return {
       toolName,
       ok: false,

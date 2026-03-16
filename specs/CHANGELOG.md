@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-03-17
+### Changed
+- 更新 `specs/102-address-bar-navigation/spec.md`：新增开始页缓存目录 `rootPath` 可见性、手动强制重绑入口，以及命中 `rootPath` 路径类错误后“提示重绑 + 手动重试（不自动重试）”契约与验收条款。
+
 ## 2026-03-16
 ### Changed
 - 更新 `specs/114-metadata-annotation/spec.md`、`src/types/index.ts`、`src/features/preview/utils/annotationDisplayStore.ts`、`src/features/workspace/components/WorkspaceShell.tsx`、`src/hooks/useFileSystem.ts` 与 `src/features/explorer/components/ExplorerToolbar.tsx`：顶部排序条件新增“标注时间（`updatedAt`）”；应用该排序时已标注项按时间升降序排序，未标注项始终置底（不随升降序翻转），未标注组内按名称次级排序。
