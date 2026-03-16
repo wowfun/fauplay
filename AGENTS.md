@@ -1,5 +1,5 @@
 - 规格先行，在代码实现前，永远记得先 READ/UPDATE/CREATE `specs/<topic>/spec.md`
-- 实现落地后更新 `specs/CHANGELOG.md`（仅主要变更）
+- 实现落地后更新 `specs/CHANGELOG.md`（仅记录 specs 的主要变更，不展开到每个代码文件）
 - 快捷键变更时，同步更新 `src/config/shortcuts.ts` 与 `docs/shortcuts.md`
 - Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`)
 
