@@ -1,8 +1,17 @@
 # CHANGELOG
 
+## 2026-03-18
+### Changed
+- 更新 `specs/115-facial-recognition/spec.md`：补充预览区自动检测契约（图片预览无人脸记录时自动触发 `detectAsset` 并补跑 `clusterPending`），并将 SQLite 路径表述收敛为基于 `rootHandle` 的相对路径（`<rootHandle>/.fauplay/faces.v1.sqlite`）；同步新增 root 上下文缺失时的绑定与继续执行语义（`FR-FACE-12` / `AC-FACE-11`）。
+
 ## 2026-03-17
+### Added
+- 新增 `specs/115-facial-recognition/spec.md`：定义人脸识别 MVP 规范，固定“Gateway/MCP 内嵌 Immich 兼容推理 + Gateway 增量聚类 + root 级 SQLite 持久化（`.fauplay/faces.v1.sqlite`）”路线，并明确 `vision.face` 工具契约、`minScore/maxDistance/minFaces` 核心参数、deferred/夜间补聚类语义与 `FACE_*` 失败降级约束。
+
 ### Changed
 - 更新 `specs/102-address-bar-navigation/spec.md`：新增开始页缓存目录 `rootPath` 可见性、手动强制重绑入口，以及命中 `rootPath` 路径类错误后“提示重绑 + 手动重试（不自动重试）”契约与验收条款。
+- 更新 `specs/115-facial-recognition/spec.md`：补充人物功能入口与导航契约，明确“工作区工具栏（B1）人物主入口”与“预览人脸框/人物标签跳转人物详情（关联图片列表）”，并同步新增对应 `FR/AC` 条款。
+- 更新 `specs/115-facial-recognition/spec.md`：收敛 v1 推理实现口径为“Gateway/MCP 内嵌 Immich 兼容推理器（`buffalo_l`）”，移除外部 ML 服务依赖，并新增 `modelRepo/modelCacheDir/allowModelDownload` 运行时配置与模型目录兼容约束。
 
 ## 2026-03-16
 ### Changed

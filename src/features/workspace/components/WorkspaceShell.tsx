@@ -383,6 +383,8 @@ export function WorkspaceShell({
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
+  const [showPeoplePanel, setShowPeoplePanel] = useState(false)
+  const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
@@ -634,6 +636,26 @@ export function WorkspaceShell({
     if (!hasTrashEntries) return
     void navigateToPath(TRASH_RELATIVE_PATH, { resetFlattenView: true })
   }, [hasTrashEntries, navigateToPath])
+
+  const canOpenPeople = useMemo(() => (
+    pluginTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('workspace'))
+  ), [pluginTools])
+
+  const handleOpenPeople = useCallback(() => {
+    if (!canOpenPeople) return
+    setPeoplePanelPreferredPersonId(null)
+    setShowPeoplePanel(true)
+  }, [canOpenPeople])
+
+  const handleOpenPeopleForPerson = useCallback((personId: string | null) => {
+    if (!canOpenPeople) return
+    setPeoplePanelPreferredPersonId(personId)
+    setShowPeoplePanel(true)
+  }, [canOpenPeople])
+
+  const handleClosePeople = useCallback(() => {
+    setShowPeoplePanel(false)
+  }, [])
 
   useEffect(() => {
     if (!rootId) return
@@ -944,6 +966,12 @@ export function WorkspaceShell({
       onThumbnailSizePresetChange={setThumbnailSizePreset}
       canOpenTrash={hasTrashEntries}
       onOpenTrash={handleOpenTrash}
+      canOpenPeople={canOpenPeople}
+      onOpenPeople={handleOpenPeople}
+      onOpenPeopleForPerson={handleOpenPeopleForPerson}
+      showPeoplePanel={showPeoplePanel}
+      peoplePanelPreferredPersonId={peoplePanelPreferredPersonId}
+      onClosePeoplePanel={handleClosePeople}
       error={error}
       isLoading={isLoading}
       favoriteFolders={favoriteFolders}

@@ -32,6 +32,11 @@ const FileLightboxModal = lazy(async () => {
   return { default: mod.FileLightboxModal }
 })
 
+const PeoplePanel = lazy(async () => {
+  const mod = await import('@/features/faces/components/PeoplePanel')
+  return { default: mod.PeoplePanel }
+})
+
 const WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:workspace-tool-panel-collapsed'
 const PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:preview-tool-panel-collapsed'
 const WORKSPACE_TOOL_PANEL_WIDTH_STORAGE_KEY = 'fauplay:workspace-tool-panel-width'
@@ -145,6 +150,12 @@ interface ExplorerWorkspaceLayoutProps {
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
   onOpenTrash: () => void
+  canOpenPeople: boolean
+  onOpenPeople: () => void
+  onOpenPeopleForPerson: (personId: string | null) => void
+  showPeoplePanel: boolean
+  peoplePanelPreferredPersonId: string | null
+  onClosePeoplePanel: () => void
   error: string | null
   isLoading: boolean
   files: FileItem[]
@@ -212,6 +223,12 @@ export function ExplorerWorkspaceLayout({
   onThumbnailSizePresetChange,
   canOpenTrash,
   onOpenTrash,
+  canOpenPeople,
+  onOpenPeople,
+  onOpenPeopleForPerson,
+  showPeoplePanel,
+  peoplePanelPreferredPersonId,
+  onClosePeoplePanel,
   error,
   isLoading,
   files,
@@ -342,6 +359,8 @@ export function ExplorerWorkspaceLayout({
         onThumbnailSizePresetChange={onThumbnailSizePresetChange}
         canOpenTrash={canOpenTrash}
         onOpenTrash={onOpenTrash}
+        canOpenPeople={canOpenPeople}
+        onOpenPeople={onOpenPeople}
       />
 
       {error && (
@@ -449,6 +468,7 @@ export function ExplorerWorkspaceLayout({
                   setPreviewToolPanelWidthPx(clampToolPanelWidthPx(nextWidthPx))
                 }}
                 onMutationCommitted={onPreviewMutationCommitted}
+                onOpenPersonDetail={onOpenPeopleForPerson}
               />
             </Suspense>
           </div>
@@ -502,6 +522,19 @@ export function ExplorerWorkspaceLayout({
               setPreviewToolPanelWidthPx(clampToolPanelWidthPx(nextWidthPx))
             }}
             onMutationCommitted={onPreviewMutationCommitted}
+            onOpenPersonDetail={onOpenPeopleForPerson}
+          />
+        </Suspense>
+      )}
+
+      {showPeoplePanel && (
+        <Suspense fallback={null}>
+          <PeoplePanel
+            open={showPeoplePanel}
+            rootHandle={rootHandle}
+            rootId={rootId ?? ''}
+            preferredPersonId={peoplePanelPreferredPersonId}
+            onClose={onClosePeoplePanel}
           />
         </Suspense>
       )}

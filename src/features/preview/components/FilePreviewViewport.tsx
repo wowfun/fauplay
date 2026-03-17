@@ -1,6 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { File, Image as ImageIcon, Loader2, Video as VideoIcon } from 'lucide-react'
 import type { FileItem, FilePreviewKind, TextPreviewPayload } from '@/types'
+import { PreviewFaceOverlay } from '@/features/faces/components/PreviewFaceOverlay'
+import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 
 const PREVIEW_MEDIA_CONTENT_CLASS = 'block w-auto max-w-full max-h-full h-[85vh] object-contain'
 
@@ -22,6 +24,10 @@ interface FilePreviewViewportProps {
   videoPlaybackRate: number
   onVideoEnded?: () => void
   onVideoRenderError?: () => void
+  faceOverlays?: PreviewFaceOverlayItem[]
+  faceOverlayLoading?: boolean
+  faceOverlayError?: string | null
+  onFaceOverlayClick?: (item: PreviewFaceOverlayItem) => void
   children?: ReactNode
 }
 
@@ -73,12 +79,27 @@ export function FilePreviewViewport({
   videoPlaybackRate,
   onVideoEnded,
   onVideoRenderError,
+  faceOverlays = [],
+  faceOverlayLoading = false,
+  faceOverlayError = null,
+  onFaceOverlayClick,
   children,
 }: FilePreviewViewportProps) {
   const isImage = previewKind === 'image'
   const isVideo = previewKind === 'video'
   const isText = previewKind === 'text'
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number | null; height: number | null }>({
+    width: null,
+    height: null,
+  })
+
+  useEffect(() => {
+    setImageNaturalSize({
+      width: null,
+      height: null,
+    })
+  }, [file.path, previewUrl])
 
   useEffect(() => {
     if (!isVideo) return
@@ -103,12 +124,28 @@ export function FilePreviewViewport({
         </div>
       ) : previewUrl && isImage ? (
         <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
-          <div className="inline-flex max-w-full max-h-full items-center justify-center">
+          <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
             <img
               src={previewUrl}
               alt={file.name}
               className={PREVIEW_MEDIA_CONTENT_CLASS}
+              onLoad={(event) => {
+                const target = event.currentTarget
+                setImageNaturalSize({
+                  width: target.naturalWidth || null,
+                  height: target.naturalHeight || null,
+                })
+              }}
               onDoubleClick={onOpenFullscreen}
+            />
+            <PreviewFaceOverlay
+              items={faceOverlays}
+              imageNaturalWidth={imageNaturalSize.width}
+              imageNaturalHeight={imageNaturalSize.height}
+              isFullscreen={videoSurface === 'lightbox'}
+              isLoading={faceOverlayLoading}
+              error={faceOverlayError}
+              onFaceClick={onFaceOverlayClick}
             />
           </div>
         </div>

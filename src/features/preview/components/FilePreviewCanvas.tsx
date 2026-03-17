@@ -4,6 +4,7 @@ import type { FileItem, TextPreviewPayload } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
+import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 import { PreviewFeedbackOverlay } from './PreviewFeedbackOverlay'
 import { FilePreviewViewport } from './FilePreviewViewport'
 
@@ -35,6 +36,10 @@ interface FilePreviewCanvasProps {
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
+  faceOverlays: PreviewFaceOverlayItem[]
+  faceOverlayLoading: boolean
+  faceOverlayError: string | null
+  onFaceOverlayClick?: (item: PreviewFaceOverlayItem) => void
 }
 
 type FilePreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
@@ -72,6 +77,10 @@ export function FilePreviewCanvas({
   toolPanelWidthPx,
   onToolPanelWidthChange,
   onMutationCommitted,
+  faceOverlays,
+  faceOverlayLoading,
+  faceOverlayError,
+  onFaceOverlayClick,
 }: FilePreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -142,6 +151,10 @@ export function FilePreviewCanvas({
           setPlaybackError(true)
           onVideoPlaybackError?.()
         }}
+        faceOverlays={faceOverlays}
+        faceOverlayLoading={faceOverlayLoading}
+        faceOverlayError={faceOverlayError}
+        onFaceOverlayClick={onFaceOverlayClick}
       >
         <PreviewFeedbackOverlay showPlaybackError={playbackError && isVideo} />
       </FilePreviewViewport>

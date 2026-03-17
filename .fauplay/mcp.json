@@ -44,6 +44,16 @@
       "args": [
         "tools/mcp/video-same-duration/server.mjs"
       ]
+    },
+    "vision-face": {
+      "type": "stdio",
+      "command": ".venv/bin/python",
+      "callTimeoutMs": 30000,
+      "args": [
+        "tools/mcp/vision-face/server.py",
+        "--config",
+        "tools/mcp/vision-face/config.json"
+      ]
     }
   }
 }

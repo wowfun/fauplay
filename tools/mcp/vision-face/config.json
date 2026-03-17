@@ -1,0 +1,11 @@
+{
+  "modelName": "buffalo_l",
+  "modelRepo": "immich-app/buffalo_l",
+  "modelCacheDir": ".cache",
+  "allowModelDownload": false,
+  "minScore": 0.7,
+  "maxDistance": 0.5,
+  "minFaces": 3,
+  "clusterNewFacesNightly": true,
+  "forceCpu": false
+}

@@ -18,6 +18,8 @@ import {
 import { FilePreviewCanvas } from './FilePreviewCanvas'
 import { PreviewHeaderBar, type PreviewHeaderAnnotationTag } from './PreviewHeaderBar'
 import type { PreviewRenameResult } from './PreviewTitleRow'
+import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
+import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 
 interface FilePreviewPanelProps {
   file: FileItem | null
@@ -50,6 +52,7 @@ interface FilePreviewPanelProps {
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
+  onOpenPersonDetail?: (personId: string | null) => void
 }
 
 interface BatchRenameItemResult {
@@ -184,6 +187,7 @@ export function FilePreviewPanel({
   toolPanelWidthPx,
   onToolPanelWidthChange,
   onMutationCommitted,
+  onOpenPersonDetail,
 }: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
@@ -196,6 +200,7 @@ export function FilePreviewPanel({
   const currentUrlRef = useRef<string | null>(null)
   const handledMetaAnnotationQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
+  const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
   useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
@@ -204,6 +209,10 @@ export function FilePreviewPanel({
 
   const hasBatchRenameTool = useMemo(
     () => previewActionTools.some((tool) => tool.name === 'fs.batchRename'),
+    [previewActionTools]
+  )
+  const hasVisionFaceTool = useMemo(
+    () => previewActionTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('file')),
     [previewActionTools]
   )
 
@@ -237,6 +246,35 @@ export function FilePreviewPanel({
     currentUrlRef.current = nextUrl
     setPreviewUrl(nextUrl)
   }, [])
+
+  const currentFileQueue = useMemo(
+    () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
+    [file, toolResultQueueState.byContextKey]
+  )
+  const faceOverlayRefreshToken = useMemo(() => {
+    if (!file || file.kind !== 'file') return ''
+    return currentFileQueue
+      .filter((item) => item.toolName === 'vision.face')
+      .map((item) => `${item.id}:${item.status}`)
+      .join('|')
+  }, [currentFileQueue, file])
+  const {
+    items: faceOverlays,
+    isLoading: faceOverlayLoading,
+    error: faceOverlayError,
+  } = usePreviewFaceOverlays({
+    file,
+    rootHandle,
+    rootId,
+    previewKind,
+    enabled: hasVisionFaceTool,
+    refreshToken: faceOverlayRefreshToken,
+  })
+
+  const handleFaceOverlayClick = useCallback((overlay: PreviewFaceOverlayItem) => {
+    if (!overlay.personId) return
+    onOpenPersonDetail?.(overlay.personId)
+  }, [onOpenPersonDetail])
 
   useEffect(() => {
     if (!file || !rootHandle) {
@@ -446,11 +484,6 @@ export function FilePreviewPanel({
     }
   }, [canRenameFileName, file, onMutationCommitted, renameUnavailableReason, rootHandle, rootId])
 
-  const currentFileQueue = useMemo(
-    () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
-    [file, toolResultQueueState.byContextKey]
-  )
-
   useEffect(() => {
     if (!file || file.kind !== 'file' || !rootId) {
       handledMetaAnnotationQueueItemIdRef.current = null
@@ -522,7 +555,6 @@ export function FilePreviewPanel({
     )
   }
 
-  const previewKind = getFilePreviewKind(file.name)
   const isMediaPreview = isMediaPreviewKind(previewKind)
   const isVideoPreview = previewKind === 'video'
 
@@ -579,6 +611,10 @@ export function FilePreviewPanel({
         toolPanelWidthPx={toolPanelWidthPx}
         onToolPanelWidthChange={onToolPanelWidthChange}
         onMutationCommitted={onMutationCommitted}
+        faceOverlays={faceOverlays}
+        faceOverlayLoading={faceOverlayLoading}
+        faceOverlayError={faceOverlayError}
+        onFaceOverlayClick={handleFaceOverlayClick}
       />
     </div>
   )

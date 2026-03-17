@@ -13,6 +13,7 @@ import {
   Star,
   Tags,
   Trash2,
+  Users,
   Video,
   X,
 } from 'lucide-react'
@@ -69,6 +70,8 @@ interface ExplorerToolbarProps {
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
   onOpenTrash: () => void
+  canOpenPeople: boolean
+  onOpenPeople: () => void
 }
 
 function segmentKey(path: string): string {
@@ -209,6 +212,8 @@ export function ExplorerToolbar({
   onThumbnailSizePresetChange,
   canOpenTrash,
   onOpenTrash,
+  canOpenPeople,
+  onOpenPeople,
 }: ExplorerToolbarProps) {
   const [addressBarMode, setAddressBarMode] = useState<AddressBarMode>('breadcrumb')
   const [draftPath, setDraftPath] = useState(currentPath)
@@ -1031,6 +1036,17 @@ export function ExplorerToolbar({
       </div>
 
       <div className="flex items-center gap-2">
+        <Button
+          onClick={onOpenPeople}
+          variant="ghost"
+          size="md"
+          className="flex items-center gap-1"
+          disabled={!canOpenPeople}
+          title={canOpenPeople ? '打开人物列表' : '人物功能不可用'}
+        >
+          <Users className="w-4 h-4" />
+          <span>人物</span>
+        </Button>
         <Button
           onClick={onOpenTrash}
           variant="ghost"

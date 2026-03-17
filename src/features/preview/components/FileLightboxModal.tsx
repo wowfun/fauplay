@@ -35,6 +35,7 @@ interface FileLightboxModalProps {
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
+  onOpenPersonDetail?: (personId: string | null) => void
 }
 
 export function FileLightboxModal({
@@ -66,6 +67,7 @@ export function FileLightboxModal({
   toolPanelWidthPx,
   onToolPanelWidthChange,
   onMutationCommitted,
+  onOpenPersonDetail,
 }: FileLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -99,6 +101,7 @@ export function FileLightboxModal({
         toolPanelWidthPx={toolPanelWidthPx}
         onToolPanelWidthChange={onToolPanelWidthChange}
         onMutationCommitted={onMutationCommitted}
+        onOpenPersonDetail={onOpenPersonDetail}
       />
     </div>
   )
