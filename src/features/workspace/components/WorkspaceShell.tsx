@@ -393,7 +393,7 @@ export function WorkspaceShell({
   }, [])
   const showAnnotationFilterControls = isAnnotationFilterUiVisible(rootId)
   const annotationFilterTagOptions = useMemo<AnnotationFilterTagOption[]>(() => {
-    // Depend on external store version so tag options refresh with sidecar snapshot updates.
+    // Depend on external store version so tag options refresh with latest gateway tag snapshot.
     void annotationDisplayStoreVersion
     if (!showAnnotationFilterControls) return []
     const rootTagOptions = getRootAnnotationFilterTagOptions(rootId)
@@ -408,7 +408,7 @@ export function WorkspaceShell({
   }, [annotationDisplayStoreVersion, rootId, showAnnotationFilterControls])
 
   const filteredFiles = useMemo(() => {
-    // Depend on external store version so file filtering reflects latest annotation snapshot.
+    // Depend on external store version so file filtering reflects latest gateway tag snapshot.
     void annotationDisplayStoreVersion
     let nextFilteredFiles = filterFiles(files, filter)
     if (isAnnotationBooleanFilterActive(filter)) {
@@ -563,9 +563,19 @@ export function WorkspaceShell({
     return openHistoryEntry(entry)
   }, [openHistoryEntry])
 
+  const refreshAnnotationSnapshot = useCallback(async () => {
+    if (!rootId) return
+    await preloadAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+      force: true,
+    })
+  }, [rootHandle, rootId])
+
   const handleWorkspaceMutationCommitted = useCallback(async () => {
     await navigateToPath(currentPath)
-  }, [currentPath, navigateToPath])
+    await refreshAnnotationSnapshot()
+  }, [currentPath, navigateToPath, refreshAnnotationSnapshot])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
     const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
@@ -588,6 +598,7 @@ export function WorkspaceShell({
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
       await navigateToPath(currentPath)
+      await refreshAnnotationSnapshot()
       return
     }
 
@@ -620,6 +631,7 @@ export function WorkspaceShell({
     }
 
     await navigateToPath(currentPath)
+    await refreshAnnotationSnapshot()
   }, [
     alignPreviewToPath,
     currentPath,
@@ -627,6 +639,7 @@ export function WorkspaceShell({
     navigateMediaFromPane,
     navigateToPath,
     previewFile,
+    refreshAnnotationSnapshot,
     resolveNextFileAfterDelete,
     selectedFile,
     showFileInPane,

@@ -52,6 +52,12 @@ interface GatewayHealthResponse {
   status?: string
 }
 
+interface GatewayHttpErrorPayload {
+  ok?: boolean
+  error?: string
+  code?: string
+}
+
 interface JsonRpcErrorData {
   code?: string
 }
@@ -109,6 +115,18 @@ class GatewayMcpError extends Error {
     super(message)
     this.name = 'GatewayMcpError'
     this.code = code
+  }
+}
+
+class GatewayHttpError extends Error {
+  code?: string
+  status?: number
+
+  constructor(message: string, code?: string, status?: number) {
+    super(message)
+    this.name = 'GatewayHttpError'
+    this.code = code
+    this.status = status
   }
 }
 
@@ -453,6 +471,61 @@ export async function callGatewayTool<T = ToolCallResult>(
 
   const effectiveTimeoutMs = resolveToolTimeoutMs(toolName, timeoutMs)
   return callGatewayMcp<T>('tools/call', { name: toolName, arguments: args }, effectiveTimeoutMs)
+}
+
+export async function callGatewayHttp<T = ToolCallResult>(
+  endpointPath: string,
+  body: Record<string, unknown>,
+  timeoutMs?: number
+): Promise<T> {
+  const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_TOOL_TIMEOUT_MS
+  const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
+  const endpoint = `${GATEWAY_BASE_URL}${normalizedPath}`
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    const payload = (await response.json().catch(() => ({}))) as GatewayHttpErrorPayload & T
+
+    if (!response.ok) {
+      const message = typeof payload?.error === 'string'
+        ? payload.error
+        : `Gateway request failed: ${response.status}`
+      const code = typeof payload?.code === 'string' ? payload.code : undefined
+      throw new GatewayHttpError(message, code, response.status)
+    }
+
+    if (
+      payload
+      && typeof payload === 'object'
+      && 'ok' in payload
+      && payload.ok === false
+    ) {
+      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
+      const code = typeof payload.code === 'string' ? payload.code : undefined
+      throw new GatewayHttpError(message, code, response.status)
+    }
+
+    return payload as T
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createClientTimeoutError(effectiveTimeoutMs)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 }
 
 export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise<GatewayCapabilitiesSnapshot> {

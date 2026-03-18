@@ -1,7 +1,8 @@
 import type { AnnotationFilterTagOption } from '@/types'
+import { callGatewayHttp } from '@/lib/gateway'
+import { ensureRootPath } from '@/lib/reveal'
 
-const SIDECAR_DIRNAME = '.fauplay'
-const SIDECAR_FILENAME = '.annotations.v1.json'
+const TAG_QUERY_PAGE_SIZE = 1000
 
 type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
 
@@ -15,6 +16,7 @@ interface RootAnnotationDisplaySnapshot {
   status: RootSnapshotStatus
   byPath: Record<string, Record<string, string>>
   byPathUpdatedAt: Record<string, number>
+  tagKeysByPath: Record<string, string[]>
   tagOptions: AnnotationFilterTagOption[]
   hasSidecarDir: boolean
   hasSidecarFile: boolean
@@ -23,31 +25,16 @@ interface RootAnnotationDisplaySnapshot {
   loadedAtMs: number | null
 }
 
-interface SidecarAnnotationRecord {
-  pathSnapshot: string
-  status: string
-  fieldValues: Record<string, string>
-  updatedAt: number
-}
-
-interface SidecarParsedPayload {
-  annotations: SidecarAnnotationRecord[]
-}
-
-interface PathSnapshotByLatestRecord {
-  byPath: Record<string, Record<string, string>>
-  byPathUpdatedAt: Record<string, number>
-}
-
-interface SidecarReadResult {
-  hasSidecarDir: boolean
-  hasSidecarFile: boolean
-  text: string | null
-}
-
 interface PreloadAnnotationDisplaySnapshotParams {
   rootId?: string | null
   rootHandle: FileSystemDirectoryHandle | null
+  force?: boolean
+}
+
+interface PreloadFileAnnotationDisplaySnapshotParams {
+  rootId?: string | null
+  rootHandle: FileSystemDirectoryHandle | null
+  relativePath: string
   force?: boolean
 }
 
@@ -64,7 +51,28 @@ interface AnnotationFilterUiGateState {
   hasAnyFilterableAnnotation: boolean
 }
 
+interface GatewayTagRecord {
+  key?: string
+  value?: string
+  updatedAt?: number
+}
+
+interface GatewayFileTagView {
+  relativePath?: string
+  tags?: GatewayTagRecord[]
+}
+
+interface GatewayTagQueryResult {
+  items?: GatewayFileTagView[]
+  total?: number
+}
+
+interface GatewayFileTagResult {
+  file?: GatewayFileTagView | null
+}
+
 const rootSnapshots = new Map<string, RootAnnotationDisplaySnapshot>()
+const fileInflightLoads = new Map<string, Promise<void>>()
 const listeners = new Set<() => void>()
 let storeVersion = 0
 
@@ -80,97 +88,38 @@ export function toAnnotationFilterTagKey(fieldKey: string, value: string): strin
   return `${encodeURIComponent(fieldKey)}=${encodeURIComponent(value)}`
 }
 
-function sanitizeFieldValues(raw: unknown): Record<string, string> {
-  if (!isRecord(raw)) return {}
+function parseAnnotationFilterTagKey(tagKey: string): { fieldKey: string; value: string } | null {
+  if (!tagKey || !tagKey.includes('=')) return null
 
-  const result: Record<string, string> = {}
-  for (const [rawKey, rawValue] of Object.entries(raw)) {
-    if (typeof rawKey !== 'string' || typeof rawValue !== 'string') continue
-    const key = rawKey.trim()
-    const value = rawValue.trim()
-    if (!key || !value) continue
-    result[key] = value
-  }
-  return result
-}
+  const separator = tagKey.indexOf('=')
+  const rawFieldKey = tagKey.slice(0, separator)
+  const rawValue = tagKey.slice(separator + 1)
 
-function toRecordUpdatedAt(value: unknown): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.trunc(Number(value))
-}
-
-function parseSidecarJson(raw: string): SidecarParsedPayload {
-  let parsed: unknown = {}
   try {
-    parsed = JSON.parse(raw)
+    const fieldKey = decodeURIComponent(rawFieldKey)
+    const value = decodeURIComponent(rawValue)
+    if (!fieldKey || !value) return null
+    return { fieldKey, value }
   } catch {
-    return { annotations: [] }
-  }
-
-  if (!isRecord(parsed) || !Array.isArray(parsed.annotations)) {
-    return { annotations: [] }
-  }
-
-  const annotations: SidecarAnnotationRecord[] = []
-  for (const item of parsed.annotations) {
-    if (!isRecord(item)) continue
-    const pathSnapshot = typeof item.pathSnapshot === 'string' ? normalizeRelativePath(item.pathSnapshot) : ''
-    if (!pathSnapshot) continue
-    const status = typeof item.status === 'string' ? item.status : ''
-    const fieldValues = sanitizeFieldValues(item.fieldValues)
-    if (Object.keys(fieldValues).length === 0) continue
-
-    annotations.push({
-      pathSnapshot,
-      status,
-      fieldValues,
-      updatedAt: toRecordUpdatedAt(item.updatedAt),
-    })
-  }
-
-  return { annotations }
-}
-
-function buildPathSnapshotByLatestRecord(payload: SidecarParsedPayload): PathSnapshotByLatestRecord {
-  const latestByPath = new Map<string, { updatedAt: number; fieldValues: Record<string, string> }>()
-
-  for (const item of payload.annotations) {
-    if (item.status !== 'active') continue
-
-    const existing = latestByPath.get(item.pathSnapshot)
-    if (existing && existing.updatedAt > item.updatedAt) {
-      continue
-    }
-
-    latestByPath.set(item.pathSnapshot, {
-      updatedAt: item.updatedAt,
-      fieldValues: item.fieldValues,
-    })
-  }
-
-  const byPath: Record<string, Record<string, string>> = {}
-  const byPathUpdatedAt: Record<string, number> = {}
-  for (const [path, item] of latestByPath.entries()) {
-    byPath[path] = item.fieldValues
-    byPathUpdatedAt[path] = item.updatedAt
-  }
-  return {
-    byPath,
-    byPathUpdatedAt,
+    return null
   }
 }
 
-function buildFilterTagOptions(byPath: Record<string, Record<string, string>>): AnnotationFilterTagOption[] {
+function buildFilterTagOptions(tagKeysByPath: Record<string, string[]>): AnnotationFilterTagOption[] {
   const countByTagKey = new Map<string, number>()
   const entryByTagKey = new Map<string, { fieldKey: string; value: string }>()
 
-  for (const fieldValues of Object.values(byPath)) {
-    for (const [fieldKey, value] of Object.entries(fieldValues)) {
-      const tagKey = toAnnotationFilterTagKey(fieldKey, value)
-      const prevCount = countByTagKey.get(tagKey) ?? 0
-      countByTagKey.set(tagKey, prevCount + 1)
+  for (const tagKeys of Object.values(tagKeysByPath)) {
+    const deduped = new Set(tagKeys)
+    for (const tagKey of deduped) {
+      const parsed = parseAnnotationFilterTagKey(tagKey)
+      if (!parsed) continue
+      countByTagKey.set(tagKey, (countByTagKey.get(tagKey) ?? 0) + 1)
       if (!entryByTagKey.has(tagKey)) {
-        entryByTagKey.set(tagKey, { fieldKey, value })
+        entryByTagKey.set(tagKey, {
+          fieldKey: parsed.fieldKey,
+          value: parsed.value,
+        })
       }
     }
   }
@@ -195,7 +144,7 @@ function buildFilterTagOptions(byPath: Record<string, Record<string, string>>): 
 }
 
 function applyDerivedSnapshotFields(snapshot: RootAnnotationDisplaySnapshot) {
-  snapshot.tagOptions = buildFilterTagOptions(snapshot.byPath)
+  snapshot.tagOptions = buildFilterTagOptions(snapshot.tagKeysByPath)
   snapshot.hasAnyFilterableAnnotation = snapshot.tagOptions.length > 0
 }
 
@@ -207,6 +156,7 @@ function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
     status: 'idle',
     byPath: {},
     byPathUpdatedAt: {},
+    tagKeysByPath: {},
     tagOptions: [],
     hasSidecarDir: false,
     hasSidecarFile: false,
@@ -218,6 +168,14 @@ function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
   return next
 }
 
+function resetSnapshot(snapshot: RootAnnotationDisplaySnapshot) {
+  snapshot.byPath = {}
+  snapshot.byPathUpdatedAt = {}
+  snapshot.tagKeysByPath = {}
+  snapshot.tagOptions = []
+  snapshot.hasAnyFilterableAnnotation = false
+}
+
 function emitStoreUpdate() {
   storeVersion += 1
   for (const listener of listeners) {
@@ -225,44 +183,192 @@ function emitStoreUpdate() {
   }
 }
 
-async function readSidecarFileText(rootHandle: FileSystemDirectoryHandle): Promise<SidecarReadResult> {
-  let sidecarDir: FileSystemDirectoryHandle
-  try {
-    sidecarDir = await rootHandle.getDirectoryHandle(SIDECAR_DIRNAME)
-  } catch {
-    return {
-      hasSidecarDir: false,
-      hasSidecarFile: false,
-      text: null,
+function readTagViewsFromResult(rawResult: unknown): GatewayFileTagView[] {
+  if (!isRecord(rawResult)) return []
+  if (!Array.isArray(rawResult.items)) return []
+  return rawResult.items.filter((item): item is GatewayFileTagView => isRecord(item))
+}
+
+async function loadAllTagViews(rootPath: string): Promise<GatewayFileTagView[]> {
+  let page = 1
+  let total = Number.POSITIVE_INFINITY
+  const items: GatewayFileTagView[] = []
+
+  while (items.length < total) {
+    const result = await callGatewayHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
+      rootPath,
+      page,
+      size: TAG_QUERY_PAGE_SIZE,
+      includeTagKeys: [],
+      excludeTagKeys: [],
+      includeMatchMode: 'or',
+    })
+
+    const batch = readTagViewsFromResult(result)
+    items.push(...batch)
+
+    const nextTotal = Number(result.total)
+    total = Number.isFinite(nextTotal) && nextTotal >= 0 ? nextTotal : items.length
+
+    if (batch.length < TAG_QUERY_PAGE_SIZE) {
+      break
+    }
+
+    page += 1
+    if (page > 10000) {
+      break
     }
   }
 
-  let sidecarFile: FileSystemFileHandle
-  try {
-    sidecarFile = await sidecarDir.getFileHandle(SIDECAR_FILENAME)
-  } catch {
-    return {
-      hasSidecarDir: true,
-      hasSidecarFile: false,
-      text: null,
+  return items
+}
+
+function toUpdatedAt(value: unknown): number {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.trunc(numeric))
+}
+
+function buildPathSnapshotFromTagViews(tagViews: GatewayFileTagView[]) {
+  const byPath: Record<string, Record<string, string>> = {}
+  const byPathUpdatedAt: Record<string, number> = {}
+  const tagKeysByPath: Record<string, string[]> = {}
+
+  for (const view of tagViews) {
+    const relativePath = typeof view.relativePath === 'string'
+      ? normalizeRelativePath(view.relativePath)
+      : ''
+    if (!relativePath) continue
+
+    const tags = Array.isArray(view.tags) ? view.tags : []
+    if (tags.length === 0) continue
+
+    const latestValueByField = new Map<string, { value: string; updatedAt: number }>()
+    const tagKeySet = new Set<string>()
+    let maxUpdatedAt = 0
+
+    for (const tag of tags) {
+      if (!isRecord(tag)) continue
+
+      const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
+      const value = typeof tag.value === 'string' ? tag.value.trim() : ''
+      if (!fieldKey || !value) continue
+
+      const updatedAt = toUpdatedAt(tag.updatedAt)
+      const tagKey = toAnnotationFilterTagKey(fieldKey, value)
+      tagKeySet.add(tagKey)
+      maxUpdatedAt = Math.max(maxUpdatedAt, updatedAt)
+
+      const existing = latestValueByField.get(fieldKey)
+      if (!existing || updatedAt >= existing.updatedAt) {
+        latestValueByField.set(fieldKey, { value, updatedAt })
+      }
+    }
+
+    if (tagKeySet.size === 0) continue
+
+    byPath[relativePath] = {}
+    for (const [fieldKey, entry] of latestValueByField.entries()) {
+      byPath[relativePath][fieldKey] = entry.value
+    }
+
+    tagKeysByPath[relativePath] = [...tagKeySet]
+    byPathUpdatedAt[relativePath] = maxUpdatedAt
+  }
+
+  return {
+    byPath,
+    byPathUpdatedAt,
+    tagKeysByPath,
+  }
+}
+
+function buildPathStateFromTags(tags: unknown[]): {
+  fieldValues: Record<string, string> | null
+  updatedAt: number | null
+  tagKeys: string[]
+} {
+  const latestValueByField = new Map<string, { value: string; updatedAt: number }>()
+  const tagKeySet = new Set<string>()
+  let maxUpdatedAt = 0
+
+  for (const tag of tags) {
+    if (!isRecord(tag)) continue
+
+    const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
+    const value = typeof tag.value === 'string' ? tag.value.trim() : ''
+    if (!fieldKey || !value) continue
+
+    const updatedAt = toUpdatedAt(tag.updatedAt)
+    const tagKey = toAnnotationFilterTagKey(fieldKey, value)
+    tagKeySet.add(tagKey)
+    maxUpdatedAt = Math.max(maxUpdatedAt, updatedAt)
+
+    const existing = latestValueByField.get(fieldKey)
+    if (!existing || updatedAt >= existing.updatedAt) {
+      latestValueByField.set(fieldKey, { value, updatedAt })
     }
   }
 
-  try {
-    const file = await sidecarFile.getFile()
-    const text = await file.text()
+  if (tagKeySet.size === 0) {
     return {
-      hasSidecarDir: true,
-      hasSidecarFile: true,
-      text,
-    }
-  } catch {
-    return {
-      hasSidecarDir: true,
-      hasSidecarFile: true,
-      text: null,
+      fieldValues: null,
+      updatedAt: null,
+      tagKeys: [],
     }
   }
+
+  const fieldValues: Record<string, string> = {}
+  for (const [fieldKey, entry] of latestValueByField.entries()) {
+    fieldValues[fieldKey] = entry.value
+  }
+
+  return {
+    fieldValues,
+    updatedAt: maxUpdatedAt,
+    tagKeys: [...tagKeySet],
+  }
+}
+
+function removeRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record
+  const next = { ...record }
+  delete next[key]
+  return next
+}
+
+function applyFileTagsToSnapshot(
+  snapshot: RootAnnotationDisplaySnapshot,
+  relativePath: string,
+  state: {
+    fieldValues: Record<string, string> | null
+    updatedAt: number | null
+    tagKeys: string[]
+  }
+) {
+  if (!state.fieldValues || state.tagKeys.length === 0) {
+    snapshot.byPath = removeRecordKey(snapshot.byPath, relativePath)
+    snapshot.byPathUpdatedAt = removeRecordKey(snapshot.byPathUpdatedAt, relativePath)
+    snapshot.tagKeysByPath = removeRecordKey(snapshot.tagKeysByPath, relativePath)
+    return
+  }
+
+  snapshot.byPath = {
+    ...snapshot.byPath,
+    [relativePath]: state.fieldValues,
+  }
+  snapshot.byPathUpdatedAt = {
+    ...snapshot.byPathUpdatedAt,
+    [relativePath]: state.updatedAt ?? 0,
+  }
+  snapshot.tagKeysByPath = {
+    ...snapshot.tagKeysByPath,
+    [relativePath]: state.tagKeys,
+  }
+}
+
+function createFileLoadKey(rootId: string, relativePath: string): string {
+  return `${rootId}:${relativePath}`
 }
 
 export async function preloadAnnotationDisplaySnapshot({
@@ -283,28 +389,41 @@ export async function preloadAnnotationDisplaySnapshot({
   emitStoreUpdate()
 
   const loadTask = (async () => {
-    const sidecarReadResult = await readSidecarFileText(rootHandle)
-    const parsed = sidecarReadResult.text ? parseSidecarJson(sidecarReadResult.text) : { annotations: [] }
-    const byPathSnapshot = buildPathSnapshotByLatestRecord(parsed)
+    const rootPath = ensureRootPath({
+      rootLabel: rootHandle.name || 'current-folder',
+      rootId,
+      promptIfMissing: false,
+    })
     const target = ensureRootSnapshot(rootId)
-    target.byPath = byPathSnapshot.byPath
-    target.byPathUpdatedAt = byPathSnapshot.byPathUpdatedAt
-    target.hasSidecarDir = sidecarReadResult.hasSidecarDir
-    target.hasSidecarFile = sidecarReadResult.hasSidecarFile
-    applyDerivedSnapshotFields(target)
-    target.status = 'ready'
-    target.loadedAtMs = Date.now()
-  })()
-    .catch(() => {
-      const target = ensureRootSnapshot(rootId)
-      target.byPath = {}
-      target.byPathUpdatedAt = {}
+
+    if (!rootPath) {
+      resetSnapshot(target)
       target.hasSidecarDir = false
       target.hasSidecarFile = false
+      target.status = 'ready'
+      target.loadedAtMs = Date.now()
+      return
+    }
+
+    try {
+      const views = await loadAllTagViews(rootPath)
+      const derived = buildPathSnapshotFromTagViews(views)
+      target.byPath = derived.byPath
+      target.byPathUpdatedAt = derived.byPathUpdatedAt
+      target.tagKeysByPath = derived.tagKeysByPath
+      target.hasSidecarDir = true
+      target.hasSidecarFile = true
       applyDerivedSnapshotFields(target)
       target.status = 'ready'
       target.loadedAtMs = Date.now()
-    })
+    } catch {
+      resetSnapshot(target)
+      target.hasSidecarDir = true
+      target.hasSidecarFile = false
+      target.status = 'ready'
+      target.loadedAtMs = Date.now()
+    }
+  })()
     .finally(() => {
       const target = ensureRootSnapshot(rootId)
       target.inflight = null
@@ -312,6 +431,69 @@ export async function preloadAnnotationDisplaySnapshot({
     })
 
   snapshot.inflight = loadTask
+  await loadTask
+}
+
+export async function preloadFileAnnotationDisplaySnapshot({
+  rootId,
+  rootHandle,
+  relativePath,
+  force = false,
+}: PreloadFileAnnotationDisplaySnapshotParams): Promise<void> {
+  if (!rootId || !rootHandle) return
+
+  const normalizedPath = normalizeRelativePath(relativePath)
+  if (!normalizedPath) return
+
+  const snapshot = ensureRootSnapshot(rootId)
+  if (!force && snapshot.byPath[normalizedPath]) {
+    return
+  }
+
+  const rootPath = ensureRootPath({
+    rootLabel: rootHandle.name || 'current-folder',
+    rootId,
+    promptIfMissing: false,
+  })
+  if (!rootPath) return
+
+  const loadKey = createFileLoadKey(rootId, normalizedPath)
+  if (!force) {
+    const inflight = fileInflightLoads.get(loadKey)
+    if (inflight) {
+      await inflight
+      return
+    }
+  }
+
+  const loadTask = (async () => {
+    const result = await callGatewayHttp<GatewayFileTagResult>('/v1/data/tags/file', {
+      rootPath,
+      relativePath: normalizedPath,
+    })
+    const fileView = isRecord(result.file) ? result.file : null
+    const tags = fileView && Array.isArray(fileView.tags) ? fileView.tags : []
+    const state = buildPathStateFromTags(tags)
+
+    const target = ensureRootSnapshot(rootId)
+    applyFileTagsToSnapshot(target, normalizedPath, state)
+    target.hasSidecarDir = true
+    target.hasSidecarFile = true
+    if (target.status === 'idle') {
+      target.status = 'ready'
+      target.loadedAtMs = Date.now()
+    }
+    applyDerivedSnapshotFields(target)
+    emitStoreUpdate()
+  })()
+    .catch(() => {
+      // Ignore per-file query failures to avoid blocking preview rendering.
+    })
+    .finally(() => {
+      fileInflightLoads.delete(loadKey)
+    })
+
+  fileInflightLoads.set(loadKey, loadTask)
   await loadTask
 }
 
@@ -325,17 +507,31 @@ export function patchAnnotationSetValue(params: PatchAnnotationSetValueParams) {
   if (!relativePath || !fieldKey || !value) return
 
   const snapshot = ensureRootSnapshot(rootId)
-  const existing = snapshot.byPath[relativePath] ?? {}
+  const existingFieldValues = snapshot.byPath[relativePath] ?? {}
+  const previousValue = existingFieldValues[fieldKey]
+  const nextTagKey = toAnnotationFilterTagKey(fieldKey, value)
+  const currentTagKeys = snapshot.tagKeysByPath[relativePath] ?? []
+  const tagKeySet = new Set(currentTagKeys)
+
+  if (previousValue) {
+    tagKeySet.delete(toAnnotationFilterTagKey(fieldKey, previousValue))
+  }
+  tagKeySet.add(nextTagKey)
+
   snapshot.byPath = {
     ...snapshot.byPath,
     [relativePath]: {
-      ...existing,
+      ...existingFieldValues,
       [fieldKey]: value,
     },
   }
   snapshot.byPathUpdatedAt = {
     ...snapshot.byPathUpdatedAt,
     [relativePath]: Date.now(),
+  }
+  snapshot.tagKeysByPath = {
+    ...snapshot.tagKeysByPath,
+    [relativePath]: [...tagKeySet],
   }
   snapshot.hasSidecarDir = true
   snapshot.hasSidecarFile = true
@@ -397,7 +593,20 @@ export function getFileAnnotationTagKeys(
   rootId: string | null | undefined,
   relativePath: string | null | undefined
 ): string[] {
-  const fieldValues = getFileAnnotationFieldValues(rootId, relativePath)
+  if (!rootId || !relativePath) return []
+
+  const normalizedPath = normalizeRelativePath(relativePath)
+  if (!normalizedPath) return []
+
+  const snapshot = rootSnapshots.get(rootId)
+  if (!snapshot) return []
+
+  const fromTagKeys = snapshot.tagKeysByPath[normalizedPath]
+  if (Array.isArray(fromTagKeys) && fromTagKeys.length > 0) {
+    return [...fromTagKeys]
+  }
+
+  const fieldValues = snapshot.byPath[normalizedPath]
   if (!fieldValues) return []
   return Object.entries(fieldValues).map(([fieldKey, value]) => toAnnotationFilterTagKey(fieldKey, value))
 }

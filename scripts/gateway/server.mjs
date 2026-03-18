@@ -3,6 +3,22 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
+import {
+  callVisionInference,
+  cleanupAnnotationOrphans,
+  clusterPendingFaces,
+  getFileTags,
+  ingestClassificationResult,
+  listAssetFaces,
+  listPeople,
+  listTagOptions,
+  mergePeople,
+  queryFilesByTags,
+  refreshAnnotationBindings,
+  renamePerson,
+  saveDetectedFaces,
+  setAnnotationValue,
+} from './data/core.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
@@ -250,6 +266,95 @@ function toJsonRpcError(error) {
   }
 }
 
+function resolveErrorStatusCode(error) {
+  const explicit = Number(error?.statusCode)
+  if (Number.isInteger(explicit) && explicit >= 100 && explicit <= 599) {
+    return explicit
+  }
+
+  if (error?.code === 'SQLITE_CONSTRAINT') return 409
+  if (error?.code === 'MCP_TOOL_NOT_FOUND') return 404
+  if (error?.code === 'MCP_INVALID_PARAMS') return 400
+  if (error?.code === 'MCP_SERVER_TIMEOUT') return 504
+  if (error?.code === 'MCP_SERVER_CRASHED') return 502
+
+  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : ''
+  if (message.includes('required') || message.includes('invalid') || message.includes('must')) return 400
+  if (message.includes('not found')) return 404
+  return 500
+}
+
+function toHttpErrorBody(error) {
+  const message = error instanceof Error ? error.message : 'Gateway request failed'
+  const code = typeof error?.code === 'string' ? error.code : 'GATEWAY_HTTP_ERROR'
+  return {
+    ok: false,
+    error: message,
+    code,
+  }
+}
+
+async function handleHttpGatewayRoute(runtime, pathname, payload) {
+  if (pathname === '/v1/data/tags/file') {
+    return getFileTags(payload)
+  }
+
+  if (pathname === '/v1/data/tags/options') {
+    return listTagOptions(payload)
+  }
+
+  if (pathname === '/v1/data/tags/query') {
+    return queryFilesByTags(payload)
+  }
+
+  if (pathname === '/v1/annotations/set-value') {
+    return setAnnotationValue(payload)
+  }
+
+  if (pathname === '/v1/annotations/refresh-bindings') {
+    return refreshAnnotationBindings(payload)
+  }
+
+  if (pathname === '/v1/annotations/cleanup-orphans') {
+    return cleanupAnnotationOrphans(payload)
+  }
+
+  if (pathname === '/v1/faces/detect-asset') {
+    const inferred = await callVisionInference(runtime, payload)
+    const persisted = await saveDetectedFaces({
+      rootPath: inferred.rootPath,
+      relativePath: inferred.relativePath,
+      facePayloads: inferred.faces,
+    })
+    return {
+      ...persisted,
+      inferenceDetected: inferred.detected,
+    }
+  }
+
+  if (pathname === '/v1/faces/cluster-pending') {
+    return clusterPendingFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/list-people') {
+    return listPeople(payload)
+  }
+
+  if (pathname === '/v1/faces/rename-person') {
+    return renamePerson(payload)
+  }
+
+  if (pathname === '/v1/faces/merge-people') {
+    return mergePeople(payload)
+  }
+
+  if (pathname === '/v1/faces/list-asset-faces') {
+    return listAssetFaces(payload)
+  }
+
+  throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
+}
+
 function buildInitializeResult() {
   return {
     protocolVersion: MCP_PROTOCOL_VERSION,
@@ -348,9 +453,10 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    const url = req.url || '/'
+    const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`)
+    const pathname = requestUrl.pathname
 
-    if (req.method === 'GET' && url === '/v1/health') {
+    if (req.method === 'GET' && pathname === '/v1/health') {
       sendJson(res, 200, {
         service: 'fauplay-local-gateway',
         version: GATEWAY_VERSION,
@@ -359,7 +465,7 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    if (req.method === 'POST' && url === '/v1/mcp') {
+    if (req.method === 'POST' && pathname === '/v1/mcp') {
       let request = null
       let requestIsNotification = false
       let responseSessionId = null
@@ -370,6 +476,21 @@ export async function startGatewayServer(options = {}) {
 
         const requestSessionId = request.method === 'initialize' ? null : readSessionId(req)
         const { sessionId, result } = await handleMcpRequest(runtime, request, clientSessions, requestSessionId)
+        if (request.method === 'tools/call') {
+          const toolName = request.params?.name
+          const toolArgs = request.params?.arguments
+          if ((toolName === 'ml.classifyImage' || toolName === 'ml.classifyBatch') && isObjectRecord(toolArgs)) {
+            const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath : ''
+            if (rootPath) {
+              await ingestClassificationResult({
+                rootPath,
+                toolName,
+                toolArgs,
+                toolResult: result,
+              })
+            }
+          }
+        }
         responseSessionId = sessionId
 
         if (responseSessionId) {
@@ -407,13 +528,31 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
+    const supportsHttpRoute = req.method === 'POST' && (
+      pathname.startsWith('/v1/data/tags/')
+      || pathname.startsWith('/v1/annotations/')
+      || pathname.startsWith('/v1/faces/')
+    )
+
+    if (supportsHttpRoute) {
+      try {
+        const payload = await readJsonBody(req)
+        if (!isObjectRecord(payload)) {
+          throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
+        }
+
+        const result = await handleHttpGatewayRoute(runtime, pathname, payload)
+        sendJson(res, 200, result ?? { ok: true })
+      } catch (error) {
+        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+      }
+      return
+    }
+
     sendJson(res, 404, {
-      jsonrpc: '2.0',
-      id: null,
-      error: {
-        code: -32601,
-        message: 'Not found',
-      },
+      ok: false,
+      error: 'Not found',
+      code: 'MCP_METHOD_NOT_FOUND',
     })
   })
 

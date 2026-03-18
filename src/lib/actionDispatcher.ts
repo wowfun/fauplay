@@ -1,5 +1,5 @@
 import { ensureRootPath } from '@/lib/reveal'
-import { callGatewayTool, type ToolCallResult } from '@/lib/gateway'
+import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
 
 export type SystemToolName = string
 
@@ -18,6 +18,12 @@ export interface DispatchSystemToolResult {
   result?: ToolCallResult
   error?: string
   errorCode?: string
+}
+
+interface DispatchHttpRoute {
+  endpointPath: string
+  payload: Record<string, unknown>
+  timeoutMs?: number
 }
 
 function toToolError(error: unknown): { message: string; code?: string } {
@@ -44,6 +50,106 @@ function isLikelyRootPathError(error: { message: string; code?: string }): boole
     || normalizedCode.includes('rootpath')
     || normalizedCode.includes('root_path')
   )
+}
+
+function toArgsWithoutOperation(args: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...args }
+  delete next.operation
+  return next
+}
+
+function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown>): DispatchHttpRoute | null {
+  const operation = typeof args.operation === 'string' ? args.operation : ''
+  const payload = toArgsWithoutOperation(args)
+
+  if (toolName === 'meta.annotation') {
+    if (operation === 'setValue') {
+      return {
+        endpointPath: '/v1/annotations/set-value',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
+    if (operation === 'refreshBindings') {
+      return {
+        endpointPath: '/v1/annotations/refresh-bindings',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
+    if (operation === 'cleanupOrphans') {
+      return {
+        endpointPath: '/v1/annotations/cleanup-orphans',
+        payload,
+      }
+    }
+    return null
+  }
+
+  if (toolName === 'vision.face') {
+    if (operation === 'detectAsset') {
+      return {
+        endpointPath: '/v1/faces/detect-asset',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
+    if (operation === 'clusterPending') {
+      return {
+        endpointPath: '/v1/faces/cluster-pending',
+        payload,
+      }
+    }
+    if (operation === 'listPeople') {
+      return {
+        endpointPath: '/v1/faces/list-people',
+        payload,
+      }
+    }
+    if (operation === 'renamePerson') {
+      return {
+        endpointPath: '/v1/faces/rename-person',
+        payload,
+      }
+    }
+    if (operation === 'mergePeople') {
+      return {
+        endpointPath: '/v1/faces/merge-people',
+        payload,
+      }
+    }
+    if (operation === 'listAssetFaces') {
+      return {
+        endpointPath: '/v1/faces/list-asset-faces',
+        payload,
+      }
+    }
+    return null
+  }
+
+  if (toolName === 'data.tags') {
+    if (operation === 'listFileTags') {
+      return {
+        endpointPath: '/v1/data/tags/file',
+        payload,
+      }
+    }
+    if (operation === 'listTagOptions') {
+      return {
+        endpointPath: '/v1/data/tags/options',
+        payload,
+      }
+    }
+    if (operation === 'queryFiles') {
+      return {
+        endpointPath: '/v1/data/tags/query',
+        payload,
+      }
+    }
+    return null
+  }
+
+  return null
 }
 
 // Dispatch system tools through a single entry to avoid feature components
@@ -82,10 +188,30 @@ export async function dispatchSystemTool({
   }
 
   try {
-    const result = await callGatewayTool(toolName, {
+    const argsPayload: Record<string, unknown> = {
       rootPath,
       ...(additionalArgs ?? {}),
-    }, timeoutMs)
+    }
+    const httpRoute = resolveDispatchHttpRoute(toolName, argsPayload)
+    if (!httpRoute && toolName === 'meta.annotation') {
+      const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''
+      return {
+        toolName,
+        ok: false,
+        error: operation
+          ? `meta.annotation.${operation} 已下线，请改用 Gateway 统一数据接口`
+          : 'meta.annotation 缺少 operation 参数',
+        errorCode: 'TOOL_OPERATION_UNSUPPORTED',
+      }
+    }
+
+    const result = httpRoute
+      ? await callGatewayHttp(
+        httpRoute.endpointPath,
+        httpRoute.payload,
+        typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs
+      )
+      : await callGatewayTool(toolName, argsPayload, timeoutMs)
 
     return {
       toolName,

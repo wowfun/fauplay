@@ -1,181 +1,65 @@
-# 104 Timm Classification MCP 插件规范
+# 104 TIMM Classification 推理规范
 
 ## 1. 目的 (Purpose)
 
-定义 Fauplay 的 `timm` 图像分类 MCP 插件行为契约（Timm Classification MCP Contract），统一单图分类与批量分类工具的输入输出、错误语义、设备选择和模型生命周期规则。插件推理实现基于 HuggingFace `transformers.pipelines.ImageClassificationPipeline` 标准接口。
+定义 `timm-classifier` 在 Gateway 统一数据层架构下的契约：
 
-## 2. 关键术语 (Terminology)
+1. 插件仅提供图像分类推理。
+2. 分类结果由 Gateway 统一持久化为标签数据。
+3. 分类标签与标注/人脸标签共享统一查询与过滤模型。
 
-- 图像分类（Image Classification）
-- 单图分类（Single-image Classification）
-- 批量分类（Batch Classification）
-- 模型目录（Model Directory）
-- Safetensors 权重（Safetensors Weights）
-- HuggingFace 图像分类管线（ImageClassificationPipeline）
-- 推理批大小（Batch Size）
-- Top-K 预测（Top-K Predictions）
-- 模型预热（Model Warm-up）
-
-## 3. 范围与非目标 (In Scope / Out of Scope)
+## 2. 范围与非目标 (In Scope / Out of Scope)
 
 范围内：
 
-1. 通过 `stdio` MCP Server 暴露 `ml.classifyImage` 与 `ml.classifyBatch`。
-2. 本地路径输入（`rootPath + relativePath(s)`）的校验与安全约束。
-3. 基于 `transformers` `ImageClassificationPipeline` 的模型目录加载、设备自动选择与推理返回结构。
-4. 批量调用的部分成功语义与项级错误返回。
+1. 单图/批量分类推理输入输出契约。
+2. 分类结果字段标准化（`label/score`）。
+3. Gateway 侧分类标签持久化。
 
 范围外：
 
-1. 工作区/预览 UI 入口改造。
-2. 远程推理服务化（HTTP/gRPC）与在线模型下载。
-3. 训练流程、评估指标与模型结构搜索。
+1. 模型训练与微调。
+2. 分类标签人工编辑 UI。
 
-## 4. 用户可见行为契约 (User-visible Contract)
+## 3. 插件职责契约 (Plugin Responsibility)
 
-1. 插件注册成功后，网关 `tools/list` 中应可发现 `ml.classifyImage` 与 `ml.classifyBatch`。
-2. 单图分类返回按置信度降序的 `predictions` 列表，并包含 `device` 与 `timingMs`。
-3. 批量分类支持混合结果：成功项返回预测，失败项返回错误信息，不因单项失败终止整批。
-4. 首次调用允许出现模型加载开销；后续调用应复用已加载权重，不重复加载模型文件。
-5. 分类推理应通过 `ImageClassificationPipeline` 执行（而非手写 `timm + torch` 前后处理链路），以收敛实现复杂度。
-6. 调用方（如 Web 端）在触发 `ml.classifyImage` / `ml.classifyBatch` 时必须使用长超时预算（不少于 `120000ms`），避免首轮模型加载被默认短超时中断。
-7. 当调用方超时取消请求时，用户可见错误必须为可读超时提示，不得直接暴露浏览器原始中止文案（例如 `signal is aborted without reason`）。
-8. `ml.classifyImage` 应通过 `annotations.toolOptions` 暴露 `preview.continuousCall.enabled`（`boolean`）选项，以支持预览区持续调用工作流。
-9. 当持续调用开启时，调用方可基于当前文件历史结果命中执行静默跳过，避免同签名请求反复触发。
+1. `ml.classifyImage` 与 `ml.classifyBatch` 仅返回推理结果。
+2. 插件不得执行本地数据持久化（不得直写 SQLite）。
 
-## 5. 工具契约 (Tools Contract)
+## 4. 数据落盘契约 (Gateway Persistence)
 
-### 5.1 `ml.classifyImage`
+1. Gateway 接收分类结果后，按统一标签模型落盘。
+2. 标签来源固定：`source=ml.classify`。
+3. 标签最小字段：`id,key,value,source,sourceRefId,confidence,status,createdAt,updatedAt`。
+4. 文件关联必须通过统一 `fileId`。
 
-输入参数：
+## 5. 工具契约 (Tool Contract)
 
-- `rootPath: string`（必填）
-- `relativePath: string`（必填）
-- `topK: number`（可选，默认 `5`，范围 `1-20`）
-- `minScore: number`（可选，默认 `0.0`，范围 `0-1`）
+工具名保持：
 
-结果结构：
+1. `ml.classifyImage`
+2. `ml.classifyBatch`
 
-- `model: string`
-- `device: string`（`cpu` 或 `cuda`）
-- `timingMs: number`
-- `predictions: Array<{ label: string; score: number }>`
+返回结构保持：
 
-错误约束：
+1. `predictions: Array<{ label: string; score: number }>`
+2. 批量 `items: Array<{ relativePath: string; ok: boolean; predictions?: ...; error?: string }>`
 
-1. 参数缺失、越界、路径不安全时返回 `MCP_INVALID_PARAMS`。
-2. 工具名错误时返回 `MCP_TOOL_NOT_FOUND`。
-3. 模型加载或推理失败时返回 `MCP_TOOL_CALL_FAILED`。
+## 6. 功能需求 (FR)
 
-工具元数据约束：
+1. `FR-TIMM-01` 分类插件必须仅承担推理职责。
+2. `FR-TIMM-02` 分类结果必须由 Gateway 持久化为统一标签。
+3. `FR-TIMM-03` 分类标签必须可被统一标签过滤查询消费。
+4. `FR-TIMM-04` 分类失败不得破坏已落盘标签数据。
 
-1. `annotations.scopes` 必须为 `["file"]`。
-2. `annotations.toolOptions` 应至少包含：
-   - `key: "preview.continuousCall.enabled"`
-   - `label: "持续调用"`
-   - `type: "boolean"`
-3. 推荐声明 `annotations.icon = "image"` 作为单图分类动作图标。
+## 7. 验收标准 (AC)
 
-### 5.2 `ml.classifyBatch`
+1. `AC-TIMM-01` 单图分类成功后，统一标签查询可读到分类标签。
+2. `AC-TIMM-02` 批量分类部分失败时，成功项标签可落盘，失败项不产生脏数据。
+3. `AC-TIMM-03` 关闭/重启后分类标签可恢复查询。
 
-输入参数：
+## 8. 关联主题 (Related Specs)
 
-- `rootPath: string`（必填）
-- `relativePaths: string[]`（必填，至少 `1` 项）
-- `topK: number`（可选，默认 `5`，范围 `1-20`）
-- `minScore: number`（可选，默认 `0.0`，范围 `0-1`）
-- `maxItems: number`（可选，默认 `256`，范围 `1-1024`）
-
-结果结构：
-
-- `model: string`
-- `device: string`
-- `timingMs: number`
-- `succeeded: number`
-- `failed: number`
-- `items: Array<{ relativePath: string; ok: boolean; predictions?: Array<{ label: string; score: number }>; error?: string }>`
-
-批量语义：
-
-1. 单项参数错误、文件不存在、文件不可解码时，仅标记该项失败。
-2. 全局初始化错误（配置缺失、权重加载失败）直接返回 MCP 错误。
-
-工具元数据约束：
-
-1. `annotations.scopes` 必须为 `["workspace"]`。
-2. 推荐声明 `annotations.icon = "images"` 作为批量分类动作图标。
-
-## 6. 配置契约 (Configuration Contract)
-
-插件配置文件：`tools/mcp/timm-classifier/config.json`
-
-必填字段：
-
-- `modelDir: string`（模型目录路径）
-
-可选字段：
-
-- `device: "auto" | "cpu" | "cuda"`（默认 `auto`）
-- `batch_size: integer`（默认 `64`，必须为正整数）
-
-约束：
-
-1. 相对路径按配置文件目录解析。
-2. `modelDir` 必须是 `transformers` 图像分类管线可加载目录，至少包含 `config.json` 与模型权重文件（如 `model.safetensors`）。
-3. `modelDir` 缺少图像预处理配置（如 `preprocessor_config.json`）且无法自动推断时，调用必须返回 `MCP_TOOL_CALL_FAILED`。
-4. `device=auto` 时优先 CUDA，不可用时回退 CPU。
-5. `batch_size` 缺省时回退默认值 `64`。
-6. `batch_size` 非法（非整数或小于等于 `0`）时，插件初始化必须返回 `MCP_TOOL_CALL_FAILED`。
-7. `.fauplay/mcp.json` 中 `timm-classifier` 注册项应配置 `callTimeoutMs >= 120000`，以覆盖首轮模型加载耗时。
-
-## 7. 安全与路径约束 (Security & Path Constraints)
-
-1. `relativePath(s)` 禁止包含 `..` 越界段。
-2. 文件绝对路径必须落在 `rootPath` 内。
-3. 插件只处理常见图片扩展名（`jpg/jpeg/png/webp/bmp/gif`），其他类型视为无效参数。
-
-## 8. 功能需求 (FR)
-
-1. `FR-TIMM-01` 系统必须通过 `.fauplay/mcp.json` 以 `stdio` 方式注册该插件。
-2. `FR-TIMM-02` 系统必须支持 `initialize` / `notifications/initialized` / `tools/list` / `tools/call`。
-3. `FR-TIMM-03` 系统必须在进程内缓存模型实例，避免每次调用重复加载权重。
-4. `FR-TIMM-04` 系统必须在 `ml.classifyImage` 返回 Top-K 预测并按分数降序排序。
-5. `FR-TIMM-05` 系统必须在 `ml.classifyBatch` 支持部分成功并提供项级错误信息。
-6. `FR-TIMM-06` 系统必须输出稳定错误码到 `error.data.code`。
-7. `FR-TIMM-07` 网关侧 `timm-classifier` 注册必须提供不少于 `120000ms` 的下游调用超时预算（`callTimeoutMs`）。
-8. `FR-TIMM-08` 前端网关调用层必须为 `ml.classify*` 工具提供不少于 `120000ms` 的默认调用超时。
-9. `FR-TIMM-09` 前端网关调用层必须将请求中止（Abort）统一映射为可读超时错误（建议内部码：`MCP_CLIENT_TIMEOUT`）。
-10. `FR-TIMM-10` `ml.classifyImage` 的工具注解必须声明 `preview.continuousCall.enabled` 布尔选项，用于驱动预览区持续调用开关。
-11. `FR-TIMM-11` 持续调用路径应支持基于 `tool + file + 请求签名` 的历史命中跳过；手动调用不受该跳过策略限制。
-12. `FR-TIMM-12` 插件实现必须通过 `ImageClassificationPipeline` 标准接口执行推理，并将输出映射为 `{label, score}`。
-13. `FR-TIMM-13` `ml.classifyBatch` 必须将配置中的 `batch_size` 传递到 pipeline 批推理调用，以提升多文件批处理吞吐。
-
-## 9. 验收标准 (AC)
-
-1. `AC-TIMM-01` `tools/list` 可见 `ml.classifyImage` 与 `ml.classifyBatch`。
-2. `AC-TIMM-02` 有效输入下，单图工具返回非空预测列表与 `device/timingMs`。
-3. `AC-TIMM-03` 批量输入包含无效项时，整批仍返回成功结果对象，`failed` 计数正确。
-4. `AC-TIMM-04` 首次调用后再次调用不重复加载权重（日志或运行时状态可观测）。
-5. `AC-TIMM-05` 越界路径与非法参数返回 `MCP_INVALID_PARAMS`。
-6. `AC-TIMM-06` 首次模型加载超过 `5s` 的场景下，Web 端仍可等待完成或返回可读超时错误，不出现原始浏览器中止文案。
-7. `AC-TIMM-07` 预览区结果展示在 `ml.classifyImage` 成功后可直接看到 Top-K 预测（`label/score`），无需依赖浏览器 Network 面板。
-8. `AC-TIMM-08` `tools/list` 中 `ml.classifyImage.annotations.toolOptions` 包含 `preview.continuousCall.enabled`，开启后切换文件会自动触发分类调用。
-9. `AC-TIMM-09` 同文件下持续调用命中历史成功或失败记录时，系统静默跳过请求；手动点击工具仍会强制重算并产生新结果项。
-10. `AC-TIMM-10` `config.batch_size` 缺省时批处理使用默认值 `64`；显式配置后批处理调用使用配置值。
-
-## 10. 默认值与一致性约束 (Defaults & Consistency)
-
-1. 默认 `topK=5`，默认 `minScore=0.0`。
-2. 默认批量上限 `maxItems=256`。
-3. 默认设备策略为 `auto`（CUDA 优先，CPU 回退）。
-4. 插件元数据中 `ml.classifyImage` 的 `scopes` 为 `["file"]`，`ml.classifyBatch` 的 `scopes` 为 `["workspace"]`。
-5. 推荐 UI 呈现语义：`ml.classifyImage.predictions` 以 Top-K 表格展示（列：`label`、`score`），并保留通用 JSON 兜底视图。
-6. `preview.continuousCall.enabled` 默认值应为 `false`，避免默认触发高频推理。
-7. 默认 `batch_size=64`，用于 `ml.classifyBatch` 的 pipeline 批推理调用。
-8. 推荐图标默认值：`ml.classifyImage -> image`，`ml.classifyBatch -> images`。
-
-## 11. 关联主题 (Related Specs)
-
-- 架构边界：[`../001-architecture/spec.md`](../001-architecture/spec.md)
-- 协议契约：[`../002-contracts/spec.md`](../002-contracts/spec.md)
-- UI 分区：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
+- 基础数据契约：[`../005-local-data-contracts/spec.md`](../005-local-data-contracts/spec.md)
+- 契约基线：[`../002-contracts/spec.md`](../002-contracts/spec.md)
+- 插件运行时：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)

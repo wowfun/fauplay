@@ -1,8 +1,18 @@
 # CHANGELOG
 
+## 2026-03-19
+### Changed
+- 更新 `specs/114-metadata-annotation/spec.md`：新增“预览切换文件时按文件粒度异步即时读取标签（`/v1/data/tags/file`）且不得阻塞预览 UI”契约，并补充对应 `FR-MA-08` / `AC-MA-05`。
+
 ## 2026-03-18
+### Added
+- 新增 `specs/005-local-data-contracts/spec.md`：定义“Gateway 唯一数据层 + `.fauplay/faudb.v1.sqlite` 单一真源 + 统一 `fileId` + 插件仅计算不直写”基础契约，并明确标签/标注/人脸业务主链路迁移为 Gateway HTTP 接口。
+
 ### Changed
 - 更新 `specs/115-facial-recognition/spec.md`：补充预览区自动检测契约（图片预览无人脸记录时自动触发 `detectAsset` 并补跑 `clusterPending`），并将 SQLite 路径表述收敛为基于 `rootHandle` 的相对路径（`<rootHandle>/.fauplay/faces.v1.sqlite`）；同步新增 root 上下文缺失时的绑定与继续执行语义（`FR-FACE-12` / `AC-FACE-11`）。
+- 更新 `specs/114-metadata-annotation/spec.md`：标注能力改为 Gateway HTTP + SQLite 持久化模式，移除 sidecar 运行时依赖，并将记录主键语义统一为 `id`（不再使用 `annotationId`）。
+- 更新 `specs/115-facial-recognition/spec.md`：人脸持久化库名统一为 `faudb.v1.sqlite`，人脸/人物关系统一 `fileId`，并明确 `vision-face` 插件仅保留推理职责。
+- 更新 `specs/104-timm-classification-mcp/spec.md`：分类插件收敛为推理角色，分类结果由 Gateway 落统一标签模型（`source=ml.classify`）。
 
 ## 2026-03-17
 ### Added

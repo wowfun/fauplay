@@ -491,7 +491,7 @@ TOOL_DEFINITIONS = [
         },
         "annotations": {
             "title": "图像分类",
-            "mutation": False,
+            "mutation": True,
             "icon": "image",
             "scopes": ["file"],
             "toolOptions": [
@@ -522,7 +522,7 @@ TOOL_DEFINITIONS = [
         },
         "annotations": {
             "title": "批量图像分类",
-            "mutation": False,
+            "mutation": True,
             "icon": "images",
             "scopes": ["workspace"],
         },

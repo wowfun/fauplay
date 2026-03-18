@@ -12,6 +12,7 @@ import {
   getAnnotationDisplayStoreVersion,
   getFileAnnotationFieldValues,
   patchAnnotationSetValue,
+  preloadFileAnnotationDisplaySnapshot,
   preloadAnnotationDisplaySnapshot,
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
@@ -238,6 +239,15 @@ export function FilePreviewPanel({
       rootHandle,
     })
   }, [rootHandle, rootId])
+
+  useEffect(() => {
+    if (!rootId || !rootHandle || !file || file.kind !== 'file') return
+    void preloadFileAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+      relativePath: file.path,
+    })
+  }, [file, rootHandle, rootId])
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
     if (currentUrlRef.current) {
@@ -509,10 +519,11 @@ export function FilePreviewPanel({
       return
     }
 
-    if (!rootHandle) return
-    void preloadAnnotationDisplaySnapshot({
+    if (!rootHandle || file.kind !== 'file') return
+    void preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      relativePath: file.path,
       force: true,
     })
   }, [currentFileQueue, file, rootHandle, rootId])
