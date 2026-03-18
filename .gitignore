@@ -44,3 +44,4 @@ __pycache__/
 tools/mcp-local/
 config.local.json
 _local/
+.cache/
