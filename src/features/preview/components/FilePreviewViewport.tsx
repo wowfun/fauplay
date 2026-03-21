@@ -24,6 +24,7 @@ interface FilePreviewViewportProps {
   videoPlaybackRate: number
   onVideoEnded?: () => void
   onVideoRenderError?: () => void
+  showFaceOverlays?: boolean
   faceOverlays?: PreviewFaceOverlayItem[]
   faceOverlayLoading?: boolean
   faceOverlayError?: string | null
@@ -79,6 +80,7 @@ export function FilePreviewViewport({
   videoPlaybackRate,
   onVideoEnded,
   onVideoRenderError,
+  showFaceOverlays = false,
   faceOverlays = [],
   faceOverlayLoading = false,
   faceOverlayError = null,
@@ -138,15 +140,17 @@ export function FilePreviewViewport({
               }}
               onDoubleClick={onOpenFullscreen}
             />
-            <PreviewFaceOverlay
-              items={faceOverlays}
-              imageNaturalWidth={imageNaturalSize.width}
-              imageNaturalHeight={imageNaturalSize.height}
-              isFullscreen={videoSurface === 'lightbox'}
-              isLoading={faceOverlayLoading}
-              error={faceOverlayError}
-              onFaceClick={onFaceOverlayClick}
-            />
+            {showFaceOverlays && (
+              <PreviewFaceOverlay
+                items={faceOverlays}
+                imageNaturalWidth={imageNaturalSize.width}
+                imageNaturalHeight={imageNaturalSize.height}
+                isFullscreen={videoSurface === 'lightbox'}
+                isLoading={faceOverlayLoading}
+                error={faceOverlayError}
+                onFaceClick={onFaceOverlayClick}
+              />
+            )}
           </div>
         </div>
       ) : previewUrl && isVideo ? (

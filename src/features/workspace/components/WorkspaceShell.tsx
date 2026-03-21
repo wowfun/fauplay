@@ -457,6 +457,7 @@ export function WorkspaceShell({
     autoPlayIntervalSec,
     videoSeekStepSec,
     videoPlaybackRate,
+    faceBboxVisible,
     playbackOrder,
     hasOpenPreview,
     hasActiveMediaPreview,
@@ -471,6 +472,7 @@ export function WorkspaceShell({
     setVideoSeekStep,
     setVideoPlaybackRate,
     cycleVideoPlaybackRate,
+    toggleFaceBboxVisible,
     navigateMediaFromPane,
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,
@@ -1017,9 +1019,11 @@ export function WorkspaceShell({
       autoPlayIntervalSec={autoPlayIntervalSec}
       videoSeekStepSec={videoSeekStepSec}
       videoPlaybackRate={videoPlaybackRate}
+      faceBboxVisible={faceBboxVisible}
       onToggleAutoPlay={toggleAutoPlay}
       playbackOrder={playbackOrder}
       onTogglePlaybackOrder={togglePlaybackOrder}
+      onToggleFaceBboxVisible={toggleFaceBboxVisible}
       onAutoPlayIntervalChange={setAutoPlayInterval}
       onVideoSeekStepChange={setVideoSeekStep}
       onVideoPlaybackRateChange={setVideoPlaybackRate}

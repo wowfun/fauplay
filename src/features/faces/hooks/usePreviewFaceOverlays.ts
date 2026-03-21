@@ -13,6 +13,7 @@ interface UsePreviewFaceOverlaysOptions {
   previewKind: FilePreviewKind
   enabled: boolean
   refreshToken?: string | number | null
+  onFaceMutationCommitted?: () => void | Promise<void>
 }
 
 interface UsePreviewFaceOverlaysResult {
@@ -103,6 +104,7 @@ export function usePreviewFaceOverlays({
   previewKind,
   enabled,
   refreshToken,
+  onFaceMutationCommitted,
 }: UsePreviewFaceOverlaysOptions): UsePreviewFaceOverlaysResult {
   const [items, setItems] = useState<PreviewFaceOverlayItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -156,16 +158,19 @@ export function usePreviewFaceOverlays({
           && previewKind === 'image'
           && !autoDetectedPathSetRef.current.has(file.path)
         ) {
+          let hasFaceMutation = false
           autoDetectedPathSetRef.current.add(file.path)
           await invokeVisionFace({
             operation: 'detectAsset',
             relativePath: file.path,
           }, FACE_DETECT_TIMEOUT_MS)
+          hasFaceMutation = true
           try {
             await invokeVisionFace({
               operation: 'clusterPending',
               limit: 200,
             }, FACE_CLUSTER_TIMEOUT_MS)
+            hasFaceMutation = true
           } catch {
             // Cluster failures should not block overlay rendering.
           }
@@ -173,6 +178,15 @@ export function usePreviewFaceOverlays({
             operation: 'listAssetFaces',
             relativePath: file.path,
           }))
+
+          if (hasFaceMutation && !cancelled) {
+            try {
+              await onFaceMutationCommitted?.()
+            } catch {
+              // Tag snapshot refresh failures should not block overlay rendering.
+            }
+          }
+          if (cancelled) return
         }
 
         const personIds = [...new Set(parsedFaces.map((face) => face.personId).filter((id): id is string => Boolean(id)))]
@@ -210,7 +224,7 @@ export function usePreviewFaceOverlays({
     return () => {
       cancelled = true
     }
-  }, [enabled, file, previewKind, refreshToken, reloadVersion, rootHandle, rootId])
+  }, [enabled, file, onFaceMutationCommitted, previewKind, refreshToken, reloadVersion, rootHandle, rootId])
 
   return {
     items,

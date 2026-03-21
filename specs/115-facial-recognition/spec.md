@@ -15,7 +15,7 @@
 
 1. 单资产检测并产出检测框与 embedding。
 2. Gateway 侧增量聚类、人物命名、人物合并。
-3. 预览人脸框展示与人物详情查询。
+3. 预览人脸框展示与人物详情查询（含显示/隐藏切换）。
 4. 统一标签系统的人物标签写入（`source=vision.face`）。
 
 范围外：
@@ -90,6 +90,10 @@
 5. `FR-FACE-05` 人物命名/合并后，列表与预览展示必须一致。
 6. `FR-FACE-06` 人物归属应同步写入统一标签模型（`source=vision.face`）。
 7. `FR-FACE-07` 系统不得依赖 `face_job_state` 作为流程状态真源。
+8. `FR-FACE-08` 预览区必须提供“人脸框显示/隐藏”显式开关，且开关状态需持久化到 `localStorage`（键：`fauplay:preview-face-bbox-visible`）。
+9. `FR-FACE-09` 人脸框开关默认值必须为“隐藏”，并在侧栏预览与全屏预览间保持一致。
+10. `FR-FACE-10` 人脸框显示状态仅影响前端覆盖层渲染，不得作为后台检测/识别（`detect-asset/list-asset-faces/cluster-pending/list-people`）的门控条件。
+11. `FR-FACE-11` 预览文件的人脸检测/识别完成后，当前预览头部标签必须在同一预览会话内即时同步，无需切换文件。
 
 ## 8. 验收标准 (AC)
 
@@ -99,12 +103,18 @@
 4. `AC-FACE-04` 重启后同 root 可恢复人脸与人物数据。
 5. `AC-FACE-05` 人脸流程后，文件级 `vision.face` 标签与 `person_face` 关系一致。
 6. `AC-FACE-06` 旧 `faces.v1.sqlite` 存在时新流程不读取且不崩溃。
+7. `AC-FACE-07` 首次进入预览（无持久化值）时不显示人脸框；用户显式开启后刷新页面仍保持开启。
+8. `AC-FACE-08` 侧栏预览与全屏预览切换时，人脸框开关状态一致且实时生效。
+9. `AC-FACE-09` 在图片预览中关闭人脸框后，后台仍可继续执行检测/识别流程并更新人物归属；再次开启时可直接展示最新识别结果。
+10. `AC-FACE-10` 自动 `detect-asset/cluster-pending` 或预览内手动 `vision.face` 成功后，当前文件预览标签在一次异步刷新内可见，不依赖切换文件触发。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
 1. v1 运行时配置：`modelName/minScore/maxDistance/minFaces` 保持既有语义。
 2. 写请求事务化，失败可回滚。
 3. 错误码前缀保持 `FACE_`。
+4. `localStorage` 不可用时允许降级为仅会话内状态，且默认仍为隐藏。
+5. “即时同步”语义为同一预览会话内完成一次文件级标签快照刷新即可，不要求阻塞 UI。
 
 ## 10. 关联主题 (Related Specs)
 

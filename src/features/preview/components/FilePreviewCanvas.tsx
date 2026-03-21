@@ -36,6 +36,7 @@ interface FilePreviewCanvasProps {
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
+  showFaceOverlays: boolean
   faceOverlays: PreviewFaceOverlayItem[]
   faceOverlayLoading: boolean
   faceOverlayError: string | null
@@ -77,6 +78,7 @@ export function FilePreviewCanvas({
   toolPanelWidthPx,
   onToolPanelWidthChange,
   onMutationCommitted,
+  showFaceOverlays,
   faceOverlays,
   faceOverlayLoading,
   faceOverlayError,
@@ -151,6 +153,7 @@ export function FilePreviewCanvas({
           setPlaybackError(true)
           onVideoPlaybackError?.()
         }}
+        showFaceOverlays={showFaceOverlays}
         faceOverlays={faceOverlays}
         faceOverlayLoading={faceOverlayLoading}
         faceOverlayError={faceOverlayError}

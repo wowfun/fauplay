@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Eye, EyeOff, X } from 'lucide-react'
 import { MediaPlaybackControls } from './MediaPlaybackControls'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import { Button } from '@/ui/Button'
@@ -11,9 +11,12 @@ interface PreviewControlGroupProps {
   autoPlayIntervalSec: number
   videoSeekStepSec: number
   videoPlaybackRate: number
+  showFaceBboxToggle: boolean
+  faceBboxVisible: boolean
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
+  onToggleFaceBboxVisible: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoSeekStepChange: (sec: number) => void
   onVideoPlaybackRateChange: (rate: number) => void
@@ -28,9 +31,12 @@ export function PreviewControlGroup({
   autoPlayIntervalSec,
   videoSeekStepSec,
   videoPlaybackRate,
+  showFaceBboxToggle,
+  faceBboxVisible,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
+  onToggleFaceBboxVisible,
   onAutoPlayIntervalChange,
   onVideoSeekStepChange,
   onVideoPlaybackRateChange,
@@ -55,6 +61,19 @@ export function PreviewControlGroup({
           onVideoSeekStepChange={onVideoSeekStepChange}
           onVideoPlaybackRateChange={onVideoPlaybackRateChange}
         />
+      )}
+      {showFaceBboxToggle && (
+        <Button
+          onClick={onToggleFaceBboxVisible}
+          variant={faceBboxVisible ? 'default' : 'accent'}
+          size="sm"
+          className="text-xs"
+          aria-label={faceBboxVisible ? '隐藏人脸框' : '显示人脸框'}
+          title={faceBboxVisible ? '隐藏人脸框' : '显示人脸框'}
+        >
+          {faceBboxVisible ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Eye className="mr-1 h-3.5 w-3.5" />}
+          人脸框
+        </Button>
       )}
       <Button
         onClick={onClose}

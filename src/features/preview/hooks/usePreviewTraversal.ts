@@ -13,6 +13,8 @@ const VIDEO_PLAYBACK_RATE_CYCLE_ORDER = [1, 3, 5, 0.5] as const
 const DEFAULT_VIDEO_PLAYBACK_RATE = 1
 const VIDEO_SEEK_STEP_STORAGE_KEY = 'fauplay:preview-video-seek-step-sec'
 const VIDEO_PLAYBACK_RATE_STORAGE_KEY = 'fauplay:preview-video-playback-rate'
+const FACE_BBOX_VISIBLE_STORAGE_KEY = 'fauplay:preview-face-bbox-visible'
+const DEFAULT_FACE_BBOX_VISIBLE = false
 const WRAP_AT_BOUNDARY = true
 
 type NavigateSource = 'pane' | 'modal' | 'autoplay'
@@ -81,6 +83,29 @@ function savePersistedVideoPlaybackRate(value: number): void {
   }
 }
 
+function readPersistedFaceBboxVisible(): boolean {
+  if (typeof window === 'undefined') return DEFAULT_FACE_BBOX_VISIBLE
+  try {
+    const raw = window.localStorage.getItem(FACE_BBOX_VISIBLE_STORAGE_KEY)
+    if (raw === null) return DEFAULT_FACE_BBOX_VISIBLE
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    const parsed = JSON.parse(raw) as unknown
+    return typeof parsed === 'boolean' ? parsed : DEFAULT_FACE_BBOX_VISIBLE
+  } catch {
+    return DEFAULT_FACE_BBOX_VISIBLE
+  }
+}
+
+function savePersistedFaceBboxVisible(value: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(FACE_BBOX_VISIBLE_STORAGE_KEY, value ? 'true' : 'false')
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
 function toVideoSeekStepSec(value: number): number {
   return VIDEO_SEEK_STEP_OPTIONS.includes(value as (typeof VIDEO_SEEK_STEP_OPTIONS)[number])
     ? value
@@ -102,6 +127,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
   const [videoSeekStepSec, setVideoSeekStepSec] = useState<number>(() => readPersistedVideoSeekStepSec())
   const [videoPlaybackRate, setVideoPlaybackRateState] = useState<number>(() => readPersistedVideoPlaybackRate())
+  const [faceBboxVisible, setFaceBboxVisible] = useState<boolean>(() => readPersistedFaceBboxVisible())
   const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
   const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>('sequential')
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
@@ -400,6 +426,10 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     })
   }, [])
 
+  const toggleFaceBboxVisible = useCallback(() => {
+    setFaceBboxVisible((previous) => !previous)
+  }, [])
+
   const handleAutoPlayVideoEnded = useCallback(() => {
     if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
     if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
@@ -559,6 +589,10 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [videoPlaybackRate])
 
   useEffect(() => {
+    savePersistedFaceBboxVisible(faceBboxVisible)
+  }, [faceBboxVisible])
+
+  useEffect(() => {
     if (!hasOpenPreview) return
     if (!hasActiveMediaPreview && autoPlayEnabled) {
       setAutoPlayEnabled(false)
@@ -629,6 +663,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     autoPlayIntervalSec,
     videoSeekStepSec,
     videoPlaybackRate,
+    faceBboxVisible,
     playbackOrder,
     hasOpenPreview,
     hasActiveMediaPreview,
@@ -643,6 +678,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     setVideoSeekStep,
     setVideoPlaybackRate,
     cycleVideoPlaybackRate,
+    toggleFaceBboxVisible,
     navigateMediaFromPane,
     navigateMediaFromModal,
     handleAutoPlayVideoEnded,

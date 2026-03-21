@@ -17,9 +17,12 @@ interface PreviewHeaderBarProps {
   autoPlayIntervalSec: number
   videoSeekStepSec: number
   videoPlaybackRate: number
+  showFaceBboxToggle: boolean
+  faceBboxVisible: boolean
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
+  onToggleFaceBboxVisible: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoSeekStepChange: (sec: number) => void
   onVideoPlaybackRateChange: (rate: number) => void
@@ -40,9 +43,12 @@ export function PreviewHeaderBar({
   autoPlayIntervalSec,
   videoSeekStepSec,
   videoPlaybackRate,
+  showFaceBboxToggle,
+  faceBboxVisible,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
+  onToggleFaceBboxVisible,
   onAutoPlayIntervalChange,
   onVideoSeekStepChange,
   onVideoPlaybackRateChange,
@@ -98,9 +104,12 @@ export function PreviewHeaderBar({
         autoPlayIntervalSec={autoPlayIntervalSec}
         videoSeekStepSec={videoSeekStepSec}
         videoPlaybackRate={videoPlaybackRate}
+        showFaceBboxToggle={showFaceBboxToggle}
+        faceBboxVisible={faceBboxVisible}
         onToggleAutoPlay={onToggleAutoPlay}
         playbackOrder={playbackOrder}
         onTogglePlaybackOrder={onTogglePlaybackOrder}
+        onToggleFaceBboxVisible={onToggleFaceBboxVisible}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onVideoSeekStepChange={onVideoSeekStepChange}
         onVideoPlaybackRateChange={onVideoPlaybackRateChange}

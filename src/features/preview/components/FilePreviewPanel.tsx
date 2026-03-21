@@ -33,9 +33,11 @@ interface FilePreviewPanelProps {
   autoPlayIntervalSec: number
   videoSeekStepSec: number
   videoPlaybackRate: number
+  faceBboxVisible: boolean
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
+  onToggleFaceBboxVisible: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoSeekStepChange: (sec: number) => void
   onVideoPlaybackRateChange: (rate: number) => void
@@ -168,9 +170,11 @@ export function FilePreviewPanel({
   autoPlayIntervalSec,
   videoSeekStepSec,
   videoPlaybackRate,
+  faceBboxVisible,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
+  onToggleFaceBboxVisible,
   onAutoPlayIntervalChange,
   onVideoSeekStepChange,
   onVideoPlaybackRateChange,
@@ -200,6 +204,7 @@ export function FilePreviewPanel({
   const [error, setError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
   const handledLocalDataQueueItemIdRef = useRef<string | null>(null)
+  const handledVisionFaceQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
   const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
   useSyncExternalStore(
@@ -268,6 +273,15 @@ export function FilePreviewPanel({
       .map((item) => `${item.id}:${item.status}`)
       .join('|')
   }, [currentFileQueue, file])
+  const refreshCurrentPreviewFileTags = useCallback(async () => {
+    if (!file || file.kind !== 'file' || !rootId || !rootHandle) return
+    await preloadFileAnnotationDisplaySnapshot({
+      rootId,
+      rootHandle,
+      relativePath: file.path,
+      force: true,
+    })
+  }, [file, rootHandle, rootId])
   const {
     items: faceOverlays,
     isLoading: faceOverlayLoading,
@@ -279,6 +293,7 @@ export function FilePreviewPanel({
     previewKind,
     enabled: hasVisionFaceTool,
     refreshToken: faceOverlayRefreshToken,
+    onFaceMutationCommitted: refreshCurrentPreviewFileTags,
   })
 
   const handleFaceOverlayClick = useCallback((overlay: PreviewFaceOverlayItem) => {
@@ -528,6 +543,23 @@ export function FilePreviewPanel({
     })
   }, [currentFileQueue, file, rootHandle, rootId])
 
+  useEffect(() => {
+    if (!file || file.kind !== 'file' || !rootId) {
+      handledVisionFaceQueueItemIdRef.current = null
+      return
+    }
+
+    const latestVisionFaceSuccess = currentFileQueue.find((item) => (
+      item.toolName === 'vision.face'
+      && item.status === 'success'
+    ))
+    if (!latestVisionFaceSuccess) return
+    if (handledVisionFaceQueueItemIdRef.current === latestVisionFaceSuccess.id) return
+    handledVisionFaceQueueItemIdRef.current = latestVisionFaceSuccess.id
+
+    void refreshCurrentPreviewFileTags()
+  }, [currentFileQueue, file, refreshCurrentPreviewFileTags, rootId])
+
   const annotationTags: PreviewHeaderAnnotationTag[] = []
   if (file && file.kind === 'file' && rootId) {
     const fieldValues = getFileAnnotationFieldValues(rootId, file.path)
@@ -568,6 +600,7 @@ export function FilePreviewPanel({
 
   const isMediaPreview = isMediaPreviewKind(previewKind)
   const isVideoPreview = previewKind === 'video'
+  const showFaceBboxToggle = hasVisionFaceTool && previewKind === 'image'
 
   return (
     <div className={isFullscreen ? 'flex flex-col h-full bg-background' : 'flex flex-col h-full bg-card border-l border-border'}>
@@ -580,9 +613,12 @@ export function FilePreviewPanel({
         autoPlayIntervalSec={autoPlayIntervalSec}
         videoSeekStepSec={videoSeekStepSec}
         videoPlaybackRate={videoPlaybackRate}
+        showFaceBboxToggle={showFaceBboxToggle}
+        faceBboxVisible={faceBboxVisible}
         onToggleAutoPlay={onToggleAutoPlay}
         playbackOrder={playbackOrder}
         onTogglePlaybackOrder={onTogglePlaybackOrder}
+        onToggleFaceBboxVisible={onToggleFaceBboxVisible}
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onVideoSeekStepChange={onVideoSeekStepChange}
         onVideoPlaybackRateChange={onVideoPlaybackRateChange}
@@ -612,6 +648,7 @@ export function FilePreviewPanel({
         isFullscreen={isFullscreen}
         onVideoEnded={onVideoEnded}
         onVideoPlaybackError={onVideoPlaybackError}
+        showFaceOverlays={faceBboxVisible}
         toolResultQueueState={toolResultQueueState}
         setToolResultQueueState={setToolResultQueueState}
         toolWorkbenchState={toolWorkbenchState}

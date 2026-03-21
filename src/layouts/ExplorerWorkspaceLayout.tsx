@@ -183,9 +183,11 @@ interface ExplorerWorkspaceLayoutProps {
   autoPlayIntervalSec: number
   videoSeekStepSec: number
   videoPlaybackRate: number
+  faceBboxVisible: boolean
   onToggleAutoPlay: () => void
   playbackOrder: PlaybackOrder
   onTogglePlaybackOrder: () => void
+  onToggleFaceBboxVisible: () => void
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoSeekStepChange: (sec: number) => void
   onVideoPlaybackRateChange: (rate: number) => void
@@ -256,9 +258,11 @@ export function ExplorerWorkspaceLayout({
   autoPlayIntervalSec,
   videoSeekStepSec,
   videoPlaybackRate,
+  faceBboxVisible,
   onToggleAutoPlay,
   playbackOrder,
   onTogglePlaybackOrder,
+  onToggleFaceBboxVisible,
   onAutoPlayIntervalChange,
   onVideoSeekStepChange,
   onVideoPlaybackRateChange,
@@ -446,9 +450,11 @@ export function ExplorerWorkspaceLayout({
                 autoPlayIntervalSec={autoPlayIntervalSec}
                 videoSeekStepSec={videoSeekStepSec}
                 videoPlaybackRate={videoPlaybackRate}
+                faceBboxVisible={faceBboxVisible}
                 onToggleAutoPlay={onToggleAutoPlay}
                 playbackOrder={playbackOrder}
                 onTogglePlaybackOrder={onTogglePlaybackOrder}
+                onToggleFaceBboxVisible={onToggleFaceBboxVisible}
                 onAutoPlayIntervalChange={onAutoPlayIntervalChange}
                 onVideoSeekStepChange={onVideoSeekStepChange}
                 onVideoPlaybackRateChange={onVideoPlaybackRateChange}
@@ -500,9 +506,11 @@ export function ExplorerWorkspaceLayout({
             autoPlayIntervalSec={autoPlayIntervalSec}
             videoSeekStepSec={videoSeekStepSec}
             videoPlaybackRate={videoPlaybackRate}
+            faceBboxVisible={faceBboxVisible}
             onToggleAutoPlay={onToggleAutoPlay}
             playbackOrder={playbackOrder}
             onTogglePlaybackOrder={onTogglePlaybackOrder}
+            onToggleFaceBboxVisible={onToggleFaceBboxVisible}
             onAutoPlayIntervalChange={onAutoPlayIntervalChange}
             onVideoSeekStepChange={onVideoSeekStepChange}
             onVideoPlaybackRateChange={onVideoPlaybackRateChange}
