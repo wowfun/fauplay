@@ -109,7 +109,7 @@ export function WorkspacePluginHost({
       return { relativePaths: targetPaths }
     }, [hasTargets, targetPaths]),
     canRunTool: useCallback((tool: GatewayToolDescriptor) => {
-      if (tool.name === 'meta.annotation') {
+      if (tool.name === 'local.data') {
         return true
       }
       if (tool.name === 'fs.softDelete' || tool.name === 'fs.restore') {

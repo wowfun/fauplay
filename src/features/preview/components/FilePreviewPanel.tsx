@@ -64,7 +64,7 @@ interface BatchRenameItemResult {
   error?: string
 }
 
-interface MetaAnnotationSetValueResult {
+interface LocalDataSetValueResult {
   relativePath: string
   fieldKey: string
   value: string
@@ -140,7 +140,7 @@ function toConflictAwareErrorMessage(item: BatchRenameItemResult, fallback: stri
   return item.error || fallback
 }
 
-function readMetaAnnotationSetValueResult(result: unknown): MetaAnnotationSetValueResult | null {
+function readLocalDataSetValueResult(result: unknown): LocalDataSetValueResult | null {
   if (!isRecord(result)) return null
 
   const relativePath = typeof result.relativePath === 'string' ? result.relativePath : ''
@@ -199,7 +199,7 @@ export function FilePreviewPanel({
   const [isRenaming, setIsRenaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const currentUrlRef = useRef<string | null>(null)
-  const handledMetaAnnotationQueueItemIdRef = useRef<string | null>(null)
+  const handledLocalDataQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
   const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
   useSyncExternalStore(
@@ -496,19 +496,19 @@ export function FilePreviewPanel({
 
   useEffect(() => {
     if (!file || file.kind !== 'file' || !rootId) {
-      handledMetaAnnotationQueueItemIdRef.current = null
+      handledLocalDataQueueItemIdRef.current = null
       return
     }
 
-    const latestMetaAnnotationSuccess = currentFileQueue.find((item) => (
-      item.toolName === 'meta.annotation'
+    const latestLocalDataSuccess = currentFileQueue.find((item) => (
+      item.toolName === 'local.data'
       && item.status === 'success'
     ))
-    if (!latestMetaAnnotationSuccess) return
-    if (handledMetaAnnotationQueueItemIdRef.current === latestMetaAnnotationSuccess.id) return
-    handledMetaAnnotationQueueItemIdRef.current = latestMetaAnnotationSuccess.id
+    if (!latestLocalDataSuccess) return
+    if (handledLocalDataQueueItemIdRef.current === latestLocalDataSuccess.id) return
+    handledLocalDataQueueItemIdRef.current = latestLocalDataSuccess.id
 
-    const setValueResult = readMetaAnnotationSetValueResult(latestMetaAnnotationSuccess.result)
+    const setValueResult = readLocalDataSetValueResult(latestLocalDataSuccess.result)
     if (setValueResult) {
       patchAnnotationSetValue({
         rootId,

@@ -3,6 +3,7 @@ import { callGatewayHttp } from '@/lib/gateway'
 import { ensureRootPath } from '@/lib/reveal'
 
 const TAG_QUERY_PAGE_SIZE = 1000
+const ANNOTATION_SOURCE = 'meta.annotation'
 
 type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
 
@@ -54,6 +55,8 @@ interface AnnotationFilterUiGateState {
 interface GatewayTagRecord {
   key?: string
   value?: string
+  source?: string
+  appliedAt?: number
   updatedAt?: number
 }
 
@@ -223,10 +226,32 @@ async function loadAllTagViews(rootPath: string): Promise<GatewayFileTagView[]> 
   return items
 }
 
-function toUpdatedAt(value: unknown): number {
+function toUpdatedAt(value: unknown, fallbackValue?: unknown): number {
   const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return 0
-  return Math.max(0, Math.trunc(numeric))
+  if (Number.isFinite(numeric)) return Math.max(0, Math.trunc(numeric))
+
+  const fallbackNumeric = Number(fallbackValue)
+  if (Number.isFinite(fallbackNumeric)) return Math.max(0, Math.trunc(fallbackNumeric))
+
+  return 0
+}
+
+function toAnnotationTag(tag: unknown): { fieldKey: string; value: string; updatedAt: number } | null {
+  if (!isRecord(tag)) return null
+
+  const source = typeof tag.source === 'string' ? tag.source.trim() : ''
+  if (source !== ANNOTATION_SOURCE) return null
+
+  const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
+  const value = typeof tag.value === 'string' ? tag.value.trim() : ''
+  if (!fieldKey || !value) return null
+
+  const updatedAt = toUpdatedAt(tag.appliedAt, tag.updatedAt)
+  return {
+    fieldKey,
+    value,
+    updatedAt,
+  }
 }
 
 function buildPathSnapshotFromTagViews(tagViews: GatewayFileTagView[]) {
@@ -248,20 +273,19 @@ function buildPathSnapshotFromTagViews(tagViews: GatewayFileTagView[]) {
     let maxUpdatedAt = 0
 
     for (const tag of tags) {
-      if (!isRecord(tag)) continue
+      const parsed = toAnnotationTag(tag)
+      if (!parsed) continue
 
-      const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
-      const value = typeof tag.value === 'string' ? tag.value.trim() : ''
-      if (!fieldKey || !value) continue
-
-      const updatedAt = toUpdatedAt(tag.updatedAt)
-      const tagKey = toAnnotationFilterTagKey(fieldKey, value)
+      const tagKey = toAnnotationFilterTagKey(parsed.fieldKey, parsed.value)
       tagKeySet.add(tagKey)
-      maxUpdatedAt = Math.max(maxUpdatedAt, updatedAt)
+      maxUpdatedAt = Math.max(maxUpdatedAt, parsed.updatedAt)
 
-      const existing = latestValueByField.get(fieldKey)
-      if (!existing || updatedAt >= existing.updatedAt) {
-        latestValueByField.set(fieldKey, { value, updatedAt })
+      const existing = latestValueByField.get(parsed.fieldKey)
+      if (!existing || parsed.updatedAt >= existing.updatedAt) {
+        latestValueByField.set(parsed.fieldKey, {
+          value: parsed.value,
+          updatedAt: parsed.updatedAt,
+        })
       }
     }
 
@@ -293,20 +317,19 @@ function buildPathStateFromTags(tags: unknown[]): {
   let maxUpdatedAt = 0
 
   for (const tag of tags) {
-    if (!isRecord(tag)) continue
+    const parsed = toAnnotationTag(tag)
+    if (!parsed) continue
 
-    const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
-    const value = typeof tag.value === 'string' ? tag.value.trim() : ''
-    if (!fieldKey || !value) continue
-
-    const updatedAt = toUpdatedAt(tag.updatedAt)
-    const tagKey = toAnnotationFilterTagKey(fieldKey, value)
+    const tagKey = toAnnotationFilterTagKey(parsed.fieldKey, parsed.value)
     tagKeySet.add(tagKey)
-    maxUpdatedAt = Math.max(maxUpdatedAt, updatedAt)
+    maxUpdatedAt = Math.max(maxUpdatedAt, parsed.updatedAt)
 
-    const existing = latestValueByField.get(fieldKey)
-    if (!existing || updatedAt >= existing.updatedAt) {
-      latestValueByField.set(fieldKey, { value, updatedAt })
+    const existing = latestValueByField.get(parsed.fieldKey)
+    if (!existing || parsed.updatedAt >= existing.updatedAt) {
+      latestValueByField.set(parsed.fieldKey, {
+        value: parsed.value,
+        updatedAt: parsed.updatedAt,
+      })
     }
   }
 

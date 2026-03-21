@@ -21,6 +21,7 @@ export interface DispatchSystemToolResult {
 }
 
 interface DispatchHttpRoute {
+  method?: 'POST' | 'PUT' | 'PATCH'
   endpointPath: string
   payload: Record<string, unknown>
   timeoutMs?: number
@@ -62,24 +63,35 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
   const operation = typeof args.operation === 'string' ? args.operation : ''
   const payload = toArgsWithoutOperation(args)
 
-  if (toolName === 'meta.annotation') {
-    if (operation === 'setValue') {
+  if (toolName === 'local.data') {
+    if (operation === 'setAnnotationValue') {
       return {
-        endpointPath: '/v1/annotations/set-value',
+        method: 'PUT',
+        endpointPath: '/v1/file-annotations',
         payload,
         timeoutMs: 120000,
       }
     }
-    if (operation === 'refreshBindings') {
+    if (operation === 'batchRebindPaths') {
       return {
-        endpointPath: '/v1/annotations/refresh-bindings',
+        method: 'PATCH',
+        endpointPath: '/v1/files/relative-paths',
         payload,
         timeoutMs: 120000,
       }
     }
-    if (operation === 'cleanupOrphans') {
+    if (operation === 'reconcileFileBindings') {
       return {
-        endpointPath: '/v1/annotations/cleanup-orphans',
+        method: 'POST',
+        endpointPath: '/v1/file-bindings/reconciliations',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
+    if (operation === 'cleanupInvalidFileIds') {
+      return {
+        method: 'POST',
+        endpointPath: '/v1/file-bindings/cleanups',
         payload,
       }
     }
@@ -193,14 +205,14 @@ export async function dispatchSystemTool({
       ...(additionalArgs ?? {}),
     }
     const httpRoute = resolveDispatchHttpRoute(toolName, argsPayload)
-    if (!httpRoute && toolName === 'meta.annotation') {
+    if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''
       return {
         toolName,
         ok: false,
         error: operation
-          ? `meta.annotation.${operation} 已下线，请改用 Gateway 统一数据接口`
-          : 'meta.annotation 缺少 operation 参数',
+          ? `local.data.${operation} 不支持或已下线`
+          : 'local.data 缺少 operation 参数',
         errorCode: 'TOOL_OPERATION_UNSUPPORTED',
       }
     }
@@ -209,7 +221,8 @@ export async function dispatchSystemTool({
       ? await callGatewayHttp(
         httpRoute.endpointPath,
         httpRoute.payload,
-        typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs
+        typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs,
+        httpRoute.method
       )
       : await callGatewayTool(toolName, argsPayload, timeoutMs)
 

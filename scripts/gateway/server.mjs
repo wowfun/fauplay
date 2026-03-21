@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import {
+  batchRebindPaths,
   callVisionInference,
-  cleanupAnnotationOrphans,
   clusterPendingFaces,
   getFileTags,
   ingestClassificationResult,
@@ -14,10 +14,11 @@ import {
   listTagOptions,
   mergePeople,
   queryFilesByTags,
-  refreshAnnotationBindings,
+  reconcileFileBindings,
   renamePerson,
   saveDetectedFaces,
   setAnnotationValue,
+  cleanupInvalidFileIds,
 } from './data/core.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
@@ -30,7 +31,7 @@ const LOCAL_MCP_CONFIG_FILENAME = 'mcp.local.json'
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${MCP_SESSION_HEADER}`)
   res.setHeader('Access-Control-Expose-Headers', MCP_SESSION_HEADER)
 }
@@ -77,6 +78,28 @@ function toStringRecord(value) {
 
 function isObjectRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function parseBatchRenameRebindMappings(toolResult) {
+  if (!isObjectRecord(toolResult)) return []
+  const items = Array.isArray(toolResult.items) ? toolResult.items : []
+  const mappings = []
+  for (const item of items) {
+    if (!isObjectRecord(item)) continue
+    if (item.ok !== true || item.skipped === true) continue
+    const fromRelativePath = typeof item.relativePath === 'string' ? item.relativePath.trim() : ''
+    const toRelativePath = typeof item.nextRelativePath === 'string' ? item.nextRelativePath.trim() : ''
+    if (!fromRelativePath || !toRelativePath || fromRelativePath === toRelativePath) continue
+    mappings.push({ fromRelativePath, toRelativePath })
+  }
+  return mappings
+}
+
+function appendPostProcessWarning(result, warning) {
+  if (!isObjectRecord(result)) return result
+  const previous = typeof result.postProcessWarning === 'string' ? result.postProcessWarning : ''
+  result.postProcessWarning = previous ? `${previous}; ${warning}` : warning
+  return result
 }
 
 function resolveCwd(configDir, cwd) {
@@ -294,7 +317,7 @@ function toHttpErrorBody(error) {
   }
 }
 
-async function handleHttpGatewayRoute(runtime, pathname, payload) {
+async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
   if (pathname === '/v1/data/tags/file') {
     return getFileTags(payload)
   }
@@ -307,16 +330,36 @@ async function handleHttpGatewayRoute(runtime, pathname, payload) {
     return queryFilesByTags(payload)
   }
 
-  if (pathname === '/v1/annotations/set-value') {
+  if (method === 'PUT' && pathname === '/v1/file-annotations') {
     return setAnnotationValue(payload)
   }
 
-  if (pathname === '/v1/annotations/refresh-bindings') {
-    return refreshAnnotationBindings(payload)
+  if (method === 'PATCH' && pathname === '/v1/files/relative-paths') {
+    return batchRebindPaths(payload)
   }
 
-  if (pathname === '/v1/annotations/cleanup-orphans') {
-    return cleanupAnnotationOrphans(payload)
+  if (method === 'POST' && pathname === '/v1/file-bindings/reconciliations') {
+    return reconcileFileBindings(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/file-bindings/cleanups') {
+    return cleanupInvalidFileIds(payload)
+  }
+
+  if (pathname.startsWith('/v1/local-data/')) {
+    throw createMcpRuntimeError(
+      'MCP_METHOD_NOT_FOUND',
+      `Endpoint offline: ${pathname}`,
+      404,
+    )
+  }
+
+  if (pathname.startsWith('/v1/annotations/')) {
+    throw createMcpRuntimeError(
+      'MCP_METHOD_NOT_FOUND',
+      `Endpoint offline: ${pathname}`,
+      404,
+    )
   }
 
   if (pathname === '/v1/faces/detect-asset') {
@@ -490,6 +533,37 @@ export async function startGatewayServer(options = {}) {
               })
             }
           }
+
+          if (toolName === 'fs.batchRename' && isObjectRecord(toolArgs) && isObjectRecord(result)) {
+            const confirm = toolArgs.confirm === true
+            const renamed = Number(result.renamed ?? 0)
+
+            if (confirm && renamed > 0) {
+              const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath.trim() : ''
+              const mappings = parseBatchRenameRebindMappings(result)
+              if (!rootPath) {
+                appendPostProcessWarning(result, 'batchRebindPaths skipped: missing rootPath')
+              } else if (mappings.length > 0) {
+                try {
+                  const rebindResult = await batchRebindPaths({
+                    rootPath,
+                    mappings,
+                  })
+                  result.rebindResult = rebindResult
+                  if (Number(rebindResult?.failed ?? 0) > 0) {
+                    appendPostProcessWarning(
+                      result,
+                      `batchRebindPaths completed with ${rebindResult.failed} failed item(s)`,
+                    )
+                  }
+                } catch (error) {
+                  const reason = error instanceof Error ? error.message : 'unknown error'
+                  console.warn(`[gateway] fs.batchRename post-process batchRebindPaths failed: ${reason}`)
+                  appendPostProcessWarning(result, `batchRebindPaths failed: ${reason}`)
+                }
+              }
+            }
+          }
         }
         responseSessionId = sessionId
 
@@ -528,10 +602,16 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    const supportsHttpRoute = req.method === 'POST' && (
-      pathname.startsWith('/v1/data/tags/')
-      || pathname.startsWith('/v1/annotations/')
-      || pathname.startsWith('/v1/faces/')
+    const supportsHttpRoute = (
+      (req.method === 'POST' && (
+        pathname.startsWith('/v1/data/tags/')
+        || pathname.startsWith('/v1/file-bindings/')
+        || pathname.startsWith('/v1/faces/')
+        || pathname.startsWith('/v1/local-data/')
+        || pathname.startsWith('/v1/annotations/')
+      ))
+      || (req.method === 'PUT' && pathname === '/v1/file-annotations')
+      || (req.method === 'PATCH' && pathname === '/v1/files/relative-paths')
     )
 
     if (supportsHttpRoute) {
@@ -541,7 +621,7 @@ export async function startGatewayServer(options = {}) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
 
-        const result = await handleHttpGatewayRoute(runtime, pathname, payload)
+        const result = await handleHttpGatewayRoute(runtime, req.method || 'GET', pathname, payload)
         sendJson(res, 200, result ?? { ok: true })
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))

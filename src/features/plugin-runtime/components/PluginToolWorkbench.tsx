@@ -174,7 +174,7 @@ export function PluginToolWorkbench({
         </div>
       )}
 
-      {tool.name === 'meta.annotation' && (
+      {tool.name === 'local.data' && (
         <div className={hasOptions || hasActions ? 'mt-3' : 'mt-0'}>
           <AnnotationQuickTagPanel
             rootId={rootId}
@@ -185,7 +185,7 @@ export function PluginToolWorkbench({
               onRunCustomToolCall(tool, {
                 actionLabel: `${fieldKey}=${value}`,
                 additionalArgs: {
-                  operation: 'setValue',
+                  operation: 'setAnnotationValue',
                   fieldKey,
                   value,
                   source,

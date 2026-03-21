@@ -6,7 +6,7 @@ const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_TOOL_TIMEOUT_MS = 5000
 const ML_CLASSIFY_TOOL_TIMEOUT_MS = 120000
 const VIDEO_SAME_DURATION_TIMEOUT_MS = 20000
-const METADATA_ANNOTATION_TIMEOUT_MS = 120000
+const LOCAL_DATA_TOOL_TIMEOUT_MS = 120000
 const MCP_CLIENT_INFO = {
   name: 'fauplay-web',
   version: '0.0.1',
@@ -175,8 +175,8 @@ function resolveToolTimeoutMs(toolName: string, timeoutMs?: number): number {
     return VIDEO_SAME_DURATION_TIMEOUT_MS
   }
 
-  if (toolName === 'meta.annotation') {
-    return METADATA_ANNOTATION_TIMEOUT_MS
+  if (toolName === 'local.data' || toolName === 'meta.annotation') {
+    return LOCAL_DATA_TOOL_TIMEOUT_MS
   }
 
   return DEFAULT_TOOL_TIMEOUT_MS
@@ -476,7 +476,8 @@ export async function callGatewayTool<T = ToolCallResult>(
 export async function callGatewayHttp<T = ToolCallResult>(
   endpointPath: string,
   body: Record<string, unknown>,
-  timeoutMs?: number
+  timeoutMs?: number,
+  method: 'POST' | 'PUT' | 'PATCH' = 'POST'
 ): Promise<T> {
   const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
@@ -488,7 +489,7 @@ export async function callGatewayHttp<T = ToolCallResult>(
 
   try {
     const response = await fetch(endpoint, {
-      method: 'POST',
+      method,
       headers: {
         'Content-Type': 'application/json',
       },

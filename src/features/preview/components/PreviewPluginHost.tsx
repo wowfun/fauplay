@@ -140,7 +140,7 @@ export function PreviewPluginHost({
     [fileActionTools]
   )
   const annotationTool = useMemo(
-    () => fileActionTools.find((tool) => tool.name === 'meta.annotation') ?? null,
+    () => fileActionTools.find((tool) => tool.name === 'local.data') ?? null,
     [fileActionTools]
   )
   const currentFileQueue = pluginRuntime.currentQueue
@@ -289,7 +289,7 @@ export function PreviewPluginHost({
         trigger: 'manual',
         actionLabel: `${assignment.fieldKey}=${value}`,
         additionalArgs: {
-          operation: 'setValue',
+          operation: 'setAnnotationValue',
           fieldKey: assignment.fieldKey,
           value,
           source: 'hotkey',

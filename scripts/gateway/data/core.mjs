@@ -1,19 +1,28 @@
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { randomUUID, createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { TextDecoder, promisify } from 'node:util'
 
 const DB_DIRNAME = '.fauplay'
 const DB_FILENAME = 'faudb.v1.sqlite'
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const EMBEDDING_DIM = 512
 const SAMPLE_CHUNK_BYTES = 64 * 1024
 const HASH_HEX_128_LENGTH = 32
+const ES_SEARCH_MAX_BUFFER = 16 * 1024 * 1024
+const DEFAULT_ES_INSTANCE_NAME = '1.5a'
+const DEFAULT_ES_MAX_CANDIDATES = 500
+const MIN_ES_MAX_CANDIDATES = 1
+const MAX_ES_MAX_CANDIDATES = 5000
+const LOCAL_DATA_CONFIG_PATH = path.resolve(process.cwd(), 'tools/mcp/local-data/config.json')
+const LOCAL_DATA_CONFIG_LOCAL_PATH = path.resolve(process.cwd(), 'tools/mcp/local-data/config.local.json')
 const ANNOTATION_SOURCE = 'meta.annotation'
 const FACE_SOURCE = 'vision.face'
 const CLASSIFY_SOURCE = 'ml.classify'
 const UNANNOTATED_TAG_KEY = '__ANNOTATION_UNANNOTATED__'
+const execFileAsync = promisify(execFile)
 
 function nowTs() {
   return Date.now()
@@ -69,6 +78,10 @@ export function normalizeRelativePath(input, fieldName = 'relativePath') {
   return normalized.join('/')
 }
 
+function isObjectRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function resolvePathWithinRoot(rootPath, relativePath) {
   const target = path.resolve(rootPath, ...relativePath.split('/'))
   const relative = path.relative(rootPath, target)
@@ -76,6 +89,26 @@ function resolvePathWithinRoot(rootPath, relativePath) {
     throw new Error('relativePath escapes rootPath')
   }
   return target
+}
+
+function toRelativePathWithinRoot(rootPath, absolutePath) {
+  const target = path.resolve(absolutePath)
+  const relative = path.relative(rootPath, target)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null
+  }
+  return relative.replace(/\\/g, '/').split('/').filter(Boolean).join('/')
+}
+
+function readMappingPathField(mapping, primaryKey, fallbackKey) {
+  if (!isObjectRecord(mapping)) return ''
+  const primary = mapping[primaryKey]
+  if (typeof primary === 'string' && primary.trim()) return primary
+  if (fallbackKey) {
+    const fallback = mapping[fallbackKey]
+    if (typeof fallback === 'string' && fallback.trim()) return fallback
+  }
+  return ''
 }
 
 function parseInteger(value, defaultValue) {
@@ -86,12 +119,6 @@ function parseInteger(value, defaultValue) {
   return next
 }
 
-function parseBoolean(value, defaultValue = false) {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'undefined') return defaultValue
-  return defaultValue
-}
-
 function parseFiniteNumber(value, defaultValue = 0) {
   const next = Number(value)
   if (!Number.isFinite(next)) {
@@ -100,9 +127,185 @@ function parseFiniteNumber(value, defaultValue = 0) {
   return next
 }
 
+function clampInt(value, min, max, defaultValue) {
+  if (!Number.isInteger(value)) return defaultValue
+  return Math.min(Math.max(value, min), max)
+}
+
+function asConfigObject(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {}
+  }
+  return input
+}
+
+function isSkippableFsError(error) {
+  if (!error || typeof error !== 'object') return false
+  const code = error.code
+  return code === 'EIO'
+    || code === 'EACCES'
+    || code === 'EPERM'
+    || code === 'ENOENT'
+    || code === 'ENOTDIR'
+    || code === 'EISDIR'
+}
+
 function toFileMtimeMs(statResult) {
   const value = Math.trunc(Number(statResult?.mtimeMs))
   return Number.isFinite(value) && value >= 0 ? value : 0
+}
+
+function snapshotMatches(statResult, fileSizeBytes, fileMtimeMs) {
+  if (!Number.isFinite(fileSizeBytes) || !Number.isFinite(fileMtimeMs)) {
+    return false
+  }
+  return Number(statResult.size) === Number(fileSizeBytes)
+    && toFileMtimeMs(statResult) === Number(fileMtimeMs)
+}
+
+async function readJsonFileSafe(filePath, required) {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8')
+    return JSON.parse(raw)
+  } catch (error) {
+    if (!required && error && typeof error === 'object' && error.code === 'ENOENT') {
+      return {}
+    }
+    throw new Error(`failed to load config: ${filePath}`)
+  }
+}
+
+async function loadEsSearchConfig() {
+  const baseConfig = asConfigObject(await readJsonFileSafe(LOCAL_DATA_CONFIG_PATH, true))
+  const localConfig = asConfigObject(await readJsonFileSafe(LOCAL_DATA_CONFIG_LOCAL_PATH, false))
+  const merged = { ...baseConfig, ...localConfig }
+
+  if (typeof merged.esPath !== 'string' || !merged.esPath.trim()) {
+    throw new Error('config.esPath is required')
+  }
+
+  return {
+    esPath: merged.esPath.trim(),
+    instanceName: typeof merged.instanceName === 'string' && merged.instanceName.trim()
+      ? merged.instanceName.trim()
+      : DEFAULT_ES_INSTANCE_NAME,
+    maxCandidates: clampInt(
+      Number(merged.maxCandidates),
+      MIN_ES_MAX_CANDIDATES,
+      MAX_ES_MAX_CANDIDATES,
+      DEFAULT_ES_MAX_CANDIDATES
+    ),
+  }
+}
+
+function decodeEsOutputBuffer(buffer) {
+  const utf8Text = buffer.toString('utf8')
+  if (!utf8Text.includes('\uFFFD')) {
+    return utf8Text
+  }
+
+  try {
+    const gbkText = new TextDecoder('gbk').decode(buffer)
+    const utf8ReplacementCount = (utf8Text.match(/\uFFFD/g) || []).length
+    const gbkReplacementCount = (gbkText.match(/\uFFFD/g) || []).length
+    return gbkReplacementCount <= utf8ReplacementCount ? gbkText : utf8Text
+  } catch {
+    return utf8Text
+  }
+}
+
+function parseEsCandidateWindowsPaths(stdoutText) {
+  const windowsPaths = []
+  const lines = stdoutText.split(/\r?\n/)
+
+  for (const line of lines) {
+    if (!line.trim()) continue
+
+    const matchWithSize = line.match(/^\s*[0-9,]+\s+"(.+)"\s*$/)
+    if (matchWithSize && matchWithSize[1]) {
+      windowsPaths.push(matchWithSize[1])
+      continue
+    }
+
+    const matchPathOnly = line.match(/^\s*"(.+)"\s*$/)
+    if (matchPathOnly && matchPathOnly[1]) {
+      windowsPaths.push(matchPathOnly[1])
+    }
+  }
+
+  return windowsPaths
+}
+
+async function toWindowsPath(targetPath) {
+  if (isWindowsPath(targetPath)) return targetPath
+  if (process.platform === 'win32') return targetPath
+  const { stdout } = await execFileAsync('wslpath', ['-w', targetPath])
+  return String(stdout).trim()
+}
+
+async function toUnixPath(targetPath) {
+  if (!isWindowsPath(targetPath)) return targetPath
+  if (process.platform === 'win32') return targetPath
+  const { stdout } = await execFileAsync('wslpath', ['-u', targetPath])
+  return String(stdout).trim()
+}
+
+async function searchCandidatesBySizeMtime(rootPath, snapshot, config) {
+  const rootWindowsPath = await toWindowsPath(rootPath)
+
+  const args = []
+  if (config.instanceName) {
+    args.push('-instance', config.instanceName)
+  }
+  args.push('-path', rootWindowsPath)
+  args.push('file:')
+  args.push(`size:${snapshot.fileSizeBytes}`)
+  args.push('-double-quote')
+  args.push('-n', String(config.maxCandidates))
+  args.push('-size')
+
+  const result = await execFileAsync(config.esPath, args, {
+    encoding: 'buffer',
+    maxBuffer: ES_SEARCH_MAX_BUFFER,
+  })
+
+  const stdoutBuffer = Buffer.isBuffer(result.stdout)
+    ? result.stdout
+    : Buffer.from(String(result.stdout || ''), 'utf8')
+  const stdoutText = decodeEsOutputBuffer(stdoutBuffer)
+  const windowsPaths = parseEsCandidateWindowsPaths(stdoutText)
+
+  const deduped = new Map()
+  for (const windowsPath of windowsPaths) {
+    let unixPath = ''
+    try {
+      unixPath = await toUnixPath(windowsPath)
+    } catch {
+      continue
+    }
+
+    const relativePath = toRelativePathWithinRoot(rootPath, unixPath)
+    if (!relativePath) continue
+
+    let candidateStat = null
+    try {
+      const absPath = resolvePathWithinRoot(rootPath, relativePath)
+      candidateStat = await fs.stat(absPath)
+    } catch (error) {
+      if (isSkippableFsError(error)) continue
+      throw error
+    }
+
+    if (!candidateStat || !candidateStat.isFile()) continue
+    if (!snapshotMatches(candidateStat, snapshot.fileSizeBytes, snapshot.fileMtimeMs)) continue
+
+    deduped.set(relativePath, {
+      relativePath,
+      stat: candidateStat,
+    })
+  }
+
+  return [...deduped.values()]
 }
 
 async function readSampleBytes(absPath, fileSize) {
@@ -177,16 +380,16 @@ function buildTagKey(key, value) {
 }
 
 function toTagDto(row) {
+  const appliedAt = Number(row.appliedAt ?? row.updatedAt ?? 0)
   return {
     id: row.id,
     key: row.key,
     value: row.value,
     source: row.source,
-    sourceRefId: row.sourceRefId,
-    confidence: row.confidence === null || typeof row.confidence === 'undefined' ? null : Number(row.confidence),
-    status: row.status,
-    createdAt: Number(row.createdAt ?? 0),
-    updatedAt: Number(row.updatedAt ?? 0),
+    appliedAt,
+    // Backward-compatible alias for older consumers.
+    updatedAt: appliedAt,
+    score: row.score === null || typeof row.score === 'undefined' ? null : Number(row.score),
   }
 }
 
@@ -200,130 +403,119 @@ function openDb(rootPath) {
   return db
 }
 
+function quoteIdentifier(input) {
+  return `"${String(input).replace(/"/g, '""')}"`
+}
+
+function rebuildSchema(db) {
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    const tableRows = db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    `).all()
+
+    for (const row of tableRows) {
+      const tableName = typeof row?.name === 'string' ? row.name : ''
+      if (!tableName) continue
+      db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`)
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
+function createSchemaV2(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS file (
+      id TEXT PRIMARY KEY,
+      relativePath TEXT NOT NULL UNIQUE,
+      fileSizeBytes INTEGER,
+      fileMtimeMs INTEGER,
+      bindingFp TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tag (
+      id TEXT NOT NULL UNIQUE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      source TEXT NOT NULL,
+      PRIMARY KEY(key, value, source)
+    );
+
+    CREATE TABLE IF NOT EXISTS file_tag (
+      fileId TEXT NOT NULL,
+      tagId TEXT NOT NULL,
+      appliedAt INTEGER NOT NULL,
+      score REAL,
+      PRIMARY KEY(fileId, tagId),
+      FOREIGN KEY(fileId) REFERENCES file(id) ON DELETE CASCADE,
+      FOREIGN KEY(tagId) REFERENCES tag(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS face (
+      id TEXT PRIMARY KEY,
+      fileId TEXT NOT NULL,
+      x1 REAL NOT NULL,
+      y1 REAL NOT NULL,
+      x2 REAL NOT NULL,
+      y2 REAL NOT NULL,
+      score REAL NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unassigned',
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY(fileId) REFERENCES file(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS face_embedding (
+      faceId TEXT PRIMARY KEY,
+      dim INTEGER NOT NULL DEFAULT 512,
+      embedding BLOB NOT NULL,
+      FOREIGN KEY(faceId) REFERENCES face(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS person (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      featureFaceId TEXT,
+      faceCount INTEGER NOT NULL DEFAULT 0,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY(featureFaceId) REFERENCES face(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS person_face (
+      personId TEXT NOT NULL,
+      faceId TEXT NOT NULL UNIQUE,
+      assignedBy TEXT NOT NULL,
+      assignedAt INTEGER NOT NULL,
+      PRIMARY KEY(personId, faceId),
+      FOREIGN KEY(personId) REFERENCES person(id) ON DELETE CASCADE,
+      FOREIGN KEY(faceId) REFERENCES face(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_file_relative_path ON file(relativePath);
+    CREATE INDEX IF NOT EXISTS idx_tag_source_key_value ON tag(source, key, value);
+    CREATE INDEX IF NOT EXISTS idx_file_tag_tag_id ON file_tag(tagId);
+    CREATE INDEX IF NOT EXISTS idx_file_tag_applied_at ON file_tag(appliedAt);
+    CREATE INDEX IF NOT EXISTS idx_face_file_id ON face(fileId);
+    CREATE INDEX IF NOT EXISTS idx_face_status ON face(status);
+    CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
+  `)
+}
+
 function ensureSchema(db) {
   const row = db.prepare('PRAGMA user_version').get()
   const currentVersion = Number(row?.user_version ?? 0)
-  if (currentVersion === 0) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS file (
-        id TEXT PRIMARY KEY,
-        relativePath TEXT NOT NULL UNIQUE,
-        fileSizeBytes INTEGER,
-        fileMtimeMs INTEGER,
-        bindingFp TEXT,
-        createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS annotation_record (
-        id TEXT PRIMARY KEY,
-        fileId TEXT NOT NULL,
-        fieldKey TEXT NOT NULL,
-        value TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'click',
-        status TEXT NOT NULL DEFAULT 'active',
-        orphanReason TEXT,
-        fileSizeBytes INTEGER,
-        fileMtimeMs INTEGER,
-        bindingFp TEXT,
-        createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL,
-        UNIQUE(fileId, fieldKey),
-        FOREIGN KEY(fileId) REFERENCES file(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS tag (
-        id TEXT PRIMARY KEY,
-        key TEXT NOT NULL,
-        value TEXT NOT NULL,
-        source TEXT NOT NULL,
-        sourceRefId TEXT,
-        confidence REAL,
-        status TEXT NOT NULL DEFAULT 'active',
-        createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL,
-        UNIQUE(source, sourceRefId)
-      );
-
-      CREATE TABLE IF NOT EXISTS file_tag (
-        fileId TEXT NOT NULL,
-        tagId TEXT NOT NULL,
-        appliedAt INTEGER NOT NULL,
-        PRIMARY KEY(fileId, tagId),
-        FOREIGN KEY(fileId) REFERENCES file(id) ON DELETE CASCADE,
-        FOREIGN KEY(tagId) REFERENCES tag(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS face (
-        id TEXT PRIMARY KEY,
-        fileId TEXT NOT NULL,
-        x1 REAL NOT NULL,
-        y1 REAL NOT NULL,
-        x2 REAL NOT NULL,
-        y2 REAL NOT NULL,
-        score REAL NOT NULL,
-        status TEXT NOT NULL DEFAULT 'unassigned',
-        createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL,
-        FOREIGN KEY(fileId) REFERENCES file(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS face_embedding (
-        faceId TEXT PRIMARY KEY,
-        dim INTEGER NOT NULL DEFAULT 512,
-        embedding BLOB NOT NULL,
-        FOREIGN KEY(faceId) REFERENCES face(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS person (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL DEFAULT '',
-        featureFaceId TEXT,
-        faceCount INTEGER NOT NULL DEFAULT 0,
-        createdAt INTEGER NOT NULL,
-        updatedAt INTEGER NOT NULL,
-        FOREIGN KEY(featureFaceId) REFERENCES face(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS person_face (
-        personId TEXT NOT NULL,
-        faceId TEXT NOT NULL UNIQUE,
-        assignedBy TEXT NOT NULL,
-        assignedAt INTEGER NOT NULL,
-        PRIMARY KEY(personId, faceId),
-        FOREIGN KEY(personId) REFERENCES person(id) ON DELETE CASCADE,
-        FOREIGN KEY(faceId) REFERENCES face(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS face_job_state (
-        faceId TEXT PRIMARY KEY,
-        detectStatus TEXT NOT NULL,
-        clusterStatus TEXT NOT NULL,
-        deferred INTEGER NOT NULL DEFAULT 0,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        lastErrorCode TEXT,
-        lastRunAt INTEGER NOT NULL,
-        nextRunAt INTEGER,
-        FOREIGN KEY(faceId) REFERENCES face(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_file_relative_path ON file(relativePath);
-      CREATE INDEX IF NOT EXISTS idx_tag_key_value ON tag(key, value);
-      CREATE INDEX IF NOT EXISTS idx_tag_source_ref ON tag(source, sourceRefId);
-      CREATE INDEX IF NOT EXISTS idx_file_tag_tag_id ON file_tag(tagId);
-      CREATE INDEX IF NOT EXISTS idx_annotation_file_id ON annotation_record(fileId);
-      CREATE INDEX IF NOT EXISTS idx_annotation_status ON annotation_record(status);
-      CREATE INDEX IF NOT EXISTS idx_face_file_id ON face(fileId);
-      CREATE INDEX IF NOT EXISTS idx_face_status ON face(status);
-      CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
-      CREATE INDEX IF NOT EXISTS idx_face_job_state_cluster ON face_job_state(clusterStatus, deferred);
-    `)
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
-    return
+  if (currentVersion !== 0 && currentVersion !== SCHEMA_VERSION) {
+    rebuildSchema(db)
   }
-
+  createSchemaV2(db)
   if (currentVersion !== SCHEMA_VERSION) {
-    throw new Error(`unsupported schemaVersion: ${currentVersion}`)
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
 }
 
@@ -410,66 +602,112 @@ function getFileByRelativePath(db, relativePath) {
   return db.prepare('SELECT * FROM file WHERE relativePath = ?').get(normalized) ?? null
 }
 
-function upsertTagForSourceRef(db, payload) {
-  const {
-    fileId,
-    key,
-    value,
-    source,
-    sourceRefId,
-    confidence = null,
-    status = 'active',
-  } = payload
-
-  if (!fileId || !key || !value || !source) {
+function getOrCreateTagId(db, { key, value, source }) {
+  const normalizedKey = typeof key === 'string' ? key.trim() : ''
+  const normalizedValue = typeof value === 'string' ? value.trim() : ''
+  const normalizedSource = typeof source === 'string' ? source.trim() : ''
+  if (!normalizedKey || !normalizedValue || !normalizedSource) {
     throw new Error('invalid tag payload')
   }
 
-  const ts = nowTs()
-  let existing = null
-  if (sourceRefId) {
-    existing = db.prepare('SELECT * FROM tag WHERE source = ? AND sourceRefId = ?').get(source, sourceRefId) ?? null
+  const existing = db.prepare(`
+    SELECT id
+    FROM tag
+    WHERE key = ? AND value = ? AND source = ?
+  `).get(normalizedKey, normalizedValue, normalizedSource)
+  if (existing?.id) {
+    return existing.id
   }
 
-  let tagId = existing?.id ?? null
-  if (existing) {
+  const tagId = randomUUID()
+  try {
     db.prepare(`
-      UPDATE tag
-      SET key = ?, value = ?, confidence = ?, status = ?, updatedAt = ?
-      WHERE id = ?
-    `).run(key, value, confidence, status, ts, existing.id)
-  } else {
-    tagId = randomUUID()
-    db.prepare(`
-      INSERT INTO tag(id, key, value, source, sourceRefId, confidence, status, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tagId, key, value, source, sourceRefId ?? null, confidence, status, ts, ts)
+      INSERT INTO tag(id, key, value, source)
+      VALUES (?, ?, ?, ?)
+    `).run(tagId, normalizedKey, normalizedValue, normalizedSource)
+  } catch (error) {
+    if (error?.code !== 'SQLITE_CONSTRAINT') {
+      throw error
+    }
+
+    const conflicted = db.prepare(`
+      SELECT id
+      FROM tag
+      WHERE key = ? AND value = ? AND source = ?
+    `).get(normalizedKey, normalizedValue, normalizedSource)
+    if (conflicted?.id) {
+      return conflicted.id
+    }
+    throw error
   }
-
-  db.prepare(`
-    INSERT INTO file_tag(fileId, tagId, appliedAt)
-    VALUES (?, ?, ?)
-    ON CONFLICT(fileId, tagId) DO UPDATE SET
-      appliedAt = excluded.appliedAt
-  `).run(fileId, tagId, ts)
-
   return tagId
 }
 
-function removeTagBySourceRef(db, source, sourceRefId) {
-  if (!source || !sourceRefId) return
-  const row = db.prepare('SELECT id FROM tag WHERE source = ? AND sourceRefId = ?').get(source, sourceRefId)
-  if (!row) return
-  db.prepare('DELETE FROM file_tag WHERE tagId = ?').run(row.id)
-  db.prepare('DELETE FROM tag WHERE id = ?').run(row.id)
+function upsertFileTagBinding(db, { fileId, tagId, appliedAt = nowTs(), score = null }) {
+  const normalizedScore = score === null || typeof score === 'undefined'
+    ? null
+    : parseFiniteNumber(score, 0)
+  db.prepare(`
+    INSERT INTO file_tag(fileId, tagId, appliedAt, score)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(fileId, tagId) DO UPDATE SET
+      appliedAt = excluded.appliedAt,
+      score = excluded.score
+  `).run(fileId, tagId, appliedAt, normalizedScore)
 }
 
-function removeClassifyTagsForFile(db, fileId) {
-  const rows = db.prepare('SELECT id FROM tag WHERE source = ? AND sourceRefId LIKE ?').all(CLASSIFY_SOURCE, `file:${fileId}:%`)
-  for (const row of rows) {
-    db.prepare('DELETE FROM file_tag WHERE tagId = ?').run(row.id)
-    db.prepare('DELETE FROM tag WHERE id = ?').run(row.id)
+function bindTagToFile(db, { fileId, key, value, source, appliedAt = nowTs(), score = null }) {
+  if (!fileId) {
+    throw new Error('invalid fileId')
   }
+  const tagId = getOrCreateTagId(db, { key, value, source })
+  upsertFileTagBinding(db, { fileId, tagId, appliedAt, score })
+  return tagId
+}
+
+function removeTagBindingsForFile(db, { fileId, source = null, key = null }) {
+  if (!fileId) return
+
+  const where = ['file_tag.fileId = ?']
+  const params = [fileId]
+  if (source) {
+    where.push('tag.source = ?')
+    params.push(source)
+  }
+  if (key) {
+    where.push('tag.key = ?')
+    params.push(key)
+  }
+
+  const rows = db.prepare(`
+    SELECT tag.id AS tagId
+    FROM file_tag
+    INNER JOIN tag ON tag.id = file_tag.tagId
+    WHERE ${where.join(' AND ')}
+  `).all(...params)
+  if (rows.length === 0) return
+
+  const placeholders = rows.map(() => '?').join(',')
+  db.prepare(`
+    DELETE FROM file_tag
+    WHERE fileId = ? AND tagId IN (${placeholders})
+  `).run(fileId, ...rows.map((row) => row.tagId))
+}
+
+function cleanupOrphanTags(db, source = null) {
+  if (source) {
+    db.prepare(`
+      DELETE FROM tag
+      WHERE source = ?
+        AND id NOT IN (SELECT DISTINCT tagId FROM file_tag)
+    `).run(source)
+    return
+  }
+
+  db.prepare(`
+    DELETE FROM tag
+    WHERE id NOT IN (SELECT DISTINCT tagId FROM file_tag)
+  `).run()
 }
 
 function toEmbeddingBlob(values) {
@@ -589,100 +827,601 @@ function toPersonLabel(personId, name) {
   return `人物 ${personId.slice(0, 8)}`
 }
 
-function syncVisionFaceTags(db, faceIds = null) {
-  let rows = []
-  if (Array.isArray(faceIds) && faceIds.length > 0) {
-    const placeholders = faceIds.map(() => '?').join(',')
-    rows = db.prepare(`
-      SELECT
-        face.id AS faceId,
-        face.fileId AS fileId,
-        person_face.personId AS personId,
-        person.name AS personName
-      FROM face
-      LEFT JOIN person_face ON person_face.faceId = face.id
-      LEFT JOIN person ON person.id = person_face.personId
-      WHERE face.id IN (${placeholders})
-    `).all(...faceIds)
+function syncVisionFaceTags(db, fileIds = null) {
+  let targetFileIds = []
+  if (Array.isArray(fileIds)) {
+    targetFileIds = [...new Set(fileIds.filter((item) => typeof item === 'string' && item))]
   } else {
-    rows = db.prepare(`
-      SELECT
-        face.id AS faceId,
-        face.fileId AS fileId,
-        person_face.personId AS personId,
+    const rows = db.prepare(`
+      SELECT DISTINCT fileId
+      FROM face
+      UNION
+      SELECT DISTINCT file_tag.fileId AS fileId
+      FROM file_tag
+      INNER JOIN tag ON tag.id = file_tag.tagId
+      WHERE tag.source = ? AND tag.key = 'person'
+    `).all(FACE_SOURCE)
+    targetFileIds = rows
+      .map((row) => row.fileId)
+      .filter((item) => typeof item === 'string' && item)
+  }
+
+  if (targetFileIds.length === 0) return
+
+  const appliedAt = nowTs()
+  for (const fileId of targetFileIds) {
+    const desiredRows = db.prepare(`
+      SELECT DISTINCT
+        person.id AS personId,
         person.name AS personName
       FROM face
-      LEFT JOIN person_face ON person_face.faceId = face.id
-      LEFT JOIN person ON person.id = person_face.personId
-    `).all()
+      INNER JOIN person_face ON person_face.faceId = face.id
+      INNER JOIN person ON person.id = person_face.personId
+      WHERE face.fileId = ?
+    `).all(fileId)
+    const desiredValues = new Set(
+      desiredRows.map((row) => toPersonLabel(row.personId, row.personName)),
+    )
+
+    const existingRows = db.prepare(`
+      SELECT tag.id AS tagId
+      FROM file_tag
+      INNER JOIN tag ON tag.id = file_tag.tagId
+      WHERE file_tag.fileId = ?
+        AND tag.source = ?
+        AND tag.key = 'person'
+    `).all(fileId, FACE_SOURCE)
+
+    const desiredTagIds = new Set()
+    for (const label of desiredValues) {
+      const tagId = bindTagToFile(db, {
+        fileId,
+        key: 'person',
+        value: label,
+        source: FACE_SOURCE,
+        appliedAt,
+        score: null,
+      })
+      desiredTagIds.add(tagId)
+    }
+
+    for (const row of existingRows) {
+      if (desiredTagIds.has(row.tagId)) continue
+      db.prepare('DELETE FROM file_tag WHERE fileId = ? AND tagId = ?').run(fileId, row.tagId)
+    }
   }
+
+  cleanupOrphanTags(db, FACE_SOURCE)
+}
+
+async function evaluateFileBindingRows(db, rootPath, { applyRebind }) {
+  const rows = db.prepare(`
+    SELECT
+      id AS fileId,
+      relativePath,
+      fileSizeBytes,
+      fileMtimeMs,
+      bindingFp
+    FROM file
+    ORDER BY relativePath ASC
+  `).all()
+
+  let cachedSearchConfig = null
+  let searchConfigLoadFailed = false
+  const ensureSearchConfig = async () => {
+    if (searchConfigLoadFailed) return null
+    if (cachedSearchConfig) return cachedSearchConfig
+    try {
+      cachedSearchConfig = await loadEsSearchConfig()
+      return cachedSearchConfig
+    } catch {
+      searchConfigLoadFailed = true
+      return null
+    }
+  }
+
+  const items = []
+  let active = 0
+  let rebound = 0
+  let conflict = 0
+  let orphan = 0
+  let searchUnavailable = 0
+  const timestamp = nowTs()
 
   for (const row of rows) {
-    const sourceRefId = `face:${row.faceId}`
-    if (row.personId) {
-      upsertTagForSourceRef(db, {
-        fileId: row.fileId,
-        key: 'person',
-        value: toPersonLabel(row.personId, row.personName),
-        source: FACE_SOURCE,
-        sourceRefId,
-        confidence: null,
-        status: 'active',
-      })
-    } else {
-      removeTagBySourceRef(db, FACE_SOURCE, sourceRefId)
+    const item = {
+      fileId: row.fileId,
+      relativePath: row.relativePath,
+      status: 'active',
+      reason: null,
+      rebound: false,
+      resolvedRelativePath: row.relativePath,
     }
-  }
-}
 
-async function listFilesRecursively(rootPath) {
-  const result = []
+    let previousStat = null
+    try {
+      const previousAbsPath = resolvePathWithinRoot(rootPath, row.relativePath)
+      const statResult = await fs.stat(previousAbsPath)
+      if (statResult.isFile()) {
+        previousStat = statResult
+      }
+    } catch (error) {
+      if (!isSkippableFsError(error)) {
+        throw error
+      }
+    }
 
-  async function walk(relativeDir) {
-    const absDir = relativeDir ? resolvePathWithinRoot(rootPath, relativeDir) : rootPath
-    const entries = await fs.readdir(absDir, { withFileTypes: true })
+    if (previousStat && snapshotMatches(previousStat, row.fileSizeBytes, row.fileMtimeMs)) {
+      active += 1
+      items.push(item)
+      continue
+    }
 
-    for (const entry of entries) {
-      const childRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
-      if (childRelative === DB_DIRNAME || childRelative.startsWith(`${DB_DIRNAME}/`)) continue
-      if (childRelative === '.trash' || childRelative.startsWith('.trash/')) continue
+    const recordedSize = Number.isFinite(Number(row.fileSizeBytes))
+      ? Math.trunc(Number(row.fileSizeBytes))
+      : null
+    const recordedMtime = Number.isFinite(Number(row.fileMtimeMs))
+      ? Math.trunc(Number(row.fileMtimeMs))
+      : null
+    const originalBinding = typeof row.bindingFp === 'string' ? row.bindingFp : ''
 
-      if (entry.isDirectory()) {
-        await walk(childRelative)
+    if (recordedSize === null || recordedMtime === null || !originalBinding) {
+      item.status = 'orphan'
+      item.reason = 'no_candidate'
+      orphan += 1
+      items.push(item)
+      continue
+    }
+
+    const searchConfig = await ensureSearchConfig()
+    if (!searchConfig) {
+      item.status = 'orphan'
+      item.reason = 'search_unavailable'
+      orphan += 1
+      searchUnavailable += 1
+      items.push(item)
+      continue
+    }
+
+    let candidates = []
+    try {
+      candidates = await searchCandidatesBySizeMtime(rootPath, {
+        fileSizeBytes: recordedSize,
+        fileMtimeMs: recordedMtime,
+      }, searchConfig)
+    } catch {
+      item.status = 'orphan'
+      item.reason = 'search_unavailable'
+      orphan += 1
+      searchUnavailable += 1
+      items.push(item)
+      continue
+    }
+
+    const matchedCandidates = []
+    for (const candidate of candidates) {
+      try {
+        const candidateAbsPath = resolvePathWithinRoot(rootPath, candidate.relativePath)
+        const candidateFingerprints = await computeFingerprintsForFile(candidateAbsPath, candidate.relativePath, {
+          exactEnabled: false,
+          similarImageEnabled: false,
+        }, candidate.stat)
+
+        if (candidateFingerprints.bindingFp === originalBinding) {
+          matchedCandidates.push(candidate)
+        }
+      } catch (error) {
+        if (isSkippableFsError(error)) continue
+        throw error
+      }
+    }
+
+    if (matchedCandidates.length === 1) {
+      const [matched] = matchedCandidates
+      const occupier = db.prepare('SELECT id FROM file WHERE relativePath = ?').get(matched.relativePath)
+      if (occupier?.id && occupier.id !== row.fileId) {
+        item.status = 'conflict'
+        item.reason = 'ambiguous_rebind'
+        conflict += 1
+        items.push(item)
         continue
       }
-      if (!entry.isFile()) continue
-      result.push(childRelative)
+
+      item.resolvedRelativePath = matched.relativePath
+      item.rebound = matched.relativePath !== row.relativePath
+      if (item.rebound) {
+        rebound += 1
+      }
+      active += 1
+      items.push(item)
+
+      if (applyRebind) {
+        db.prepare(`
+          UPDATE file
+          SET
+            relativePath = ?,
+            fileSizeBytes = ?,
+            fileMtimeMs = ?,
+            bindingFp = ?,
+            updatedAt = ?
+          WHERE id = ?
+        `).run(
+          matched.relativePath,
+          Number(matched.stat.size),
+          toFileMtimeMs(matched.stat),
+          originalBinding,
+          timestamp,
+          row.fileId,
+        )
+      }
+      continue
     }
-  }
 
-  await walk('')
-  return result
-}
-
-async function buildSnapshotIndex(rootPath) {
-  const relativePaths = await listFilesRecursively(rootPath)
-  const bySizeMtime = new Map()
-
-  for (const relativePath of relativePaths) {
-    try {
-      const absPath = resolvePathWithinRoot(rootPath, relativePath)
-      const statResult = await fs.stat(absPath)
-      if (!statResult.isFile()) continue
-      const size = Number(statResult.size)
-      const mtime = toFileMtimeMs(statResult)
-      const key = `${size}:${mtime}`
-      const list = bySizeMtime.get(key) ?? []
-      list.push({ relativePath, stat: statResult })
-      bySizeMtime.set(key, list)
-    } catch {
-      // ignore broken entries
+    if (matchedCandidates.length > 1) {
+      item.status = 'conflict'
+      item.reason = 'ambiguous_rebind'
+      conflict += 1
+      items.push(item)
+      continue
     }
+
+    item.status = 'orphan'
+    item.reason = 'no_candidate'
+    orphan += 1
+    items.push(item)
   }
 
   return {
-    bySizeMtime,
+    ok: true,
+    total: rows.length,
+    active,
+    rebound,
+    conflict,
+    orphan,
+    searchUnavailable,
+    items,
   }
+}
+
+function countRows(db, sql, params = []) {
+  return Number(db.prepare(sql).get(...params)?.count ?? 0)
+}
+
+function estimateCleanupImpact(db, targetFileIds) {
+  if (!Array.isArray(targetFileIds) || targetFileIds.length === 0) {
+    return {
+      file: 0,
+      fileTag: 0,
+      face: 0,
+      faceEmbedding: 0,
+      personFace: 0,
+      person: 0,
+      tag: 0,
+    }
+  }
+
+  const placeholders = targetFileIds.map(() => '?').join(',')
+  const duplicateParams = [...targetFileIds, ...targetFileIds]
+
+  return {
+    file: targetFileIds.length,
+    fileTag: countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM file_tag WHERE fileId IN (${placeholders})`,
+      targetFileIds,
+    ),
+    face: countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM face WHERE fileId IN (${placeholders})`,
+      targetFileIds,
+    ),
+    faceEmbedding: countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM face_embedding WHERE faceId IN (
+        SELECT id FROM face WHERE fileId IN (${placeholders})
+      )`,
+      targetFileIds,
+    ),
+    personFace: countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM person_face WHERE faceId IN (
+        SELECT id FROM face WHERE fileId IN (${placeholders})
+      )`,
+      targetFileIds,
+    ),
+    person: countRows(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM person
+       WHERE id IN (
+         SELECT DISTINCT person_face.personId
+         FROM person_face
+         INNER JOIN face ON face.id = person_face.faceId
+         WHERE face.fileId IN (${placeholders})
+       )
+       AND id NOT IN (
+         SELECT DISTINCT person_face.personId
+         FROM person_face
+         INNER JOIN face ON face.id = person_face.faceId
+         WHERE face.fileId NOT IN (${placeholders})
+       )`,
+      duplicateParams,
+    ),
+    tag: countRows(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM tag
+       WHERE id IN (
+         SELECT DISTINCT tagId FROM file_tag WHERE fileId IN (${placeholders})
+       )
+       AND id NOT IN (
+         SELECT DISTINCT tagId FROM file_tag WHERE fileId NOT IN (${placeholders})
+       )`,
+      duplicateParams,
+    ),
+  }
+}
+
+function batchUpdateRelativePaths(tx, mappings) {
+  if (!Array.isArray(mappings) || mappings.length === 0) {
+    return { updated: 0 }
+  }
+
+  const ts = nowTs()
+  const stagedMappings = mappings.map((mapping) => ({
+    ...mapping,
+    tempRelativePath: `__fauplay_rebind_tmp__/${randomUUID()}`,
+  }))
+
+  for (const mapping of stagedMappings) {
+    tx.prepare(`
+      UPDATE file
+      SET relativePath = ?, updatedAt = ?
+      WHERE id = ?
+    `).run(mapping.tempRelativePath, ts, mapping.fileId)
+  }
+
+  for (const mapping of stagedMappings) {
+    tx.prepare(`
+      UPDATE file
+      SET relativePath = ?, updatedAt = ?
+      WHERE id = ?
+    `).run(mapping.toRelativePath, ts, mapping.fileId)
+  }
+
+  return { updated: stagedMappings.length }
+}
+
+export async function batchRebindPaths(params) {
+  const rootPath = resolveRootPath(params.rootPath)
+  const inputMappings = Array.isArray(params.mappings) ? params.mappings : null
+  if (!inputMappings) {
+    throw new Error('mappings must be an array')
+  }
+
+  return withDb(rootPath, async (db) => (
+    withTransaction(db, async () => {
+      const items = inputMappings.map((mapping, index) => ({
+        index,
+        fromRelativePath: '',
+        toRelativePath: '',
+        fileId: null,
+        ok: false,
+        skipped: false,
+        reasonCode: null,
+        error: null,
+      }))
+
+      const sourceUseMap = new Map()
+      const targetUseMap = new Map()
+
+      for (let i = 0; i < inputMappings.length; i += 1) {
+        const item = items[i]
+        const mapping = inputMappings[i]
+        const rawFrom = readMappingPathField(mapping, 'fromRelativePath', 'relativePath')
+        const rawTo = readMappingPathField(mapping, 'toRelativePath', 'nextRelativePath')
+
+        if (!rawFrom) {
+          item.reasonCode = 'INVALID_SOURCE_PATH'
+          item.error = 'fromRelativePath is required'
+          continue
+        }
+
+        if (!rawTo) {
+          item.reasonCode = 'INVALID_TARGET_PATH'
+          item.error = 'toRelativePath is required'
+          continue
+        }
+
+        try {
+          item.fromRelativePath = normalizeRelativePath(rawFrom, 'fromRelativePath')
+        } catch (error) {
+          item.reasonCode = 'INVALID_SOURCE_PATH'
+          item.error = error instanceof Error ? error.message : 'invalid fromRelativePath'
+          continue
+        }
+
+        try {
+          item.toRelativePath = normalizeRelativePath(rawTo, 'toRelativePath')
+        } catch (error) {
+          item.reasonCode = 'INVALID_TARGET_PATH'
+          item.error = error instanceof Error ? error.message : 'invalid toRelativePath'
+          continue
+        }
+
+        if (item.fromRelativePath === item.toRelativePath) {
+          item.ok = true
+          item.skipped = true
+          item.reasonCode = 'NO_CHANGE'
+          continue
+        }
+
+        if (sourceUseMap.has(item.fromRelativePath)) {
+          item.reasonCode = 'DUPLICATE_SOURCE'
+          item.error = 'duplicate fromRelativePath in mappings'
+          continue
+        }
+        sourceUseMap.set(item.fromRelativePath, i)
+
+        if (targetUseMap.has(item.toRelativePath)) {
+          item.reasonCode = 'DUPLICATE_TARGET'
+          item.error = 'duplicate toRelativePath in mappings'
+          continue
+        }
+        targetUseMap.set(item.toRelativePath, i)
+      }
+
+      const validSourcePaths = items
+        .filter((item) => !item.reasonCode && item.skipped !== true)
+        .map((item) => item.fromRelativePath)
+      const validTargetPaths = items
+        .filter((item) => !item.reasonCode && item.skipped !== true)
+        .map((item) => item.toRelativePath)
+
+      const sourceRows = validSourcePaths.length > 0
+        ? db.prepare(`
+          SELECT id, relativePath
+          FROM file
+          WHERE relativePath IN (${validSourcePaths.map(() => '?').join(',')})
+        `).all(...validSourcePaths)
+        : []
+      const sourceByPath = new Map(sourceRows.map((row) => [row.relativePath, row]))
+
+      const targetRows = validTargetPaths.length > 0
+        ? db.prepare(`
+          SELECT id, relativePath
+          FROM file
+          WHERE relativePath IN (${validTargetPaths.map(() => '?').join(',')})
+        `).all(...validTargetPaths)
+        : []
+      const targetByPath = new Map(targetRows.map((row) => [row.relativePath, row]))
+      const movingFileIdSet = new Set(sourceRows.map((row) => row.id))
+
+      const executableMappings = []
+
+      for (const item of items) {
+        if (item.reasonCode || item.skipped === true) continue
+
+        const sourceRow = sourceByPath.get(item.fromRelativePath)
+        if (!sourceRow) {
+          item.reasonCode = 'SOURCE_NOT_FOUND'
+          item.error = 'source file entry not found'
+          continue
+        }
+
+        const targetRow = targetByPath.get(item.toRelativePath)
+        if (targetRow && !movingFileIdSet.has(targetRow.id)) {
+          item.reasonCode = 'TARGET_OCCUPIED'
+          item.error = 'target path is occupied by another file entry'
+          continue
+        }
+
+        item.fileId = sourceRow.id
+        executableMappings.push({
+          fileId: sourceRow.id,
+          fromRelativePath: item.fromRelativePath,
+          toRelativePath: item.toRelativePath,
+        })
+      }
+
+      if (executableMappings.length > 0) {
+        batchUpdateRelativePaths(db, executableMappings)
+      }
+
+      let updated = 0
+      let skipped = 0
+      let failed = 0
+
+      for (const item of items) {
+        if (item.reasonCode) {
+          if (item.reasonCode === 'NO_CHANGE') {
+            skipped += 1
+            continue
+          }
+          failed += 1
+          continue
+        }
+
+        if (item.skipped) {
+          skipped += 1
+          continue
+        }
+
+        item.ok = true
+        updated += 1
+      }
+
+      return {
+        ok: true,
+        total: items.length,
+        updated,
+        skipped,
+        failed,
+        items: items.map((item) => ({
+          fromRelativePath: item.fromRelativePath,
+          toRelativePath: item.toRelativePath,
+          fileId: item.fileId,
+          ok: item.ok,
+          skipped: item.skipped || undefined,
+          reasonCode: item.reasonCode || undefined,
+          error: item.error || undefined,
+        })),
+      }
+    })
+  ))
+}
+
+export async function reconcileFileBindings(params) {
+  const rootPath = resolveRootPath(params.rootPath)
+  return withDb(rootPath, async (db) => (
+    withTransaction(db, async () => evaluateFileBindingRows(db, rootPath, { applyRebind: true }))
+  ))
+}
+
+export async function refreshFileBindings(params) {
+  return reconcileFileBindings(params)
+}
+
+export async function cleanupInvalidFileIds(params) {
+  const rootPath = resolveRootPath(params.rootPath)
+  const confirm = params.confirm === true
+
+  return withDb(rootPath, async (db) => (
+    withTransaction(db, async () => {
+      const refreshResult = await evaluateFileBindingRows(db, rootPath, { applyRebind: false })
+      const invalidItems = refreshResult.items.filter((item) => item.status !== 'active')
+      const invalidFileIds = [...new Set(invalidItems.map((item) => item.fileId))]
+      const impact = estimateCleanupImpact(db, invalidFileIds)
+
+      if (!confirm || invalidFileIds.length === 0) {
+        return {
+          ok: true,
+          dryRun: !confirm,
+          invalidFileIds,
+          impact,
+          removed: 0,
+        }
+      }
+
+      const placeholders = invalidFileIds.map(() => '?').join(',')
+      const cursor = db.prepare(`DELETE FROM file WHERE id IN (${placeholders})`).run(...invalidFileIds)
+      const removed = Number(cursor?.changes ?? 0)
+
+      db.prepare('DELETE FROM person WHERE id NOT IN (SELECT personId FROM person_face)').run()
+      refreshPersonCache(db)
+      updateFaceAssignmentStatus(db)
+      syncVisionFaceTags(db)
+      cleanupOrphanTags(db)
+
+      return {
+        ok: true,
+        dryRun: false,
+        invalidFileIds,
+        impact,
+        removed,
+      }
+    })
+  ))
 }
 
 export async function setAnnotationValue(params) {
@@ -698,64 +1437,27 @@ export async function setAnnotationValue(params) {
   return withDb(rootPath, async (db, resolvedRoot) => (
     withTransaction(db, async () => {
       const file = await ensureFileEntry(db, resolvedRoot, relativePath)
-      const ts = nowTs()
+      const appliedAt = nowTs()
 
-      const existing = db.prepare(`
-        SELECT *
-        FROM annotation_record
-        WHERE fileId = ? AND fieldKey = ?
-      `).get(file.id, fieldKey)
+      // Enforce overwrite semantics by file + field key.
+      removeTagBindingsForFile(db, {
+        fileId: file.id,
+        source: ANNOTATION_SOURCE,
+        key: fieldKey,
+      })
+      cleanupOrphanTags(db, ANNOTATION_SOURCE)
 
-      const id = existing?.id ?? randomUUID()
-      if (existing) {
-        db.prepare(`
-          UPDATE annotation_record
-          SET value = ?, source = ?, status = 'active', orphanReason = NULL,
-              fileSizeBytes = ?, fileMtimeMs = ?, bindingFp = ?, updatedAt = ?
-          WHERE id = ?
-        `).run(
-          value,
-          source,
-          file.fileSizeBytes,
-          file.fileMtimeMs,
-          file.bindingFp,
-          ts,
-          id,
-        )
-      } else {
-        db.prepare(`
-          INSERT INTO annotation_record(
-            id, fileId, fieldKey, value, source, status, orphanReason,
-            fileSizeBytes, fileMtimeMs, bindingFp, createdAt, updatedAt
-          )
-          VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?, ?)
-        `).run(
-          id,
-          file.id,
-          fieldKey,
-          value,
-          source,
-          file.fileSizeBytes,
-          file.fileMtimeMs,
-          file.bindingFp,
-          ts,
-          ts,
-        )
-      }
-
-      upsertTagForSourceRef(db, {
+      bindTagToFile(db, {
         fileId: file.id,
         key: fieldKey,
         value,
         source: ANNOTATION_SOURCE,
-        sourceRefId: id,
-        confidence: null,
-        status: 'active',
+        appliedAt,
+        score: null,
       })
 
       return {
         ok: true,
-        id,
         fileId: file.id,
         relativePath,
         fieldKey,
@@ -766,279 +1468,8 @@ export async function setAnnotationValue(params) {
   ))
 }
 
-export async function refreshAnnotationBindings(params) {
-  const rootPath = resolveRootPath(params.rootPath)
-
-  return withDb(rootPath, async (db, resolvedRoot) => (
-    withTransaction(db, async () => {
-      const rows = db.prepare(`
-        SELECT
-          annotation_record.*,
-          file.relativePath AS relativePath
-        FROM annotation_record
-        INNER JOIN file ON file.id = annotation_record.fileId
-      `).all()
-
-      if (rows.length === 0) {
-        return {
-          ok: true,
-          total: 0,
-          active: 0,
-          orphan: 0,
-          conflict: 0,
-          rebound: 0,
-        }
-      }
-
-      let active = 0
-      let orphan = 0
-      let conflict = 0
-      let rebound = 0
-      const ts = nowTs()
-      let snapshotIndex = null
-
-      for (const row of rows) {
-        const id = row.id
-        const relativePath = row.relativePath
-        const recordedSize = parseFiniteNumber(row.fileSizeBytes, -1)
-        const recordedMtime = parseFiniteNumber(row.fileMtimeMs, -1)
-        const bindingFp = typeof row.bindingFp === 'string' ? row.bindingFp : ''
-
-        let statMatched = false
-        let currentStat = null
-
-        try {
-          const absPath = resolvePathWithinRoot(resolvedRoot, relativePath)
-          const statResult = await fs.stat(absPath)
-          if (statResult.isFile()) {
-            currentStat = statResult
-            const currentSize = Number(statResult.size)
-            const currentMtime = toFileMtimeMs(statResult)
-            if (currentSize === recordedSize && currentMtime === recordedMtime) {
-              statMatched = true
-            }
-          }
-        } catch {
-          currentStat = null
-        }
-
-        if (statMatched) {
-          db.prepare(`
-            UPDATE annotation_record
-            SET status = 'active', orphanReason = NULL, updatedAt = ?
-            WHERE id = ?
-          `).run(ts, id)
-          db.prepare(`
-            UPDATE tag
-            SET status = 'active', updatedAt = ?
-            WHERE source = ? AND sourceRefId = ?
-          `).run(ts, ANNOTATION_SOURCE, id)
-          active += 1
-          continue
-        }
-
-        if (currentStat && (recordedSize < 0 || recordedMtime < 0)) {
-          const currentSize = Number(currentStat.size)
-          const currentMtime = toFileMtimeMs(currentStat)
-          const absPath = resolvePathWithinRoot(resolvedRoot, relativePath)
-          const fps = await computeFingerprintsForFile(absPath, relativePath, {
-            exactEnabled: false,
-            similarImageEnabled: false,
-          }, currentStat)
-
-          db.prepare(`
-            UPDATE annotation_record
-            SET fileSizeBytes = ?, fileMtimeMs = ?, bindingFp = ?,
-                status = 'active', orphanReason = NULL, updatedAt = ?
-            WHERE id = ?
-          `).run(currentSize, currentMtime, fps.bindingFp, ts, id)
-
-          db.prepare(`
-            UPDATE tag
-            SET status = 'active', updatedAt = ?
-            WHERE source = ? AND sourceRefId = ?
-          `).run(ts, ANNOTATION_SOURCE, id)
-          active += 1
-          continue
-        }
-
-        if (!bindingFp || recordedSize < 0 || recordedMtime < 0) {
-          db.prepare(`
-            UPDATE annotation_record
-            SET status = 'orphan', orphanReason = 'no_candidate', updatedAt = ?
-            WHERE id = ?
-          `).run(ts, id)
-          db.prepare(`
-            UPDATE tag
-            SET status = 'orphan', updatedAt = ?
-            WHERE source = ? AND sourceRefId = ?
-          `).run(ts, ANNOTATION_SOURCE, id)
-          orphan += 1
-          continue
-        }
-
-        if (!snapshotIndex) {
-          snapshotIndex = await buildSnapshotIndex(resolvedRoot)
-        }
-
-        const key = `${recordedSize}:${recordedMtime}`
-        const candidates = snapshotIndex.bySizeMtime.get(key) ?? []
-        const matched = []
-
-        for (const candidate of candidates) {
-          try {
-            const absPath = resolvePathWithinRoot(resolvedRoot, candidate.relativePath)
-            const candidateFp = await computeFingerprintsForFile(absPath, candidate.relativePath, {
-              exactEnabled: false,
-              similarImageEnabled: false,
-            }, candidate.stat)
-            if (candidateFp.bindingFp === bindingFp) {
-              matched.push({
-                relativePath: candidate.relativePath,
-                stat: candidate.stat,
-                bindingFp: candidateFp.bindingFp,
-              })
-            }
-          } catch {
-            // ignore candidate failures
-          }
-        }
-
-        if (matched.length === 1) {
-          const candidate = matched[0]
-          let targetFile = getFileByRelativePath(db, candidate.relativePath)
-          if (!targetFile) {
-            const nextId = randomUUID()
-            db.prepare(`
-              INSERT INTO file(id, relativePath, fileSizeBytes, fileMtimeMs, bindingFp, createdAt, updatedAt)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `).run(
-              nextId,
-              candidate.relativePath,
-              Number(candidate.stat.size),
-              toFileMtimeMs(candidate.stat),
-              candidate.bindingFp,
-              ts,
-              ts,
-            )
-            targetFile = getFileById(db, nextId)
-          }
-
-          db.prepare(`
-            UPDATE annotation_record
-            SET fileId = ?, status = 'active', orphanReason = NULL,
-                fileSizeBytes = ?, fileMtimeMs = ?, bindingFp = ?, updatedAt = ?
-            WHERE id = ?
-          `).run(
-            targetFile.id,
-            Number(candidate.stat.size),
-            toFileMtimeMs(candidate.stat),
-            candidate.bindingFp,
-            ts,
-            id,
-          )
-
-          db.prepare(`
-            UPDATE file
-            SET fileSizeBytes = ?, fileMtimeMs = ?, bindingFp = ?, updatedAt = ?
-            WHERE id = ?
-          `).run(Number(candidate.stat.size), toFileMtimeMs(candidate.stat), candidate.bindingFp, ts, targetFile.id)
-
-          db.prepare(`
-            UPDATE tag
-            SET status = 'active', updatedAt = ?
-            WHERE source = ? AND sourceRefId = ?
-          `).run(ts, ANNOTATION_SOURCE, id)
-
-          db.prepare(`
-            INSERT INTO file_tag(fileId, tagId, appliedAt)
-            SELECT ?, id, ?
-            FROM tag
-            WHERE source = ? AND sourceRefId = ?
-            ON CONFLICT(fileId, tagId) DO UPDATE SET appliedAt = excluded.appliedAt
-          `).run(targetFile.id, ts, ANNOTATION_SOURCE, id)
-
-          active += 1
-          rebound += 1
-          continue
-        }
-
-        if (matched.length > 1) {
-          db.prepare(`
-            UPDATE annotation_record
-            SET status = 'conflict', orphanReason = 'ambiguous_rebind', updatedAt = ?
-            WHERE id = ?
-          `).run(ts, id)
-          db.prepare(`
-            UPDATE tag
-            SET status = 'conflict', updatedAt = ?
-            WHERE source = ? AND sourceRefId = ?
-          `).run(ts, ANNOTATION_SOURCE, id)
-          conflict += 1
-          continue
-        }
-
-        db.prepare(`
-          UPDATE annotation_record
-          SET status = 'orphan', orphanReason = 'no_candidate', updatedAt = ?
-          WHERE id = ?
-        `).run(ts, id)
-        db.prepare(`
-          UPDATE tag
-          SET status = 'orphan', updatedAt = ?
-          WHERE source = ? AND sourceRefId = ?
-        `).run(ts, ANNOTATION_SOURCE, id)
-        orphan += 1
-      }
-
-      return {
-        ok: true,
-        total: rows.length,
-        active,
-        orphan,
-        conflict,
-        rebound,
-      }
-    })
-  ))
-}
-
-export async function cleanupAnnotationOrphans(params) {
-  const rootPath = resolveRootPath(params.rootPath)
-  const confirm = parseBoolean(params.confirm, false)
-
-  return withDb(rootPath, async (db) => (
-    withTransaction(db, async () => {
-      const orphanRows = db.prepare(`
-        SELECT id
-        FROM annotation_record
-        WHERE status = 'orphan'
-      `).all()
-
-      const totalOrphans = orphanRows.length
-      if (!confirm) {
-        return {
-          ok: true,
-          dryRun: true,
-          totalOrphans,
-          removed: 0,
-        }
-      }
-
-      for (const row of orphanRows) {
-        const annotationId = row.id
-        removeTagBySourceRef(db, ANNOTATION_SOURCE, annotationId)
-        db.prepare('DELETE FROM annotation_record WHERE id = ?').run(annotationId)
-      }
-
-      return {
-        ok: true,
-        dryRun: false,
-        totalOrphans,
-        removed: orphanRows.length,
-      }
-    })
-  ))
+export async function setLocalDataValue(params) {
+  return setAnnotationValue(params)
 }
 
 export async function getFileTags(params) {
@@ -1064,11 +1495,17 @@ export async function getFileTags(params) {
     }
 
     const tagRows = db.prepare(`
-      SELECT tag.*
-      FROM tag
-      INNER JOIN file_tag ON file_tag.tagId = tag.id
-      WHERE file_tag.fileId = ? AND tag.status = 'active'
-      ORDER BY tag.updatedAt DESC, tag.createdAt DESC
+      SELECT
+        tag.id AS id,
+        tag.key AS key,
+        tag.value AS value,
+        tag.source AS source,
+        file_tag.appliedAt AS appliedAt,
+        file_tag.score AS score
+      FROM file_tag
+      INNER JOIN tag ON tag.id = file_tag.tagId
+      WHERE file_tag.fileId = ?
+      ORDER BY file_tag.appliedAt DESC, tag.source ASC, tag.key ASC, tag.value ASC
     `).all(file.id)
 
     return {
@@ -1111,12 +1548,12 @@ export async function listTagOptions(params) {
       SELECT
         tag.key AS key,
         tag.value AS value,
+        tag.source AS source,
         COUNT(DISTINCT file_tag.fileId) AS fileCount
       FROM tag
       INNER JOIN file_tag ON file_tag.tagId = tag.id
-      WHERE tag.status = 'active'
-      GROUP BY tag.key, tag.value
-      ORDER BY tag.key ASC, tag.value ASC
+      GROUP BY tag.source, tag.key, tag.value
+      ORDER BY tag.source ASC, tag.key ASC, tag.value ASC
     `).all()
 
     return {
@@ -1125,6 +1562,7 @@ export async function listTagOptions(params) {
         tagKey: buildTagKey(row.key, row.value),
         key: row.key,
         value: row.value,
+        source: row.source,
         fileCount: Number(row.fileCount ?? 0),
       })),
     }
@@ -1152,14 +1590,11 @@ export async function queryFilesByTags(params) {
         tag.key AS key,
         tag.value AS value,
         tag.source AS source,
-        tag.sourceRefId AS sourceRefId,
-        tag.confidence AS confidence,
-        tag.status AS status,
-        tag.createdAt AS createdAt,
-        tag.updatedAt AS updatedAt
+        file_tag.appliedAt AS appliedAt,
+        file_tag.score AS score
       FROM file
       LEFT JOIN file_tag ON file_tag.fileId = file.id
-      LEFT JOIN tag ON tag.id = file_tag.tagId AND tag.status = 'active'
+      LEFT JOIN tag ON tag.id = file_tag.tagId
       ORDER BY file.relativePath ASC
     `).all()
 
@@ -1175,15 +1610,19 @@ export async function queryFilesByTags(params) {
       if (row.tagId) {
         const dto = toTagDto(row)
         existing.tags.push(dto)
-        existing.updatedAt = Math.max(existing.updatedAt, Number(dto.updatedAt ?? 0))
+        if (dto.source === ANNOTATION_SOURCE) {
+          existing.updatedAt = Math.max(existing.updatedAt, Number(dto.appliedAt ?? dto.updatedAt ?? 0))
+        }
       }
       byFile.set(fileId, existing)
     }
 
     const filtered = []
     for (const item of byFile.values()) {
-      const tagKeys = item.tags.map((tag) => buildTagKey(tag.key, tag.value))
-      if (!matchesTagFilter(tagKeys, includeTagKeys, excludeTagKeys, includeMatchMode)) {
+      const annotationTagKeys = item.tags
+        .filter((tag) => tag.source === ANNOTATION_SOURCE)
+        .map((tag) => buildTagKey(tag.key, tag.value))
+      if (!matchesTagFilter(annotationTagKeys, includeTagKeys, excludeTagKeys, includeMatchMode)) {
         continue
       }
       filtered.push(item)
@@ -1224,10 +1663,6 @@ export async function saveDetectedFaces(params) {
           SET featureFaceId = NULL
           WHERE featureFaceId IN (${placeholders})
         `).run(...existingFaceIds)
-
-        for (const faceId of existingFaceIds) {
-          removeTagBySourceRef(db, FACE_SOURCE, `face:${faceId}`)
-        }
       }
 
       db.prepare('DELETE FROM face WHERE fileId = ?').run(file.id)
@@ -1263,17 +1698,6 @@ export async function saveDetectedFaces(params) {
           VALUES (?, ?, ?)
         `).run(faceId, EMBEDDING_DIM, embeddingBlob)
 
-        db.prepare(`
-          INSERT INTO face_job_state(faceId, detectStatus, clusterStatus, deferred, attempts, lastErrorCode, lastRunAt, nextRunAt)
-          VALUES (?, 'success', 'pending', 0, 0, NULL, ?, NULL)
-          ON CONFLICT(faceId) DO UPDATE SET
-            detectStatus = 'success',
-            clusterStatus = 'pending',
-            deferred = 0,
-            lastErrorCode = NULL,
-            lastRunAt = excluded.lastRunAt
-        `).run(faceId, ts)
-
         createdFaces.push({
           faceId,
           assetPath: relativePath,
@@ -1287,6 +1711,7 @@ export async function saveDetectedFaces(params) {
       updateFaceAssignmentStatus(db)
       refreshPersonCache(db)
       db.prepare('DELETE FROM person WHERE id NOT IN (SELECT personId FROM person_face)').run()
+      syncVisionFaceTags(db, [file.id])
 
       return {
         ok: true,
@@ -1358,7 +1783,7 @@ export async function clusterPendingFaces(params) {
       let deferred = 0
       let skipped = 0
       let failed = 0
-      const touchedFaceIds = []
+      const touchedFileIds = new Set()
 
       for (const row of rows) {
         processed += 1
@@ -1395,16 +1820,6 @@ export async function clusterPendingFaces(params) {
             WHERE id = ?
           `).run(ts, faceId)
 
-          db.prepare(`
-            INSERT INTO face_job_state(faceId, detectStatus, clusterStatus, deferred, attempts, lastErrorCode, lastRunAt, nextRunAt)
-            VALUES (?, 'success', 'assigned', 0, 0, NULL, ?, NULL)
-            ON CONFLICT(faceId) DO UPDATE SET
-              clusterStatus = 'assigned',
-              deferred = 0,
-              lastErrorCode = NULL,
-              lastRunAt = excluded.lastRunAt
-          `).run(faceId, ts)
-
           for (const item of allEmbeddings) {
             if (item.faceId === faceId) {
               item.personId = personId
@@ -1412,7 +1827,7 @@ export async function clusterPendingFaces(params) {
             }
           }
 
-          touchedFaceIds.push(faceId)
+          touchedFileIds.add(row.fileId)
           assigned += 1
         } else {
           const ts = nowTs()
@@ -1421,25 +1836,16 @@ export async function clusterPendingFaces(params) {
             SET status = 'deferred', updatedAt = ?
             WHERE id = ?
           `).run(ts, faceId)
-
-          db.prepare(`
-            INSERT INTO face_job_state(faceId, detectStatus, clusterStatus, deferred, attempts, lastErrorCode, lastRunAt, nextRunAt)
-            VALUES (?, 'success', 'deferred', 1, 0, NULL, ?, NULL)
-            ON CONFLICT(faceId) DO UPDATE SET
-              clusterStatus = 'deferred',
-              deferred = 1,
-              lastErrorCode = NULL,
-              lastRunAt = excluded.lastRunAt
-          `).run(faceId, ts)
-
-          touchedFaceIds.push(faceId)
+          touchedFileIds.add(row.fileId)
           deferred += 1
         }
       }
 
       updateFaceAssignmentStatus(db)
       refreshPersonCache(db)
-      syncVisionFaceTags(db, touchedFaceIds)
+      if (touchedFileIds.size > 0) {
+        syncVisionFaceTags(db, [...touchedFileIds])
+      }
 
       return {
         ok: true,
@@ -1510,13 +1916,13 @@ export async function renamePerson(params) {
         throw new Error(`person not found: ${personId}`)
       }
 
-      const faceRows = db.prepare(`
-        SELECT face.id AS faceId
+      const fileRows = db.prepare(`
+        SELECT DISTINCT face.fileId AS fileId
         FROM face
         INNER JOIN person_face ON person_face.faceId = face.id
         WHERE person_face.personId = ?
       `).all(personId)
-      syncVisionFaceTags(db, faceRows.map((row) => row.faceId))
+      syncVisionFaceTags(db, fileRows.map((row) => row.fileId))
 
       const row = db.prepare(`
         SELECT
@@ -1571,7 +1977,7 @@ export async function mergePeople(params) {
       const ts = nowTs()
       const merged = []
       const skipped = []
-      const touchedFaces = []
+      const touchedFileIds = new Set()
 
       for (const sourceId of validSources) {
         const sourceExists = db.prepare('SELECT 1 AS ok FROM person WHERE id = ?').get(sourceId)
@@ -1581,8 +1987,9 @@ export async function mergePeople(params) {
         }
 
         const sourceFaceRows = db.prepare(`
-          SELECT faceId
+          SELECT person_face.faceId AS faceId, face.fileId AS fileId
           FROM person_face
+          INNER JOIN face ON face.id = person_face.faceId
           WHERE personId = ?
         `).all(sourceId)
 
@@ -1594,13 +2001,15 @@ export async function mergePeople(params) {
 
         db.prepare('DELETE FROM person WHERE id = ?').run(sourceId)
         merged.push(sourceId)
-        touchedFaces.push(...sourceFaceRows.map((row) => row.faceId))
+        for (const row of sourceFaceRows) {
+          touchedFileIds.add(row.fileId)
+        }
       }
 
       updateFaceAssignmentStatus(db)
       refreshPersonCache(db)
-      if (touchedFaces.length > 0) {
-        syncVisionFaceTags(db, touchedFaces)
+      if (touchedFileIds.size > 0) {
+        syncVisionFaceTags(db, [...touchedFileIds])
       }
 
       return {
@@ -1732,22 +2141,34 @@ export async function ingestClassificationResult(params) {
           continue
         }
 
-        removeClassifyTagsForFile(db, file.id)
+        removeTagBindingsForFile(db, {
+          fileId: file.id,
+          source: CLASSIFY_SOURCE,
+          key: 'class',
+        })
+        cleanupOrphanTags(db, CLASSIFY_SOURCE)
 
-        for (let index = 0; index < task.predictions.length; index += 1) {
-          const prediction = task.predictions[index]
+        const scoreByLabel = new Map()
+        for (const prediction of task.predictions) {
           if (!prediction || typeof prediction !== 'object') continue
           const label = typeof prediction.label === 'string' ? prediction.label.trim() : ''
           if (!label) continue
           const score = parseFiniteNumber(prediction.score, 0)
-          upsertTagForSourceRef(db, {
+          const prev = scoreByLabel.get(label)
+          if (typeof prev !== 'number' || score > prev) {
+            scoreByLabel.set(label, score)
+          }
+        }
+
+        const appliedAt = nowTs()
+        for (const [label, score] of scoreByLabel.entries()) {
+          bindTagToFile(db, {
             fileId: file.id,
             key: 'class',
             value: label,
             source: CLASSIFY_SOURCE,
-            sourceRefId: `file:${file.id}:${index}`,
-            confidence: score,
-            status: 'active',
+            appliedAt,
+            score,
           })
           ingested += 1
         }
