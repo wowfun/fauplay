@@ -1,8 +1,27 @@
 # CHANGELOG
 
-## 2026-03-19
+## 2026-03-20
+### Added
+- 归档旧 114 文档到 `specs/_archive/2026-03-20/114-metadata-annotation/`（包含 `spec.md` 与 `plan.md`）。
+- 新增 `specs/116-rename-driven-rebind/spec.md`：定义“命名分层（外部语义 + 内部 CRUD）+ RESTful 路径切换 + `fs.batchRename` 成功后自动路径重绑 + 两阶段更新”契约。
+
 ### Changed
-- 更新 `specs/114-metadata-annotation/spec.md`：新增“预览切换文件时按文件粒度异步即时读取标签（`/v1/data/tags/file`）且不得阻塞预览 UI”契约，并补充对应 `FR-MA-08` / `AC-MA-05`。
+- 重写 `specs/114-local-data-plugin/spec.md`：主题切换为 `local.data` 本地数据管理插件，能力收敛为 `setAnnotationValue + batchRebindPaths + reconcileFileBindings + cleanupInvalidFileIds`，标签来源保持 `meta.annotation`。
+- 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：本地数据接口切换为 RESTful（`/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/file-bindings/*`），并补充 `file` 表重绑与失效 `fileId` 清理契约。
+- 更新 `specs/115-facial-recognition/spec.md` 与 `specs/README.md`：将 114 关联语义从“标注插件”改为“本地数据管理插件”。
+- 更新 `specs/114-local-data-plugin/spec.md`：`local.data` 的 `operation` 枚举切换为 `setAnnotationValue/batchRebindPaths/reconcileFileBindings/cleanupInvalidFileIds`，并新增 `batchRebindPaths` 两阶段更新与逐项 `reasonCode` 约束。
+- 更新 `specs/106-batch-rename-workspace/spec.md` 与 `specs/113-preview-inline-rename/spec.md`：补充“改名成功后自动触发路径重绑，失败仅 `postProcessWarning` 告警不回滚主流程”行为。
+- 更新 `specs/README.md`：新增 `116-rename-driven-rebind` 主题入口。
+
+## 2026-03-19
+### Added
+- 新增 `specs/005-local-data-contracts/tag-core-v2-reference.md`：集中定义 Tag Core v2 参考契约（`file + tag + file_tag` 核心模型、保留人脸业务表、移除表清单、接口行为映射与验收场景）。
+
+### Changed
+- 更新 `specs/005-local-data-contracts/spec.md`：schema 升级为 v2，`tag` 收敛为 `id,key,value,source`，`file_tag` 新增通用可空 `score`，并明确移除 `annotation_record/face_job_state/*_tag_ext`。
+- 更新 `specs/114-metadata-annotation/spec.md`：标注能力收敛为仅 `set-value` 覆盖写入，不再依赖 `annotation_record`，并下线 `refresh-bindings/cleanup-orphans`。
+- 更新 `specs/115-facial-recognition/spec.md`：移除 `face_job_state` 表依赖，新增 `person_face -> vision.face` 文件标签投影一致性契约。
+- 更新 `specs/104-timm-classification-mcp/spec.md`：分类 `score` 持久化位置改为 `file_tag.score`，不再写入 `tag` 扩展字段。
 
 ## 2026-03-18
 ### Added

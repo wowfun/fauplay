@@ -38,6 +38,8 @@
 4. 结果必须包含汇总统计与逐项明细。
 5. `confirm=true` 且工具调用成功后，客户端必须自动刷新当前目录视图，避免网格区继续显示旧文件名。
 6. 自动刷新不得强制关闭已打开的侧栏预览；当原预览文件已重命名不可用时，客户端应回退到当前目录内可预览文件并保持面板状态。
+7. `confirm=true` 且 `renamed>0` 时，Gateway 必须自动触发一次路径重绑（`batchRebindPaths`）；该后处理失败不得回滚重命名主流程。
+8. 后处理失败时，返回结果应包含 `postProcessWarning` 用于提示“重命名成功但重绑失败”。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -130,6 +132,8 @@
 8. `FR-BR-08` 工具必须支持 `searchMode=plain|regex`，且 `replaceText` 允许为空字符串。
 9. `FR-BR-09` 工具必须支持 `[N]/[P]/[G]/[C]` 掩码子集。
 10. `FR-BR-10` 请求包含 `prefix/suffix` 时必须返回 `MCP_INVALID_PARAMS`。
+11. `FR-BR-11` `confirm=true && renamed>0` 时，系统必须自动执行批量路径重绑（逐项映射）。
+12. `FR-BR-12` 路径重绑失败不得影响已成功落盘的重命名结果。
 
 ## 8. 验收标准 (AC)
 
@@ -143,6 +147,8 @@
 8. `AC-BR-08` `searchMode=regex` 且 `findText` 非法正则时返回 `MCP_INVALID_PARAMS`。
 9. `AC-BR-09` 请求包含 `prefix/suffix` 时返回 `MCP_INVALID_PARAMS`。
 10. `AC-BR-10` `[P]/[G]` 在层级不足时按契约回退（`[P]=rootName`、`[G]=""`）。
+11. `AC-BR-11` 批量改名成功后，`file` 表中对应 `relativePath` 同步更新，且 `fileId` 保持稳定。
+12. `AC-BR-12` 人工构造重绑失败时，批量改名结果仍成功返回，并带 `postProcessWarning`。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 

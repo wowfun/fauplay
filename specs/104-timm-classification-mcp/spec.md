@@ -28,10 +28,11 @@
 
 ## 4. 数据落盘契约 (Gateway Persistence)
 
-1. Gateway 接收分类结果后，按统一标签模型落盘。
+1. Gateway 接收分类结果后，按 `tag + file_tag` 双层模型落盘。
 2. 标签来源固定：`source=ml.classify`。
-3. 标签最小字段：`id,key,value,source,sourceRefId,confidence,status,createdAt,updatedAt`。
-4. 文件关联必须通过统一 `fileId`。
+3. `tag` 仅承载标签身份：`id,key,value,source`（`PRIMARY KEY(key,value,source)` + `id UNIQUE`）。
+4. 分类置信度必须写入 `file_tag.score`，不得再写入 `tag` 扩展字段。
+5. 文件关联必须通过统一 `fileId`。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -51,12 +52,14 @@
 2. `FR-TIMM-02` 分类结果必须由 Gateway 持久化为统一标签。
 3. `FR-TIMM-03` 分类标签必须可被统一标签过滤查询消费。
 4. `FR-TIMM-04` 分类失败不得破坏已落盘标签数据。
+5. `FR-TIMM-05` 分类 `score` 必须以 `file_tag.score` 持久化。
 
 ## 7. 验收标准 (AC)
 
 1. `AC-TIMM-01` 单图分类成功后，统一标签查询可读到分类标签。
 2. `AC-TIMM-02` 批量分类部分失败时，成功项标签可落盘，失败项不产生脏数据。
 3. `AC-TIMM-03` 关闭/重启后分类标签可恢复查询。
+4. `AC-TIMM-04` 分类标签查询可返回 `file_tag.score`，非分类来源标签该字段保持 `NULL`。
 
 ## 8. 关联主题 (Related Specs)
 

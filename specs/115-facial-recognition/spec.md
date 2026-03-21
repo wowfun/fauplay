@@ -16,7 +16,7 @@
 1. 单资产检测并产出检测框与 embedding。
 2. Gateway 侧增量聚类、人物命名、人物合并。
 3. 预览人脸框展示与人物详情查询。
-4. 统一标签系统的人物标签写入。
+4. 统一标签系统的人物标签写入（`source=vision.face`）。
 
 范围外：
 
@@ -46,13 +46,22 @@
 3. `face_embedding`
 4. `person`
 5. `person_face`
-6. `face_job_state`
+6. `tag`
+7. `file_tag`
 
 约束：
 
 1. `face.fileId` 必须关联 `file.id`。
 2. `person_face.faceId` 唯一，保证一脸一人物。
 3. 向量格式保持 `float32 blob`。
+4. 不再持久化 `face_job_state`。
+
+### 4.3 标签投影契约（`vision.face`）
+
+1. 文件级人物标签必须由 `person_face` 关系投影生成。
+2. 标签格式固定为：`source=vision.face`、`key='person'`、`value=person.name`。
+3. 同名人物允许存在；文件级标签在名字维度合并，不保证人物级可区分过滤。
+4. `rename-person` 与 `merge-people` 后，相关文件的 `vision.face` 标签必须同步更新。
 
 ## 5. Gateway HTTP 接口契约 (HTTP Contract)
 
@@ -80,14 +89,16 @@
 4. `FR-FACE-04` 系统必须提供上述 Gateway HTTP 人脸接口。
 5. `FR-FACE-05` 人物命名/合并后，列表与预览展示必须一致。
 6. `FR-FACE-06` 人物归属应同步写入统一标签模型（`source=vision.face`）。
+7. `FR-FACE-07` 系统不得依赖 `face_job_state` 作为流程状态真源。
 
 ## 8. 验收标准 (AC)
 
-1. `AC-FACE-01` `detect-asset` 后可查询到人脸框与状态。
+1. `AC-FACE-01` `detect-asset` 后可查询到人脸框数据。
 2. `AC-FACE-02` `cluster-pending` 后同人物跨资产可归并。
 3. `AC-FACE-03` `rename-person` 与 `merge-people` 后查询结果立即一致。
 4. `AC-FACE-04` 重启后同 root 可恢复人脸与人物数据。
-5. `AC-FACE-05` 旧 `faces.v1.sqlite` 存在时新流程不读取且不崩溃。
+5. `AC-FACE-05` 人脸流程后，文件级 `vision.face` 标签与 `person_face` 关系一致。
+6. `AC-FACE-06` 旧 `faces.v1.sqlite` 存在时新流程不读取且不崩溃。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -98,5 +109,5 @@
 ## 10. 关联主题 (Related Specs)
 
 - 基础数据契约：[`../005-local-data-contracts/spec.md`](../005-local-data-contracts/spec.md)
-- 标注能力：[`../114-metadata-annotation/spec.md`](../114-metadata-annotation/spec.md)
+- 本地数据管理插件：[`../114-local-data-plugin/spec.md`](../114-local-data-plugin/spec.md)
 - 契约基线：[`../002-contracts/spec.md`](../002-contracts/spec.md)
