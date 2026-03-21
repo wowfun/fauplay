@@ -3,6 +3,7 @@
 ## 2026-03-21
 ### Changed
 - 清理活动专题规范中的过期表述：`114-local-data-plugin`、`116-rename-driven-rebind`、`005-local-data-contracts`（含 `tag-core-v2-reference`）不再显式枚举已下线旧接口路径，统一改为“历史维护接口已下线（返回下线错误或 404）”；`114-local-data-plugin/plan.md` 同步修正为 RESTful 口径并更新 operation 名称；`003-ui-ux/spec.md` 与 `003-ui-ux/areas.md` 将“sidecar 快照门控”统一为“标签快照门控”术语。
+- 更新 `specs/003-ui-ux/spec.md`、`specs/114-local-data-plugin/spec.md` 与 `specs/005-local-data-contracts/spec.md`：明确顶部标签过滤与预览标签显示默认读取统一标签模型中的全部来源标签（不再以 `source=meta.annotation` 作为读取前置条件）；“未标注”语义收敛为“无任何来源标签”；同时保留 `setAnnotationValue` 写入来源固定为 `meta.annotation`。
 
 ## 2026-03-20
 ### Added

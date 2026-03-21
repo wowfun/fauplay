@@ -3,7 +3,6 @@ import { callGatewayHttp } from '@/lib/gateway'
 import { ensureRootPath } from '@/lib/reveal'
 
 const TAG_QUERY_PAGE_SIZE = 1000
-const ANNOTATION_SOURCE = 'meta.annotation'
 
 type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
 
@@ -238,9 +237,6 @@ function toUpdatedAt(value: unknown, fallbackValue?: unknown): number {
 
 function toAnnotationTag(tag: unknown): { fieldKey: string; value: string; updatedAt: number } | null {
   if (!isRecord(tag)) return null
-
-  const source = typeof tag.source === 'string' ? tag.source.trim() : ''
-  if (source !== ANNOTATION_SOURCE) return null
 
   const fieldKey = typeof tag.key === 'string' ? tag.key.trim() : ''
   const value = typeof tag.value === 'string' ? tag.value.trim() : ''

@@ -71,6 +71,7 @@
 2. `source=vision.face`：`key='person'`、`value=personName`。
 3. `source=ml.classify`：`key='class'`、`value=label`，`score` 写入 `file_tag.score`。
 4. 同名人物允许存在，文件标签在名字维度合并。
+5. `source` 用于来源追踪与标签去重维度，不作为前端过滤/预览显示的默认读取门槛。
 
 ### 5.5 参考文档
 
@@ -83,6 +84,8 @@
 1. `POST /v1/data/tags/file`
 2. `POST /v1/data/tags/options`
 3. `POST /v1/data/tags/query`
+4. `/v1/data/tags/file` 与 `/v1/data/tags/query` 默认返回多来源标签集合，不得隐式按 `source=meta.annotation` 预过滤。
+5. 前端可按场景做二次筛选，但顶部标签过滤与预览标签显示默认应支持跨来源汇总。
 
 ### 6.2 本地数据管理
 
@@ -129,6 +132,7 @@
 7. `FR-LDC-07` 标签来源必须可追踪（`source`）。
 8. `FR-LDC-08` 系统不得再读写 `.annotations.v1.json` 作为业务真源。
 9. `FR-LDC-09` 系统必须支持 `file` 表批量路径重绑、自动重绑与失效 `fileId` 清理。
+10. `FR-LDC-10` 标签读取接口默认不得将 `source=meta.annotation` 作为隐式过滤条件。
 
 ## 10. 验收标准 (AC)
 
@@ -140,6 +144,7 @@
 6. `AC-LDC-06` 旧 sidecar/旧库存在时系统不读取且不崩溃。
 7. `AC-LDC-07` `files/relative-paths` 支持链式映射（如 `A->B, B->C`）且 `fileId` 保持稳定。
 8. `AC-LDC-08` `file-bindings/reconciliations` 唯一命中重绑后 `fileId` 保持稳定，`file-bindings/cleanups` 支持 dry-run/commit 并完成级联一致性收敛。
+9. `AC-LDC-09` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 

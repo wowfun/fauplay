@@ -4,7 +4,7 @@
 
 定义 `local.data` 插件在 Gateway 统一数据层下的契约：
 
-1. 标注写入通过统一本地数据接口完成，标签来源保持 `source=meta.annotation`。
+1. 标注写入通过统一本地数据接口完成，且 `setAnnotationValue` 标签来源固定为 `source=meta.annotation`。
 2. `file` 表支持批量路径重绑与自动重绑，`fileId` 保持稳定。
 3. 提供失效 `fileId` 的 dry-run/commit 清理能力，并保证关联数据一致性收敛。
 4. 人脸、分类、标注继续共享同一 `file + tag + file_tag` 数据模型。
@@ -37,6 +37,7 @@
    - 输入：`rootPath, relativePath, fieldKey, value, source?`
    - 语义：按 `fileId + fieldKey + source=meta.annotation` 覆盖绑定（先删旧绑定再写新绑定）
    - 输出：`{ ok, fileId, relativePath, fieldKey, value }`
+   - 读侧说明：用于顶部标签过滤与预览标签显示的读取接口（`/v1/data/tags/file`、`/v1/data/tags/query`）默认不按 `source=meta.annotation` 预过滤。
 2. `PATCH /v1/files/relative-paths`
    - 输入：`rootPath, mappings[]`
    - `mappings[]` 项结构：`{ fromRelativePath, toRelativePath }`
@@ -59,6 +60,7 @@
 1. 标注标签来源固定为 `source=meta.annotation`。
 2. 字段映射固定为 `key=fieldKey`、`value=fieldValue`。
 3. 同文件同字段重复写入，仅保留一个当前绑定。
+4. 上述“来源固定”仅约束写入；过滤与显示读取链路默认读取全部 `source` 标签。
 
 ### 5.2 批量路径重绑（`batchRebindPaths`）
 
@@ -101,6 +103,7 @@
 5. `FR-LD-05` `cleanupInvalidFileIds` 必须支持 dry-run 与 commit 双阶段。
 6. `FR-LD-06` 提交清理后必须完成人物与标签一致性收敛。
 7. `FR-LD-07` 历史维护接口不得继续提供写入或维护能力。
+8. `FR-LD-08` 标签读取接口用于顶部过滤与预览显示时，不得默认限制为 `source=meta.annotation`。
 
 ## 7. 验收标准 (AC)
 
@@ -110,6 +113,7 @@
 4. `AC-LD-04` `reconcileFileBindings` 在 ES 不可用时请求成功返回，结果中包含 `search_unavailable` 统计与条目。
 5. `AC-LD-05` 清理 dry-run 与 commit 的目标数量一致，commit 后级联数据被清理。
 6. `AC-LD-06` 清理后人脸聚类、人物列表、重命名、合并流程仍可用且标签投影一致。
+7. `AC-LD-07` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
 
 ## 8. 默认值与一致性约束 (Defaults & Consistency)
 
