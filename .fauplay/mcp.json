@@ -29,12 +29,12 @@
         "tools/mcp/soft-delete/server.mjs"
       ]
     },
-    "metadata-annotation": {
+    "local-data": {
       "type": "stdio",
       "command": "node",
       "callTimeoutMs": 120000,
       "args": [
-        "tools/mcp/metadata-annotation/server.mjs"
+        "tools/mcp/local-data/server.mjs"
       ]
     },
     "video-same-duration": {
