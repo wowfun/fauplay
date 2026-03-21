@@ -6,7 +6,7 @@
 
 1. 文件改名后 `file` 表路径可增量更新，`fileId` 保持稳定。
 2. 外部接口保持业务语义，内部数据层命名保持 CRUD 风格。
-3. Gateway HTTP 接口采用 RESTful 路径与方法，旧 `/v1/local-data/*` 下线。
+3. Gateway HTTP 接口采用 RESTful 路径与方法，历史维护接口下线。
 4. `fs.batchRename` 成功提交后自动触发重绑，失败仅告警不阻断主流程。
 
 ## 2. 命名分层 (Naming Layers)
@@ -30,10 +30,7 @@
    - 对应语义：`reconcileFileBindings`
 4. `POST /v1/file-bindings/cleanups`
    - 对应语义：`cleanupInvalidFileIds`
-5. 旧路径直接下线（返回 404）：
-   - `/v1/local-data/set-value`
-   - `/v1/local-data/refresh-file-bindings`
-   - `/v1/local-data/cleanup-invalid-fileids`
+5. 历史维护接口直接下线（返回下线错误或 404）。
 
 ## 4. 批量重绑行为 (Batch Rebind Behavior)
 
@@ -65,14 +62,14 @@
 ## 7. 功能需求 (FR)
 
 1. `FR-RDR-01` 系统必须支持命名分层：外部语义、内部 CRUD。
-2. `FR-RDR-02` 系统必须提供新的 RESTful 路径与方法，并下线旧 `/v1/local-data/*`。
+2. `FR-RDR-02` 系统必须提供新的 RESTful 路径与方法，并下线历史维护接口。
 3. `FR-RDR-03` `batchRebindPaths` 必须返回逐项结果并支持部分成功。
 4. `FR-RDR-04` 路径批量更新必须使用两阶段更新，保证链式映射成功。
 5. `FR-RDR-05` `fs.batchRename` 成功后必须自动触发重绑，失败仅告警不阻断。
 
 ## 8. 验收标准 (AC)
 
-1. `AC-RDR-01` 新 RESTful 路径可用，旧 `/v1/local-data/*` 返回 404。
+1. `AC-RDR-01` 新 RESTful 路径可用，历史维护接口返回下线错误或 404。
 2. `AC-RDR-02` `batchRebindPaths` 调用后内部实际走 `batchUpdateRelativePaths`。
 3. `AC-RDR-03` 链式映射 `A->B, B->C` 成功且 `fileId` 不变。
 4. `AC-RDR-04` 目标占用/源不存在/非法路径分别返回约定 `reasonCode`，其余项继续执行。

@@ -28,7 +28,7 @@
 - 职责：目录导航、搜索筛选、排序、视图模式切换。
 - 当前组件：`features/explorer/components/ExplorerToolbar`
 - 边界：不承载预览渲染与媒体播放状态机。
-- 条件渲染约束：标签过滤相关 UI 仅在当前 root 的 sidecar 快照满足 `hasSidecarFile && hasAnyFilterableAnnotation` 时显示；否则整块隐藏，且不得保留隐式标签过滤结果；不提供手动 `all/boolean` 模式切换，模式由 include/exclude 条件自动推导。
+- 条件渲染约束：标签过滤相关 UI 仅在当前 root 的标签快照满足“存在可读取标签快照文件且存在可过滤标注”时显示；否则整块隐藏，且不得保留隐式标签过滤结果；不提供手动 `all/boolean` 模式切换，模式由 include/exclude 条件自动推导。
 
 ### B1 文件网格区（File Browser Grid Zone）
 

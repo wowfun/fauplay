@@ -90,7 +90,7 @@
 2. `PATCH /v1/files/relative-paths`
 3. `POST /v1/file-bindings/reconciliations`
 4. `POST /v1/file-bindings/cleanups`
-5. 下线 `/v1/local-data/*` 与 `POST /v1/annotations/*` 全部路径（404）。
+5. 历史维护接口全部下线（返回下线错误或 404）。
 
 ### 6.3 人脸流程
 

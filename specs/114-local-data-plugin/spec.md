@@ -50,11 +50,7 @@
    - 输入：`rootPath, confirm?`
    - 语义：按“刷新后无法唯一重绑”的结果集执行清理；`confirm=false` 仅预演，`confirm=true` 提交删除
    - 输出：`{ ok, dryRun, invalidFileIds[], impact, removed? }`
-5. 旧路径下线并返回 404：
-   - `/v1/local-data/set-value`
-   - `/v1/local-data/refresh-file-bindings`
-   - `/v1/local-data/cleanup-invalid-fileids`
-   - `/v1/annotations/*`
+5. 历史维护接口已下线；调用时返回下线错误或 404。
 
 ## 5. 数据与行为契约 (Data & Behavior Contract)
 
@@ -104,7 +100,7 @@
 4. `FR-LD-04` `reconcileFileBindings` 在 ES 不可用时不得整次失败。
 5. `FR-LD-05` `cleanupInvalidFileIds` 必须支持 dry-run 与 commit 双阶段。
 6. `FR-LD-06` 提交清理后必须完成人物与标签一致性收敛。
-7. `FR-LD-07` 旧 `/v1/local-data/*` 与 `/v1/annotations/*` 接口不得继续提供写入或维护能力。
+7. `FR-LD-07` 历史维护接口不得继续提供写入或维护能力。
 
 ## 7. 验收标准 (AC)
 

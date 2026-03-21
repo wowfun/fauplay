@@ -8,12 +8,12 @@
 ## 2. 当前收口目标
 
 1. 工具名切换为 `local.data`。
-2. HTTP 接口切换到 `/v1/local-data/*`。
+2. HTTP 接口切换到 RESTful 契约（`/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/file-bindings/*`）。
 3. 新增 `file` 表刷新重绑与失效 `fileId` 清理能力。
 4. 保持标注标签来源 `source=meta.annotation` 不变。
 
 ## 3. 后续增量方向
 
-1. 为 `refresh-file-bindings` 增加更细粒度指标（耗时、候选数量分布、失败分类）。
-2. 为 `cleanup-invalid-fileids` 增加分批提交与可选目标过滤能力。
+1. 为 `reconcileFileBindings` 增加更细粒度指标（耗时、候选数量分布、失败分类）。
+2. 为 `cleanupInvalidFileIds` 增加分批提交与可选目标过滤能力。
 3. 补齐自动化集成测试覆盖（重绑 + 清理 + 人脸一致性回归）。

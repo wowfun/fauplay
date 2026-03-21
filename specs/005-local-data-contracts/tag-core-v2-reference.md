@@ -121,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
    - `PATCH /v1/files/relative-paths`
    - `POST /v1/file-bindings/reconciliations`
    - `POST /v1/file-bindings/cleanups`
-2. 下线 `/v1/local-data/*` 与 `POST /v1/annotations/*` 全部路径。
+2. 历史维护接口全部下线（返回下线错误或 404）。
 3. `/v1/data/tags/*` 的时间语义以 `file_tag.appliedAt` 为准。
 4. 人脸接口路径不变，但内部流程不依赖 `face_job_state`。
 
@@ -138,4 +138,4 @@ CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
 3. 分类落库后 `file_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
 4. 人脸检测/聚类/改名/合并后，文件级 `vision.face` 标签与 `person_face` 结果一致。
 5. 同名人物存在时，标签按名字合并，不保证人物级可区分过滤。
-6. 旧接口 `refresh-bindings/cleanup-orphans` 返回下线错误（或 404）。
+6. 历史维护接口返回下线错误（或 404）。
