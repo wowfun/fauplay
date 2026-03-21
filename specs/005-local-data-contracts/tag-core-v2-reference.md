@@ -1,29 +1,43 @@
-# Tag Core v2 参考文档
+# Tag Core 全局资产参考文档
 
 ## 1. 目标
 
-1. 以 `file + tag + file_tag` 作为统一标签核心模型。
+1. 以 `asset + file + tag + asset_tag` 作为统一标签核心模型。
 2. 其他业务表仅保留必要实体：`face/face_embedding/person/person_face`。
-3. 不引入任何 `*_tag_ext` 扩展表。
+3. 不引入 `root`、`asset_fingerprint` 或任何 `*_tag_ext` 扩展表。
 
 ## 2. 核心关系
 
-1. `file` 记录文件实体。
-2. `tag` 记录标签身份（去重维度为 `key + value + source`）。
-3. `file_tag` 记录文件与标签绑定，并承载绑定时间与可选评分。
-4. 人脸业务以 `person_face` 为人物归属真源，再投影到 `vision.face` 文件标签。
+1. `asset` 记录内容实体，是标签、人脸、分类的统一业务真源。
+2. `file` 记录物理位置实体，以 `absolutePath` 表示当前有效位置。
+3. `tag` 记录标签身份（去重维度为 `key + value + source`）。
+4. `asset_tag` 记录资产与标签绑定，并承载绑定时间与可选评分。
+5. 人脸业务以 `person_face` 为人物归属真源，再投影到 `vision.face` 资产标签；file-centered 查询会把资产标签展开到每个可见 `file`。
 
 ## 3. 契约级 DDL
 
 ```sql
+CREATE TABLE IF NOT EXISTS asset (
+  id TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  fingerprint TEXT NOT NULL,
+  fpMethod TEXT NOT NULL,
+  sha256 TEXT,
+  deletedAt INTEGER,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  UNIQUE (size, fingerprint, fpMethod)
+);
+
 CREATE TABLE IF NOT EXISTS file (
   id TEXT PRIMARY KEY,
-  relativePath TEXT NOT NULL UNIQUE,
-  fileSizeBytes INTEGER,
+  assetId TEXT NOT NULL,
+  absolutePath TEXT NOT NULL UNIQUE,
   fileMtimeMs INTEGER,
-  bindingFp TEXT,
+  lastSeenAt INTEGER NOT NULL,
   createdAt INTEGER NOT NULL,
-  updatedAt INTEGER NOT NULL
+  updatedAt INTEGER NOT NULL,
+  FOREIGN KEY (assetId) REFERENCES asset(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS tag (
@@ -34,19 +48,19 @@ CREATE TABLE IF NOT EXISTS tag (
   PRIMARY KEY (key, value, source)
 );
 
-CREATE TABLE IF NOT EXISTS file_tag (
-  fileId TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS asset_tag (
+  assetId TEXT NOT NULL,
   tagId TEXT NOT NULL,
   appliedAt INTEGER NOT NULL,
   score REAL,
-  PRIMARY KEY (fileId, tagId),
-  FOREIGN KEY (fileId) REFERENCES file(id) ON DELETE CASCADE,
+  PRIMARY KEY (assetId, tagId),
+  FOREIGN KEY (assetId) REFERENCES asset(id) ON DELETE CASCADE,
   FOREIGN KEY (tagId) REFERENCES tag(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS face (
   id TEXT PRIMARY KEY,
-  fileId TEXT NOT NULL,
+  assetId TEXT NOT NULL,
   x1 REAL NOT NULL,
   y1 REAL NOT NULL,
   x2 REAL NOT NULL,
@@ -55,7 +69,7 @@ CREATE TABLE IF NOT EXISTS face (
   status TEXT NOT NULL DEFAULT 'unassigned',
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL,
-  FOREIGN KEY (fileId) REFERENCES file(id) ON DELETE CASCADE
+  FOREIGN KEY (assetId) REFERENCES asset(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS face_embedding (
@@ -89,30 +103,34 @@ CREATE TABLE IF NOT EXISTS person_face (
 推荐索引：
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_file_relative_path ON file(relativePath);
+CREATE INDEX IF NOT EXISTS idx_file_asset_id ON file(assetId);
 CREATE INDEX IF NOT EXISTS idx_tag_source_key_value ON tag(source, key, value);
-CREATE INDEX IF NOT EXISTS idx_file_tag_tag_id ON file_tag(tagId);
-CREATE INDEX IF NOT EXISTS idx_file_tag_applied_at ON file_tag(appliedAt);
-CREATE INDEX IF NOT EXISTS idx_face_file_id ON face(fileId);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_tag_id ON asset_tag(tagId);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_applied_at ON asset_tag(appliedAt);
+CREATE INDEX IF NOT EXISTS idx_face_asset_id ON face(assetId);
 CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
+CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 ```
 
 ## 4. 删除对象
 
-以下表在 v2 中不再保留：
+以下对象在全局资产模型中不再保留：
 
-1. `annotation_record`
-2. `face_job_state`
-3. `annotation_tag_ext`
-4. `face_tag_ext`
-5. `classification_tag_ext`
+1. `root`
+2. `annotation_record`
+3. `face_job_state`
+4. `asset_fingerprint`
+5. `file_tag`
+6. `annotation_tag_ext`
+7. `face_tag_ext`
+8. `classification_tag_ext`
 
 ## 5. 标签语义
 
-1. `meta.annotation`：`key=fieldKey`、`value=fieldValue`。
-2. `vision.face`：`key='person'`、`value=personName`。
-3. `ml.classify`：`key='class'`、`value=label`，`score` 写入 `file_tag.score`。
-4. 同名人物允许存在；文件级 `vision.face` 标签在名字维度合并。
+1. `meta.annotation`：`key=fieldKey`、`value=fieldValue`，写入 `asset_tag`。
+2. `vision.face`：`key='person'`、`value=personName`，按 `person_face` 投影到资产标签。
+3. `ml.classify`：`key='class'`、`value=label`，`score` 写入 `asset_tag.score`。
+4. 同名人物允许存在；资产级 `vision.face` 标签在名字维度合并。
 
 ## 6. 接口行为映射
 
@@ -121,21 +139,25 @@ CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);
    - `PATCH /v1/files/relative-paths`
    - `POST /v1/file-bindings/reconciliations`
    - `POST /v1/file-bindings/cleanups`
-2. 历史维护接口全部下线（返回下线错误或 404）。
-3. `/v1/data/tags/*` 的时间语义以 `file_tag.appliedAt` 为准。
-4. 人脸接口路径不变，但内部流程不依赖 `face_job_state`。
+2. 上述接口继续接收 `rootPath + relativePath`，Gateway 内部统一解析为 `absolutePath` 再读写 `file -> asset`。
+3. `/v1/data/tags/*` 的时间语义以 `asset_tag.appliedAt` 为准。
+4. 普通查询默认仅返回 `asset.deletedAt IS NULL` 的活跃资产。
+5. 人脸接口路径不变，但内部流程不依赖 `face_job_state`，且默认工作在全局人物空间。
 
 ## 7. 迁移策略
 
-1. 检测到旧结构时，直接重建数据库（不做备份）。
-2. `person.name` 不设唯一约束，允许同名。
-3. `score` 作为 `file_tag` 通用可空列，当前仅 `ml.classify` 使用。
+1. 检测到旧结构时，直接重建全局数据库（不做备份）。
+2. 不读取、不导入旧 `<root>/.fauplay/faudb.v1.sqlite`。
+3. `person.name` 不设唯一约束，允许同名。
+4. `score` 作为 `asset_tag` 通用可空列，当前仅 `ml.classify` 使用。
+5. `sha256` 仅预留为可空字段，不在 v1 设计其生成流程或管理接口。
 
 ## 8. 验收场景
 
-1. 新 root 首次访问自动创建 v2 结构，且不存在被移除的表。
-2. `file-annotations` 同文件同字段重复写入时，只保留一个当前值绑定。
-3. 分类落库后 `file_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
-4. 人脸检测/聚类/改名/合并后，文件级 `vision.face` 标签与 `person_face` 结果一致。
-5. 同名人物存在时，标签按名字合并，不保证人物级可区分过滤。
-6. 历史维护接口返回下线错误（或 404）。
+1. 首次访问自动创建全局结构，且不存在被移除的表。
+2. 同一物理文件从重叠 root 打开两次时，只存在一条 `file(absolutePath)`。
+3. `file-annotations` 同资产同字段重复写入时，只保留一个当前值绑定。
+4. 分类落库后 `asset_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
+5. 人脸检测/聚类/改名/合并后，资产级 `vision.face` 标签与 `person_face` 结果一致。
+6. 同内容文件位于不同路径时，file-centered 查询会返回多条 `file`，但这些结果共享同一套资产标签与人脸数据。
+7. 当最后一个 `file` 消失时，`asset` 进入软删除；同内容文件再次出现时，原 `asset` 自动复活。

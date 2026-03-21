@@ -28,11 +28,12 @@
 
 ## 4. 数据落盘契约 (Gateway Persistence)
 
-1. Gateway 接收分类结果后，按 `tag + file_tag` 双层模型落盘。
+1. Gateway 接收分类结果后，按 `tag + asset_tag` 双层模型落盘。
 2. 标签来源固定：`source=ml.classify`。
 3. `tag` 仅承载标签身份：`id,key,value,source`（`PRIMARY KEY(key,value,source)` + `id UNIQUE`）。
-4. 分类置信度必须写入 `file_tag.score`，不得再写入 `tag` 扩展字段。
-5. 文件关联必须通过统一 `fileId`。
+4. 分类置信度必须写入 `asset_tag.score`，不得再写入 `tag` 扩展字段。
+5. 文件上下文输入必须先通过 `rootPath + relativePath -> absolutePath -> file -> asset` 解析，再以统一 `assetId` 持久化。
+6. 同内容文件命中同一 `asset` 时，其 file-centered 查询结果必须共享相同的分类标签与 `score`。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -52,14 +53,16 @@
 2. `FR-TIMM-02` 分类结果必须由 Gateway 持久化为统一标签。
 3. `FR-TIMM-03` 分类标签必须可被统一标签过滤查询消费。
 4. `FR-TIMM-04` 分类失败不得破坏已落盘标签数据。
-5. `FR-TIMM-05` 分类 `score` 必须以 `file_tag.score` 持久化。
+5. `FR-TIMM-05` 分类 `score` 必须以 `asset_tag.score` 持久化。
+6. `FR-TIMM-06` 同内容文件在不同路径下出现时，分类结果必须按共享 `asset` 语义复用。
 
 ## 7. 验收标准 (AC)
 
 1. `AC-TIMM-01` 单图分类成功后，统一标签查询可读到分类标签。
 2. `AC-TIMM-02` 批量分类部分失败时，成功项标签可落盘，失败项不产生脏数据。
 3. `AC-TIMM-03` 关闭/重启后分类标签可恢复查询。
-4. `AC-TIMM-04` 分类标签查询可返回 `file_tag.score`，非分类来源标签该字段保持 `NULL`。
+4. `AC-TIMM-04` 分类标签查询可返回 `asset_tag.score`，非分类来源标签该字段保持 `NULL`。
+5. `AC-TIMM-05` 同内容文件在不同路径下出现时，这些 file-centered 查询结果可读到相同分类标签与 `score`。
 
 ## 8. 关联主题 (Related Specs)
 

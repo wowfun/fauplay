@@ -4,35 +4,35 @@
 
 定义 Fauplay 的本地数据统一契约，确保：
 
-1. 本地数据单一真源固定为 SQLite。
+1. 本地数据单一真源固定为全局 SQLite。
 2. 数据读写（DDL/DML）统一由 Gateway 承担，禁止插件直写。
-3. 文件身份（`fileId`）与标签系统跨能力域一致。
+3. 内容身份（`assetId`）与位置身份（`fileId`）在标签、人脸、分类等能力域下职责清晰。
 4. 人脸、标注、分类能力在同一数据层下可查询、可组合、可演进。
 
 ## 2. 关键术语 (Terminology)
 
 - 单一真源（Single Source of Truth）
 - 数据网关层（Gateway Data Layer）
-- 文件标识（`fileId`）
-- 标签记录（Tag Record）
-- 文件标签关联（File-Tag Binding）
+- 资产标识（`assetId`）
+- 文件位置记录（File Location Record）
+- 资产标签关联（Asset-Tag Binding）
 - 计算插件（Compute Plugin）
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
 
 范围内：
 
-1. 统一本地数据文件：`.fauplay/faudb.v1.sqlite`。
+1. 统一本地数据文件：`${HOME}/.fauplay/faudb.global.sqlite`。
 2. 统一 DDL、迁移、事务、索引、并发控制归属到 Gateway。
-3. 定义统一文件与标签模型（含多来源标签）。
+3. 定义统一 `asset + file + tag + asset_tag` 数据模型（含多来源标签）。
 4. 定义 Gateway 原生 HTTP 读写接口契约。
 5. 定义插件“只计算不直写”约束。
 
 范围外：
 
-1. 旧数据导入与兼容迁移。
-2. 跨 root 数据合并。
-3. 向量检索算法优化细节。
+1. 旧 per-root 数据导入与兼容迁移。
+2. `sha256` 生成流程与人工校验工作流。
+3. 全局管理/校验 UI 设计细节。
 
 ## 4. 架构契约 (Gateway as Single Data Layer)
 
@@ -45,35 +45,45 @@
 
 ### 5.1 文件路径与隔离
 
-1. 数据库文件固定为：`<rootHandle>/.fauplay/faudb.v1.sqlite`。
-2. 一个 root 对应一个库文件，禁止跨 root 共享库。
-3. `schemaVersion=2`（`PRAGMA user_version=2`）。
+1. 数据库文件固定为：`${HOME}/.fauplay/faudb.global.sqlite`。
+2. 全应用共享单一全局库；`rootPath` 仅作为请求过滤条件，不是持久化实体。
+3. `schemaVersion=3`（`PRAGMA user_version=3`）。
 
 ### 5.2 统一主键与关系
 
-1. `file.id` 为全局唯一 `UUID`，作为统一 `fileId`。
-2. `tag` 使用复合主键 `PRIMARY KEY(key, value, source)`，并额外保留 `id UNIQUE` 供 `file_tag.tagId` 引用。
-3. `file_tag` 作为文件-标签唯一绑定层，`PRIMARY KEY(fileId, tagId)`。
-4. `.annotations.v1.json`、`faces.v1.sqlite` 不再作为运行时数据源。
+1. `asset.id` 为全局唯一 `UUID`，作为统一业务真源 `assetId`。
+2. `file.id` 为全局唯一 `UUID`，作为文件位置标识 `fileId`；`fileId` 不再承担跨能力域业务真源职责。
+3. `asset` 以 `UNIQUE(size, fingerprint, fpMethod)` 作为主内容身份约束；`sha256` 为可空预留字段，不参与 v1 主身份与共享判定。
+4. `file` 以 `absolutePath UNIQUE` 作为唯一位置身份；数据库不持久化 `relativePath`。
+5. `tag` 使用复合主键 `PRIMARY KEY(key, value, source)`，并额外保留 `id UNIQUE` 供 `asset_tag.tagId` 引用。
+6. `asset_tag` 作为资产-标签唯一绑定层，`PRIMARY KEY(assetId, tagId)`。
+7. 旧 `.annotations.v1.json`、`faces.v1.sqlite` 与 `<root>/.fauplay/faudb.v1.sqlite` 不再作为运行时数据源。
 
 ### 5.3 最小逻辑模型（表级约束）
 
-1. `file`：`id`、`relativePath`、`fileSizeBytes`、`fileMtimeMs`、`bindingFp`、`createdAt`、`updatedAt`。
-2. `tag`：`id`、`key`、`value`、`source`。
-3. `file_tag`：`fileId`、`tagId`、`appliedAt`、`score`（可空，当前仅分类使用）。
-4. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `fileId` 关系。
-5. `annotation_record`、`face_job_state` 不再保留。
-6. 不新增 `annotation_tag_ext/face_tag_ext/classification_tag_ext`。
+1. `asset`：`id`、`size`、`fingerprint`、`fpMethod`、`sha256`（可空）、`deletedAt`（可空）、`createdAt`、`updatedAt`。
+2. `file`：`id`、`assetId`、`absolutePath`、`fileMtimeMs`、`lastSeenAt`、`createdAt`、`updatedAt`。
+3. `tag`：`id`、`key`、`value`、`source`。
+4. `asset_tag`：`assetId`、`tagId`、`appliedAt`、`score`（可空，当前仅分类使用）。
+5. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `assetId` 关系。
+6. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
 
-### 5.4 标签语义
+### 5.4 路径与查询语义
 
-1. `source=meta.annotation`：`key=fieldKey`、`value=fieldValue`。
-2. `source=vision.face`：`key='person'`、`value=personName`。
-3. `source=ml.classify`：`key='class'`、`value=label`，`score` 写入 `file_tag.score`。
-4. 同名人物允许存在，文件标签在名字维度合并。
+1. `absolutePath` 必须以 Linux 风格绝对路径持久化，作为唯一位置身份。
+2. `relativePath` 仅在读请求显式携带 `rootPath` 时，由 Gateway 基于 `absolutePath` 动态换算后返回。
+3. 重叠 root（如先打开 `rootA`，再打开 `rootA/sub`）不得产生重复 `file` 记录；同一物理文件只允许存在一条 `file(absolutePath)`。
+4. 普通文件、标签、人物查询默认仅返回 `asset.deletedAt IS NULL` 的活跃资产；`includeDeleted` 仅为未来全局管理/校验接口预留。
+
+### 5.5 标签语义
+
+1. `source=meta.annotation`：`key=fieldKey`、`value=fieldValue`，写入 `asset_tag`。
+2. `source=vision.face`：`key='person'`、`value=personName`，由 `person_face` 投影生成资产级标签。
+3. `source=ml.classify`：`key='class'`、`value=label`，`score` 写入 `asset_tag.score`。
+4. 同名人物允许存在；资产级 `vision.face` 标签按人物显示名维度合并，file-centered 查询会把资产级标签展开到每个可见 `file`。
 5. `source` 用于来源追踪与标签去重维度，不作为前端过滤/预览显示的默认读取门槛。
 
-### 5.5 参考文档
+### 5.6 参考文档
 
 1. 详细 DDL 与行为映射见：[`./tag-core-v2-reference.md`](./tag-core-v2-reference.md)。
 
@@ -84,8 +94,11 @@
 1. `POST /v1/data/tags/file`
 2. `POST /v1/data/tags/options`
 3. `POST /v1/data/tags/query`
-4. `/v1/data/tags/file` 与 `/v1/data/tags/query` 默认返回多来源标签集合，不得隐式按 `source=meta.annotation` 预过滤。
-5. 前端可按场景做二次筛选，但顶部标签过滤与预览标签显示默认应支持跨来源汇总。
+4. `/v1/data/tags/file` 支持通过 `fileId` 或 `rootPath + relativePath` 定位，内部统一解析为 `absolutePath -> file -> asset`。
+5. `/v1/data/tags/options` 与 `/v1/data/tags/query` 默认执行全局查询，并支持显式 `rootPath` 过滤。
+6. file-centered 查询结果必须同时返回 `fileId` 与 `assetId`；当请求携带 `rootPath` 时，响应还必须返回动态换算后的 `relativePath`。
+7. `/v1/data/tags/file` 与 `/v1/data/tags/query` 默认返回多来源标签集合，不得隐式按 `source=meta.annotation` 预过滤。
+8. 标签统计按可见 `file` 行计数，不按去重后的 `asset` 数计数，以保持与 file-centered 结果一致。
 
 ### 6.2 本地数据管理
 
@@ -93,7 +106,8 @@
 2. `PATCH /v1/files/relative-paths`
 3. `POST /v1/file-bindings/reconciliations`
 4. `POST /v1/file-bindings/cleanups`
-5. 历史维护接口全部下线（返回下线错误或 404）。
+5. 以上接口对外继续接收 `rootPath + relativePath`，但持久化层只落 `absolutePath`。
+6. 历史维护接口全部下线（返回下线错误或 404）。
 
 ### 6.3 人脸流程
 
@@ -117,40 +131,44 @@
 
 ## 8. 兼容与迁移策略 (Compatibility)
 
-1. 不兼容旧数据：不读取、不导入旧 `faces.v1.sqlite` 与旧 `.annotations.v1.json`。
-2. 当检测到旧 schema 时，直接重建数据库（不备份）。
-3. 新版本仅认 `schemaVersion=2`。
+1. 不兼容旧数据：不读取、不导入旧 `faces.v1.sqlite`、旧 `.annotations.v1.json` 与旧 `<root>/.fauplay/faudb.v1.sqlite`。
+2. 当检测到旧全局 schema 时，直接重建数据库（不备份）。
+3. 新版本仅认 `schemaVersion=3`。
 
 ## 9. 功能需求 (FR)
 
-1. `FR-LDC-01` 系统必须以 `faudb.v1.sqlite` 作为唯一运行时数据源。
+1. `FR-LDC-01` 系统必须以 `faudb.global.sqlite` 作为唯一运行时数据源。
 2. `FR-LDC-02` Gateway 必须成为唯一 DDL/DML 执行者。
 3. `FR-LDC-03` 插件不得直接访问 SQLite。
-4. `FR-LDC-04` 所有可持久化数据必须统一关联 `fileId`。
-5. `FR-LDC-05` 系统必须提供标签查询 HTTP 接口用于预览展示与过滤。
+4. `FR-LDC-04` 所有可持久化业务数据必须统一关联 `assetId`；`fileId` 仅表示物理位置记录。
+5. `FR-LDC-05` 系统必须提供 file-centered 标签查询 HTTP 接口用于预览展示与过滤。
 6. `FR-LDC-06` 单次写请求必须事务化，失败可回滚。
 7. `FR-LDC-07` 标签来源必须可追踪（`source`）。
-8. `FR-LDC-08` 系统不得再读写 `.annotations.v1.json` 作为业务真源。
-9. `FR-LDC-09` 系统必须支持 `file` 表批量路径重绑、自动重绑与失效 `fileId` 清理。
+8. `FR-LDC-08` 系统不得再读写旧 sidecar 或旧 per-root 数据库作为业务真源。
+9. `FR-LDC-09` 系统必须支持 `file` 记录的批量路径重绑、自动重绑与失效 `fileId` 清理，且成功重绑时 `fileId` 保持稳定。
 10. `FR-LDC-10` 标签读取接口默认不得将 `source=meta.annotation` 作为隐式过滤条件。
+11. `FR-LDC-11` 普通查询必须默认隐藏 `deletedAt` 非空的软删除资产。
+12. `FR-LDC-12` `sha256` 仅作为预留字段存在，不参与 v1 主身份、唯一键、共享判定与接口设计。
 
 ## 10. 验收标准 (AC)
 
-1. `AC-LDC-01` 新 root 首次调用后自动创建 `.fauplay/faudb.v1.sqlite` 并可查询。
-2. `AC-LDC-02` `file-annotations` 同文件同字段重复写入时，只保留一个当前绑定值。
-3. `AC-LDC-03` 人脸检测与聚类后，人物列表与文件标签查询结果一致。
-4. `AC-LDC-04` 分类推理后，`file_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
-5. `AC-LDC-05` 插件进程异常时事务回滚，数据库无半写入状态。
-6. `AC-LDC-06` 旧 sidecar/旧库存在时系统不读取且不崩溃。
+1. `AC-LDC-01` 首次调用后自动创建 `${HOME}/.fauplay/faudb.global.sqlite` 并可查询。
+2. `AC-LDC-02` 同一物理文件从重叠 root 打开两次时，只生成一条 `file(absolutePath)` 记录。
+3. `AC-LDC-03` 同内容文件在不同路径下命中同一 `asset` 后，任一路径写入标签，其余路径可立即看到相同标签。
+4. `AC-LDC-04` 分类推理后，`asset_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
+5. `AC-LDC-05` 人脸检测与聚类后，人物列表、资产标签与 file-centered 查询结果一致。
+6. `AC-LDC-06` 旧 sidecar、旧人脸库与旧 per-root 库存在时，系统不读取且不崩溃。
 7. `AC-LDC-07` `files/relative-paths` 支持链式映射（如 `A->B, B->C`）且 `fileId` 保持稳定。
-8. `AC-LDC-08` `file-bindings/reconciliations` 唯一命中重绑后 `fileId` 保持稳定，`file-bindings/cleanups` 支持 dry-run/commit 并完成级联一致性收敛。
+8. `AC-LDC-08` `file-bindings/reconciliations` 唯一命中重绑后 `fileId` 保持稳定；当同一路径内容变更时，同一 `fileId` 可切换到新的 `assetId`。
 9. `AC-LDC-09` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
+10. `AC-LDC-10` 当某个 `asset` 的最后一个 `file` 消失时，普通查询不再返回该资产；同内容文件再次出现时会自动复活原 `asset`。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
-1. `TagRecord` 时间字段语义收敛到 `file_tag.appliedAt`。
+1. `TagRecord` 时间字段语义收敛到 `asset_tag.appliedAt`。
 2. `TagRecord.score` 作为通用可空字段新增，当前仅分类来源使用。
-3. 标注与文件维护接口统一为 `/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/file-bindings/*`。
+3. file-centered 查询结果统一返回 `fileId` 与 `assetId`；`relativePath` 仅在请求携带 `rootPath` 时返回。
+4. 标注与文件维护接口保持 `/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/file-bindings/*` 路径不变，但内部真源切换到 `absolutePath -> file -> asset`。
 
 ## 12. 关联主题 (Related Specs)
 

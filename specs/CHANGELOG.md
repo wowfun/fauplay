@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-03-22
+### Changed
+- 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：本地数据真源从 per-root `faudb.v1.sqlite` 切换为全局 `faudb.global.sqlite`，核心模型重构为 `asset + file + tag + asset_tag`，并明确 `absolutePath` 为唯一位置身份、`rootPath` 仅为请求过滤条件、`asset.deletedAt` 为普通查询默认隐藏的软删除语义。
+- 更新 `specs/114-local-data-plugin/spec.md`：`local.data` 写入/重绑/清理链路统一改为 `rootPath + relativePath -> absolutePath -> file -> asset`，并明确 `fileId` 仅表示位置记录、内容变更可切换 `assetId`、最后一个 `file` 消失时对应 `asset` 进入软删除。
+- 更新 `specs/115-facial-recognition/spec.md` 与 `specs/104-timm-classification-mcp/spec.md`：人脸与分类结果统一切换到 `assetId` 真源；人物空间默认全局，不再按 root 隔离；同内容文件的多路径位置共享同一套 `vision.face` / `ml.classify` 结果。
+
 ## 2026-03-21
 ### Changed
 - 清理活动专题规范中的过期表述：`114-local-data-plugin`、`116-rename-driven-rebind`、`005-local-data-contracts`（含 `tag-core-v2-reference`）不再显式枚举已下线旧接口路径，统一改为“历史维护接口已下线（返回下线错误或 404）”；`114-local-data-plugin/plan.md` 同步修正为 RESTful 口径并更新 operation 名称；`003-ui-ux/spec.md` 与 `003-ui-ux/areas.md` 将“sidecar 快照门控”统一为“标签快照门控”术语。
