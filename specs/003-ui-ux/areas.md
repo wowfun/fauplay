@@ -25,10 +25,10 @@
 
 ### A 顶部工具区（Top Toolbar Zone）
 
-- 职责：目录导航、搜索筛选、排序、视图模式切换。
+- 职责：目录导航、搜索筛选、排序、视图模式切换、顶部标签过滤。
 - 当前组件：`features/explorer/components/ExplorerToolbar`
 - 边界：不承载预览渲染与媒体播放状态机。
-- 条件渲染约束：标签过滤相关 UI 仅在当前 root 的标签快照满足“存在可读取标签快照文件且存在可过滤标注”时显示；否则整块隐藏，且不得保留隐式标签过滤结果；不提供手动 `all/boolean` 模式切换，模式由 include/exclude 条件自动推导。
+- 标签过滤参考：顶部标签过滤位于 A 区；门控显示与回退基线遵循 `spec.md`，详细交互、面板状态与 `source` / `key` 分面规则见 [`./top-toolbar-tag-filter.md`](./top-toolbar-tag-filter.md)。
 
 ### B1 文件网格区（File Browser Grid Zone）
 

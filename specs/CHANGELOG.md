@@ -2,6 +2,8 @@
 
 ## 2026-03-22
 ### Changed
+- 更新 `specs/003-ui-ux/top-toolbar-tag-filter.md` 与 `src/features/explorer/components/ExplorerToolbar.tsx`：顶部标签过滤候选面板新增“全选”按钮，按当前 `source` / `key` 分面后的可见候选批量勾选，不清除当前被分面隐藏的已选标签。
+- 新增 `specs/003-ui-ux/top-toolbar-tag-filter.md`，并更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：将顶部标签过滤细则下沉为 `003` 下独立参考文件；主规范保留门控、回退、全来源读取与开面板强制刷新等基线约束；新增候选面板 `source` / `key` 分面、面板级临时状态与“未标注”显示边界规则。
 - 更新 `specs/117-preview-header-tag-management/spec.md`：预览切换到文件时，必须按文件粒度强制刷新该文件标签并从数据库读取最新信息，不再因已有前端快照而跳过读库；允许先展示缓存后无感更新头部标签。
 - 更新 `specs/003-ui-ux/spec.md`：顶部工具栏标签过滤在点击打开“包含标签/排除标签”面板时，必须立即强制刷新当前 root 标签快照并从数据库读取最新标签信息，不再只依赖进入 root 时的首次快照。
 - 新增 `specs/117-preview-header-tag-management/spec.md`，并更新 `specs/005-local-data-contracts/spec.md` 与 `specs/114-local-data-plugin/spec.md`：预览头部标签与顶部过滤改为按逻辑标签 `key + value` 聚合；同一逻辑标签同时存在 `meta.annotation` 与派生来源时以前者为代表来源；`local.data` 新增 `bindAnnotationTag/unbindAnnotationTag` 与对应 `file-annotations/tags/*` 写契约，用于仅补/删 `meta.annotation` 来源而不影响派生来源。
