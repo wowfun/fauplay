@@ -8,6 +8,7 @@
 2. 数据读写（DDL/DML）统一由 Gateway 承担，禁止插件直写。
 3. 内容身份（`assetId`）与路径索引（`file.absolutePath`）在标签、人脸、分类等能力域下职责清晰。
 4. 人脸、标注、分类能力在同一数据层下可查询、可组合、可演进。
+5. 文件型运行时配置按“应用配置归应用、工具配置归工具”收敛，不再把 repo 默认值、工具默认值、全局覆盖、root 覆盖与浏览器私有状态混作一层。
 
 ## 2. 关键术语 (Terminology)
 
@@ -17,16 +18,21 @@
 - 文件路径索引（File Path Index）
 - 资产标签关联（Asset-Tag Binding）
 - 计算插件（Compute Plugin）
+- 应用配置（App-owned Runtime Config）
+- 工具配置（Tool-owned Runtime Config）
+- 全局配置根（Global Config Root）
+- Root 配置根（Root Config Root）
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
 
 范围内：
 
-1. 统一本地数据文件：`${HOME}/.fauplay/faudb.global.sqlite`。
+1. 统一本地数据文件：`${HOME}/.fauplay/global/faudb.sqlite`。
 2. 统一 DDL、迁移、事务、索引、并发控制归属到 Gateway。
 3. 定义统一 `asset + file + tag + asset_tag` 数据模型（含多来源标签）。
 4. 定义 Gateway 原生 HTTP 读写接口契约。
 5. 定义插件“只计算不直写”约束。
+6. 定义文件型运行时配置的统一分层、路径与覆盖顺序。
 
 范围外：
 
@@ -41,11 +47,24 @@
 3. 所有持久化操作必须由 Gateway 数据层统一执行。
 4. Gateway 必须以事务方式应用一次写请求的全部数据变更，保证原子性。
 
+### 4.1 文件型运行时配置分层
+
+1. app-owned 运行时配置按以下顺序解析：`src/config/<domain>.json -> ~/.fauplay/global/<domain>.json -> <root>/.fauplay/<domain>.json`。
+2. tool-owned 默认配置必须与工具一起发布在 `tools/mcp/<tool>/config.json`，不再强制迁入 `src/config/`。
+3. tool-owned 配置不得自动读取 `~/.fauplay/global/<domain>.json` 或 `<root>/.fauplay/<domain>.json` 作为内建覆盖层。
+4. Host 如需覆盖工具内部配置，必须通过 `~/.fauplay/global/mcp.json` 显式改写对应 server 的 `args/env/command/cwd`，或在独立运行工具时显式传入 `--config <path>`。
+5. 并非所有 app-owned 配置域都支持 root 覆盖；只有显式声明为 root-scoped 的域才允许读取 `<root>/.fauplay/<domain>.json`。
+6. `mcp` 注册配置固定为 default + global 两层：`src/config/mcp.json -> ~/.fauplay/global/mcp.json`；Gateway 启动时不得读取 `<root>/.fauplay/mcp.json`。
+7. 浏览器 `localStorage` 与 `IndexedDB` 不参与文件型运行时配置解析链。
+8. 当 `root=~` 时，`~/.fauplay/<domain>.json` 仍视为 root 级配置，`~/.fauplay/global/<domain>.json` 仍只视为全局级配置；实现必须按精确文件路径、非递归方式查找，避免串层。
+9. 项目目录下的 `.fauplay/` 仅表示“以项目目录为 root 的本地数据与配置目录”，不再承载 repo 发布的默认配置。
+10. `*.local.json` 不再属于运行时兼容路径；旧文件允许遗留，但系统不得继续读取。
+
 ## 5. 数据与存储契约 (SQLite Contract)
 
 ### 5.1 文件路径与隔离
 
-1. 数据库文件固定为：`${HOME}/.fauplay/faudb.global.sqlite`。
+1. 数据库文件固定为：`${HOME}/.fauplay/global/faudb.sqlite`。
 2. 全应用共享单一全局库；`rootPath` 仅作为请求过滤条件，不是持久化实体。
 3. `schemaVersion=3`（`PRAGMA user_version=3`）。
 
@@ -88,6 +107,7 @@
 ### 5.6 参考文档
 
 1. 详细 DDL 与行为映射见：[`./tag-core-v2-reference.md`](./tag-core-v2-reference.md)。
+2. 文件型运行时配置分层、路径矩阵与作用域表见：[`./runtime-config-reference.md`](./runtime-config-reference.md)。
 
 ## 6. Gateway HTTP 接口契约 (Public HTTP APIs)
 
@@ -138,12 +158,13 @@
 ## 8. 兼容与迁移策略 (Compatibility)
 
 1. 不兼容旧数据：不读取、不导入旧 `faces.v1.sqlite`、旧 `.annotations.v1.json` 与旧 `<root>/.fauplay/faudb.v1.sqlite`。
-2. 当检测到旧全局 schema 时，直接重建数据库（不备份）。
-3. 新版本仅认 `schemaVersion=3`。
+2. 若旧全局数据库 `${HOME}/.fauplay/faudb.global.sqlite` 存在且新路径 `${HOME}/.fauplay/global/faudb.sqlite` 缺失，系统必须先完成一次迁移，再打开新路径。
+3. 当检测到旧全局 schema 时，直接重建数据库（不备份）。
+4. 新版本仅认 `schemaVersion=3`。
 
 ## 9. 功能需求 (FR)
 
-1. `FR-LDC-01` 系统必须以 `faudb.global.sqlite` 作为唯一运行时数据源。
+1. `FR-LDC-01` 系统必须以 `${HOME}/.fauplay/global/faudb.sqlite` 作为唯一运行时数据源。
 2. `FR-LDC-02` Gateway 必须成为唯一 DDL/DML 执行者。
 3. `FR-LDC-03` 插件不得直接访问 SQLite。
 4. `FR-LDC-04` 所有可持久化业务数据必须统一关联 `assetId`；`file` 仅表示当前路径索引。
@@ -157,10 +178,17 @@
 12. `FR-LDC-12` `sha256` 仅作为预留字段存在，不参与 v1 主身份、唯一键、共享判定与接口设计。
 13. `FR-LDC-13` 前端逻辑标签展示、过滤与候选去重必须按 `key + value` 聚合，而非按 `source` 分裂。
 14. `FR-LDC-14` 系统必须提供“仅补/删 `meta.annotation` 来源”的逻辑标签写接口，不得影响派生来源标签。
+15. `FR-LDC-15` app-owned 文件型运行时配置必须统一按 `src/config -> ~/.fauplay/global -> <root>/.fauplay` 解析；只有显式 root-scoped 域可读取 root 级配置。
+16. `FR-LDC-16` MCP 注册配置必须仅解析 `src/config/mcp.json` 与 `~/.fauplay/global/mcp.json`，不得在 Gateway 启动时读取 root 级 `mcp.json`。
+17. `FR-LDC-17` 系统不得继续读取 `.fauplay/mcp.local.json`、`config.local.json` 或其他 `*.local.json` 作为运行时配置兼容路径。
+18. `FR-LDC-18` 项目目录下 `.fauplay/` 必须只作为该目录被当作 root 时的本地数据/配置目录，不再承载 repo 发布默认值。
+19. `FR-LDC-19` 浏览器 `localStorage` 与 `IndexedDB` 不得参与文件型运行时配置覆盖链。
+20. `FR-LDC-20` 当 root 为用户家目录时，root 级 `.fauplay/<domain>.json` 与全局 `.fauplay/global/<domain>.json` 必须保持作用域隔离，不得递归串层。
+21. `FR-LDC-21` `local-data`、`video-same-duration`、`timm-classifier`、`vision-face` 等 tool-owned 默认配置必须位于 `tools/mcp/<tool>/config.json`，且不得自动读取 `~/.fauplay/global/<domain>.json` 作为内建覆盖层。
 
 ## 10. 验收标准 (AC)
 
-1. `AC-LDC-01` 首次调用后自动创建 `${HOME}/.fauplay/faudb.global.sqlite` 并可查询。
+1. `AC-LDC-01` 首次调用后自动创建 `${HOME}/.fauplay/global/faudb.sqlite` 并可查询。
 2. `AC-LDC-02` 同一物理文件从重叠 root 打开两次时，只生成一条 `file(absolutePath)` 记录。
 3. `AC-LDC-03` 同内容文件在不同路径下命中同一 `asset` 后，任一路径写入标签，其余路径可立即看到相同标签。
 4. `AC-LDC-04` 分类推理后，`asset_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
@@ -172,6 +200,10 @@
 10. `AC-LDC-10` 当某个 `asset` 的最后一个 `file` 消失时，普通查询不再返回该资产；同内容文件再次出现时会自动复活原 `asset`。
 11. `AC-LDC-11` 同一文件同时拥有 `vision.face(person=Alice)` 与 `meta.annotation(person=Alice)` 时，前端逻辑标签聚合后仅显示一个 `person=Alice` 项，并优先以 `meta.annotation` 为代表来源。
 12. `AC-LDC-12` 调用 `file-annotations/tags/unbind` 删除 `meta.annotation(person=Alice)` 后，若 `vision.face(person=Alice)` 仍存在，则查询结果仍保留该逻辑标签。
+13. `AC-LDC-13` `mcp.local.json`、`config.local.json` 等旧本地覆盖文件存在时，系统不读取且不崩溃。
+14. `AC-LDC-14` 当 `root=~` 时，`~/.fauplay/<domain>.json` 可作为 root 级文件生效，但 `~/.fauplay/global/<domain>.json` 不会被误识别为 root 级配置。
+15. `AC-LDC-15` 若旧路径 `${HOME}/.fauplay/faudb.global.sqlite` 存在且新路径缺失，首次打开数据库后新路径生效，旧路径不再作为运行时读写真源。
+16. `AC-LDC-16` `~/.fauplay/global/timm-classifier.json`、`video-same-duration.json`、`vision-face.json`、`local-data.json` 等旧 tool-owned 全局覆盖文件存在时，系统忽略它们且不崩溃。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 

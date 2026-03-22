@@ -76,7 +76,7 @@
 配置文件：
 
 1. 默认：`tools/mcp/video-same-duration/config.json`
-2. 本地覆盖：`tools/mcp/video-same-duration/config.local.json`（可选）
+2. 显式覆盖：独立运行时可传 `--config <path>`；Gateway 如需覆盖，应在 `~/.fauplay/global/mcp.json` 中改写该 server 的 `args`
 
 字段：
 
@@ -89,16 +89,18 @@
 
 规则：
 
-1. `config.local.json` 与默认配置按浅合并，本地同名字段覆盖默认配置。
-2. 搜索默认排序为 `size-descending`。
-3. `searchScope=root` 时仅检索当前 `rootPath` 范围。
-4. ES 输出解码固定为自动判定（原始字节在 UTF-8 与 GBK 之间择优解码），不暴露手工编码配置项。
-5. 同时长判定以毫秒为准：候选项需满足 `|candidateDurationMs - targetDurationMs| <= toleranceMs`。
-6. 大小容差启用条件：`toleranceSize >= 0`；启用后候选项需满足 `|candidateSizeBytes - targetSizeBytes| <= toleranceSize * 1024`。
-7. `openEverything` 生成的查询条件需与插件内搜索等价；启用大小容差时必须包含对应 `size` 条件。
-8. 当目标文件位于 `/mnt/<drive>/...` 且探测阶段报错包含 `No such device` 时，系统需尝试执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并仅重试一次。
-9. 自动重挂载仅使用环境变量 `SUDO_PASSWORD`；不支持 `sudo_password` 兼容读取。
-10. 探测与自动重挂载流程需设置超时并快速失败，避免长时间阻塞导致前端 `MCP_CLIENT_TIMEOUT`。
+1. 未显式传入 `--config` 时，工具只读取同目录默认配置文件。
+2. 显式传入 `--config` 时，工具只读取该文件。
+3. 工具不得自动读取 `~/.fauplay/global/video-same-duration.json`、`<root>/.fauplay/video-same-duration.json` 或其他 `*.local.json` 作为内建覆盖层。
+4. 搜索默认排序为 `size-descending`。
+5. `searchScope=root` 时仅检索当前 `rootPath` 范围。
+6. ES 输出解码固定为自动判定（原始字节在 UTF-8 与 GBK 之间择优解码），不暴露手工编码配置项。
+7. 同时长判定以毫秒为准：候选项需满足 `|candidateDurationMs - targetDurationMs| <= toleranceMs`。
+8. 大小容差启用条件：`toleranceSize >= 0`；启用后候选项需满足 `|candidateSizeBytes - targetSizeBytes| <= toleranceSize * 1024`。
+9. `openEverything` 生成的查询条件需与插件内搜索等价；启用大小容差时必须包含对应 `size` 条件。
+10. 当目标文件位于 `/mnt/<drive>/...` 且探测阶段报错包含 `No such device` 时，系统需尝试执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并仅重试一次。
+11. 自动重挂载仅使用环境变量 `SUDO_PASSWORD`；不支持 `sudo_password` 兼容读取。
+12. 探测与自动重挂载流程需设置超时并快速失败，避免长时间阻塞导致前端 `MCP_CLIENT_TIMEOUT`。
 
 ## 6. 持续调用与去重语义
 

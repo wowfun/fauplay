@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import {
@@ -27,8 +28,16 @@ const DEFAULT_HOST = '127.0.0.1'
 const GATEWAY_VERSION = '0.2.0'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
-const DEFAULT_MCP_CONFIG_PATH = path.resolve(process.cwd(), '.fauplay', 'mcp.json')
-const LOCAL_MCP_CONFIG_FILENAME = 'mcp.local.json'
+const PROJECT_ROOT = process.cwd()
+const DEFAULT_MCP_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'mcp.json')
+const GLOBAL_MCP_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'mcp.json')
+
+function resolveConfigPath(configPath) {
+  if (typeof configPath !== 'string' || !configPath.trim()) {
+    return configPath
+  }
+  return path.isAbsolute(configPath) ? configPath : path.resolve(PROJECT_ROOT, configPath)
+}
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -103,14 +112,19 @@ function appendPostProcessWarning(result, warning) {
   return result
 }
 
-function resolveCwd(configDir, cwd) {
+function resolveCwd(projectDir, cwd) {
   if (typeof cwd !== 'string' || !cwd.trim()) return undefined
-  return path.isAbsolute(cwd) ? cwd : path.resolve(configDir, cwd)
+  return path.isAbsolute(cwd) ? cwd : path.resolve(projectDir, cwd)
 }
 
 function toConfigObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return value
+}
+
+function formatMcpConfigSourceLog(source) {
+  const suffix = source.loaded ? '' : ' (missing, skipped)'
+  return `[gateway]   - ${source.label}: ${source.path}${suffix}`
 }
 
 async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
@@ -138,45 +152,73 @@ async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
   return parsed
 }
 
-function resolveLocalMcpConfigPath(configPath) {
-  return path.resolve(path.dirname(configPath), LOCAL_MCP_CONFIG_FILENAME)
+function mergeMcpServerEntries(baseEntry, overrideEntry) {
+  if (!baseEntry || typeof baseEntry !== 'object' || Array.isArray(baseEntry)) {
+    return overrideEntry
+  }
+  if (!overrideEntry || typeof overrideEntry !== 'object' || Array.isArray(overrideEntry)) {
+    return overrideEntry ?? baseEntry
+  }
+  return {
+    ...baseEntry,
+    ...overrideEntry,
+  }
 }
 
-function mergeMcpConfig(baseConfig, localConfig) {
+function mergeMcpConfig(baseConfig, overrideConfig) {
   const base = toConfigObject(baseConfig)
-  const local = toConfigObject(localConfig)
+  const override = toConfigObject(overrideConfig)
 
   const merged = {
     ...base,
-    ...local,
+    ...override,
   }
 
   const baseServers = toConfigObject(base.servers)
-  const localServers = toConfigObject(local.servers)
-  const hasServers = Object.keys(baseServers).length > 0 || Object.keys(localServers).length > 0
+  const overrideServers = toConfigObject(override.servers)
+  const hasServers = Object.keys(baseServers).length > 0 || Object.keys(overrideServers).length > 0
 
   if (hasServers) {
-    merged.servers = {
-      ...baseServers,
-      ...localServers,
+    const mergedServers = {}
+    const serverNames = new Set([...Object.keys(baseServers), ...Object.keys(overrideServers)])
+    for (const name of serverNames) {
+      mergedServers[name] = mergeMcpServerEntries(baseServers[name], overrideServers[name])
     }
+    merged.servers = mergedServers
   }
 
   return merged
 }
 
-async function loadMcpServersFromConfig(configPath) {
-  const baseConfig = await readMcpConfigFile(configPath, { allowMissing: true })
-  const localConfigPath = resolveLocalMcpConfigPath(configPath)
-  const localConfig = await readMcpConfigFile(localConfigPath, { allowMissing: true })
-  const parsed = mergeMcpConfig(baseConfig, localConfig)
+async function loadMcpServersFromConfig(configPath, { useGlobalConfig = true } = {}) {
+  const resolvedConfigPath = resolveConfigPath(configPath)
+  const configSources = []
+  const baseConfig = await readMcpConfigFile(resolvedConfigPath)
+  configSources.push({
+    label: useGlobalConfig ? 'default' : 'custom',
+    path: resolvedConfigPath,
+    loaded: true,
+  })
+  const globalConfig = useGlobalConfig
+    ? await readMcpConfigFile(GLOBAL_MCP_CONFIG_PATH, { allowMissing: true })
+    : null
+  if (useGlobalConfig) {
+    configSources.push({
+      label: 'global',
+      path: GLOBAL_MCP_CONFIG_PATH,
+      loaded: Boolean(globalConfig),
+    })
+  }
+  const parsed = mergeMcpConfig(baseConfig, globalConfig)
 
   const servers = parsed.servers
   if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
-    return []
+    return {
+      serverRegistry: [],
+      configSources,
+    }
   }
 
-  const configDir = path.dirname(configPath)
   const serversToLoad = []
 
   for (const [name, entry] of Object.entries(servers)) {
@@ -204,7 +246,7 @@ async function loadMcpServersFromConfig(configPath) {
       sourceLabel: name,
       command,
       args: toStringArray(entry.args),
-      cwd: resolveCwd(configDir, entry.cwd),
+      cwd: resolveCwd(PROJECT_ROOT, entry.cwd),
       env: toStringRecord(entry.env),
       callTimeoutMs: entry.callTimeoutMs,
       initTimeoutMs: entry.initTimeoutMs,
@@ -214,11 +256,14 @@ async function loadMcpServersFromConfig(configPath) {
     })
   }
 
-  return serversToLoad
+  return {
+    serverRegistry: serversToLoad,
+    configSources,
+  }
 }
 
-async function createMcpServerRegistry(configPath) {
-  return loadMcpServersFromConfig(configPath)
+async function createMcpServerRegistry(configPath, options) {
+  return loadMcpServersFromConfig(configPath, options)
 }
 
 function parseJsonRpcRequest(payload) {
@@ -483,10 +528,11 @@ async function handleMcpRequest(runtime, request, sessions, sessionId) {
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
-  const configPath = typeof options.mcpConfigPath === 'string' && options.mcpConfigPath
-    ? options.mcpConfigPath
-    : DEFAULT_MCP_CONFIG_PATH
-  const serverRegistry = await createMcpServerRegistry(configPath)
+  const hasCustomMcpConfig = typeof options.mcpConfigPath === 'string' && options.mcpConfigPath
+  const configPath = hasCustomMcpConfig ? resolveConfigPath(options.mcpConfigPath) : DEFAULT_MCP_CONFIG_PATH
+  const { serverRegistry, configSources } = await createMcpServerRegistry(configPath, {
+    useGlobalConfig: !hasCustomMcpConfig,
+  })
 
   const runtime = new McpHostRuntime({
     serverRegistry,
@@ -653,7 +699,10 @@ export async function startGatewayServer(options = {}) {
 
   server.listen(port, host, () => {
     console.log(`Fauplay gateway listening on http://${host}:${port}`)
-    console.log(`[gateway] MCP config: ${configPath}`)
+    console.log('[gateway] MCP config files:')
+    for (const source of configSources) {
+      console.log(formatMcpConfigSourceLog(source))
+    }
     console.log(`[gateway] MCP servers loaded: ${serverRegistry.length}`)
   })
 

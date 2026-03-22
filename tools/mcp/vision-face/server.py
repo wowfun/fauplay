@@ -18,6 +18,8 @@ from protocol import (
     write_jsonrpc,
 )
 
+DEFAULT_CONFIG_PATH = (Path(__file__).resolve().parent / "config.json").resolve()
+
 
 def handle_request(request: dict[str, Any], service: VisionFaceService) -> dict[str, Any] | None:
     method = request["method"]
@@ -55,7 +57,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         type=Path,
-        default=(Path(__file__).resolve().parent / "config.json"),
+        default=DEFAULT_CONFIG_PATH,
         help="Path to server config file",
     )
     options = parser.parse_args()

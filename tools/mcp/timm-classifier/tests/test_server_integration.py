@@ -3,13 +3,14 @@ import json
 import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SERVER_PATH = REPO_ROOT / "tools/mcp/timm-classifier/server.py"
-CONFIG_PATH = REPO_ROOT / "tools/mcp/timm-classifier/config.json"
+DEFAULT_CONFIG_PATH = REPO_ROOT / "tools/mcp/timm-classifier/config.json"
 FIXTURE_DIR = REPO_ROOT / "tools/mcp/timm-classifier/tests/fixtures"
 FIXTURE_IMAGE = "img1.jpg"
 VENV_PYTHON = REPO_ROOT / ".venv/bin/python"
@@ -23,10 +24,10 @@ def load_server_module():
     return module
 
 
-def run_server_requests(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def run_server_requests(requests: list[dict[str, Any]], config_path: Path) -> list[dict[str, Any]]:
     payload = "\n".join(json.dumps(item, ensure_ascii=False) for item in requests) + "\n"
     completed = subprocess.run(
-        [str(VENV_PYTHON), str(SERVER_PATH), "--config", str(CONFIG_PATH)],
+        [str(VENV_PYTHON), str(SERVER_PATH), "--config", str(config_path)],
         cwd=REPO_ROOT,
         input=payload,
         text=True,
@@ -46,6 +47,14 @@ def run_server_requests(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return responses
 
 
+@contextmanager
+def temp_config_copy(payload: dict[str, Any]):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / "config.json"
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        yield tmp_path
+
+
 class _FakePipeline:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
@@ -63,7 +72,7 @@ class TimmClassifierServerTests(unittest.TestCase):
         if not VENV_PYTHON.exists():
             raise unittest.SkipTest("missing .venv python")
         cls.server_module = load_server_module()
-        cls.base_config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        cls.base_config = json.loads(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
 
     def test_batch_size_default_is_64_when_missing(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -81,26 +90,27 @@ class TimmClassifierServerTests(unittest.TestCase):
             self.assertEqual(classifier.config["batch_size"], 64)
 
     def test_classify_batch_passes_configured_batch_size_to_pipeline(self):
-        classifier = self.server_module.TimmClassifier(CONFIG_PATH)
-        fake_pipeline = _FakePipeline()
-        classifier.pipeline = fake_pipeline
-        classifier.model_loaded = True
+        with temp_config_copy(self.base_config) as config_path:
+            classifier = self.server_module.TimmClassifier(config_path)
+            fake_pipeline = _FakePipeline()
+            classifier.pipeline = fake_pipeline
+            classifier.model_loaded = True
 
-        from PIL import Image
+            from PIL import Image
 
-        classifier.pil_image = Image
+            classifier.pil_image = Image
 
-        result = classifier.classify_batch(
-            {
-                "rootPath": str(FIXTURE_DIR),
-                "relativePaths": [FIXTURE_IMAGE, FIXTURE_IMAGE],
-                "topK": 3,
-            }
-        )
-        self.assertEqual(result["failed"], 0)
-        self.assertEqual(result["succeeded"], 2)
-        self.assertGreaterEqual(len(fake_pipeline.calls), 1)
-        self.assertEqual(fake_pipeline.calls[0]["batch_size"], self.base_config["batch_size"])
+            result = classifier.classify_batch(
+                {
+                    "rootPath": str(FIXTURE_DIR),
+                    "relativePaths": [FIXTURE_IMAGE, FIXTURE_IMAGE],
+                    "topK": 3,
+                }
+            )
+            self.assertEqual(result["failed"], 0)
+            self.assertEqual(result["succeeded"], 2)
+            self.assertGreaterEqual(len(fake_pipeline.calls), 1)
+            self.assertEqual(fake_pipeline.calls[0]["batch_size"], self.base_config["batch_size"])
 
     def test_integration_classify_image_and_batch_return_predictions(self):
         requests = [
@@ -135,30 +145,31 @@ class TimmClassifierServerTests(unittest.TestCase):
             },
         ]
 
-        responses = run_server_requests(requests)
-        by_id = {item.get("id"): item for item in responses}
+        with temp_config_copy(self.base_config) as config_path:
+            responses = run_server_requests(requests, config_path)
+            by_id = {item.get("id"): item for item in responses}
 
-        image_resp = by_id[2]
-        self.assertIn("result", image_resp)
-        image_predictions = image_resp["result"]["predictions"]
-        self.assertIsInstance(image_predictions, list)
-        self.assertGreater(len(image_predictions), 0)
-        self.assertIn("label", image_predictions[0])
-        self.assertIn("score", image_predictions[0])
-        self.assertNotIn("index", image_predictions[0])
+            image_resp = by_id[2]
+            self.assertIn("result", image_resp)
+            image_predictions = image_resp["result"]["predictions"]
+            self.assertIsInstance(image_predictions, list)
+            self.assertGreater(len(image_predictions), 0)
+            self.assertIn("label", image_predictions[0])
+            self.assertIn("score", image_predictions[0])
+            self.assertNotIn("index", image_predictions[0])
 
-        batch_resp = by_id[3]
-        self.assertIn("result", batch_resp)
-        batch_result = batch_resp["result"]
-        self.assertEqual(batch_result["failed"], 0)
-        self.assertEqual(batch_result["succeeded"], 2)
-        self.assertEqual(len(batch_result["items"]), 2)
-        for item in batch_result["items"]:
-            self.assertTrue(item["ok"])
-            self.assertGreater(len(item["predictions"]), 0)
-            self.assertIn("label", item["predictions"][0])
-            self.assertIn("score", item["predictions"][0])
-            self.assertNotIn("index", item["predictions"][0])
+            batch_resp = by_id[3]
+            self.assertIn("result", batch_resp)
+            batch_result = batch_resp["result"]
+            self.assertEqual(batch_result["failed"], 0)
+            self.assertEqual(batch_result["succeeded"], 2)
+            self.assertEqual(len(batch_result["items"]), 2)
+            for item in batch_result["items"]:
+                self.assertTrue(item["ok"])
+                self.assertGreater(len(item["predictions"]), 0)
+                self.assertIn("label", item["predictions"][0])
+                self.assertIn("score", item["predictions"][0])
+                self.assertNotIn("index", item["predictions"][0])
 
 
 if __name__ == "__main__":

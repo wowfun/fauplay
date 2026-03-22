@@ -46,6 +46,10 @@
 
 1. `predictions: Array<{ label: string; score: number }>`
 2. 批量 `items: Array<{ relativePath: string; ok: boolean; predictions?: ...; error?: string }>`
+3. 默认运行配置文件固定为 `tools/mcp/timm-classifier/config.json`。
+4. 工具支持显式 `--config <path>`；显式传入时只读取该文件。
+5. 工具不得自动读取 `~/.fauplay/global/timm-classifier.json` 作为内建覆盖层。
+6. Fauplay 默认 MCP 注册必须使用项目虚拟环境解释器 `.venv/bin/python` 启动 `tools/mcp/timm-classifier/server.py`，避免误落到缺少 `torch` 依赖的系统 `python3`。
 
 ## 6. 功能需求 (FR)
 

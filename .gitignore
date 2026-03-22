@@ -40,8 +40,7 @@ coverage/
 __pycache__/
 
 # Local
-.fauplay/mcp.local.json
+.fauplay/
 tools/mcp-local/
-config.local.json
 _local/
 .cache/

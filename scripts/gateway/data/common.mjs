@@ -6,7 +6,9 @@ import path from 'node:path'
 import { TextDecoder, promisify } from 'node:util'
 
 export const DB_DIRNAME = '.fauplay'
-export const DB_FILENAME = 'faudb.global.sqlite'
+export const GLOBAL_CONFIG_DIRNAME = 'global'
+export const DB_FILENAME = 'faudb.sqlite'
+export const LEGACY_DB_FILENAME = 'faudb.global.sqlite'
 export const SCHEMA_VERSION = 4
 export const EMBEDDING_DIM = 512
 const SAMPLE_CHUNK_BYTES = 64 * 1024
@@ -16,14 +18,16 @@ const DEFAULT_ES_INSTANCE_NAME = '1.5a'
 const DEFAULT_ES_MAX_CANDIDATES = 500
 const MIN_ES_MAX_CANDIDATES = 1
 const MAX_ES_MAX_CANDIDATES = 5000
-const LOCAL_DATA_CONFIG_PATH = path.resolve(process.cwd(), 'tools/mcp/local-data/config.json')
-const LOCAL_DATA_CONFIG_LOCAL_PATH = path.resolve(process.cwd(), 'tools/mcp/local-data/config.local.json')
+const DEFAULT_LOCAL_DATA_CONFIG_PATH = path.resolve(process.cwd(), 'tools', 'mcp', 'local-data', 'config.json')
 export const ANNOTATION_SOURCE = 'meta.annotation'
 export const FACE_SOURCE = 'vision.face'
 export const CLASSIFY_SOURCE = 'ml.classify'
 export const UNANNOTATED_TAG_KEY = '__ANNOTATION_UNANNOTATED__'
 export const FP_METHOD = 'b1'
-export const GLOBAL_DB_DIR = path.join(os.homedir(), DB_DIRNAME)
+export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), DB_DIRNAME, GLOBAL_CONFIG_DIRNAME)
+export const GLOBAL_DB_DIR = GLOBAL_CONFIG_DIR
+export const GLOBAL_DB_PATH = path.join(GLOBAL_DB_DIR, DB_FILENAME)
+export const LEGACY_GLOBAL_DB_PATH = path.join(os.homedir(), DB_DIRNAME, LEGACY_DB_FILENAME)
 const execFileAsync = promisify(execFile)
 
 export function nowTs() {
@@ -210,22 +214,67 @@ async function readJsonFileSafe(filePath, required) {
   }
 }
 
-export async function loadEsSearchConfig() {
-  const baseConfig = asConfigObject(await readJsonFileSafe(LOCAL_DATA_CONFIG_PATH, true))
-  const localConfig = asConfigObject(await readJsonFileSafe(LOCAL_DATA_CONFIG_LOCAL_PATH, false))
-  const merged = { ...baseConfig, ...localConfig }
+function resolveConfigPathValue(layers, key) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]
+    if (!layer || !isObjectRecord(layer.config)) continue
+    const raw = layer.config[key]
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const value = raw.trim()
+    if (path.isAbsolute(value) || isWindowsPath(value)) {
+      return value
+    }
+    return normalizeAbsolutePath(path.resolve(path.dirname(layer.path), value))
+  }
+  return ''
+}
 
-  if (typeof merged.esPath !== 'string' || !merged.esPath.trim()) {
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function migrateLegacyGlobalDb() {
+  await fs.mkdir(GLOBAL_DB_DIR, { recursive: true })
+
+  if (await pathExists(GLOBAL_DB_PATH)) {
+    return
+  }
+  if (!(await pathExists(LEGACY_GLOBAL_DB_PATH))) {
+    return
+  }
+
+  try {
+    await fs.rename(LEGACY_GLOBAL_DB_PATH, GLOBAL_DB_PATH)
+  } catch (error) {
+    if (!error || typeof error !== 'object' || error.code !== 'EXDEV') {
+      throw error
+    }
+    await fs.copyFile(LEGACY_GLOBAL_DB_PATH, GLOBAL_DB_PATH)
+    await fs.unlink(LEGACY_GLOBAL_DB_PATH)
+  }
+}
+
+export async function loadEsSearchConfig() {
+  const baseConfig = asConfigObject(await readJsonFileSafe(DEFAULT_LOCAL_DATA_CONFIG_PATH, true))
+  const layers = [{ path: DEFAULT_LOCAL_DATA_CONFIG_PATH, config: baseConfig }]
+  const esPath = resolveConfigPathValue(layers, 'esPath')
+
+  if (!esPath) {
     throw new Error('config.esPath is required')
   }
 
   return {
-    esPath: merged.esPath.trim(),
-    instanceName: typeof merged.instanceName === 'string' && merged.instanceName.trim()
-      ? merged.instanceName.trim()
+    esPath,
+    instanceName: typeof baseConfig.instanceName === 'string' && baseConfig.instanceName.trim()
+      ? baseConfig.instanceName.trim()
       : DEFAULT_ES_INSTANCE_NAME,
     maxCandidates: clampInt(
-      Number(merged.maxCandidates),
+      Number(baseConfig.maxCandidates),
       MIN_ES_MAX_CANDIDATES,
       MAX_ES_MAX_CANDIDATES,
       DEFAULT_ES_MAX_CANDIDATES

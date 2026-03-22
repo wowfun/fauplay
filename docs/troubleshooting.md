@@ -107,17 +107,19 @@ curl -s -X POST http://127.0.0.1:3210/v1/mcp \
 
 ### 原因
 
-- `.fauplay/mcp.json` 语法错误或结构错误
+- `src/config/mcp.json` 语法错误或结构错误
+- `~/.fauplay/global/mcp.json` 语法错误或结构错误
 - `servers.<name>.type` 不是 `stdio`
 - `stdio` 条目的 `command` 缺失或为空
 - `servers.<name>.disabled` 被设置为 `true`
 
 ### 解决
 
-1. 检查配置文件路径与 JSON 语法：
+1. 先检查 repo 默认配置与全局覆盖的 JSON 语法：
 
 ```bash
-cat .fauplay/mcp.json
+cat src/config/mcp.json
+cat ~/.fauplay/global/mcp.json
 ```
 
 2. 确认条目为可执行的 `stdio` server：
@@ -166,18 +168,12 @@ sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>
 
 ### 配置
 
-`.fauplay/mcp.local.json` 对同名 server 为“整项覆盖”（非深合并），因此需保留完整 `stdio` 条目再附加 `env`：
+把 `SUDO_PASSWORD` 写到 `~/.fauplay/global/mcp.json`。`servers.<name>` 按 server key 合并，server 内字段做浅覆盖，因此只需覆盖 `env`：
 
 ```json
 {
   "servers": {
     "video-same-duration": {
-      "type": "stdio",
-      "command": "node",
-      "callTimeoutMs": 20000,
-      "args": [
-        "tools/mcp/video-same-duration/server.mjs"
-      ],
       "env": {
         "SUDO_PASSWORD": "<your_sudo_password>"
       }

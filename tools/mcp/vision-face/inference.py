@@ -11,10 +11,13 @@ SUPPORTED_PROVIDERS = [
     "CoreMLExecutionProvider",
     "CPUExecutionProvider",
 ]
+DEFAULT_CONFIG_PATH = (Path(__file__).resolve().parent / "config.json").resolve()
 
 
-def read_config(config_path: Path) -> dict[str, Any]:
+def read_config_file(config_path: Path, *, required: bool) -> dict[str, Any]:
     if not config_path.exists() or not config_path.is_file():
+        if not required:
+            return {}
         raise MCPError("MCP_TOOL_CALL_FAILED", f"config file not found: {config_path}")
     try:
         parsed = json.loads(config_path.read_text(encoding="utf-8"))
@@ -22,15 +25,21 @@ def read_config(config_path: Path) -> dict[str, Any]:
         raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to parse config file: {error}") from error
     if not isinstance(parsed, dict):
         raise MCPError("MCP_TOOL_CALL_FAILED", "config root must be an object")
+    return parsed
+
+
+def read_config(config_path: Path) -> dict[str, Any]:
+    resolved_config_path = config_path.expanduser().resolve()
+    parsed = read_config_file(resolved_config_path, required=True)
 
     model_name = str(parsed.get("modelName") or "buffalo_l")
     model_repo = str(parsed.get("modelRepo") or f"immich-app/{model_name}")
 
     cache_raw = parsed.get("modelCacheDir")
     if isinstance(cache_raw, str) and cache_raw.strip():
-        cache_dir = Path(cache_raw)
+        cache_dir = Path(cache_raw.strip())
         if not cache_dir.is_absolute():
-            cache_dir = (config_path.parent / cache_dir).resolve()
+            cache_dir = (resolved_config_path.parent / cache_dir).resolve()
     else:
         cache_dir = (Path.home() / ".cache" / "fauplay" / "vision-face" / model_name).resolve()
 

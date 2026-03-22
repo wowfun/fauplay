@@ -7,53 +7,37 @@
     },
     "timm-classifier": {
       "type": "stdio",
-      "command": "python3",
+      "command": ".venv/bin/python",
       "callTimeoutMs": 120000,
-      "args": [
-        "tools/mcp/timm-classifier/server.py",
-        "--config",
-        "tools/mcp/timm-classifier/config.json"
-      ]
+      "args": ["tools/mcp/timm-classifier/server.py"]
     },
     "batch-rename": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "tools/mcp/batch-rename/server.mjs"
-      ]
+      "args": ["tools/mcp/batch-rename/server.mjs"]
     },
     "soft-delete": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "tools/mcp/soft-delete/server.mjs"
-      ]
+      "args": ["tools/mcp/soft-delete/server.mjs"]
     },
     "local-data": {
       "type": "stdio",
       "command": "node",
       "callTimeoutMs": 120000,
-      "args": [
-        "tools/mcp/local-data/server.mjs"
-      ]
+      "args": ["tools/mcp/local-data/server.mjs"]
     },
     "video-same-duration": {
       "type": "stdio",
       "command": "node",
       "callTimeoutMs": 20000,
-      "args": [
-        "tools/mcp/video-same-duration/server.mjs"
-      ]
+      "args": ["tools/mcp/video-same-duration/server.mjs"]
     },
     "vision-face": {
       "type": "stdio",
       "command": ".venv/bin/python",
       "callTimeoutMs": 30000,
-      "args": [
-        "tools/mcp/vision-face/server.py",
-        "--config",
-        "tools/mcp/vision-face/config.json"
-      ]
+      "args": ["tools/mcp/vision-face/server.py"]
     }
   }
 }

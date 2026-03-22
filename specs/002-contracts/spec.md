@@ -55,15 +55,19 @@
 ### Server 注册配置（Host Registration）
 
 1. MCP 插件活动目录基线为 `tools/mcp/<plugin>/server.*`，`servers.<name>` 的注册路径应与该目录布局语义对应。
-2. 网关从项目路径 `.fauplay/mcp.json` 读取主 MCP Server 注册信息（VS Code `mcp.json` 风格），并可选读取 `.fauplay/mcp.local.json` 作为本地覆盖层。
+2. MCP 注册表属于 app-owned config；网关必须先读取 repo 默认注册配置 `src/config/mcp.json`，再可选读取全局覆盖 `~/.fauplay/global/mcp.json`。
 3. 当前仅支持 `servers.<name>.type = "stdio"`。
 4. 内置能力需以独立 CLI 形式注册到 `servers` 中（不在网关内硬编码 inproc server）。
 5. `stdio` 条目必须提供 `command`（可选 `args/cwd/env`）。
 6. `disabled: true` 的 server 必须被跳过。
-7. 当主配置与本地覆盖层存在同名 `servers.<name>` 时，本地覆盖层必须优先，且按 server 维度完整覆盖主配置同名项。
-8. 本地覆盖层配置文件存在但 JSON 非法时，网关必须以配置错误失败启动并标注错误文件路径。
-9. 注册体系不得保留旧目录兼容层（软链接、跳转脚本或双路径并存注册）。
-10. Server 注册配置不改变 MCP 对外协议字段。
+7. 当默认配置与全局覆盖存在同名 `servers.<name>` 时，必须按 server key 合并；server 对象内字段由全局层做浅覆盖。
+8. 全局覆盖配置文件存在但 JSON 非法时，网关必须以配置错误失败启动并标注错误文件路径。
+9. Gateway 启动期不得读取 `<root>/.fauplay/mcp.json` 或任何 `*.local.json` 作为 MCP 注册兼容路径。
+10. 注册体系不得保留旧目录兼容层（软链接、跳转脚本或双路径并存注册）。
+11. Server 注册配置不改变 MCP 对外协议字段。
+12. Gateway 启动日志必须打印本次实际读取的 MCP 配置文件路径；默认模式至少打印 `default` 与 `global` 两层，其中缺失的可选全局覆盖必须明确标注为“missing, skipped”；显式传入自定义 `mcpConfigPath` 时必须打印 `custom` 配置路径。
+13. 工具内部默认配置属于 tool-owned config，默认应与工具一起发布在 `tools/mcp/<tool>/config.json`；它们不参与 `src/config -> ~/.fauplay/global` 的 MCP 注册表分层。
+14. 如需 Host 级覆盖工具内部配置，必须通过 `~/.fauplay/global/mcp.json` 显式改写对应 server 的 `args/env/command/cwd`；Gateway 不得隐式读取 `~/.fauplay/global/<tool>.json` 作为工具内建覆盖层。
 
 ## 生命周期契约 (Lifecycle Contract)
 

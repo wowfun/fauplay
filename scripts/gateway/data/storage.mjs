@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import fs from 'node:fs/promises'
-import path from 'node:path'
+import { stat } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  DB_FILENAME,
   SCHEMA_VERSION,
   EMBEDDING_DIM,
   FACE_SOURCE,
-  GLOBAL_DB_DIR,
+  GLOBAL_DB_PATH,
+  migrateLegacyGlobalDb,
   nowTs,
   normalizeRelativePath,
   resolvePathWithinRoot,
@@ -17,8 +16,7 @@ import {
 } from './common.mjs'
 
 function openDb() {
-  const dbPath = path.join(GLOBAL_DB_DIR, DB_FILENAME)
-  const db = new DatabaseSync(dbPath)
+  const db = new DatabaseSync(GLOBAL_DB_PATH)
   db.exec('PRAGMA foreign_keys = ON')
   db.exec('PRAGMA journal_mode = DELETE')
   ensureSchema(db)
@@ -155,7 +153,7 @@ function ensureSchema(db) {
 }
 
 export async function withDb(callback) {
-  await fs.mkdir(GLOBAL_DB_DIR, { recursive: true })
+  await migrateLegacyGlobalDb()
   const db = openDb()
   try {
     return await callback(db)
@@ -261,7 +259,7 @@ export function softDeleteAssetsIfOrphaned(db, assetIds) {
 export async function ensureFileEntry(db, rootPath, relativePath) {
   const normalizedRelativePath = normalizeRelativePath(relativePath)
   const absolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
-  const statResult = await fs.stat(absolutePath)
+  const statResult = await stat(absolutePath)
   if (!statResult.isFile()) {
     throw new Error('target path must be a file')
   }

@@ -128,6 +128,7 @@
 1. 时间戳统一使用毫秒（ms）。
 2. 所有写请求必须事务化（全成或全败）。
 3. 不新增 file 绑定状态持久化表，状态只在请求结果中返回。
+4. Gateway 侧 ES 搜索默认配置固定读取 `tools/mcp/local-data/config.json`，不自动叠加 `~/.fauplay/global/local-data.json`。
 
 ## 9. 关联主题 (Related Specs)
 

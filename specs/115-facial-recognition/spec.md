@@ -6,7 +6,7 @@
 
 1. 检测与 embedding 推理由插件提供。
 2. 聚类、人物归属、人物管理、持久化由 Gateway 执行。
-3. 人脸与人物数据统一持久化在全局数据库 `faudb.global.sqlite`。
+3. 人脸与人物数据统一持久化在全局数据库 `faudb.sqlite`。
 4. 人脸与人物关系统一以 `assetId` 为业务真源；同内容文件的多路径位置共享同一套人脸结果。
 
 ## 2. 范围与非目标 (In Scope / Out of Scope)
@@ -29,12 +29,14 @@
 1. `vision-face` 插件仅负责推理，不得执行 SQLite DDL/DML。
 2. Gateway 为人脸与人物数据唯一写入者。
 3. 前端人脸流程统一调用 Gateway HTTP 接口。
+4. `vision-face` 默认运行配置文件固定为 `tools/mcp/vision-face/config.json`；独立运行可显式传 `--config <path>`，显式传入时只读取该文件。
+5. 插件不得自动读取 `~/.fauplay/global/vision-face.json` 作为内建覆盖层。
 
 ## 4. 数据与存储契约 (SQLite Contract)
 
 ### 4.1 路径与隔离
 
-1. 数据库路径固定为：`${HOME}/.fauplay/faudb.global.sqlite`。
+1. 数据库路径固定为：`${HOME}/.fauplay/global/faudb.sqlite`。
 2. 全应用共享单一全局库；`rootPath` 仅作为文件级请求的路径解析与过滤条件。
 
 ### 4.2 最小表契约
@@ -90,7 +92,7 @@
 
 ## 7. 功能需求 (FR)
 
-1. `FR-FACE-01` 人脸数据必须持久化到 `faudb.global.sqlite`。
+1. `FR-FACE-01` 人脸数据必须持久化到 `faudb.sqlite`。
 2. `FR-FACE-02` 插件不得直写人脸/人物表。
 3. `FR-FACE-03` 所有人脸记录必须统一关联 `assetId`。
 4. `FR-FACE-04` 系统必须提供上述 Gateway HTTP 人脸接口。

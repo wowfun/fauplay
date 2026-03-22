@@ -28,7 +28,6 @@ const execFileAsync = promisify(execFile)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'config.json')
-const LOCAL_CONFIG_PATH = path.resolve(__dirname, 'config.local.json')
 const remountFailureByDrive = new Map()
 
 const TOOL_DEFINITIONS = [
@@ -178,11 +177,52 @@ async function readJsonFileSafe(filePath, required) {
   }
 }
 
+function parseConfigPathArg(argv = process.argv) {
+  const args = Array.isArray(argv) ? argv.slice(2) : []
+  let configPath = DEFAULT_CONFIG_PATH
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === '--config') {
+      const next = args[index + 1]
+      if (typeof next !== 'string' || !next.trim()) {
+        throw toToolCallError('Missing value for --config')
+      }
+      configPath = path.resolve(process.cwd(), next)
+      index += 1
+      continue
+    }
+
+    throw toToolCallError(`Unsupported CLI argument: ${arg}`)
+  }
+
+  return configPath
+}
+
 function asConfigObject(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return {}
   }
   return input
+}
+
+function resolveConfigPathValue(layers, key) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]
+    if (!layer || !layer.config || typeof layer.config !== 'object' || Array.isArray(layer.config)) {
+      continue
+    }
+    const raw = layer.config[key]
+    if (typeof raw !== 'string' || !raw.trim()) {
+      continue
+    }
+    const value = raw.trim()
+    if (path.isAbsolute(value) || isWindowsPath(value)) {
+      return value
+    }
+    return path.resolve(path.dirname(layer.path), value)
+  }
+  return ''
 }
 
 function clampInt(value, min, max, defaultValue) {
@@ -197,21 +237,24 @@ function parseToleranceSizeKB(value) {
   return Math.min(value, MAX_TOLERANCE_SIZE_KB)
 }
 
-async function loadConfig() {
-  const baseConfig = asConfigObject(await readJsonFileSafe(DEFAULT_CONFIG_PATH, true))
-  const localConfig = asConfigObject(await readJsonFileSafe(LOCAL_CONFIG_PATH, false))
-  const merged = { ...baseConfig, ...localConfig }
+async function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
+  const resolvedConfigPath = path.resolve(configPath)
+  const baseConfig = asConfigObject(await readJsonFileSafe(resolvedConfigPath, true))
+  const layers = [{ path: resolvedConfigPath, config: baseConfig }]
+  const merged = { ...baseConfig }
+  const esPath = resolveConfigPathValue(layers, 'esPath')
+  const everythingPath = resolveConfigPathValue(layers, 'everythingPath')
 
-  if (typeof merged.esPath !== 'string' || !merged.esPath.trim()) {
+  if (!esPath) {
     throw toToolCallError('config.esPath is required')
   }
-  if (typeof merged.everythingPath !== 'string' || !merged.everythingPath.trim()) {
+  if (!everythingPath) {
     throw toToolCallError('config.everythingPath is required')
   }
 
   return {
-    esPath: merged.esPath.trim(),
-    everythingPath: merged.everythingPath.trim(),
+    esPath,
+    everythingPath,
     instanceName: typeof merged.instanceName === 'string' && merged.instanceName.trim()
       ? merged.instanceName.trim()
       : DEFAULT_INSTANCE_NAME,
@@ -806,7 +849,8 @@ async function handleRequest(request, config) {
   throw error
 }
 
-const config = await loadConfig()
+const configPath = parseConfigPathArg()
+const config = await loadConfig(configPath)
 const rl = readline.createInterface({
   input: process.stdin,
   crlfDelay: Infinity,

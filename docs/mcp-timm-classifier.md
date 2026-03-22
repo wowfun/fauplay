@@ -5,8 +5,9 @@
 ## 1. 文件位置
 
 - MCP server 脚本：`tools/mcp/timm-classifier/server.py`
-- MCP 注册配置：`.fauplay/mcp.json`
-- 模型配置文件：`tools/mcp/timm-classifier/config.json`
+- 默认 MCP 注册配置：`src/config/mcp.json`
+- 全局 MCP 覆盖：`~/.fauplay/global/mcp.json`
+- 默认模型配置文件：`tools/mcp/timm-classifier/config.json`
 
 ## 2. Python 依赖
 
@@ -16,9 +17,11 @@
 pip install torch transformers pillow
 ```
 
+Fauplay 默认 MCP 注册会使用项目内的 `.venv/bin/python` 启动 `timm-classifier`，这样可以避免误用系统 `python3` 导致 `torch` 等依赖缺失。
+
 ## 3. 模型配置
 
-编辑 `tools/mcp/timm-classifier/config.json`：
+默认配置随工具一起发布在 `tools/mcp/timm-classifier/config.json`：
 
 ```json
 {
@@ -34,6 +37,23 @@ pip install torch transformers pillow
 2. 目录至少应包含 `config.json` 与模型权重（如 `model.safetensors`），并建议提供图像预处理配置（如 `preprocessor_config.json`）。
 3. `device=auto` 表示优先使用 CUDA，不可用时回退 CPU。
 4. `batch_size` 仅用于 `ml.classifyBatch`，默认值为 `64`。
+5. 未显式传入 `--config` 时，工具默认读取同目录 `config.json`；显式传入自定义 `--config` 时只读取该文件。
+
+如需在 Fauplay 中做机器私有覆盖，可在 `~/.fauplay/global/mcp.json` 中覆盖该 server 的 `args`：
+
+```json
+{
+  "servers": {
+    "timm-classifier": {
+      "args": [
+        "tools/mcp/timm-classifier/server.py",
+        "--config",
+        "/abs/path/to/timm-classifier.local.json"
+      ]
+    }
+  }
+}
+```
 
 ## 4. 启动网关
 

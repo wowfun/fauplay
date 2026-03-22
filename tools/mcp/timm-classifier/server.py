@@ -21,6 +21,7 @@ MAX_TOP_K = 20
 MAX_BATCH_ITEMS = 1024
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 WINDOWS_ABS_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
+DEFAULT_CONFIG_PATH = (Path(__file__).resolve().parent / "config.json").resolve()
 
 
 class MCPError(Exception):
@@ -185,6 +186,24 @@ def resolve_model_dir_path(config_dir: Path, model_dir_raw: str) -> Path:
     return model_dir
 
 
+def read_config_file(config_path: Path, *, required: bool) -> dict[str, Any]:
+    if not config_path.exists() or not config_path.is_file():
+        if not required:
+            return {}
+        raise MCPError("MCP_TOOL_CALL_FAILED", f"config file not found: {config_path}")
+
+    try:
+        with config_path.open("r", encoding="utf-8") as fh:
+            parsed = json.load(fh)
+    except Exception as error:
+        raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to parse plugin config: {error}") from error
+
+    if not isinstance(parsed, dict):
+        raise MCPError("MCP_TOOL_CALL_FAILED", "config root must be an object")
+
+    return parsed
+
+
 def load_model_name(model_dir: Path) -> str:
     model_name = model_dir.name
     config_path = model_dir / "config.json"
@@ -262,17 +281,8 @@ class TimmClassifier:
         self.model_loaded = False
 
     def load_plugin_config(self, config_path: Path) -> dict[str, Any]:
-        if not config_path.exists() or not config_path.is_file():
-            raise MCPError("MCP_TOOL_CALL_FAILED", f"config file not found: {config_path}")
-
-        try:
-            with config_path.open("r", encoding="utf-8") as fh:
-                parsed = json.load(fh)
-        except Exception as error:
-            raise MCPError("MCP_TOOL_CALL_FAILED", f"failed to parse plugin config: {error}") from error
-
-        if not isinstance(parsed, dict):
-            raise MCPError("MCP_TOOL_CALL_FAILED", "config root must be an object")
+        resolved_config_path = config_path.expanduser().resolve()
+        parsed = read_config_file(resolved_config_path, required=True)
 
         model_dir_raw = parsed.get("modelDir")
         if not isinstance(model_dir_raw, str) or not model_dir_raw.strip():
@@ -284,7 +294,7 @@ class TimmClassifier:
 
         batch_size = parse_batch_size(parsed.get("batch_size"))
 
-        model_dir = resolve_model_dir_path(config_path.parent, model_dir_raw.strip())
+        model_dir = resolve_model_dir_path(resolved_config_path.parent, model_dir_raw.strip())
         if not model_dir.exists() or not model_dir.is_dir():
             raise MCPError("MCP_TOOL_CALL_FAILED", f"modelDir not found: {model_dir}")
 
@@ -571,7 +581,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default="tools/mcp/timm-classifier/config.json",
+        default=str(DEFAULT_CONFIG_PATH),
         help="Path to timm classifier config file",
     )
     return parser.parse_args()

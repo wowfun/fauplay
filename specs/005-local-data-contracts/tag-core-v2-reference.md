@@ -5,6 +5,7 @@
 1. 以 `asset + file + tag + asset_tag` 作为统一标签核心模型。
 2. 其他业务表仅保留必要实体：`face/face_embedding/person/person_face`。
 3. 不引入 `root`、`asset_fingerprint` 或任何 `*_tag_ext` 扩展表。
+4. 全局 SQLite 真源固定为 `${HOME}/.fauplay/global/faudb.sqlite`。
 
 ## 2. 核心关系
 
