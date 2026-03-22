@@ -35,8 +35,11 @@ export const ANNOTATION_FILTER_UNANNOTATED_TAG_KEY = '__ANNOTATION_UNANNOTATED__
 
 export interface AnnotationFilterTagOption {
   tagKey: string
-  fieldKey: string
+  key: string
   value: string
+  sources: string[]
+  hasMetaAnnotation: boolean
+  representativeSource: string
   fileCount?: number
 }
 

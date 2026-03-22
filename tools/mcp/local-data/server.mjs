@@ -6,14 +6,20 @@ const MCP_PROTOCOL_VERSION = '2025-11-05'
 const TOOL_DEFINITIONS = [
   {
     name: 'local.data',
-    description: '本地数据管理：标注写入、file 重绑与失效清理',
+    description: '本地数据管理：标注写入、逻辑标签补删来源、file 重绑与失效清理',
     inputSchema: {
       type: 'object',
       properties: {
         rootPath: { type: 'string' },
         operation: {
           type: 'string',
-          enum: ['setAnnotationValue', 'batchRebindPaths', 'cleanupMissingFiles'],
+          enum: [
+            'setAnnotationValue',
+            'bindAnnotationTag',
+            'unbindAnnotationTag',
+            'batchRebindPaths',
+            'cleanupMissingFiles',
+          ],
         },
         relativePath: { type: 'string' },
         mappings: {
@@ -29,6 +35,7 @@ const TOOL_DEFINITIONS = [
           },
         },
         fieldKey: { type: 'string' },
+        key: { type: 'string' },
         value: { type: 'string' },
         source: {
           type: 'string',
@@ -160,7 +167,7 @@ async function handleRequest(request) {
     const operation = typeof args?.operation === 'string' ? args.operation : ''
     const error = new Error(
       operation
-        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/files/relative-paths, /v1/files/missing/cleanups instead`
+        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/file-annotations/tags/bind, /v1/file-annotations/tags/unbind, /v1/files/relative-paths, /v1/files/missing/cleanups instead`
         : 'local.data operation is required',
     )
     error.code = 'MCP_TOOL_CALL_FAILED'

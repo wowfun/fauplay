@@ -378,7 +378,7 @@ export function bindTagToAsset(db, { assetId, key, value, source, appliedAt = no
   return tagId
 }
 
-export function removeTagBindingsForAsset(db, { assetId, source = null, key = null }) {
+export function removeTagBindingsForAsset(db, { assetId, source = null, key = null, value = null }) {
   if (!assetId) return
 
   const where = ['asset_tag.assetId = ?']
@@ -390,6 +390,10 @@ export function removeTagBindingsForAsset(db, { assetId, source = null, key = nu
   if (key) {
     where.push('tag.key = ?')
     params.push(key)
+  }
+  if (value) {
+    where.push('tag.value = ?')
+    params.push(value)
   }
 
   const rows = db.prepare(`

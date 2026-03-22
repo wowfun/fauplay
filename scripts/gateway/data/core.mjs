@@ -6,6 +6,8 @@ export {
 export {
   setAnnotationValue,
   setLocalDataValue,
+  bindAnnotationTag,
+  unbindAnnotationTag,
   getFileTags,
   listTagOptions,
   queryFilesByTags,

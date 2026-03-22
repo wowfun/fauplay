@@ -5,6 +5,7 @@ import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import {
   batchRebindPaths,
+  bindAnnotationTag,
   callVisionInference,
   clusterPendingFaces,
   getFileTags,
@@ -17,6 +18,7 @@ import {
   renamePerson,
   saveDetectedFaces,
   setAnnotationValue,
+  unbindAnnotationTag,
   cleanupMissingFiles,
 } from './data/core.mjs'
 
@@ -333,6 +335,14 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
     return setAnnotationValue(payload)
   }
 
+  if (method === 'POST' && pathname === '/v1/file-annotations/tags/bind') {
+    return bindAnnotationTag(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/file-annotations/tags/unbind') {
+    return unbindAnnotationTag(payload)
+  }
+
   if (method === 'PATCH' && pathname === '/v1/files/relative-paths') {
     return batchRebindPaths(payload)
   }
@@ -608,6 +618,7 @@ export async function startGatewayServer(options = {}) {
     const supportsHttpRoute = (
       (req.method === 'POST' && (
         pathname.startsWith('/v1/data/tags/')
+        || pathname.startsWith('/v1/file-annotations/tags/')
         || pathname.startsWith('/v1/files/missing/')
         || pathname.startsWith('/v1/file-bindings/')
         || pathname.startsWith('/v1/faces/')

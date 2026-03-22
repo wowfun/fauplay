@@ -1,11 +1,16 @@
 import { PreviewControlGroup } from './PreviewControlGroup'
+import { PreviewHeaderTagManager } from './PreviewHeaderTagManager'
 import { PreviewTitleRow, type PreviewRenameResult } from './PreviewTitleRow'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
+import type { AnnotationFilterTagOption } from '@/types'
 
 export interface PreviewHeaderAnnotationTag {
-  fieldKey: string
-  fieldLabel: string
+  tagKey: string
+  key: string
   value: string
+  sources: string[]
+  hasMetaAnnotation: boolean
+  representativeSource: string
 }
 
 interface PreviewHeaderBarProps {
@@ -32,6 +37,14 @@ interface PreviewHeaderBarProps {
   renameUnavailableReason?: string | null
   onSubmitFileNameRename: (nextBaseName: string) => Promise<PreviewRenameResult>
   annotationTags: PreviewHeaderAnnotationTag[]
+  canManageAnnotationTags: boolean
+  annotationTagManageUnavailableReason?: string | null
+  annotationTagOptions: AnnotationFilterTagOption[]
+  annotationTagOptionsStatus: 'idle' | 'loading' | 'ready'
+  annotationTagOptionsError?: string | null
+  onRequestAnnotationTagOptions: () => void
+  onBindAnnotationTag: (params: { key: string; value: string }) => Promise<void>
+  onUnbindAnnotationTag: (tag: PreviewHeaderAnnotationTag) => Promise<void>
 }
 
 export function PreviewHeaderBar({
@@ -58,12 +71,15 @@ export function PreviewHeaderBar({
   renameUnavailableReason,
   onSubmitFileNameRename,
   annotationTags,
+  canManageAnnotationTags,
+  annotationTagManageUnavailableReason,
+  annotationTagOptions,
+  annotationTagOptionsStatus,
+  annotationTagOptionsError,
+  onRequestAnnotationTagOptions,
+  onBindAnnotationTag,
+  onUnbindAnnotationTag,
 }: PreviewHeaderBarProps) {
-  const annotationTagClassName = isFullscreen
-    ? 'border-white/25 bg-white/10 text-white/90'
-    : 'border-border bg-muted/40 text-foreground'
-  const annotationFieldClassName = isFullscreen ? 'text-white/70' : 'text-muted-foreground'
-
   return (
     <div
       className={`p-3 border-b flex-shrink-0 ${isFullscreen ? 'border-white/10' : 'border-border'}`}
@@ -79,22 +95,18 @@ export function PreviewHeaderBar({
             onSubmitRename={onSubmitFileNameRename}
           />
         </div>
-        {annotationTags.length > 0 && (
-          <div className="max-w-[58%] shrink-0 overflow-x-auto">
-            <div className="flex items-center justify-end gap-1 pl-1">
-              {annotationTags.map((tag) => (
-                <span
-                  key={`${tag.fieldKey}:${tag.value}`}
-                  className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-[11px] leading-none ${annotationTagClassName}`}
-                  title={`${tag.fieldLabel}: ${tag.value}`}
-                >
-                  <span className={annotationFieldClassName}>{tag.fieldLabel}</span>
-                  <span>{tag.value}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <PreviewHeaderTagManager
+          isFullscreen={isFullscreen}
+          tags={annotationTags}
+          canManageTags={canManageAnnotationTags}
+          manageUnavailableReason={annotationTagManageUnavailableReason}
+          tagOptions={annotationTagOptions}
+          tagOptionsStatus={annotationTagOptionsStatus}
+          tagOptionsError={annotationTagOptionsError}
+          onRequestTagOptions={onRequestAnnotationTagOptions}
+          onBindTag={onBindAnnotationTag}
+          onUnbindTag={onUnbindAnnotationTag}
+        />
       </div>
       <PreviewControlGroup
         isFullscreen={isFullscreen}

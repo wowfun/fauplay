@@ -400,8 +400,11 @@ export function WorkspaceShell({
     return [
       {
         tagKey: ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
-        fieldKey: '',
+        key: '',
         value: '未标注',
+        sources: [],
+        hasMetaAnnotation: false,
+        representativeSource: '',
       },
       ...rootTagOptions,
     ]

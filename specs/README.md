@@ -45,3 +45,4 @@
 - 相同时长视频搜索专题：[`112-video-same-duration-search/spec.md`](./112-video-same-duration-search/spec.md)
 - 预览标题点击重命名专题：[`113-preview-inline-rename/spec.md`](./113-preview-inline-rename/spec.md)
 - 本地数据管理插件专题：[`114-local-data-plugin/spec.md`](./114-local-data-plugin/spec.md)
+- 预览头部逻辑标签管理专题：[`117-preview-header-tag-management/spec.md`](./117-preview-header-tag-management/spec.md)

@@ -72,6 +72,22 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
         timeoutMs: 120000,
       }
     }
+    if (operation === 'bindAnnotationTag') {
+      return {
+        method: 'POST',
+        endpointPath: '/v1/file-annotations/tags/bind',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
+    if (operation === 'unbindAnnotationTag') {
+      return {
+        method: 'POST',
+        endpointPath: '/v1/file-annotations/tags/unbind',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
     if (operation === 'batchRebindPaths') {
       return {
         method: 'PATCH',

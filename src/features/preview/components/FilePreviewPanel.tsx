@@ -7,13 +7,17 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import { resolveAnnotationSchema } from '@/features/plugin-runtime/utils/annotationSchema'
 import {
   getAnnotationDisplayStoreVersion,
-  getFileAnnotationFieldValues,
+  getFileLogicalTags,
+  getGlobalAnnotationTagOptions,
+  getGlobalAnnotationTagOptionsState,
   patchAnnotationSetValue,
+  patchAnnotationTagBinding,
+  patchAnnotationTagUnbinding,
   preloadFileAnnotationDisplaySnapshot,
   preloadAnnotationDisplaySnapshot,
+  preloadGlobalAnnotationTagOptions,
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
 import { FilePreviewCanvas } from './FilePreviewCanvas'
@@ -221,6 +225,10 @@ export function FilePreviewPanel({
     () => previewActionTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('file')),
     [previewActionTools]
   )
+  const hasLocalDataTool = useMemo(
+    () => previewActionTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file')),
+    [previewActionTools]
+  )
 
   const renameUnavailableReason = useMemo(() => {
     if (!file || file.kind !== 'file') {
@@ -236,6 +244,19 @@ export function FilePreviewPanel({
   }, [file, hasBatchRenameTool, rootHandle, rootId])
 
   const canRenameFileName = renameUnavailableReason === null
+  const annotationTagManageUnavailableReason = useMemo(() => {
+    if (!file || file.kind !== 'file') {
+      return '当前项不可管理标签'
+    }
+    if (!rootHandle || !rootId) {
+      return '工具上下文不完整'
+    }
+    if (!hasLocalDataTool) {
+      return '标签管理能力不可用（网关离线或未注册 local.data）'
+    }
+    return null
+  }, [file, hasLocalDataTool, rootHandle, rootId])
+  const canManageAnnotationTags = annotationTagManageUnavailableReason === null
 
   useEffect(() => {
     if (!rootId || !rootHandle) return
@@ -282,6 +303,11 @@ export function FilePreviewPanel({
       force: true,
     })
   }, [file, rootHandle, rootId])
+  const refreshGlobalAnnotationTagOptions = useCallback(async () => {
+    await preloadGlobalAnnotationTagOptions({
+      force: true,
+    })
+  }, [])
   const {
     items: faceOverlays,
     isLoading: faceOverlayLoading,
@@ -300,6 +326,119 @@ export function FilePreviewPanel({
     if (!overlay.personId) return
     onOpenPersonDetail?.(overlay.personId)
   }, [onOpenPersonDetail])
+
+  const handleRequestAnnotationTagOptions = useCallback(() => {
+    if (!canManageAnnotationTags) return
+    void preloadGlobalAnnotationTagOptions()
+  }, [canManageAnnotationTags])
+
+  const handleBindAnnotationTag = useCallback(async ({ key, value }: { key: string; value: string }) => {
+    if (!file || file.kind !== 'file') {
+      throw new Error('当前项不可管理标签')
+    }
+    if (!canManageAnnotationTags || !rootHandle || !rootId) {
+      throw new Error(annotationTagManageUnavailableReason || '标签管理能力不可用')
+    }
+
+    const rollback = patchAnnotationTagBinding({
+      rootId,
+      relativePath: file.path,
+      key,
+      value,
+    })
+
+    try {
+      const result = await dispatchSystemTool({
+        toolName: 'local.data',
+        rootHandle,
+        rootId,
+        additionalArgs: {
+          operation: 'bindAnnotationTag',
+          relativePath: file.path,
+          key,
+          value,
+        },
+      })
+
+      if (!result.ok) {
+        throw new Error(result.error || '标签绑定失败')
+      }
+
+      await Promise.allSettled([
+        refreshCurrentPreviewFileTags(),
+        refreshGlobalAnnotationTagOptions(),
+      ])
+    } catch (error) {
+      rollback?.()
+      await Promise.allSettled([
+        refreshCurrentPreviewFileTags(),
+        refreshGlobalAnnotationTagOptions(),
+      ])
+      throw error
+    }
+  }, [
+    annotationTagManageUnavailableReason,
+    canManageAnnotationTags,
+    file,
+    refreshCurrentPreviewFileTags,
+    refreshGlobalAnnotationTagOptions,
+    rootHandle,
+    rootId,
+  ])
+
+  const handleUnbindAnnotationTag = useCallback(async (tag: PreviewHeaderAnnotationTag) => {
+    if (!file || file.kind !== 'file') {
+      throw new Error('当前项不可管理标签')
+    }
+    if (!canManageAnnotationTags || !rootHandle || !rootId) {
+      throw new Error(annotationTagManageUnavailableReason || '标签管理能力不可用')
+    }
+
+    const rollback = patchAnnotationTagUnbinding({
+      rootId,
+      relativePath: file.path,
+      key: tag.key,
+      value: tag.value,
+    })
+
+    try {
+      const result = await dispatchSystemTool({
+        toolName: 'local.data',
+        rootHandle,
+        rootId,
+        additionalArgs: {
+          operation: 'unbindAnnotationTag',
+          relativePath: file.path,
+          key: tag.key,
+          value: tag.value,
+        },
+      })
+
+      if (!result.ok) {
+        throw new Error(result.error || '标签删除失败')
+      }
+
+      await Promise.allSettled([
+        refreshCurrentPreviewFileTags(),
+        refreshGlobalAnnotationTagOptions(),
+      ])
+    } catch (error) {
+      rollback?.()
+      await Promise.allSettled([
+        refreshCurrentPreviewFileTags(),
+        refreshGlobalAnnotationTagOptions(),
+      ])
+      throw error
+    }
+  }, [
+    annotationTagManageUnavailableReason,
+    canManageAnnotationTags,
+    file,
+    refreshCurrentPreviewFileTags,
+    refreshGlobalAnnotationTagOptions,
+    rootHandle,
+    rootId,
+  ])
 
   useEffect(() => {
     if (!file || !rootHandle) {
@@ -560,33 +699,20 @@ export function FilePreviewPanel({
     void refreshCurrentPreviewFileTags()
   }, [currentFileQueue, file, refreshCurrentPreviewFileTags, rootId])
 
-  const annotationTags: PreviewHeaderAnnotationTag[] = []
-  if (file && file.kind === 'file' && rootId) {
-    const fieldValues = getFileAnnotationFieldValues(rootId, file.path)
-    if (fieldValues) {
-      const { schema } = resolveAnnotationSchema(rootId)
-      const fieldOrder = new Map<string, number>()
-      const fieldLabelByKey = new Map<string, string>()
-      schema.fields.forEach((field, index) => {
-        fieldOrder.set(field.key, index)
-        fieldLabelByKey.set(field.key, field.label)
-      })
-
-      const entries = Object.entries(fieldValues)
-        .sort(([leftKey], [rightKey]) => {
-          const leftOrder = fieldOrder.get(leftKey) ?? Number.MAX_SAFE_INTEGER
-          const rightOrder = fieldOrder.get(rightKey) ?? Number.MAX_SAFE_INTEGER
-          if (leftOrder !== rightOrder) return leftOrder - rightOrder
-          return leftKey.localeCompare(rightKey)
-        })
-        .map(([fieldKey, value]) => ({
-          fieldKey,
-          fieldLabel: fieldLabelByKey.get(fieldKey) ?? fieldKey,
-          value,
-        }))
-      annotationTags.push(...entries)
-    }
-  }
+  const annotationTags: PreviewHeaderAnnotationTag[] = (
+    file && file.kind === 'file' && rootId
+      ? getFileLogicalTags(rootId, file.path).map((tag) => ({
+        tagKey: tag.tagKey,
+        key: tag.key,
+        value: tag.value,
+        sources: tag.sources,
+        hasMetaAnnotation: tag.hasMetaAnnotation,
+        representativeSource: tag.representativeSource,
+      }))
+      : []
+  )
+  const annotationTagOptions = getGlobalAnnotationTagOptions()
+  const annotationTagOptionsState = getGlobalAnnotationTagOptionsState()
 
   if (!file) {
     return (
@@ -628,6 +754,14 @@ export function FilePreviewPanel({
         renameUnavailableReason={renameUnavailableReason}
         onSubmitFileNameRename={handleSubmitFileNameRename}
         annotationTags={annotationTags}
+        canManageAnnotationTags={canManageAnnotationTags}
+        annotationTagManageUnavailableReason={annotationTagManageUnavailableReason}
+        annotationTagOptions={annotationTagOptions}
+        annotationTagOptionsStatus={annotationTagOptionsState.status}
+        annotationTagOptionsError={annotationTagOptionsState.error}
+        onRequestAnnotationTagOptions={handleRequestAnnotationTagOptions}
+        onBindAnnotationTag={handleBindAnnotationTag}
+        onUnbindAnnotationTag={handleUnbindAnnotationTag}
       />
 
       <FilePreviewCanvas

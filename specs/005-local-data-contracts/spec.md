@@ -82,6 +82,8 @@
 3. `source=ml.classify`：`key='class'`、`value=label`，`score` 写入 `asset_tag.score`。
 4. 同名人物允许存在；资产级 `vision.face` 标签按人物显示名维度合并，file-centered 查询会把资产级标签展开到每个可见 `file`。
 5. `source` 用于来源追踪与标签去重维度，不作为前端过滤/预览显示的默认读取门槛。
+6. 前端展示、过滤与候选去重的逻辑标签身份固定为 `key + value`；`source` 是同一逻辑标签的附加来源维度。
+7. 当同一逻辑标签同时存在 `meta.annotation` 与其他来源时，前端代表来源必须优先选择 `meta.annotation`。
 
 ### 5.6 参考文档
 
@@ -99,14 +101,19 @@
 6. file-centered 查询结果必须返回 `assetId + absolutePath`；当请求携带 `rootPath` 时，响应还必须返回动态换算后的 `relativePath`。
 7. `/v1/data/tags/file` 与 `/v1/data/tags/query` 默认返回多来源标签集合，不得隐式按 `source=meta.annotation` 预过滤。
 8. 标签统计按可见 `file` 行计数，不按去重后的 `asset` 数计数，以保持与 file-centered 结果一致。
+9. `/v1/data/tags/options` 返回的候选项允许包含同一 `key + value` 的多来源记录；前端必须先保留来源信息，再按逻辑标签聚合。
 
 ### 6.2 本地数据管理
 
 1. `PUT /v1/file-annotations`
-2. `PATCH /v1/files/relative-paths`
-3. `POST /v1/files/missing/cleanups`
-5. 以上接口对外继续接收 `rootPath + relativePath`，但持久化层只落 `absolutePath`。
-6. 历史维护接口全部下线（返回下线错误或 404）。
+2. `POST /v1/file-annotations/tags/bind`
+3. `POST /v1/file-annotations/tags/unbind`
+4. `PATCH /v1/files/relative-paths`
+5. `POST /v1/files/missing/cleanups`
+6. `file-annotations/tags/bind` 仅新增 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
+7. `file-annotations/tags/unbind` 仅移除 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
+8. 以上接口对外继续接收 `rootPath + relativePath`，但持久化层只落 `absolutePath`。
+9. 历史维护接口全部下线（返回下线错误或 404）。
 
 ### 6.3 人脸流程
 
@@ -148,6 +155,8 @@
 10. `FR-LDC-10` 标签读取接口默认不得将 `source=meta.annotation` 作为隐式过滤条件。
 11. `FR-LDC-11` 普通查询必须默认隐藏 `deletedAt` 非空的软删除资产。
 12. `FR-LDC-12` `sha256` 仅作为预留字段存在，不参与 v1 主身份、唯一键、共享判定与接口设计。
+13. `FR-LDC-13` 前端逻辑标签展示、过滤与候选去重必须按 `key + value` 聚合，而非按 `source` 分裂。
+14. `FR-LDC-14` 系统必须提供“仅补/删 `meta.annotation` 来源”的逻辑标签写接口，不得影响派生来源标签。
 
 ## 10. 验收标准 (AC)
 
@@ -161,6 +170,8 @@
 8. `AC-LDC-08` 外部重命名后若新路径先被建档，标签与人脸仍通过共享 `assetId` 正常复用；执行缺失路径清理后旧路径索引被删除。
 9. `AC-LDC-09` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
 10. `AC-LDC-10` 当某个 `asset` 的最后一个 `file` 消失时，普通查询不再返回该资产；同内容文件再次出现时会自动复活原 `asset`。
+11. `AC-LDC-11` 同一文件同时拥有 `vision.face(person=Alice)` 与 `meta.annotation(person=Alice)` 时，前端逻辑标签聚合后仅显示一个 `person=Alice` 项，并优先以 `meta.annotation` 为代表来源。
+12. `AC-LDC-12` 调用 `file-annotations/tags/unbind` 删除 `meta.annotation(person=Alice)` 后，若 `vision.face(person=Alice)` 仍存在，则查询结果仍保留该逻辑标签。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -168,6 +179,7 @@
 2. `TagRecord.score` 作为通用可空字段新增，当前仅分类来源使用。
 3. file-centered 查询结果统一返回 `assetId + absolutePath`；`relativePath` 仅在请求携带 `rootPath` 时返回。
 4. 标注与文件维护接口保持 `/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/files/missing/cleanups` 路径，但内部真源切换到 `absolutePath -> file -> asset`。
+5. 前端逻辑标签主模型新增 `tagKey/key/value/sources/hasMetaAnnotation/representativeSource`，用于按 `key + value` 聚合多来源标签。
 
 ## 12. 关联主题 (Related Specs)
 
@@ -175,3 +187,4 @@
 - 本地数据管理插件：[`../114-local-data-plugin/spec.md`](../114-local-data-plugin/spec.md)
 - 人脸识别：[`../115-facial-recognition/spec.md`](../115-facial-recognition/spec.md)
 - 图像分类：[`../104-timm-classification-mcp/spec.md`](../104-timm-classification-mcp/spec.md)
+- 预览头部逻辑标签管理：[`../117-preview-header-tag-management/spec.md`](../117-preview-header-tag-management/spec.md)

@@ -100,7 +100,7 @@ function annotationTagDisplayLabel(option: AnnotationFilterTagOption): string {
   if (option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
     return '未标注'
   }
-  return `${option.fieldKey}: ${option.value}`
+  return `${option.key}: ${option.value}`
 }
 
 function annotationTagSummaryText(

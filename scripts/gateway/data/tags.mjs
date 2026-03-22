@@ -53,6 +53,28 @@ function matchesTagFilter(tagKeys, includeTagKeys, excludeTagKeys, includeMatchM
   return !excludeTagKeys.some((tagKey) => fileMatchesTag(tagSet, tagKey))
 }
 
+function parseLogicalTagIdentity(params) {
+  const key = typeof params.key === 'string' ? params.key.trim() : ''
+  const value = typeof params.value === 'string' ? params.value.trim() : ''
+
+  if (!key) throw new Error('key is required')
+  if (!value) throw new Error('value is required')
+
+  return { key, value }
+}
+
+function buildAnnotationTagMutationResponse(file, relativePath, key, value) {
+  return {
+    ok: true,
+    assetId: file.assetId,
+    absolutePath: file.absolutePath,
+    relativePath,
+    key,
+    value,
+    source: ANNOTATION_SOURCE,
+  }
+}
+
 export async function setAnnotationValue(params) {
   const rootPath = resolveRootPath(params.rootPath)
   const relativePath = normalizeRelativePath(params.relativePath, 'relativePath')
@@ -99,6 +121,51 @@ export async function setAnnotationValue(params) {
 
 export async function setLocalDataValue(params) {
   return setAnnotationValue(params)
+}
+
+export async function bindAnnotationTag(params) {
+  const rootPath = resolveRootPath(params.rootPath)
+  const relativePath = normalizeRelativePath(params.relativePath, 'relativePath')
+  const { key, value } = parseLogicalTagIdentity(params)
+
+  return withDb(async (db) => (
+    withTransaction(db, async () => {
+      const file = await ensureFileEntry(db, rootPath, relativePath)
+
+      bindTagToAsset(db, {
+        assetId: file.assetId,
+        key,
+        value,
+        source: ANNOTATION_SOURCE,
+        appliedAt: nowTs(),
+        score: null,
+      })
+
+      return buildAnnotationTagMutationResponse(file, relativePath, key, value)
+    })
+  ))
+}
+
+export async function unbindAnnotationTag(params) {
+  const rootPath = resolveRootPath(params.rootPath)
+  const relativePath = normalizeRelativePath(params.relativePath, 'relativePath')
+  const { key, value } = parseLogicalTagIdentity(params)
+
+  return withDb(async (db) => (
+    withTransaction(db, async () => {
+      const file = await ensureFileEntry(db, rootPath, relativePath)
+
+      removeTagBindingsForAsset(db, {
+        assetId: file.assetId,
+        source: ANNOTATION_SOURCE,
+        key,
+        value,
+      })
+      cleanupOrphanTags(db, ANNOTATION_SOURCE)
+
+      return buildAnnotationTagMutationResponse(file, relativePath, key, value)
+    })
+  ))
 }
 
 export async function getFileTags(params) {
