@@ -66,6 +66,7 @@ interface ExplorerToolbarProps {
   videoCount: number
   showAnnotationFilterControls: boolean
   annotationFilterTagOptions: AnnotationFilterTagOption[]
+  onOpenAnnotationFilterPanel: () => void
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
@@ -208,6 +209,7 @@ export function ExplorerToolbar({
   videoCount,
   showAnnotationFilterControls,
   annotationFilterTagOptions,
+  onOpenAnnotationFilterPanel,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
   canOpenTrash,
@@ -644,6 +646,32 @@ export function ExplorerToolbar({
       ...filter,
       annotationExcludeTagKeys: [],
     })
+  }
+
+  const handleToggleAnnotationIncludePanel = () => {
+    if (isAnnotationIncludeOpen) {
+      setIsAnnotationIncludeOpen(false)
+      return
+    }
+
+    if (!isAnnotationExcludeOpen) {
+      onOpenAnnotationFilterPanel()
+    }
+    setIsAnnotationIncludeOpen(true)
+    setIsAnnotationExcludeOpen(false)
+  }
+
+  const handleToggleAnnotationExcludePanel = () => {
+    if (isAnnotationExcludeOpen) {
+      setIsAnnotationExcludeOpen(false)
+      return
+    }
+
+    if (!isAnnotationIncludeOpen) {
+      onOpenAnnotationFilterPanel()
+    }
+    setIsAnnotationExcludeOpen(true)
+    setIsAnnotationIncludeOpen(false)
   }
 
   const renderAnnotationTagPanel = (
@@ -1131,10 +1159,7 @@ export function ExplorerToolbar({
 
           <div className="relative">
             <Button
-              onClick={() => {
-                setIsAnnotationIncludeOpen((previous) => !previous)
-                setIsAnnotationExcludeOpen(false)
-              }}
+              onClick={handleToggleAnnotationIncludePanel}
               variant={filter.annotationIncludeTagKeys.length > 0 ? 'default' : 'ghost'}
               size="md"
               className="h-8 max-w-40 justify-start gap-1"
@@ -1158,10 +1183,7 @@ export function ExplorerToolbar({
 
           <div className="relative">
             <Button
-              onClick={() => {
-                setIsAnnotationExcludeOpen((previous) => !previous)
-                setIsAnnotationIncludeOpen(false)
-              }}
+              onClick={handleToggleAnnotationExcludePanel}
               variant={filter.annotationExcludeTagKeys.length > 0 ? 'default' : 'ghost'}
               size="md"
               className="h-8 max-w-40 justify-start gap-1"

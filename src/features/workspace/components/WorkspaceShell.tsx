@@ -577,6 +577,10 @@ export function WorkspaceShell({
     })
   }, [rootHandle, rootId])
 
+  const handleOpenAnnotationFilterPanel = useCallback(() => {
+    void refreshAnnotationSnapshot()
+  }, [refreshAnnotationSnapshot])
+
   const handleWorkspaceMutationCommitted = useCallback(async () => {
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
@@ -980,6 +984,7 @@ export function WorkspaceShell({
       videoCount={videoCount}
       showAnnotationFilterControls={showAnnotationFilterControls}
       annotationFilterTagOptions={annotationFilterTagOptions}
+      onOpenAnnotationFilterPanel={handleOpenAnnotationFilterPanel}
       thumbnailSizePreset={thumbnailSizePreset}
       onThumbnailSizePresetChange={setThumbnailSizePreset}
       canOpenTrash={hasTrashEntries}

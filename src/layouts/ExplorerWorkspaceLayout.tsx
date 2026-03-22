@@ -146,6 +146,7 @@ interface ExplorerWorkspaceLayoutProps {
   videoCount: number
   showAnnotationFilterControls: boolean
   annotationFilterTagOptions: AnnotationFilterTagOption[]
+  onOpenAnnotationFilterPanel: () => void
   thumbnailSizePreset: ThumbnailSizePreset
   onThumbnailSizePresetChange: (preset: ThumbnailSizePreset) => void
   canOpenTrash: boolean
@@ -221,6 +222,7 @@ export function ExplorerWorkspaceLayout({
   videoCount,
   showAnnotationFilterControls,
   annotationFilterTagOptions,
+  onOpenAnnotationFilterPanel,
   thumbnailSizePreset,
   onThumbnailSizePresetChange,
   canOpenTrash,
@@ -359,6 +361,7 @@ export function ExplorerWorkspaceLayout({
         videoCount={videoCount}
         showAnnotationFilterControls={showAnnotationFilterControls}
         annotationFilterTagOptions={annotationFilterTagOptions}
+        onOpenAnnotationFilterPanel={onOpenAnnotationFilterPanel}
         thumbnailSizePreset={thumbnailSizePreset}
         onThumbnailSizePresetChange={onThumbnailSizePresetChange}
         canOpenTrash={canOpenTrash}

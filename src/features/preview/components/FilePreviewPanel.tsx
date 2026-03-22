@@ -272,6 +272,7 @@ export function FilePreviewPanel({
       rootId,
       rootHandle,
       relativePath: file.path,
+      force: true,
     })
   }, [file, rootHandle, rootId])
 

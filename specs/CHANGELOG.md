@@ -2,6 +2,8 @@
 
 ## 2026-03-22
 ### Changed
+- 更新 `specs/117-preview-header-tag-management/spec.md`：预览切换到文件时，必须按文件粒度强制刷新该文件标签并从数据库读取最新信息，不再因已有前端快照而跳过读库；允许先展示缓存后无感更新头部标签。
+- 更新 `specs/003-ui-ux/spec.md`：顶部工具栏标签过滤在点击打开“包含标签/排除标签”面板时，必须立即强制刷新当前 root 标签快照并从数据库读取最新标签信息，不再只依赖进入 root 时的首次快照。
 - 新增 `specs/117-preview-header-tag-management/spec.md`，并更新 `specs/005-local-data-contracts/spec.md` 与 `specs/114-local-data-plugin/spec.md`：预览头部标签与顶部过滤改为按逻辑标签 `key + value` 聚合；同一逻辑标签同时存在 `meta.annotation` 与派生来源时以前者为代表来源；`local.data` 新增 `bindAnnotationTag/unbindAnnotationTag` 与对应 `file-annotations/tags/*` 写契约，用于仅补/删 `meta.annotation` 来源而不影响派生来源。
 - 更新 `specs/002-contracts/spec.md`：`tools/list` 的 `annotations.toolActions[]` 新增 `visible?: boolean` 元数据，前端工作台按 `visible !== false` 渲染动作。
 - 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：`file` 从“稳定位置记录”收敛为“路径索引表”，`absolutePath` 升级为主键；对外接口移除 `fileId`，下线 `reconcileFileBindings`，并将清理接口改为 `POST /v1/files/missing/cleanups`。
