@@ -195,8 +195,9 @@
 3. `annotations.icon` 为可选字符串，语义为 Lucide 图标名（支持 PascalCase 或 kebab-case 命名）。
 4. `toolOptions` 单项最小字段为：`key`、`label`、`type`；首期 `type` 支持 `boolean`、`enum` 与 `string`。
 5. `toolOptions` 可选声明 `sendToTool`（默认 `false`）与 `argumentKey`（默认使用 `key`）；当 `sendToTool=true` 时，客户端应将该选项值透传到 `tools/call.arguments`。
-6. `toolActions` 单项最小字段为：`key`、`label`；可选 `description`、`intent` 与 `arguments`（对象）。
-7. 客户端应按“最小校验 + 忽略非法项”处理注解：`icon` 空值、非法值或不可解析值不得阻断工具本身可见与可调用性，客户端应回退默认图标策略。
+6. `toolActions` 单项最小字段为：`key`、`label`；可选 `description`、`intent`、`arguments`（对象）与 `visible`（布尔值）。
+7. 当 `toolActions[].visible === false` 时，客户端工作台不得渲染该操作；缺失时按可见处理。
+8. 客户端应按“最小校验 + 忽略非法项”处理注解：`icon` 空值、非法值或不可解析值不得阻断工具本身可见与可调用性，客户端应回退默认图标策略。
 
 ### `tools/call`
 

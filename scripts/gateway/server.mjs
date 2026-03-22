@@ -14,11 +14,10 @@ import {
   listTagOptions,
   mergePeople,
   queryFilesByTags,
-  reconcileFileBindings,
   renamePerson,
   saveDetectedFaces,
   setAnnotationValue,
-  cleanupInvalidFileIds,
+  cleanupMissingFiles,
 } from './data/core.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
@@ -338,12 +337,8 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
     return batchRebindPaths(payload)
   }
 
-  if (method === 'POST' && pathname === '/v1/file-bindings/reconciliations') {
-    return reconcileFileBindings(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/file-bindings/cleanups') {
-    return cleanupInvalidFileIds(payload)
+  if (method === 'POST' && pathname === '/v1/files/missing/cleanups') {
+    return cleanupMissingFiles(payload)
   }
 
   if (pathname.startsWith('/v1/local-data/')) {
@@ -355,6 +350,14 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
   }
 
   if (pathname.startsWith('/v1/annotations/')) {
+    throw createMcpRuntimeError(
+      'MCP_METHOD_NOT_FOUND',
+      `Endpoint offline: ${pathname}`,
+      404,
+    )
+  }
+
+  if (pathname === '/v1/file-bindings/reconciliations' || pathname === '/v1/file-bindings/cleanups') {
     throw createMcpRuntimeError(
       'MCP_METHOD_NOT_FOUND',
       `Endpoint offline: ${pathname}`,
@@ -605,6 +608,7 @@ export async function startGatewayServer(options = {}) {
     const supportsHttpRoute = (
       (req.method === 'POST' && (
         pathname.startsWith('/v1/data/tags/')
+        || pathname.startsWith('/v1/files/missing/')
         || pathname.startsWith('/v1/file-bindings/')
         || pathname.startsWith('/v1/faces/')
         || pathname.startsWith('/v1/local-data/')

@@ -152,7 +152,7 @@ function shouldSkipCompletedRequest(
 }
 
 export function hasWorkbenchMetadata(tool: GatewayToolDescriptor): boolean {
-  return tool.toolOptions.length > 0 || tool.toolActions.length > 0
+  return tool.toolOptions.length > 0 || tool.toolActions.some((action) => action.visible !== false)
 }
 
 export function findToolOption(tool: GatewayToolDescriptor, optionKey: string): ToolOptionAnnotation | null {

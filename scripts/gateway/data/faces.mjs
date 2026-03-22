@@ -102,7 +102,6 @@ export async function saveDetectedFaces(params) {
 
       return {
         ok: true,
-        fileId: file.id,
         assetId: file.assetId,
         assetPath: relativePath,
         detected: facePayloads.length,

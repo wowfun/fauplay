@@ -2,6 +2,10 @@
 
 ## 2026-03-22
 ### Changed
+- 更新 `specs/002-contracts/spec.md`：`tools/list` 的 `annotations.toolActions[]` 新增 `visible?: boolean` 元数据，前端工作台按 `visible !== false` 渲染动作。
+- 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：`file` 从“稳定位置记录”收敛为“路径索引表”，`absolutePath` 升级为主键；对外接口移除 `fileId`，下线 `reconcileFileBindings`，并将清理接口改为 `POST /v1/files/missing/cleanups`。
+- 更新 `specs/114-local-data-plugin/spec.md`：`local.data` 的 operation 收敛为 `setAnnotationValue | batchRebindPaths | cleanupMissingFiles`；删除“刷新 file 绑定”能力，缺失路径清理替代原失效 `fileId` 清理。
+- 归档 `specs/116-rename-driven-rebind/spec.md` 到 `specs/_archive/2026-03-22/116-rename-driven-rebind/spec.md`，并将其中仍有效的“命名分层”和“`batchRebindPaths` 作为改名后统一路径维护入口”约束并入 `specs/114-local-data-plugin/spec.md`；同步移除 `specs/README.md` 与 `specs/005-local-data-contracts/spec.md` 对活动 `116` 主题的引用。
 - 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：本地数据真源从 per-root `faudb.v1.sqlite` 切换为全局 `faudb.global.sqlite`，核心模型重构为 `asset + file + tag + asset_tag`，并明确 `absolutePath` 为唯一位置身份、`rootPath` 仅为请求过滤条件、`asset.deletedAt` 为普通查询默认隐藏的软删除语义。
 - 更新 `specs/114-local-data-plugin/spec.md`：`local.data` 写入/重绑/清理链路统一改为 `rootPath + relativePath -> absolutePath -> file -> asset`，并明确 `fileId` 仅表示位置记录、内容变更可切换 `assetId`、最后一个 `file` 消失时对应 `asset` 进入软删除。
 - 更新 `specs/115-facial-recognition/spec.md` 与 `specs/104-timm-classification-mcp/spec.md`：人脸与分类结果统一切换到 `assetId` 真源；人物空间默认全局，不再按 root 隔离；同内容文件的多路径位置共享同一套 `vision.face` / `ml.classify` 结果。

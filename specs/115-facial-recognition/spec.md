@@ -63,7 +63,7 @@
 1. 资产级人物标签必须由 `person_face` 关系投影生成。
 2. 标签格式固定为：`source=vision.face`、`key='person'`、`value=person.name`。
 3. 同名人物允许存在；资产级标签在名字维度合并，不保证人物级可区分过滤。
-4. file-centered 查询必须把资产级 `vision.face` 标签展开到每个可见 `file`。
+4. file-centered 查询必须把资产级 `vision.face` 标签展开到每个可见 `file`，且公开结果不依赖 `fileId`。
 5. `rename-person` 与 `merge-people` 后，相关资产及其所有可见文件结果的 `vision.face` 标签必须同步更新。
 
 ## 5. Gateway HTTP 接口契约 (HTTP Contract)

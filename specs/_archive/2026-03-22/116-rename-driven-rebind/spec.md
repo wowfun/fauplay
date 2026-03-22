@@ -1,5 +1,7 @@
 # 116 Rename Driven Rebind 改名驱动重绑规范
 
+> Archived on 2026-03-22. Remaining valid contract content has been merged into [`../../../114-local-data-plugin/spec.md`](../../../114-local-data-plugin/spec.md).
+
 ## 1. 目的 (Purpose)
 
 定义“文件改名后本地数据重绑”的统一契约，确保：
@@ -77,7 +79,7 @@
 
 ## 9. 关联主题 (Related Specs)
 
-- 本地数据契约：[`../005-local-data-contracts/spec.md`](../005-local-data-contracts/spec.md)
-- 批量重命名：[`../106-batch-rename-workspace/spec.md`](../106-batch-rename-workspace/spec.md)
-- 预览改名：[`../113-preview-inline-rename/spec.md`](../113-preview-inline-rename/spec.md)
-- 本地数据插件：[`../114-local-data-plugin/spec.md`](../114-local-data-plugin/spec.md)
+- 本地数据契约：[`../../../005-local-data-contracts/spec.md`](../../../005-local-data-contracts/spec.md)
+- 批量重命名：[`../../../106-batch-rename-workspace/spec.md`](../../../106-batch-rename-workspace/spec.md)
+- 预览改名：[`../../../113-preview-inline-rename/spec.md`](../../../113-preview-inline-rename/spec.md)
+- 本地数据插件：[`../../../114-local-data-plugin/spec.md`](../../../114-local-data-plugin/spec.md)

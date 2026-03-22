@@ -62,7 +62,8 @@ export function PluginToolWorkbench({
   if (!tool) return null
 
   const hasOptions = tool.toolOptions.length > 0
-  const hasActions = tool.toolActions.length > 0
+  const visibleActions = tool.toolActions.filter((action) => action.visible !== false)
+  const hasActions = visibleActions.length > 0
   if (!hasOptions && !hasActions) return null
 
   const isLightbox = surfaceVariant === 'preview-lightbox'
@@ -149,7 +150,7 @@ export function PluginToolWorkbench({
 
       {hasActions && (
         <div className={hasOptions ? 'mt-3 space-y-2' : 'space-y-2'}>
-          {tool.toolActions.map((action) => (
+          {visibleActions.map((action) => (
             <div key={action.key} className={`p-2 ${rowClassName}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">

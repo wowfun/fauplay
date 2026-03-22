@@ -80,18 +80,10 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
         timeoutMs: 120000,
       }
     }
-    if (operation === 'reconcileFileBindings') {
+    if (operation === 'cleanupMissingFiles') {
       return {
         method: 'POST',
-        endpointPath: '/v1/file-bindings/reconciliations',
-        payload,
-        timeoutMs: 120000,
-      }
-    }
-    if (operation === 'cleanupInvalidFileIds') {
-      return {
-        method: 'POST',
-        endpointPath: '/v1/file-bindings/cleanups',
+        endpointPath: '/v1/files/missing/cleanups',
         payload,
       }
     }

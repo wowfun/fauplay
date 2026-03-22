@@ -147,7 +147,7 @@
 8. `AC-BR-08` `searchMode=regex` 且 `findText` 非法正则时返回 `MCP_INVALID_PARAMS`。
 9. `AC-BR-09` 请求包含 `prefix/suffix` 时返回 `MCP_INVALID_PARAMS`。
 10. `AC-BR-10` `[P]/[G]` 在层级不足时按契约回退（`[P]=rootName`、`[G]=""`）。
-11. `AC-BR-11` 批量改名成功后，`file` 表中对应 `relativePath` 同步更新，且 `fileId` 保持稳定。
+11. `AC-BR-11` 批量改名成功后，`file` 路径索引同步更新到新路径，且共享 `assetId` 的标签/人脸仍可通过新路径查询。
 12. `AC-BR-12` 人工构造重绑失败时，批量改名结果仍成功返回，并带 `postProcessWarning`。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)

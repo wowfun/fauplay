@@ -5,8 +5,8 @@
 定义 `local.data` 插件在 Gateway 统一数据层下的契约：
 
 1. 标注写入通过统一本地数据接口完成，且 `setAnnotationValue` 标签来源固定为 `source=meta.annotation`。
-2. `file` 位置记录支持批量路径重绑与自动重绑，`fileId` 保持稳定。
-3. 提供失效 `fileId` 的 dry-run/commit 清理能力，并在最后一个 `file` 消失时将对应 `asset` 软删除。
+2. `file` 仅作为当前路径索引；批量路径重绑只维护 `absolutePath`，不再承诺位置身份连续性。
+3. 提供缺失路径的 dry-run/commit 清理能力，并在最后一个 `file` 消失时将对应 `asset` 软删除。
 4. 人脸、分类、标注继续共享同一 `asset + file + tag + asset_tag` 数据模型。
 
 ## 2. 范围与非目标 (In Scope / Out of Scope)
@@ -15,8 +15,7 @@
 
 1. `setAnnotationValue`：同资产同字段覆盖写入。
 2. `batchRebindPaths`：按相对路径映射批量更新 `file.absolutePath`（支持链式映射）。
-3. `reconcileFileBindings`：针对当前 `rootPath` 作用域内的 `file` 记录执行路径校验、候选搜索与自动重绑。
-4. `cleanupInvalidFileIds`：失效 `fileId` 预演与提交清理。
+3. `cleanupMissingFiles`：缺失路径预演与提交清理。
 5. 预览态 `0..9` 快捷打标链路与工作台标注面板。
 
 范围外：
@@ -28,29 +27,32 @@
 ## 3. 工具契约 (MCP Tool Contract)
 
 1. 工具名固定为：`local.data`。
-2. `operation` 枚举固定为：`setAnnotationValue | batchRebindPaths | reconcileFileBindings | cleanupInvalidFileIds`。
+2. `operation` 枚举固定为：`setAnnotationValue | batchRebindPaths | cleanupMissingFiles`。
 3. `local.data` 仅承载工作台元数据与操作入口；持久化由 Gateway HTTP 接口执行。
+
+### 3.1 命名分层与入口收敛
+
+1. 外部语义层（HTTP / MCP 操作名）固定使用业务语义：`setAnnotationValue`、`batchRebindPaths`、`cleanupMissingFiles`。
+2. 内部数据层（仓储 / 核心函数）可保留 CRUD 风格或实现导向命名，但不得改变外部语义层契约。
+3. `batchRebindPaths` 是改名后路径维护的统一入口；工作区批量改名与预览单文件改名成功后，均应通过该入口执行后处理重绑。
 
 ## 4. Gateway HTTP 接口契约 (HTTP Contract)
 
 1. `PUT /v1/file-annotations`
    - 输入：`rootPath, relativePath, fieldKey, value, source?`
    - 语义：先解析 `rootPath + relativePath -> absolutePath -> file -> asset`，再按 `assetId + fieldKey + source=meta.annotation` 覆盖绑定（先删旧绑定再写新绑定）
-   - 输出：`{ ok, fileId, assetId, relativePath, fieldKey, value }`
+   - 输出：`{ ok, assetId, absolutePath, relativePath, fieldKey, value }`
    - 读侧说明：用于顶部标签过滤与预览标签显示的读取接口（`/v1/data/tags/file`、`/v1/data/tags/query`）默认不按 `source=meta.annotation` 预过滤。
 2. `PATCH /v1/files/relative-paths`
    - 输入：`rootPath, mappings[]`
    - `mappings[]` 项结构：`{ fromRelativePath, toRelativePath }`
    - 语义：基于 `rootPath` 将映射解析为绝对路径后批量重绑 `file.absolutePath`，两阶段更新避免唯一键冲突，逐项返回结果
    - 输出：`{ ok, total, updated, failed, items[] }`
-3. `POST /v1/file-bindings/reconciliations`
-   - 输入：`rootPath`
-   - 语义：只针对当前 `rootPath` 作用域下的 `file` 记录执行路径校验与自动重绑；唯一命中时只更新当前行路径与快照，不更换 `fileId`
-   - 输出：`{ ok, total, active, rebound, conflict, orphan, searchUnavailable, items[] }`
-4. `POST /v1/file-bindings/cleanups`
+3. `POST /v1/files/missing/cleanups`
    - 输入：`rootPath, confirm?`
-   - 语义：按“刷新后无法唯一重绑”的结果集执行清理；`confirm=false` 仅预演，`confirm=true` 提交删除失效 `file`，并在必要时软删除最后一个 `file` 对应的 `asset`
-   - 输出：`{ ok, dryRun, invalidFileIds[], impact, removed? }`
+   - 语义：按当前 `rootPath` 作用域扫描缺失路径；`confirm=false` 仅预演，`confirm=true` 提交删除缺失 `file`，并在必要时软删除最后一个 `file` 对应的 `asset`
+   - 输出：`{ ok, dryRun, missingAbsolutePaths[], impact, removed? }`
+4. `POST /v1/file-bindings/reconciliations` 已下线；调用时返回下线错误或 404。
 5. 历史维护接口已下线；调用时返回下线错误或 404。
 
 ## 5. 数据与行为契约 (Data & Behavior Contract)
@@ -71,35 +73,24 @@
    - `TARGET_OCCUPIED`
    - `INVALID_SOURCE_PATH`
    - `INVALID_TARGET_PATH`
-3. 成功项更新同一条 `file` 记录的 `absolutePath`、`fileMtimeMs`、`lastSeenAt` 与 `updatedAt`，`fileId` 与 `assetId` 保持稳定。
+3. 成功项更新同一条 `file` 记录的 `absolutePath`、`fileMtimeMs`、`lastSeenAt` 与 `updatedAt`；`assetId` 保持稳定。
 4. 实现必须采用两阶段更新（临时路径 -> 目标路径），避免唯一索引冲突与链式重命名失败。
+5. `fs.batchRename` 与预览单文件改名等上游改名链路在提交成功后，应复用该能力完成路径侧后处理；若后处理失败，只能告警，不得回滚已完成的文件重命名。
 
-### 5.3 file 表自动重绑（`reconcileFileBindings`）
+### 5.3 缺失路径清理（`cleanupMissingFiles`）
 
 1. 只对 `absolutePath` 落在当前 `rootPath` 前缀内的 `file` 记录执行校验。
-2. 对每条 `file` 记录按 `absolutePath` 执行 `stat`；若当前文件内容仍匹配关联 `asset` 的 `(size, fingerprint, fpMethod)` 身份，则记为 `active` 并刷新 `lastSeenAt`。
-3. 路径缺失或内容不一致时，使用 Everything Search 在当前 `rootPath` 内检索同 `size+mtime` 候选。
-4. 对候选逐个计算 `b1` 指纹并与原 `asset` 身份比对：
-   - 唯一命中：更新 `absolutePath/fileMtimeMs/lastSeenAt/updatedAt`，`fileId` 不变。
-   - 内容变化但路径仍指向有效文件：允许在保留 `fileId` 的前提下切换 `assetId` 到新的内容资产。
-   - 多命中：记 `conflict`，原因 `ambiguous_rebind`。
-   - 无命中：记 `orphan`，原因 `no_candidate`。
-5. ES 配置缺失或查询失败：记 `orphan`，原因 `search_unavailable`，且不中断整次刷新。
-
-### 5.4 失效 fileId 清理（`cleanupInvalidFileIds`）
-
-1. 失效判定基于当前 `rootPath` 作用域内“刷新后无法唯一重绑”的条目（`conflict/orphan`）。
-2. `confirm=false`：返回失效 `fileId` 清单与影响预估。
-3. `confirm=true`：删除失效 `file` 行；若某个 `asset` 因此失去最后一个 `file`，则将 `asset.deletedAt` 置值做软删除。
-4. 提交后必须刷新人物缓存与 `vision.face` 标签投影，并保证普通查询只读取活跃资产。
+2. `confirm=false`：返回缺失路径清单与影响预估。
+3. `confirm=true`：删除缺失 `file` 行；若某个 `asset` 因此失去最后一个 `file`，则将 `asset.deletedAt` 置值做软删除。
+4. 不再提供基于候选搜索的自动重绑；外部重命名后若新路径已被建档，内容连续性由共享 `assetId` 承担。
+5. 提交后必须刷新人物缓存与 `vision.face` 标签投影，并保证普通查询只读取活跃资产。
 
 ## 6. 功能需求 (FR)
 
-1. `FR-LD-01` 系统必须暴露 `local.data` 工具，且操作枚举仅包含 `setAnnotationValue/batchRebindPaths/reconcileFileBindings/cleanupInvalidFileIds`。
+1. `FR-LD-01` 系统必须暴露 `local.data` 工具，且操作枚举仅包含 `setAnnotationValue/batchRebindPaths/cleanupMissingFiles`。
 2. `FR-LD-02` 标注写入必须投影到统一标签模型，且来源固定为 `meta.annotation`。
-3. `FR-LD-03` `batchRebindPaths` 成功项必须保持 `fileId` 不变。
-4. `FR-LD-04` `reconcileFileBindings` 在 ES 不可用时不得整次失败。
-5. `FR-LD-05` `cleanupInvalidFileIds` 必须支持 dry-run 与 commit 双阶段。
+3. `FR-LD-03` `batchRebindPaths` 必须只维护路径索引，不再对外暴露 `fileId`。
+4. `FR-LD-04` `cleanupMissingFiles` 必须支持 dry-run 与 commit 双阶段。
 6. `FR-LD-06` 失效清理提交后，若某资产失去最后一个位置，系统必须将其软删除而不是物理清空资产级标签/人脸数据。
 7. `FR-LD-07` 历史维护接口不得继续提供写入或维护能力。
 8. `FR-LD-08` 标签读取接口用于顶部过滤与预览显示时，不得默认限制为 `source=meta.annotation`。
@@ -108,10 +99,9 @@
 
 1. `AC-LD-01` `setAnnotationValue` 可通过 `rootPath + relativePath` 正确定位到 `file -> asset` 并写入 `tag+asset_tag`，`source` 为 `meta.annotation`。
 2. `AC-LD-02` 同资产同字段重复写入后，仅保留一个当前绑定。
-3. `AC-LD-03` 链式映射 `A->B, B->C` 经 `batchRebindPaths` 成功执行且 `fileId` 保持稳定。
-4. `AC-LD-04` `reconcileFileBindings` 在 ES 不可用时请求成功返回，结果中包含 `search_unavailable` 统计与条目。
-5. `AC-LD-05` 同一路径内容被替换时，`fileId` 保持稳定但可切换到新的 `assetId`。
-6. `AC-LD-06` 清理 dry-run 与 commit 的目标数量一致；commit 后失效 `file` 被删除，最后一个 `file` 消失的 `asset` 会进入软删除。
+3. `AC-LD-03` 链式映射 `A->B, B->C` 经 `batchRebindPaths` 成功执行，目标路径索引正确更新。
+4. `AC-LD-04` 外部重命名后若直接访问新路径，新路径可正常建档并通过共享 `assetId` 复用标签与人脸。
+5. `AC-LD-05` `cleanupMissingFiles` dry-run 与 commit 的目标数量一致；commit 后缺失 `file` 被删除，最后一个 `file` 消失的 `asset` 会进入软删除。
 7. `AC-LD-07` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
 
 ## 8. 默认值与一致性约束 (Defaults & Consistency)
@@ -125,6 +115,5 @@
 - 基础数据契约：[`../005-local-data-contracts/spec.md`](../005-local-data-contracts/spec.md)
 - 批量重命名：[`../106-batch-rename-workspace/spec.md`](../106-batch-rename-workspace/spec.md)
 - 预览改名：[`../113-preview-inline-rename/spec.md`](../113-preview-inline-rename/spec.md)
-- 命名分层专题：[`../116-rename-driven-rebind/spec.md`](../116-rename-driven-rebind/spec.md)
 - 人脸识别：[`../115-facial-recognition/spec.md`](../115-facial-recognition/spec.md)
 - 契约基线：[`../002-contracts/spec.md`](../002-contracts/spec.md)

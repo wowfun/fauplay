@@ -33,7 +33,7 @@
 3. `tag` 仅承载标签身份：`id,key,value,source`（`PRIMARY KEY(key,value,source)` + `id UNIQUE`）。
 4. 分类置信度必须写入 `asset_tag.score`，不得再写入 `tag` 扩展字段。
 5. 文件上下文输入必须先通过 `rootPath + relativePath -> absolutePath -> file -> asset` 解析，再以统一 `assetId` 持久化。
-6. 同内容文件命中同一 `asset` 时，其 file-centered 查询结果必须共享相同的分类标签与 `score`。
+6. 同内容文件命中同一 `asset` 时，其 file-centered 查询结果必须共享相同的分类标签与 `score`，且查询结果不依赖 `fileId`。
 
 ## 5. 工具契约 (Tool Contract)
 

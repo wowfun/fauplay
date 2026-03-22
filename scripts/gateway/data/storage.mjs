@@ -48,7 +48,7 @@ function rebuildSchema(db) {
   }
 }
 
-function createSchemaV3(db) {
+function createSchemaV4(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS asset (
       id TEXT PRIMARY KEY,
@@ -63,9 +63,8 @@ function createSchemaV3(db) {
     );
 
     CREATE TABLE IF NOT EXISTS file (
-      id TEXT PRIMARY KEY,
+      absolutePath TEXT PRIMARY KEY,
       assetId TEXT NOT NULL,
-      absolutePath TEXT NOT NULL UNIQUE,
       fileMtimeMs INTEGER,
       lastSeenAt INTEGER NOT NULL,
       createdAt INTEGER NOT NULL,
@@ -149,7 +148,7 @@ function ensureSchema(db) {
   if (currentVersion !== 0 && currentVersion !== SCHEMA_VERSION) {
     rebuildSchema(db)
   }
-  createSchemaV3(db)
+  createSchemaV4(db)
   if (currentVersion !== SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
@@ -224,11 +223,6 @@ export function getOrCreateAsset(db, identity) {
   }
 }
 
-export function getFileById(db, fileId) {
-  if (typeof fileId !== 'string' || !fileId) return null
-  return db.prepare('SELECT * FROM file WHERE id = ?').get(fileId) ?? null
-}
-
 export function getFileByAbsolutePath(db, absolutePath) {
   return db.prepare('SELECT * FROM file WHERE absolutePath = ?').get(absolutePath) ?? null
 }
@@ -285,15 +279,14 @@ export async function ensureFileEntry(db, rootPath, relativePath) {
     db.prepare(`
       UPDATE file
       SET assetId = ?, fileMtimeMs = ?, lastSeenAt = ?, updatedAt = ?
-      WHERE id = ?
-    `).run(asset.id, mtime, ts, ts, existing.id)
+      WHERE absolutePath = ?
+    `).run(asset.id, mtime, ts, ts, absolutePath)
 
     if (existing.assetId !== asset.id) {
       softDeleteAssetIfOrphan(db, existing.assetId)
     }
 
     return {
-      id: existing.id,
       assetId: asset.id,
       absolutePath,
       fileMtimeMs: mtime,
@@ -302,14 +295,12 @@ export async function ensureFileEntry(db, rootPath, relativePath) {
     }
   }
 
-  const id = randomUUID()
   db.prepare(`
-    INSERT INTO file(id, assetId, absolutePath, fileMtimeMs, lastSeenAt, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, asset.id, absolutePath, mtime, ts, ts, ts)
+    INSERT INTO file(absolutePath, assetId, fileMtimeMs, lastSeenAt, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(absolutePath, asset.id, mtime, ts, ts, ts)
 
   return {
-    id,
     assetId: asset.id,
     absolutePath,
     fileMtimeMs: mtime,

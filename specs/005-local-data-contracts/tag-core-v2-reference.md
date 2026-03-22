@@ -30,9 +30,8 @@ CREATE TABLE IF NOT EXISTS asset (
 );
 
 CREATE TABLE IF NOT EXISTS file (
-  id TEXT PRIMARY KEY,
+  absolutePath TEXT PRIMARY KEY,
   assetId TEXT NOT NULL,
-  absolutePath TEXT NOT NULL UNIQUE,
   fileMtimeMs INTEGER,
   lastSeenAt INTEGER NOT NULL,
   createdAt INTEGER NOT NULL,
@@ -137,8 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 1. 本地数据写接口统一为：
    - `PUT /v1/file-annotations`
    - `PATCH /v1/files/relative-paths`
-   - `POST /v1/file-bindings/reconciliations`
-   - `POST /v1/file-bindings/cleanups`
+   - `POST /v1/files/missing/cleanups`
 2. 上述接口继续接收 `rootPath + relativePath`，Gateway 内部统一解析为 `absolutePath` 再读写 `file -> asset`。
 3. `/v1/data/tags/*` 的时间语义以 `asset_tag.appliedAt` 为准。
 4. 普通查询默认仅返回 `asset.deletedAt IS NULL` 的活跃资产。
@@ -160,4 +158,4 @@ CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 4. 分类落库后 `asset_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
 5. 人脸检测/聚类/改名/合并后，资产级 `vision.face` 标签与 `person_face` 结果一致。
 6. 同内容文件位于不同路径时，file-centered 查询会返回多条 `file`，但这些结果共享同一套资产标签与人脸数据。
-7. 当最后一个 `file` 消失时，`asset` 进入软删除；同内容文件再次出现时，原 `asset` 自动复活。
+7. 缺失路径清理只删除不存在的 `file.absolutePath` 行；当最后一个 `file` 消失时，`asset` 进入软删除；同内容文件再次出现时，原 `asset` 自动复活。

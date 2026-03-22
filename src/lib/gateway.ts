@@ -46,6 +46,7 @@ export interface ToolActionAnnotation {
   description?: string
   intent?: string
   arguments?: Record<string, unknown>
+  visible?: boolean
 }
 
 interface GatewayHealthResponse {
@@ -409,8 +410,9 @@ function toToolActionAnnotations(annotations: GatewayRawToolDescriptor['annotati
     const description = typeof item.description === 'string' ? item.description : undefined
     const intent = typeof item.intent === 'string' ? item.intent : undefined
     const argumentsPayload = isRecord(item.arguments) ? item.arguments : undefined
+    const visible = typeof item.visible === 'boolean' ? item.visible : undefined
     if (!key || !label) continue
-    actions.push({ key, label, description, intent, arguments: argumentsPayload })
+    actions.push({ key, label, description, intent, arguments: argumentsPayload, visible })
   }
 
   return actions

@@ -18,7 +18,6 @@ import {
   withTransaction,
   ensureFileEntry,
   getAssetById,
-  getFileById,
   resolveFileByRootRelativePath,
   bindTagToAsset,
   removeTagBindingsForAsset,
@@ -27,7 +26,6 @@ import {
 
 function buildFileResponse(file, rootPath = null) {
   return {
-    fileId: file.id,
     assetId: file.assetId,
     absolutePath: file.absolutePath,
     relativePath: rootPath ? toRelativePathWithinRoot(rootPath, file.absolutePath) : null,
@@ -88,8 +86,8 @@ export async function setAnnotationValue(params) {
 
       return {
         ok: true,
-        fileId: file.id,
         assetId: file.assetId,
+        absolutePath: file.absolutePath,
         relativePath,
         fieldKey,
         value,
@@ -105,16 +103,13 @@ export async function setLocalDataValue(params) {
 
 export async function getFileTags(params) {
   const rootPath = resolveOptionalRootPath(params.rootPath)
-  const fileId = typeof params.fileId === 'string' ? params.fileId : null
   const relativePath = typeof params.relativePath === 'string' && params.relativePath.trim()
     ? normalizeRelativePath(params.relativePath)
     : null
 
   return withDb(async (db) => {
     let file = null
-    if (fileId) {
-      file = getFileById(db, fileId)
-    } else if (rootPath && relativePath) {
+    if (rootPath && relativePath) {
       file = resolveFileByRootRelativePath(db, rootPath, relativePath)
     }
 
@@ -167,7 +162,7 @@ export async function listTagOptions(params) {
         tag.key AS key,
         tag.value AS value,
         tag.source AS source,
-        COUNT(DISTINCT file.id) AS fileCount
+        COUNT(DISTINCT file.absolutePath) AS fileCount
       FROM tag
       INNER JOIN asset_tag ON asset_tag.tagId = tag.id
       INNER JOIN asset ON asset.id = asset_tag.assetId
@@ -207,7 +202,6 @@ export async function queryFilesByTags(params) {
     const { sql: scopeSql, params: scopeParams } = buildPathScopeClause('file.absolutePath', rootPath)
     const rows = db.prepare(`
       SELECT
-        file.id AS fileId,
         file.assetId AS assetId,
         file.absolutePath AS absolutePath,
         tag.id AS tagId,
@@ -227,12 +221,11 @@ export async function queryFilesByTags(params) {
 
     const byFile = new Map()
     for (const row of rows) {
-      const fileId = row.fileId
-      const existing = byFile.get(fileId) ?? {
-        fileId,
+      const absolutePath = row.absolutePath
+      const existing = byFile.get(absolutePath) ?? {
         assetId: row.assetId,
-        absolutePath: row.absolutePath,
-        relativePath: rootPath ? toRelativePathWithinRoot(rootPath, row.absolutePath) : null,
+        absolutePath,
+        relativePath: rootPath ? toRelativePathWithinRoot(rootPath, absolutePath) : null,
         tags: [],
         updatedAt: 0,
       }
@@ -241,7 +234,7 @@ export async function queryFilesByTags(params) {
         existing.tags.push(dto)
         existing.updatedAt = Math.max(existing.updatedAt, Number(dto.appliedAt ?? dto.updatedAt ?? 0))
       }
-      byFile.set(fileId, existing)
+      byFile.set(absolutePath, existing)
     }
 
     const filtered = []

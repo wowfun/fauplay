@@ -13,7 +13,7 @@ const TOOL_DEFINITIONS = [
         rootPath: { type: 'string' },
         operation: {
           type: 'string',
-          enum: ['setAnnotationValue', 'batchRebindPaths', 'reconcileFileBindings', 'cleanupInvalidFileIds'],
+          enum: ['setAnnotationValue', 'batchRebindPaths', 'cleanupMissingFiles'],
         },
         relativePath: { type: 'string' },
         mappings: {
@@ -46,25 +46,18 @@ const TOOL_DEFINITIONS = [
       scopes: ['file', 'workspace'],
       toolActions: [
         {
-          key: 'reconcileFileBindings',
-          label: '刷新 file 绑定',
-          description: '扫描 file 表并执行自动重绑',
-          intent: 'primary',
-          arguments: { operation: 'reconcileFileBindings' },
-        },
-        {
-          key: 'cleanupInvalidFileIdsDryRun',
-          label: '预演清理失效 fileId',
+          key: 'cleanupMissingFilesDryRun',
+          label: '预演清理缺失路径',
           description: '仅统计，不执行删除',
           intent: 'outline',
-          arguments: { operation: 'cleanupInvalidFileIds', confirm: false },
+          arguments: { operation: 'cleanupMissingFiles', confirm: false },
         },
         {
-          key: 'cleanupInvalidFileIdsCommit',
-          label: '执行清理失效 fileId',
-          description: '删除失效 file 行并级联清理',
+          key: 'cleanupMissingFilesCommit',
+          label: '执行清理缺失路径',
+          description: '删除缺失 file 行并级联清理',
           intent: 'accent',
-          arguments: { operation: 'cleanupInvalidFileIds', confirm: true },
+          arguments: { operation: 'cleanupMissingFiles', confirm: true },
         },
       ],
     },
@@ -167,7 +160,7 @@ async function handleRequest(request) {
     const operation = typeof args?.operation === 'string' ? args.operation : ''
     const error = new Error(
       operation
-        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/files/relative-paths, /v1/file-bindings/* instead`
+        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/files/relative-paths, /v1/files/missing/cleanups instead`
         : 'local.data operation is required',
     )
     error.code = 'MCP_TOOL_CALL_FAILED'
