@@ -60,6 +60,7 @@ interface FilePreviewPanelProps {
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
   onOpenPersonDetail?: (personId: string | null) => void
+  enableAnnotationTagShortcutOwner?: boolean
 }
 
 interface BatchRenameItemResult {
@@ -197,6 +198,7 @@ export function FilePreviewPanel({
   onToolPanelWidthChange,
   onMutationCommitted,
   onOpenPersonDetail,
+  enableAnnotationTagShortcutOwner = false,
 }: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
@@ -763,6 +765,7 @@ export function FilePreviewPanel({
         onRequestAnnotationTagOptions={handleRequestAnnotationTagOptions}
         onBindAnnotationTag={handleBindAnnotationTag}
         onUnbindAnnotationTag={handleUnbindAnnotationTag}
+        enableOpenAnnotationTagByShortcut={enableAnnotationTagShortcutOwner}
       />
 
       <FilePreviewCanvas

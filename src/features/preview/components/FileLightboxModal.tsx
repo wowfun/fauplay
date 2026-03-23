@@ -38,6 +38,7 @@ interface FileLightboxModalProps {
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
   onOpenPersonDetail?: (personId: string | null) => void
+  enableAnnotationTagShortcutOwner?: boolean
 }
 
 export function FileLightboxModal({
@@ -72,6 +73,7 @@ export function FileLightboxModal({
   onToolPanelWidthChange,
   onMutationCommitted,
   onOpenPersonDetail,
+  enableAnnotationTagShortcutOwner = false,
 }: FileLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -108,6 +110,7 @@ export function FileLightboxModal({
         onToolPanelWidthChange={onToolPanelWidthChange}
         onMutationCommitted={onMutationCommitted}
         onOpenPersonDetail={onOpenPersonDetail}
+        enableAnnotationTagShortcutOwner={enableAnnotationTagShortcutOwner}
       />
     </div>
   )

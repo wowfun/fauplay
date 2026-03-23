@@ -478,6 +478,7 @@ export function ExplorerWorkspaceLayout({
                 }}
                 onMutationCommitted={onPreviewMutationCommitted}
                 onOpenPersonDetail={onOpenPeopleForPerson}
+                enableAnnotationTagShortcutOwner={!previewFile}
               />
             </Suspense>
           </div>
@@ -534,6 +535,7 @@ export function ExplorerWorkspaceLayout({
             }}
             onMutationCommitted={onPreviewMutationCommitted}
             onOpenPersonDetail={onOpenPeopleForPerson}
+            enableAnnotationTagShortcutOwner
           />
         </Suspense>
       )}

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-03-23
+### Changed
+- 更新 `specs/117-preview-header-tag-management/spec.md`、`src/config/shortcuts.ts` 与 `docs/shortcuts.md`：为预览头部“绑定逻辑标签”新增预览态快捷键 `#`，语义与点击 `+` 一致；输入焦点保护保持生效；当侧栏预览与全屏预览同时存在时固定由全屏响应，避免双面板同时打开。
+
 ## 2026-03-22
 ### Changed
 - 更新 `specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/005-local-data-contracts/runtime-config-reference.md` 与 `specs/112-video-same-duration-search/spec.md`：将 WSL `drvfs` 自动重挂载从 `video-same-duration` 插件私有逻辑上收为 Gateway 横切保障，并新增 `~/.fauplay/global/.env` 作为 Gateway 统一进程环境文件，明确优先级为 `servers.<name>.env` > 全局 `.env` > shell env。

@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Plus, X } from 'lucide-react'
+import { keyboardShortcuts } from '@/config/shortcuts'
+import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { AnnotationFilterTagOption } from '@/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/Button'
@@ -17,6 +19,7 @@ interface PreviewHeaderTagManagerProps {
   onRequestTagOptions: () => void
   onBindTag: (params: { key: string; value: string }) => Promise<void>
   onUnbindTag: (tag: PreviewHeaderAnnotationTag) => Promise<void>
+  enableOpenByShortcut?: boolean
 }
 
 function buildSourceSummary(representativeSource: string, sources: string[]): string {
@@ -57,6 +60,7 @@ export function PreviewHeaderTagManager({
   onRequestTagOptions,
   onBindTag,
   onUnbindTag,
+  enableOpenByShortcut = false,
 }: PreviewHeaderTagManagerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -81,6 +85,21 @@ export function PreviewHeaderTagManager({
       return optionMatchesQuery(option, draftValue.trim())
     })
   }, [currentTagByKey, draftValue, tagOptions])
+
+  const closeEditor = useCallback(() => {
+    setIsEditorOpen(false)
+    setDraftValue('')
+    setActiveOptionIndex(0)
+  }, [])
+
+  const handleOpenEditor = useCallback(() => {
+    if (!canManageTags || pendingAction) return
+    setMutationError(null)
+    setDraftValue('')
+    setActiveOptionIndex(0)
+    setIsEditorOpen(true)
+    onRequestTagOptions()
+  }, [canManageTags, onRequestTagOptions, pendingAction])
 
   useEffect(() => {
     if (!isEditorOpen) return
@@ -109,7 +128,25 @@ export function PreviewHeaderTagManager({
 
     window.addEventListener('mousedown', handlePointerDown)
     return () => window.removeEventListener('mousedown', handlePointerDown)
-  }, [isEditorOpen])
+  }, [closeEditor, isEditorOpen])
+
+  useEffect(() => {
+    if (!enableOpenByShortcut) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.repeat) return
+      if (isTypingTarget(event.target)) return
+      if (!canManageTags || pendingAction) return
+      if (!matchesAnyShortcut(event, keyboardShortcuts.preview.openAnnotationTagEditor)) return
+
+      event.preventDefault()
+      handleOpenEditor()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [canManageTags, enableOpenByShortcut, handleOpenEditor, pendingAction])
 
   const chipClassName = isFullscreen
     ? 'border-white/25 bg-white/10 text-white/90'
@@ -121,21 +158,6 @@ export function PreviewHeaderTagManager({
 
   if (tags.length === 0 && !canManageTags) {
     return null
-  }
-
-  const closeEditor = () => {
-    setIsEditorOpen(false)
-    setDraftValue('')
-    setActiveOptionIndex(0)
-  }
-
-  const handleOpenEditor = () => {
-    if (!canManageTags || pendingAction) return
-    setMutationError(null)
-    setDraftValue('')
-    setActiveOptionIndex(0)
-    setIsEditorOpen(true)
-    onRequestTagOptions()
   }
 
   const handleBindOption = async (option: AnnotationFilterTagOption) => {
@@ -226,7 +248,7 @@ export function PreviewHeaderTagManager({
                 isFullscreen ? 'border-white/20 bg-white/5 text-white hover:bg-white/10' : ''
               )}
               disabled={pendingAction !== null}
-              title="绑定逻辑标签"
+              title="绑定逻辑标签（#）"
               onClick={handleOpenEditor}
             >
               <Plus className="h-3.5 w-3.5" />

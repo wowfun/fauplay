@@ -43,6 +43,9 @@ export const keyboardShortcuts = {
       { key: '8', ctrl: false, meta: false, alt: false, shift: false },
       { key: '9', ctrl: false, meta: false, alt: false, shift: false },
     ] satisfies ShortcutBinding[],
+    openAnnotationTagEditor: [
+      { key: '#' },
+    ] satisfies ShortcutBinding[],
     prev: [
       { code: 'bracketleft', ctrl: false, meta: false, alt: false },
     ] satisfies ShortcutBinding[],
