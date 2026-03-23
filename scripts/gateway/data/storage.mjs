@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import {
   SCHEMA_VERSION,
@@ -13,6 +12,7 @@ import {
   toFileMtimeMs,
   computeFingerprintsForFile,
   parseFiniteNumber,
+  statPath,
 } from './common.mjs'
 
 function openDb() {
@@ -259,7 +259,7 @@ export function softDeleteAssetsIfOrphaned(db, assetIds) {
 export async function ensureFileEntry(db, rootPath, relativePath) {
   const normalizedRelativePath = normalizeRelativePath(relativePath)
   const absolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
-  const statResult = await stat(absolutePath)
+  const statResult = await statPath(absolutePath)
   if (!statResult.isFile()) {
     throw new Error('target path must be a file')
   }

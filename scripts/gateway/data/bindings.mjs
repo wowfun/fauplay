@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import fs from 'node:fs/promises'
 import {
   nowTs,
   resolveRootPath,
@@ -9,6 +8,7 @@ import {
   buildPathScopeClause,
   isSkippableFsError,
   toFileMtimeMs,
+  statPath,
 } from './common.mjs'
 import {
   withDb,
@@ -145,7 +145,7 @@ async function listMissingFileRows(db, rootPath) {
   const missingRows = []
   for (const row of rows) {
     try {
-      const statResult = await fs.stat(row.absolutePath)
+      const statResult = await statPath(row.absolutePath)
       if (!statResult.isFile()) {
         missingRows.push(row)
       }
@@ -322,7 +322,7 @@ export async function batchRebindPaths(params) {
 
         let targetStat = null
         try {
-          targetStat = await fs.stat(item.toAbsolutePath)
+          targetStat = await statPath(item.toAbsolutePath)
         } catch (error) {
           if (!isSkippableFsError(error)) {
             throw error

@@ -2,6 +2,7 @@
 
 ## 2026-03-22
 ### Changed
+- 更新 `specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/005-local-data-contracts/runtime-config-reference.md` 与 `specs/112-video-same-duration-search/spec.md`：将 WSL `drvfs` 自动重挂载从 `video-same-duration` 插件私有逻辑上收为 Gateway 横切保障，并新增 `~/.fauplay/global/.env` 作为 Gateway 统一进程环境文件，明确优先级为 `servers.<name>.env` > 全局 `.env` > shell env。
 - 更新 `specs/104-timm-classification-mcp/spec.md`、`src/config/mcp.json` 与 `docs/mcp-timm-classifier.md`：`timm-classifier` 的默认 MCP 启动解释器固定为项目 `.venv/bin/python`，避免系统 `python3` 缺少 `torch` 等依赖导致分类调用失败。
 - 更新 `specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/005-local-data-contracts/runtime-config-reference.md`、`specs/112-video-same-duration-search/spec.md`、`specs/114-local-data-plugin/spec.md`、`specs/104-timm-classification-mcp/spec.md` 与 `specs/115-facial-recognition/spec.md`：收敛“应用配置归应用、工具配置归工具”边界，`timm-classifier`、`video-same-duration`、`vision-face`、`local-data` 的默认配置回归 `tools/mcp/<tool>/config.json`，并退役按 `~/.fauplay/global/<domain>.json` 自动覆盖工具内部配置的约定。
 - 更新 `specs/002-contracts/spec.md` 与 `scripts/gateway/server.mjs`：Gateway 启动日志改为打印本次实际读取的 MCP 配置文件清单，明确区分 `default/global/custom` 来源，并在全局覆盖缺失时显示 `missing, skipped`。

@@ -69,6 +69,15 @@
 13. 工具内部默认配置属于 tool-owned config，默认应与工具一起发布在 `tools/mcp/<tool>/config.json`；它们不参与 `src/config -> ~/.fauplay/global` 的 MCP 注册表分层。
 14. 如需 Host 级覆盖工具内部配置，必须通过 `~/.fauplay/global/mcp.json` 显式改写对应 server 的 `args/env/command/cwd`；Gateway 不得隐式读取 `~/.fauplay/global/<tool>.json` 作为工具内建覆盖层。
 
+### Gateway 进程环境与 WSL 恢复（Gateway Process Env & WSL Recovery）
+
+1. Gateway 启动前必须可选读取全局环境文件 `~/.fauplay/global/.env`；文件缺失时静默跳过，语法非法时必须以配置错误失败启动并标注文件路径。
+2. 同名环境变量优先级固定为：`servers.<name>.env` > `~/.fauplay/global/.env` > 启动 Gateway 的 shell 环境变量。
+3. `~/.fauplay/global/.env` 属于 app-owned 进程环境层，只用于 Gateway 与其子进程的环境变量注入，不替代 `src/config/*.json` 与 `tools/mcp/<tool>/config.json` 的文件型配置职责。
+4. 当经 Gateway 发起的路径型工具调用或 Gateway 自身文件访问在 `/mnt/<drive>/...` 命中 `No such device` 时，Gateway 必须尝试执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并仅重试一次。
+5. 上述自动重挂载仅使用进程环境变量 `SUDO_PASSWORD`；缺失、密码错误或挂载超时时必须快速失败并返回可读错误，不得拖延为前端 `MCP_CLIENT_TIMEOUT`。
+6. Gateway 级 WSL 自动恢复属于横切运行时保障，不改变现有 MCP/HTTP 接口的 schema、工具名或请求字段。
+
 ## 生命周期契约 (Lifecycle Contract)
 
 客户端与网关的交互顺序：

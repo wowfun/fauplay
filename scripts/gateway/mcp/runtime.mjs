@@ -1,4 +1,6 @@
+import path from 'node:path'
 import { StdioMcpRunner } from './stdio-runner.mjs'
+import { withDrvfsRetry } from '../drvfs.mjs'
 
 function createRuntimeError(code, message, statusCode = 400) {
   const error = new Error(message)
@@ -11,8 +13,78 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : []
 }
 
+function isObjectRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function normalizeWorkbenchMetadataItems(value) {
   return normalizeArray(value).filter((item) => item && typeof item === 'object')
+}
+
+function isWindowsPath(input) {
+  return typeof input === 'string' && /^[a-zA-Z]:[\\/]/.test(input)
+}
+
+function joinTargetPath(rootPath, relativePath) {
+  if (isWindowsPath(rootPath)) {
+    const normalizedRoot = rootPath.replace(/[\\/]+$/, '')
+    return `${normalizedRoot}\\${relativePath.split('/').join('\\')}`
+  }
+
+  return path.resolve(rootPath, ...relativePath.split('/'))
+}
+
+function appendCandidatePath(set, value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return
+  }
+  set.add(value.trim())
+}
+
+function appendRelativeCandidatePath(set, rootPath, relativePath) {
+  if (typeof rootPath !== 'string' || !rootPath.trim()) {
+    return
+  }
+  if (typeof relativePath !== 'string' || !relativePath.trim()) {
+    return
+  }
+
+  const normalizedSegments = relativePath
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+  if (normalizedSegments.length === 0) {
+    return
+  }
+
+  set.add(joinTargetPath(rootPath.trim(), normalizedSegments.join('/')))
+}
+
+function collectCandidatePathsFromToolArgs(toolArgs) {
+  if (!isObjectRecord(toolArgs)) {
+    return []
+  }
+
+  const candidates = new Set()
+  const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath.trim() : ''
+
+  appendCandidatePath(candidates, toolArgs.absolutePath)
+  appendCandidatePath(candidates, rootPath)
+  appendRelativeCandidatePath(candidates, rootPath, toolArgs.relativePath)
+
+  for (const relativePath of normalizeArray(toolArgs.relativePaths)) {
+    appendRelativeCandidatePath(candidates, rootPath, relativePath)
+  }
+
+  for (const mapping of normalizeArray(toolArgs.mappings)) {
+    if (!isObjectRecord(mapping)) continue
+    appendRelativeCandidatePath(candidates, rootPath, mapping.fromRelativePath)
+    appendRelativeCandidatePath(candidates, rootPath, mapping.toRelativePath)
+    appendRelativeCandidatePath(candidates, rootPath, mapping.relativePath)
+    appendRelativeCandidatePath(candidates, rootPath, mapping.nextRelativePath)
+  }
+
+  return [...candidates]
 }
 
 function toGatewayTool(sourceLabel, tool) {
@@ -207,7 +279,16 @@ export class McpHostRuntime {
     }
 
     try {
-      return await found.client.callTool(toolName, args ?? {})
+      const normalizedArgs = isObjectRecord(args) ? args : {}
+      const candidatePaths = collectCandidatePathsFromToolArgs(normalizedArgs)
+      return await withDrvfsRetry(
+        candidatePaths,
+        `call tool ${toolName}`,
+        () => found.client.callTool(toolName, normalizedArgs),
+        {
+          errorCode: 'MCP_TOOL_CALL_FAILED',
+        }
+      )
     } catch (error) {
       throw mapRuntimeError(error)
     }

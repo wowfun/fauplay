@@ -50,15 +50,23 @@
 ### 4.1 文件型运行时配置分层
 
 1. app-owned 运行时配置按以下顺序解析：`src/config/<domain>.json -> ~/.fauplay/global/<domain>.json -> <root>/.fauplay/<domain>.json`。
-2. tool-owned 默认配置必须与工具一起发布在 `tools/mcp/<tool>/config.json`，不再强制迁入 `src/config/`。
-3. tool-owned 配置不得自动读取 `~/.fauplay/global/<domain>.json` 或 `<root>/.fauplay/<domain>.json` 作为内建覆盖层。
-4. Host 如需覆盖工具内部配置，必须通过 `~/.fauplay/global/mcp.json` 显式改写对应 server 的 `args/env/command/cwd`，或在独立运行工具时显式传入 `--config <path>`。
-5. 并非所有 app-owned 配置域都支持 root 覆盖；只有显式声明为 root-scoped 的域才允许读取 `<root>/.fauplay/<domain>.json`。
-6. `mcp` 注册配置固定为 default + global 两层：`src/config/mcp.json -> ~/.fauplay/global/mcp.json`；Gateway 启动时不得读取 `<root>/.fauplay/mcp.json`。
-7. 浏览器 `localStorage` 与 `IndexedDB` 不参与文件型运行时配置解析链。
-8. 当 `root=~` 时，`~/.fauplay/<domain>.json` 仍视为 root 级配置，`~/.fauplay/global/<domain>.json` 仍只视为全局级配置；实现必须按精确文件路径、非递归方式查找，避免串层。
-9. 项目目录下的 `.fauplay/` 仅表示“以项目目录为 root 的本地数据与配置目录”，不再承载 repo 发布的默认配置。
-10. `*.local.json` 不再属于运行时兼容路径；旧文件允许遗留，但系统不得继续读取。
+2. app-owned 进程环境层固定读取 `~/.fauplay/global/.env`；该层只负责 Gateway 及其子进程的环境变量注入，不与 JSON 文件型配置做字段级合并。
+3. tool-owned 默认配置必须与工具一起发布在 `tools/mcp/<tool>/config.json`，不再强制迁入 `src/config/`。
+4. tool-owned 配置不得自动读取 `~/.fauplay/global/<domain>.json` 或 `<root>/.fauplay/<domain>.json` 作为内建覆盖层。
+5. Host 如需覆盖工具内部配置，必须通过 `~/.fauplay/global/mcp.json` 显式改写对应 server 的 `args/env/command/cwd`，或在独立运行工具时显式传入 `--config <path>`。
+6. 同名环境变量优先级固定为：`servers.<name>.env` > `~/.fauplay/global/.env` > 启动 Gateway 的 shell 环境变量。
+7. 并非所有 app-owned 配置域都支持 root 覆盖；只有显式声明为 root-scoped 的域才允许读取 `<root>/.fauplay/<domain>.json`。
+8. `mcp` 注册配置固定为 default + global 两层：`src/config/mcp.json -> ~/.fauplay/global/mcp.json`；Gateway 启动时不得读取 `<root>/.fauplay/mcp.json`。
+9. 浏览器 `localStorage` 与 `IndexedDB` 不参与文件型运行时配置解析链。
+10. 当 `root=~` 时，`~/.fauplay/<domain>.json` 仍视为 root 级配置，`~/.fauplay/global/<domain>.json` 仍只视为全局级配置；实现必须按精确文件路径、非递归方式查找，避免串层。
+11. 项目目录下的 `.fauplay/` 仅表示“以项目目录为 root 的本地数据与配置目录”，不再承载 repo 发布的默认配置。
+12. `*.local.json` 不再属于运行时兼容路径；旧文件允许遗留，但系统不得继续读取。
+
+### 4.2 Gateway WSL `drvfs` 恢复
+
+1. `/mnt/<drive>/...` 路径上的 `No such device` 恢复属于 Gateway 横切运行时保障，而非任一 tool-owned config 的私有能力。
+2. 当 Gateway 自身文件访问或经 Gateway 发起的路径型工具调用命中上述错误时，Gateway 必须尝试执行 `sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>` 并仅重试一次。
+3. 自动重挂载仅使用进程环境变量 `SUDO_PASSWORD`；缺失、密码错误或挂载超时时必须快速失败并返回可读错误。
 
 ## 5. 数据与存储契约 (SQLite Contract)
 
@@ -185,6 +193,8 @@
 19. `FR-LDC-19` 浏览器 `localStorage` 与 `IndexedDB` 不得参与文件型运行时配置覆盖链。
 20. `FR-LDC-20` 当 root 为用户家目录时，root 级 `.fauplay/<domain>.json` 与全局 `.fauplay/global/<domain>.json` 必须保持作用域隔离，不得递归串层。
 21. `FR-LDC-21` `local-data`、`video-same-duration`、`timm-classifier`、`vision-face` 等 tool-owned 默认配置必须位于 `tools/mcp/<tool>/config.json`，且不得自动读取 `~/.fauplay/global/<domain>.json` 作为内建覆盖层。
+22. `FR-LDC-22` Gateway 必须在启动前读取可选的 `~/.fauplay/global/.env` 作为 app-owned 进程环境层，且同名环境变量优先级固定为 `servers.<name>.env` > `~/.fauplay/global/.env` > shell env。
+23. `FR-LDC-23` `/mnt/<drive>/...` 上的 `No such device` 恢复必须由 Gateway 统一承担；tool-owned 插件不得再把该恢复逻辑作为私有配置契约对外承诺。
 
 ## 10. 验收标准 (AC)
 
@@ -204,6 +214,8 @@
 14. `AC-LDC-14` 当 `root=~` 时，`~/.fauplay/<domain>.json` 可作为 root 级文件生效，但 `~/.fauplay/global/<domain>.json` 不会被误识别为 root 级配置。
 15. `AC-LDC-15` 若旧路径 `${HOME}/.fauplay/faudb.global.sqlite` 存在且新路径缺失，首次打开数据库后新路径生效，旧路径不再作为运行时读写真源。
 16. `AC-LDC-16` `~/.fauplay/global/timm-classifier.json`、`video-same-duration.json`、`vision-face.json`、`local-data.json` 等旧 tool-owned 全局覆盖文件存在时，系统忽略它们且不崩溃。
+17. `AC-LDC-17` `~/.fauplay/global/.env` 缺失时 Gateway 仍可正常启动；当其与 shell 中同名环境变量冲突时，以 `.env` 值为准，但 `servers.<name>.env` 仍可继续覆盖。
+18. `AC-LDC-18` Gateway 自身文件访问或经 Gateway 发起的路径型工具调用在 `/mnt/<drive>/...` 命中 `No such device` 时，可自动重挂载后单次重试成功；失败时返回可读错误且不升级为前端 `MCP_CLIENT_TIMEOUT`。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 

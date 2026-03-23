@@ -4,6 +4,11 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { TextDecoder, promisify } from 'node:util'
+import {
+  execFileWithDrvfsRetry,
+  openWithDrvfsRetry,
+  statWithDrvfsRetry,
+} from '../drvfs.mjs'
 
 export const DB_DIRNAME = '.fauplay'
 export const GLOBAL_CONFIG_DIRNAME = 'global'
@@ -189,6 +194,10 @@ export function isSkippableFsError(error) {
     || code === 'EISDIR'
 }
 
+export async function statPath(targetPath, options) {
+  return statWithDrvfsRetry(targetPath, options)
+}
+
 export function toFileMtimeMs(statResult) {
   const value = Math.trunc(Number(statResult?.mtimeMs))
   return Number.isFinite(value) && value >= 0 ? value : 0
@@ -348,10 +357,15 @@ export async function searchCandidatesBySizeMtime(rootPath, snapshot, config) {
   args.push('-n', String(config.maxCandidates))
   args.push('-size')
 
-  const result = await execFileAsync(config.esPath, args, {
-    encoding: 'buffer',
-    maxBuffer: ES_SEARCH_MAX_BUFFER,
-  })
+  const result = await execFileWithDrvfsRetry(
+    config.esPath,
+    args,
+    {
+      encoding: 'buffer',
+      maxBuffer: ES_SEARCH_MAX_BUFFER,
+    },
+    [rootPath]
+  )
 
   const stdoutBuffer = Buffer.isBuffer(result.stdout)
     ? result.stdout
@@ -373,7 +387,7 @@ export async function searchCandidatesBySizeMtime(rootPath, snapshot, config) {
 
     let candidateStat = null
     try {
-      candidateStat = await fs.stat(absolutePath)
+      candidateStat = await statWithDrvfsRetry(absolutePath)
     } catch (error) {
       if (isSkippableFsError(error)) continue
       throw error
@@ -392,7 +406,7 @@ export async function searchCandidatesBySizeMtime(rootPath, snapshot, config) {
 }
 
 async function readSampleBytes(absPath, fileSize) {
-  const handle = await fs.open(absPath, 'r')
+  const handle = await openWithDrvfsRetry(absPath, 'r')
   try {
     if (fileSize <= SAMPLE_CHUNK_BYTES * 2) {
       const all = Buffer.allocUnsafe(Math.max(fileSize, 0))
@@ -414,7 +428,7 @@ async function readSampleBytes(absPath, fileSize) {
 
 async function sha256HexForFile(absPath) {
   const hash = createHash('sha256')
-  const handle = await fs.open(absPath, 'r')
+  const handle = await openWithDrvfsRetry(absPath, 'r')
   try {
     const buffer = Buffer.allocUnsafe(1024 * 1024)
     let position = 0
@@ -431,7 +445,7 @@ async function sha256HexForFile(absPath) {
 }
 
 export async function computeFingerprintsForFile(absPath, options, providedStat = null) {
-  const statResult = providedStat ?? await fs.stat(absPath)
+  const statResult = providedStat ?? await statWithDrvfsRetry(absPath)
   if (!statResult.isFile()) {
     throw new Error('target path must be a file')
   }
