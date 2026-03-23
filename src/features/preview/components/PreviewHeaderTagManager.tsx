@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Plus, X } from 'lucide-react'
-import { keyboardShortcuts } from '@/config/shortcuts'
+import { useKeyboardShortcuts } from '@/config/shortcutStore'
+import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { AnnotationFilterTagOption } from '@/types'
 import { cn } from '@/lib/utils'
@@ -20,6 +21,8 @@ interface PreviewHeaderTagManagerProps {
   onBindTag: (params: { key: string; value: string }) => Promise<void>
   onUnbindTag: (tag: PreviewHeaderAnnotationTag) => Promise<void>
   enableOpenByShortcut?: boolean
+  rootId?: string | null
+  relativePath?: string | null
 }
 
 function buildSourceSummary(representativeSource: string, sources: string[]): string {
@@ -61,7 +64,15 @@ export function PreviewHeaderTagManager({
   onBindTag,
   onUnbindTag,
   enableOpenByShortcut = false,
+  rootId,
+  relativePath,
 }: PreviewHeaderTagManagerProps) {
+  const keyboardShortcuts = useKeyboardShortcuts()
+  const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
+    rootId,
+    relativePath,
+    enabled: enableOpenByShortcut && canManageTags,
+  })
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [isEditorOpen, setIsEditorOpen] = useState(false)
@@ -138,6 +149,7 @@ export function PreviewHeaderTagManager({
       if (event.repeat) return
       if (isTypingTarget(event.target)) return
       if (!canManageTags || pendingAction) return
+      if (getMatchingPreviewTagShortcut(event)) return
       if (!matchesAnyShortcut(event, keyboardShortcuts.preview.openAnnotationTagEditor)) return
 
       event.preventDefault()
@@ -146,7 +158,7 @@ export function PreviewHeaderTagManager({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [canManageTags, enableOpenByShortcut, handleOpenEditor, pendingAction])
+  }, [canManageTags, enableOpenByShortcut, getMatchingPreviewTagShortcut, handleOpenEditor, keyboardShortcuts, pendingAction])
 
   const chipClassName = isFullscreen
     ? 'border-white/25 bg-white/10 text-white/90'

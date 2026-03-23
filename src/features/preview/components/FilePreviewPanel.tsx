@@ -766,6 +766,8 @@ export function FilePreviewPanel({
         onBindAnnotationTag={handleBindAnnotationTag}
         onUnbindAnnotationTag={handleUnbindAnnotationTag}
         enableOpenAnnotationTagByShortcut={enableAnnotationTagShortcutOwner}
+        rootId={rootId}
+        relativePath={file.kind === 'file' ? file.path : null}
       />
 
       <FilePreviewCanvas
@@ -792,6 +794,7 @@ export function FilePreviewPanel({
         toolWorkbenchState={toolWorkbenchState}
         setToolWorkbenchState={setToolWorkbenchState}
         enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
+        enableAnnotationTagShortcutOwner={enableAnnotationTagShortcutOwner}
         toolPanelCollapsed={toolPanelCollapsed}
         onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
         toolPanelWidthPx={toolPanelWidthPx}

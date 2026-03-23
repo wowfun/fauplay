@@ -61,6 +61,7 @@
 10. 当 `root=~` 时，`~/.fauplay/<domain>.json` 仍视为 root 级配置，`~/.fauplay/global/<domain>.json` 仍只视为全局级配置；实现必须按精确文件路径、非递归方式查找，避免串层。
 11. 项目目录下的 `.fauplay/` 仅表示“以项目目录为 root 的本地数据与配置目录”，不再承载 repo 发布的默认配置。
 12. `*.local.json` 不再属于运行时兼容路径；旧文件允许遗留，但系统不得继续读取。
+13. `shortcuts` 属于 root-scoped 的 app-owned 配置域；默认值位于 `src/config/shortcuts.json`，并允许 `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 覆盖。
 
 ### 4.2 Gateway WSL `drvfs` 恢复
 
@@ -195,6 +196,7 @@
 21. `FR-LDC-21` `local-data`、`video-same-duration`、`timm-classifier`、`vision-face` 等 tool-owned 默认配置必须位于 `tools/mcp/<tool>/config.json`，且不得自动读取 `~/.fauplay/global/<domain>.json` 作为内建覆盖层。
 22. `FR-LDC-22` Gateway 必须在启动前读取可选的 `~/.fauplay/global/.env` 作为 app-owned 进程环境层，且同名环境变量优先级固定为 `servers.<name>.env` > `~/.fauplay/global/.env` > shell env。
 23. `FR-LDC-23` `/mnt/<drive>/...` 上的 `No such device` 恢复必须由 Gateway 统一承担；tool-owned 插件不得再把该恢复逻辑作为私有配置契约对外承诺。
+24. `FR-LDC-24` `shortcuts` 配置域必须按 `src/config/shortcuts.json -> ~/.fauplay/global/shortcuts.json -> <root>/.fauplay/shortcuts.json` 解析，且仅 `shortcuts` 这类显式 root-scoped 域允许读取 root 层文件。
 
 ## 10. 验收标准 (AC)
 
@@ -216,6 +218,7 @@
 16. `AC-LDC-16` `~/.fauplay/global/timm-classifier.json`、`video-same-duration.json`、`vision-face.json`、`local-data.json` 等旧 tool-owned 全局覆盖文件存在时，系统忽略它们且不崩溃。
 17. `AC-LDC-17` `~/.fauplay/global/.env` 缺失时 Gateway 仍可正常启动；当其与 shell 中同名环境变量冲突时，以 `.env` 值为准，但 `servers.<name>.env` 仍可继续覆盖。
 18. `AC-LDC-18` Gateway 自身文件访问或经 Gateway 发起的路径型工具调用在 `/mnt/<drive>/...` 命中 `No such device` 时，可自动重挂载后单次重试成功；失败时返回可读错误且不升级为前端 `MCP_CLIENT_TIMEOUT`。
+19. `AC-LDC-19` `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 缺失时，系统继续使用 `src/config/shortcuts.json` 默认值；当其存在时，仅覆盖已声明的快捷键动作。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 

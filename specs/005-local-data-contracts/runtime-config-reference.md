@@ -29,6 +29,7 @@
 | domain | owner | default | global | root | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `mcp` | app | `src/config/mcp.json` | yes | no | Gateway 启动期读取；`servers` 按 server key 合并，server 字段浅覆盖 |
+| `shortcuts` | app | `src/config/shortcuts.json` | yes | yes | 快捷键默认真源；按 action 级整项替换；global 由 Gateway 只读接口读取，root 由前端基于当前 root 句柄读取 |
 | `gateway-env` | app | none | `~/.fauplay/global/.env` | no | 仅注入 Gateway 与 MCP 子进程环境变量；优先级低于 `servers.<name>.env`，高于 shell env |
 | `local-data` | tool | `tools/mcp/local-data/config.json` | no | no | Gateway 数据链默认读取工具目录配置，不自动叠加全局 JSON |
 | `video-same-duration` | tool | `tools/mcp/video-same-duration/config.json` | no | no | 支持显式 `--config`，默认读取工具目录配置 |

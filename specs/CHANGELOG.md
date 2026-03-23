@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-03-24
+### Changed
+- 新增 `specs/118-toolbar-help-shortcuts/spec.md`，并更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/areas.md` 与 `docs/shortcuts.md`：顶部工具栏新增只读 `帮助` 入口专题，首批支持查看当前运行时快捷键；列表固定按 `App / Grid / Preview / Tag` 分组展示，动态逻辑标签快捷键单列为 `Tag` 组，状态指示基于运行时上下文而非单次按键事件。
+- 新增 `specs/116-configurable-shortcuts/spec.md`，并更新 `specs/003-ui-ux/spec.md`、`specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/runtime-config-reference.md`：将快捷键定义为 root-scoped 的 app-owned 配置域，默认真源切换为 `src/config/shortcuts.json`，配置链统一为 `src/config -> ~/.fauplay/global -> <root>/.fauplay`；同时明确扁平 `snake_case` action id、单次组合键 DSL、`none` 禁用语义、局部容错与 Gateway 全局只读配置接口契约。
+- 更新 `specs/116-configurable-shortcuts/spec.md`、`specs/117-preview-header-tag-management/spec.md` 与 `docs/shortcuts.md`：将动态逻辑标签快捷键契约收敛为所见即所得的 `tag:${key}=${value}` 原始字符串语法，支持直接写中文、空格与常见特殊字符；仅当目标逻辑标签存在于当前候选快照时才生效，并在与预览内建快捷键冲突时由逻辑标签快捷键优先。
+- 更新 `specs/116-configurable-shortcuts/spec.md` 与 `scripts/gateway/server.mjs`：Gateway 启动日志新增 shortcuts 配置文件来源输出，固定打印 `~/.fauplay/global/shortcuts.json` 的当前状态，并在缺失或 JSON 非法时分别显示 `missing, skipped` / `invalid JSON`，且不阻断网关启动。
+
 ## 2026-03-23
 ### Changed
 - 更新 `specs/117-preview-header-tag-management/spec.md`、`src/config/shortcuts.ts` 与 `docs/shortcuts.md`：为预览头部“绑定逻辑标签”新增预览态快捷键 `#`，语义与点击 `+` 一致；输入焦点保护保持生效；当侧栏预览与全屏预览同时存在时固定由全屏响应，避免双面板同时打开。

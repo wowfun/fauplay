@@ -4,8 +4,10 @@ import type { FileBrowserGridHandle } from '@/features/explorer/components/FileB
 import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requiredGridWidthForColumns } from '@/features/explorer/constants/gridLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
+import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
+import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
-import { keyboardShortcuts } from '@/config/shortcuts'
+import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
@@ -370,6 +372,7 @@ export function WorkspaceShell({
   setFlattenView,
   filterFiles,
 }: WorkspaceShellProps) {
+  const keyboardShortcuts = useKeyboardShortcuts()
   const annotationDisplayStoreVersion = useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
@@ -489,6 +492,37 @@ export function WorkspaceShell({
     }
     return getFilePreviewKind(activePreviewFile.name) === 'video'
   }, [previewFile, selectedFile, showPreviewPane])
+  const activePreviewFileForTagShortcuts = useMemo(
+    () => previewFile ?? (showPreviewPane ? selectedFile : null),
+    [previewFile, selectedFile, showPreviewPane]
+  )
+  const canRunPreviewTagShortcuts = useMemo(() => (
+    activePreviewFileForTagShortcuts?.kind === 'file'
+    && pluginTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file'))
+  ), [activePreviewFileForTagShortcuts, pluginTools])
+  const canSoftDeleteActivePreview = useMemo(() => (
+    activePreviewFileForTagShortcuts?.kind === 'file'
+    && pluginTools.some((tool) => tool.name === 'fs.softDelete' && tool.scopes.includes('file'))
+  ), [activePreviewFileForTagShortcuts, pluginTools])
+  const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
+    rootId,
+    relativePath: activePreviewFileForTagShortcuts?.kind === 'file' ? activePreviewFileForTagShortcuts.path : null,
+    enabled: canRunPreviewTagShortcuts,
+  })
+  const shortcutHelpEntries = useShortcutHelpEntries({
+    rootId,
+    currentPath,
+    visibleItemCount: filteredFiles.length,
+    selectedGridCount: selectedGridItems.length,
+    hasOpenPreview,
+    hasActivePreviewFile: Boolean(
+      activePreviewFileForTagShortcuts && activePreviewFileForTagShortcuts.kind === 'file'
+    ),
+    hasActiveMediaPreview,
+    hasActiveVideoPreview,
+    canManagePreviewTags: canRunPreviewTagShortcuts,
+    canSoftDeletePreview: canSoftDeleteActivePreview,
+  })
 
   const getActivePreviewVideoElement = useCallback((): HTMLVideoElement | null => {
     const preferredSurface = previewFile ? 'lightbox' : 'panel'
@@ -803,40 +837,41 @@ export function WorkspaceShell({
       }
 
       if (isTyping) return
+      const matchedPreviewTagShortcut = getMatchingPreviewTagShortcut(event)
 
-      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleVideoPlayPause)) {
+      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleVideoPlayPause)) {
         event.preventDefault()
         if (event.repeat) return
         toggleActivePreviewVideoPlayback()
         return
       }
 
-      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekBackward)) {
+      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekBackward)) {
         event.preventDefault()
         seekActivePreviewVideo('backward')
         return
       }
 
-      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekForward)) {
+      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekForward)) {
         event.preventDefault()
         seekActivePreviewVideo('forward')
         return
       }
 
-      if (hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.cycleVideoPlaybackRate)) {
+      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.cycleVideoPlaybackRate)) {
         event.preventDefault()
         if (event.repeat) return
         cycleVideoPlaybackRate()
         return
       }
 
-      if (hasActiveMediaPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
+      if (!matchedPreviewTagShortcut && hasActiveMediaPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
         event.preventDefault()
         toggleAutoPlay()
         return
       }
 
-      if (hasActiveMediaPreview) {
+      if (!matchedPreviewTagShortcut && hasActiveMediaPreview) {
         if (matchesAnyShortcut(event, keyboardShortcuts.preview.togglePlaybackOrder)) {
           event.preventDefault()
           togglePlaybackOrder()
@@ -868,7 +903,7 @@ export function WorkspaceShell({
         return
       }
 
-      if (matchesAnyShortcut(event, keyboardShortcuts.preview.close)) {
+      if (!matchedPreviewTagShortcut && matchesAnyShortcut(event, keyboardShortcuts.preview.close)) {
         if (previewFile) {
           event.preventDefault()
           closePreviewModal()
@@ -884,11 +919,13 @@ export function WorkspaceShell({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
+    keyboardShortcuts,
     closePreviewModal,
     closePreviewPane,
     hasActiveMediaPreview,
     hasActiveVideoPreview,
     currentPath,
+    getMatchingPreviewTagShortcut,
     navigateMediaFromModal,
     navigateMediaFromPane,
     navigateUp,
@@ -991,6 +1028,7 @@ export function WorkspaceShell({
       onOpenTrash={handleOpenTrash}
       canOpenPeople={canOpenPeople}
       onOpenPeople={handleOpenPeople}
+      shortcutHelpEntries={shortcutHelpEntries}
       onOpenPeopleForPerson={handleOpenPeopleForPerson}
       showPeoplePanel={showPeoplePanel}
       peoplePanelPreferredPersonId={peoplePanelPreferredPersonId}

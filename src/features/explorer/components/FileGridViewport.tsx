@@ -11,9 +11,9 @@ import {
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileGridCard } from './FileGridCard'
+import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
-import { keyboardShortcuts } from '@/config/shortcuts'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 
@@ -81,6 +81,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   canClearSelectionWithEscape,
   onSelectionChange,
 }, ref) {
+  const keyboardShortcuts = useKeyboardShortcuts()
   const containerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<FixedSizeGridType>(null)
   const selectedIndexRef = useRef(0)
@@ -441,6 +442,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       window.removeEventListener('keyup', handleKeyUp)
     }
   }, [
+    keyboardShortcuts,
     files,
     selectedPathSet.size,
     canClearSelectionWithEscape,

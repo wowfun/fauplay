@@ -53,6 +53,7 @@
 4. 工作区插件入口归属 B1 文件网格区侧，主要承载目录级或列表级操作。
 5. 预览插件入口归属 B2 预览面板区及其全屏表现态，主要承载当前预览文件操作。
 6. 工作区插件与预览插件必须复用同一套插件运行内核；两者差异仅体现在资源上下文与表现层。
+7. 顶部工具区必须允许承载只读帮助入口；其首批职责至少包含“查看当前快捷键”。
 
 ## 预览面板与全屏关系契约 (Panel-Fullscreen Relation Contract)
 
@@ -102,11 +103,14 @@
 
 ## 快捷键契约 (Keyboard Contract)
 
-1. 快捷键配置唯一来源为 `src/config/shortcuts.ts`。
+1. 快捷键默认配置唯一真源为 `src/config/shortcuts.json`；运行时覆盖链按 `src/config/shortcuts.json -> ~/.fauplay/global/shortcuts.json -> <root>/.fauplay/shortcuts.json` 解析。
 2. 输入控件聚焦时，非全局快捷键必须失效。
 3. 快捷键文档 `docs/shortcuts.md` 必须与配置一致。
 4. 预览快捷键在侧栏与全屏表现态下语义必须一致。
 5. 网格多选快捷键至少覆盖：`Ctrl/Cmd + A` 全选与 `Esc` 清空选择（仅在无打开预览时生效）。
+6. 快捷键运行时读取入口必须统一；组件不得各自维护独立的快捷键真源或解析逻辑。
+7. 顶部工具栏帮助面板展示的快捷键列表必须来自运行时合并结果，而不是静态默认配置快照。
+8. 快捷键帮助状态不得将输入焦点、`event.repeat` 或 `defaultPrevented` 直接展示为“当前不可用”。
 
 ## 能力与降级契约 (Capability & Degradation Contract)
 

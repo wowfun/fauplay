@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
-import { keyboardShortcuts } from '@/config/shortcuts'
+import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxContinuousConcurrent } from '@/config/toolContinuousCall'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import type { FileItem } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
@@ -36,6 +37,7 @@ interface PreviewPluginHostProps {
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
+  enableAnnotationTagShortcutOwner?: boolean
 }
 
 interface ContinuousToolTask {
@@ -77,7 +79,9 @@ export function PreviewPluginHost({
   toolPanelWidthPx,
   onToolPanelWidthChange,
   onMutationCommitted,
+  enableAnnotationTagShortcutOwner = false,
 }: PreviewPluginHostProps) {
+  const keyboardShortcuts = useKeyboardShortcuts()
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
   const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
   const continuousInFlightCountRef = useRef(0)
@@ -143,6 +147,11 @@ export function PreviewPluginHost({
     () => fileActionTools.find((tool) => tool.name === 'local.data') ?? null,
     [fileActionTools]
   )
+  const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
+    rootId,
+    relativePath: file.kind === 'file' ? file.path : null,
+    enabled: enableAnnotationTagShortcutOwner && file.kind === 'file' && annotationTool !== null,
+  })
   const currentFileQueue = pluginRuntime.currentQueue
   const showActionRail = fileActionTools.length > 0
   const showResultPanel = fileActionTools.length > 0
@@ -244,6 +253,37 @@ export function PreviewPluginHost({
   }, [enableContinuousAutoRunOwner, processContinuousQueue])
 
   useEffect(() => {
+    if (!enableAnnotationTagShortcutOwner) return
+    if (file.kind !== 'file') return
+    if (!annotationTool) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.repeat) return
+      if (isTypingTarget(event.target)) return
+
+      const matchedShortcut = getMatchingPreviewTagShortcut(event)
+      if (!matchedShortcut) return
+
+      event.preventDefault()
+      if (matchedShortcut.alreadyBound) return
+
+      void runToolCall(annotationTool, {
+        trigger: 'manual',
+        actionLabel: `${matchedShortcut.key}=${matchedShortcut.value}`,
+        additionalArgs: {
+          operation: 'bindAnnotationTag',
+          key: matchedShortcut.key,
+          value: matchedShortcut.value,
+        },
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [annotationTool, enableAnnotationTagShortcutOwner, file.kind, getMatchingPreviewTagShortcut, runToolCall])
+
+  useEffect(() => {
     if (!enableContinuousAutoRunOwner) return
     if (file.kind !== 'file') return
     if (!softDeleteTool) return
@@ -252,6 +292,7 @@ export function PreviewPluginHost({
       if (event.defaultPrevented) return
       if (event.repeat) return
       if (isTypingTarget(event.target)) return
+      if (getMatchingPreviewTagShortcut(event)) return
       if (!matchesAnyShortcut(event, keyboardShortcuts.preview.softDelete)) return
 
       event.preventDefault()
@@ -262,7 +303,7 @@ export function PreviewPluginHost({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [enableContinuousAutoRunOwner, file.kind, runToolCall, softDeleteTool])
+  }, [enableContinuousAutoRunOwner, file.kind, getMatchingPreviewTagShortcut, keyboardShortcuts, runToolCall, softDeleteTool])
 
   useEffect(() => {
     if (!enableContinuousAutoRunOwner) return
@@ -273,6 +314,7 @@ export function PreviewPluginHost({
       if (event.defaultPrevented) return
       if (event.repeat) return
       if (isTypingTarget(event.target)) return
+      if (getMatchingPreviewTagShortcut(event)) return
       if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
       if (!matchesAnyShortcut(event, keyboardShortcuts.preview.annotationAssignByDigit)) return
 
@@ -299,7 +341,7 @@ export function PreviewPluginHost({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [annotationTool, enableContinuousAutoRunOwner, file.kind, rootId, runToolCall])
+  }, [annotationTool, enableContinuousAutoRunOwner, file.kind, getMatchingPreviewTagShortcut, keyboardShortcuts, rootId, runToolCall])
 
   const railActions = useMemo(
     () => pluginRuntime.railActions.map((action) => ({

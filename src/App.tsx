@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react'
+import { useKeyboardShortcuts, useKeyboardShortcutsRuntime } from '@/config/shortcutStore'
 import { useFileSystem } from '@/hooks/useFileSystem'
-import { keyboardShortcuts } from '@/config/shortcuts'
 import { matchesAnyShortcut } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
 const WorkspaceShell = lazy(async () => {
@@ -58,6 +58,8 @@ function App() {
     setFlattenView,
     filterFiles,
   } = useFileSystem()
+  useKeyboardShortcutsRuntime(rootHandle, rootId)
+  const keyboardShortcuts = useKeyboardShortcuts()
 
   useEffect(() => {
     if (rootHandle) return
@@ -74,7 +76,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [rootHandle, selectDirectory])
+  }, [keyboardShortcuts, rootHandle, selectDirectory])
 
   if (!rootHandle) {
     return (

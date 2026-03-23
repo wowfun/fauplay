@@ -8,6 +8,7 @@ import {
   Copy,
   Files,
   Image,
+  Info,
   Rows3,
   Search,
   Star,
@@ -25,6 +26,8 @@ import {
   type FilterState,
   type ThumbnailSizePreset,
 } from '@/types'
+import type { ShortcutHelpEntry } from '@/features/explorer/hooks/useShortcutHelpEntries'
+import { ToolbarShortcutHelpPanel } from '@/features/explorer/components/ToolbarShortcutHelpPanel'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 import { Select } from '@/ui/Select'
@@ -73,6 +76,7 @@ interface ExplorerToolbarProps {
   onOpenTrash: () => void
   canOpenPeople: boolean
   onOpenPeople: () => void
+  shortcutHelpEntries: ShortcutHelpEntry[]
 }
 
 function segmentKey(path: string): string {
@@ -279,6 +283,7 @@ export function ExplorerToolbar({
   onOpenTrash,
   canOpenPeople,
   onOpenPeople,
+  shortcutHelpEntries,
 }: ExplorerToolbarProps) {
   const [addressBarMode, setAddressBarMode] = useState<AddressBarMode>('breadcrumb')
   const [draftPath, setDraftPath] = useState(currentPath)
@@ -295,6 +300,7 @@ export function ExplorerToolbar({
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [isAnnotationIncludeOpen, setIsAnnotationIncludeOpen] = useState(false)
   const [isAnnotationExcludeOpen, setIsAnnotationExcludeOpen] = useState(false)
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
   const [selectedAnnotationSourceFacet, setSelectedAnnotationSourceFacet] = useState('')
   const [selectedAnnotationKeyFacet, setSelectedAnnotationKeyFacet] = useState('')
 
@@ -319,6 +325,7 @@ export function ExplorerToolbar({
 
   const addressBarRef = useRef<HTMLDivElement>(null)
   const annotationFilterRef = useRef<HTMLDivElement>(null)
+  const helpPanelRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionRequestSeqRef = useRef(0)
   const annotationFilterOptionByTagKey = useMemo(
@@ -360,6 +367,7 @@ export function ExplorerToolbar({
     setOpenSegmentPath(null)
     setIsHistoryOpen(false)
     setIsFavoritesOpen(false)
+    setIsHelpOpen(false)
   }, [currentPath])
 
   useEffect(() => {
@@ -411,6 +419,31 @@ export function ExplorerToolbar({
     window.addEventListener('mousedown', handleGlobalPointerDown)
     return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
   }, [resetAnnotationTagFacets])
+
+  useEffect(() => {
+    const handleGlobalPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (helpPanelRef.current?.contains(target)) return
+      setIsHelpOpen(false)
+    }
+
+    window.addEventListener('mousedown', handleGlobalPointerDown)
+    return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
+  }, [])
+
+  useEffect(() => {
+    if (!isHelpOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setIsHelpOpen(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [isHelpOpen])
 
   useEffect(() => {
     if (copyState === 'idle') return
@@ -521,6 +554,7 @@ export function ExplorerToolbar({
     setOpenSegmentPath(null)
     setIsHistoryOpen(false)
     setIsFavoritesOpen(false)
+    setIsHelpOpen(false)
   }
 
   const cancelEditMode = () => {
@@ -585,6 +619,7 @@ export function ExplorerToolbar({
     setOpenSegmentPath(path)
     setIsHistoryOpen(false)
     setIsFavoritesOpen(false)
+    setIsHelpOpen(false)
     await loadSegmentDirectories(path)
   }
 
@@ -656,6 +691,7 @@ export function ExplorerToolbar({
     event.stopPropagation()
     setOpenSegmentPath(null)
     setIsFavoritesOpen(false)
+    setIsHelpOpen(false)
     setIsHistoryOpen((previous) => !previous)
   }
 
@@ -670,6 +706,7 @@ export function ExplorerToolbar({
     event.stopPropagation()
     setOpenSegmentPath(null)
     setIsHistoryOpen(false)
+    setIsHelpOpen(false)
     setIsFavoritesOpen((previous) => !previous)
   }
 
@@ -772,6 +809,7 @@ export function ExplorerToolbar({
     onOpenAnnotationFilterPanel()
     setIsAnnotationIncludeOpen(true)
     setIsAnnotationExcludeOpen(false)
+    setIsHelpOpen(false)
   }
 
   const handleToggleAnnotationExcludePanel = () => {
@@ -785,6 +823,18 @@ export function ExplorerToolbar({
     onOpenAnnotationFilterPanel()
     setIsAnnotationExcludeOpen(true)
     setIsAnnotationIncludeOpen(false)
+    setIsHelpOpen(false)
+  }
+
+  const handleToggleHelp = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setOpenSegmentPath(null)
+    setIsHistoryOpen(false)
+    setIsFavoritesOpen(false)
+    setIsAnnotationIncludeOpen(false)
+    setIsAnnotationExcludeOpen(false)
+    resetAnnotationTagFacets()
+    setIsHelpOpen((previous) => !previous)
   }
 
   const renderAnnotationTagPanel = (
@@ -1253,6 +1303,23 @@ export function ExplorerToolbar({
           <Trash2 className="w-4 h-4" />
           <span>回收站</span>
         </Button>
+        <div ref={helpPanelRef} className="relative">
+          <Button
+            onClick={handleToggleHelp}
+            variant={isHelpOpen ? 'outline' : 'ghost'}
+            size="md"
+            className="flex items-center gap-1"
+            title="查看当前快捷键"
+          >
+            <Info className="w-4 h-4" />
+            <span>帮助</span>
+          </Button>
+          {isHelpOpen && (
+            <div onClick={(event) => event.stopPropagation()}>
+              <ToolbarShortcutHelpPanel entries={shortcutHelpEntries} />
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-2">

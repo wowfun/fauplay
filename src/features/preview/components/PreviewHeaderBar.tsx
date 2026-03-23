@@ -46,6 +46,8 @@ interface PreviewHeaderBarProps {
   onBindAnnotationTag: (params: { key: string; value: string }) => Promise<void>
   onUnbindAnnotationTag: (tag: PreviewHeaderAnnotationTag) => Promise<void>
   enableOpenAnnotationTagByShortcut?: boolean
+  rootId?: string | null
+  relativePath?: string | null
 }
 
 export function PreviewHeaderBar({
@@ -81,6 +83,8 @@ export function PreviewHeaderBar({
   onBindAnnotationTag,
   onUnbindAnnotationTag,
   enableOpenAnnotationTagByShortcut = false,
+  rootId,
+  relativePath,
 }: PreviewHeaderBarProps) {
   return (
     <div
@@ -109,6 +113,8 @@ export function PreviewHeaderBar({
           onBindTag={onBindAnnotationTag}
           onUnbindTag={onUnbindAnnotationTag}
           enableOpenByShortcut={enableOpenAnnotationTagByShortcut}
+          rootId={rootId}
+          relativePath={relativePath}
         />
       </div>
       <PreviewControlGroup

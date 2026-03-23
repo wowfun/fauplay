@@ -31,6 +31,7 @@ const MCP_SESSION_HEADER = 'mcp-session-id'
 const PROJECT_ROOT = process.cwd()
 const DEFAULT_MCP_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'mcp.json')
 const GLOBAL_MCP_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'mcp.json')
+const GLOBAL_SHORTCUTS_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'shortcuts.json')
 
 function resolveConfigPath(configPath) {
   if (typeof configPath !== 'string' || !configPath.trim()) {
@@ -127,6 +128,18 @@ function formatMcpConfigSourceLog(source) {
   return `[gateway]   - ${source.label}: ${source.path}${suffix}`
 }
 
+function formatShortcutConfigSourceLog(source) {
+  let suffix = ''
+  if (source.status === 'missing') {
+    suffix = ' (missing, skipped)'
+  } else if (source.status === 'invalid') {
+    suffix = ' (invalid JSON)'
+  } else if (source.status === 'unavailable') {
+    suffix = ' (read failed)'
+  }
+  return `[gateway]   - ${source.label}: ${source.path}${suffix}`
+}
+
 async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
   let raw = ''
   try {
@@ -150,6 +163,54 @@ async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
   }
 
   return parsed
+}
+
+async function readOptionalJsonFile(configPath) {
+  let raw = ''
+  try {
+    raw = await readFile(configPath, 'utf-8')
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return {
+        loaded: false,
+        config: null,
+      }
+    }
+    throw createMcpRuntimeError('CONFIG_READ_ERROR', `Failed to read config: ${configPath}`, 500)
+  }
+
+  try {
+    return {
+      loaded: true,
+      config: JSON.parse(raw),
+    }
+  } catch {
+    throw createMcpRuntimeError('CONFIG_JSON_INVALID', `Invalid JSON in config: ${configPath}`, 400)
+  }
+}
+
+async function inspectShortcutConfigSource(configPath) {
+  try {
+    const result = await readOptionalJsonFile(configPath)
+    return {
+      label: 'global',
+      path: configPath,
+      status: result.loaded ? 'loaded' : 'missing',
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'CONFIG_JSON_INVALID') {
+      return {
+        label: 'global',
+        path: configPath,
+        status: 'invalid',
+      }
+    }
+    return {
+      label: 'global',
+      path: configPath,
+      status: 'unavailable',
+    }
+  }
 }
 
 function mergeMcpServerEntries(baseEntry, overrideEntry) {
@@ -533,6 +594,7 @@ export async function startGatewayServer(options = {}) {
   const { serverRegistry, configSources } = await createMcpServerRegistry(configPath, {
     useGlobalConfig: !hasCustomMcpConfig,
   })
+  const shortcutConfigSource = await inspectShortcutConfigSource(GLOBAL_SHORTCUTS_CONFIG_PATH)
 
   const runtime = new McpHostRuntime({
     serverRegistry,
@@ -564,6 +626,21 @@ export async function startGatewayServer(options = {}) {
         version: GATEWAY_VERSION,
         status: 'ok',
       })
+      return
+    }
+
+    if (req.method === 'GET' && pathname === '/v1/config/shortcuts') {
+      try {
+        const result = await readOptionalJsonFile(GLOBAL_SHORTCUTS_CONFIG_PATH)
+        sendJson(res, 200, {
+          ok: true,
+          loaded: result.loaded,
+          path: GLOBAL_SHORTCUTS_CONFIG_PATH,
+          ...(result.loaded ? { config: result.config } : {}),
+        })
+      } catch (error) {
+        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+      }
       return
     }
 
@@ -703,6 +780,8 @@ export async function startGatewayServer(options = {}) {
     for (const source of configSources) {
       console.log(formatMcpConfigSourceLog(source))
     }
+    console.log('[gateway] Shortcuts config files:')
+    console.log(formatShortcutConfigSourceLog(shortcutConfigSource))
     console.log(`[gateway] MCP servers loaded: ${serverRegistry.length}`)
   })
 

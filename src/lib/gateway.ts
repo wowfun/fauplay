@@ -1,6 +1,7 @@
 const GATEWAY_BASE_URL = 'http://127.0.0.1:3210'
 const HEALTH_ENDPOINT = `${GATEWAY_BASE_URL}/v1/health`
 const MCP_ENDPOINT = `${GATEWAY_BASE_URL}/v1/mcp`
+const GLOBAL_SHORTCUTS_CONFIG_ENDPOINT = `${GATEWAY_BASE_URL}/v1/config/shortcuts`
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_TOOL_TIMEOUT_MS = 5000
@@ -51,6 +52,13 @@ export interface ToolActionAnnotation {
 
 interface GatewayHealthResponse {
   status?: string
+}
+
+interface GatewayGlobalShortcutConfigResponse {
+  ok?: boolean
+  loaded?: boolean
+  path?: string
+  config?: unknown
 }
 
 interface GatewayHttpErrorPayload {
@@ -105,6 +113,12 @@ interface GatewayRawToolDescriptor {
 export interface GatewayCapabilitiesSnapshot {
   online: boolean
   tools: GatewayToolDescriptor[]
+}
+
+export interface GlobalShortcutConfigSnapshot {
+  loaded: boolean
+  path: string
+  config: unknown | null
 }
 
 export type ToolCallResult = Record<string, unknown> | unknown[] | string | number | boolean | null
@@ -544,5 +558,26 @@ export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise
   } catch {
     resetMcpInitialization()
     return { online: false, tools: [] }
+  }
+}
+
+export async function loadGlobalShortcutConfig(timeoutMs: number = 2000): Promise<GlobalShortcutConfigSnapshot> {
+  const payload = (await fetchJsonWithTimeout(
+    GLOBAL_SHORTCUTS_CONFIG_ENDPOINT,
+    timeoutMs
+  )) as GatewayGlobalShortcutConfigResponse
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid global shortcuts config response')
+  }
+
+  const path = typeof payload.path === 'string' && payload.path.trim()
+    ? payload.path
+    : '~/.fauplay/global/shortcuts.json'
+
+  return {
+    loaded: payload.loaded === true,
+    path,
+    config: payload.loaded === true ? (payload.config ?? null) : null,
   }
 }

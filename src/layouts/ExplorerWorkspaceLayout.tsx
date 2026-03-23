@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
+import type { ShortcutHelpEntry } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
@@ -153,6 +154,7 @@ interface ExplorerWorkspaceLayoutProps {
   onOpenTrash: () => void
   canOpenPeople: boolean
   onOpenPeople: () => void
+  shortcutHelpEntries: ShortcutHelpEntry[]
   onOpenPeopleForPerson: (personId: string | null) => void
   showPeoplePanel: boolean
   peoplePanelPreferredPersonId: string | null
@@ -229,6 +231,7 @@ export function ExplorerWorkspaceLayout({
   onOpenTrash,
   canOpenPeople,
   onOpenPeople,
+  shortcutHelpEntries,
   onOpenPeopleForPerson,
   showPeoplePanel,
   peoplePanelPreferredPersonId,
@@ -368,6 +371,7 @@ export function ExplorerWorkspaceLayout({
         onOpenTrash={onOpenTrash}
         canOpenPeople={canOpenPeople}
         onOpenPeople={onOpenPeople}
+        shortcutHelpEntries={shortcutHelpEntries}
       />
 
       {error && (

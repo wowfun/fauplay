@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "keybinds": {
+    "app_open_directory": ["mod+o"],
+    "app_navigate_up": ["backspace"],
+    "preview_toggle_autoplay": ["p"],
+    "preview_toggle_playback_order": ["t"],
+    "preview_toggle_video_play_pause": ["space"],
+    "preview_seek_backward": ["j"],
+    "preview_seek_forward": ["l"],
+    "preview_cycle_video_playback_rate": ["r"],
+    "preview_soft_delete": ["delete"],
+    "preview_annotation_assign_digit": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    "preview_open_annotation_tag_editor": ["#"],
+    "preview_prev": ["["],
+    "preview_next": ["]"],
+    "preview_close": ["escape"],
+    "grid_select_all": ["mod+a"],
+    "grid_clear_selection": ["escape"],
+    "grid_move_right": ["right", "d"],
+    "grid_move_left": ["left", "a"],
+    "grid_move_down": ["down", "s"],
+    "grid_move_up": ["up", "w"],
+    "grid_page_down": ["pagedown"],
+    "grid_page_up": ["pageup"],
+    "grid_open_selected": ["return"]
+  }
+}

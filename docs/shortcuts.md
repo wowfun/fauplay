@@ -2,7 +2,61 @@
 
 本文档列出当前版本已支持的快捷键与生效范围。
 
-快捷键配置统一维护在 [`src/config/shortcuts.ts`](../src/config/shortcuts.ts)。如需改键位，请优先修改该文件，而不是在组件内写死按键判断。
+默认快捷键真源位于 [`src/config/shortcuts.json`](../src/config/shortcuts.json)，解析与归一化入口位于 [`src/config/shortcuts.ts`](../src/config/shortcuts.ts)。
+
+当前运行时合并后的快捷键与状态，可在顶部工具栏的 `帮助` 面板中查看；本文档仍以默认快捷键与配置语法为参考。
+
+运行时覆盖链固定为：
+
+- 默认：`src/config/shortcuts.json`
+- 全局：`~/.fauplay/global/shortcuts.json`
+- Root：`<root>/.fauplay/shortcuts.json`
+
+说明：
+- 更高层按 action 整项替换；未声明的 action 继承上一层。
+- 将某个 action 配置为 `"none"` 可显式禁用该快捷键。
+- v1 快捷键 DSL 只支持单次组合键与字符键；`[` / `]` 按字符语义匹配，不支持 `code:*`、`<leader>` 或多段序列。
+- `keybinds` 除内建 action 外，还支持动态逻辑标签 action：`tag:${key}=${value}`。
+- 这类动态 `tag:` action 支持在 `key/value` 中直接写中文、空格和常见特殊字符，不要求额外 percent-encoding。
+- 解析时固定按第一个 `=` 分割，所以 `key` 不能包含 `=`，但 `value` 可以包含额外的 `=`。
+
+最小配置示例：
+
+```json
+{
+  "version": 1,
+  "keybinds": {
+    "app_open_directory": ["mod+o"],
+    "preview_close": ["escape"],
+    "grid_select_all": "none"
+  }
+}
+```
+
+逻辑标签快捷键示例：
+
+```json
+{
+  "version": 1,
+  "keybinds": {
+    "tag:person=张三": ["1"],
+    "tag:scene=室内 人像": ["mod+shift+s"],
+    "tag:note=foo=bar/#1": ["mod+3"]
+  }
+}
+```
+
+说明：
+- `tag:person=张三` 表示为逻辑标签 `person=张三` 配置快捷键。
+- 这类快捷键只在“当前有预览文件且标签管理能力可用”时生效。
+- 目标 `key/value` 必须已存在于当前逻辑标签候选中；不存在或配置非法时会被忽略并输出 warning。
+- 当它与现有预览快捷键冲突且当前标签快捷键处于激活状态时，标签快捷键优先。
+
+## 标签快捷键（Tag Shortcuts）
+
+- 动态逻辑标签快捷键由 `shortcuts.json` 中的 `tag:${key}=${value}` action 提供，不存在固定默认列表。
+- 顶部工具栏帮助面板会将它们单独展示在 `Tag` 组中，而不是并入 `Preview` 组。
+- `Tag` 组的状态只反映两件事：当前是否具备标注能力、目标逻辑标签当前是否存在于候选中。
 
 ## 应用快捷键（App Shortcuts）
 
@@ -28,12 +82,13 @@
 | `Delete` | 软删除当前预览文件 | 触发 `fs.softDelete` 提交执行（移动到 `.trash`） |
 | `0-9` | 快速标注当前文件 | 仅在 `meta.annotation` 配置了激活 enum 字段时生效，按字段值定义顺序映射 `0..9` |
 | `#` | 打开逻辑标签绑定面板 | 仅文件预览且标签管理能力可用时生效，语义等同点击预览头部 `+` |
-| `[` | 上一个 | 仅媒体预览可用，按当前遍历模式切换 |
-| `]` | 下一个 | 仅媒体预览可用，按当前遍历模式切换 |
+| `[` | 上一个 | 仅媒体预览可用，按当前遍历模式切换；按字符键 `[` 匹配 |
+| `]` | 下一个 | 仅媒体预览可用，按当前遍历模式切换；按字符键 `]` 匹配 |
 
 说明：
 - 视频预览头部支持“快进步长”与“倍速”下拉（步长：`3/5/10s`，倍速：`0.5/1/3/5x`），并与快捷键联动。
 - 快进步长与倍速配置会写入本地存储，刷新后保持上次设置；侧栏与全屏共享同一配置。
+- 如需直接绑定现有逻辑标签，可在 `shortcuts.json` 中使用动态 `tag:` action；触发后会以 `meta.annotation` 来源写入当前预览文件。
 
 ## 预览遍历模式（顺序/随机）
 

@@ -31,6 +31,7 @@ interface FilePreviewCanvasProps {
   toolWorkbenchState: PluginWorkbenchState
   setToolWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   enableContinuousAutoRunOwner: boolean
+  enableAnnotationTagShortcutOwner?: boolean
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
   toolPanelWidthPx: number
@@ -73,6 +74,7 @@ export function FilePreviewCanvas({
   toolWorkbenchState,
   setToolWorkbenchState,
   enableContinuousAutoRunOwner,
+  enableAnnotationTagShortcutOwner = false,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
   toolPanelWidthPx,
@@ -123,6 +125,7 @@ export function FilePreviewCanvas({
             toolWorkbenchState={toolWorkbenchState}
             setToolWorkbenchState={setToolWorkbenchState}
             enableContinuousAutoRunOwner={enableContinuousAutoRunOwner}
+            enableAnnotationTagShortcutOwner={enableAnnotationTagShortcutOwner}
             toolPanelCollapsed={toolPanelCollapsed}
             onToggleToolPanelCollapsed={onToggleToolPanelCollapsed}
             toolPanelWidthPx={toolPanelWidthPx}
