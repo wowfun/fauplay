@@ -6,19 +6,28 @@ import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import {
   batchRebindPaths,
+  assignFaces,
   bindAnnotationTag,
   callVisionInference,
   clusterPendingFaces,
+  createPersonFromFaces,
   getFileTags,
+  getFaceCrop,
+  ignoreFaces,
   ingestClassificationResult,
   listAssetFaces,
   listPeople,
+  listReviewFaces,
   listTagOptions,
   mergePeople,
   queryFilesByTags,
+  requeueFaces,
   renamePerson,
+  restoreIgnoredFaces,
   saveDetectedFaces,
   setAnnotationValue,
+  suggestPeople,
+  unassignFaces,
   unbindAnnotationTag,
   cleanupMissingFiles,
 } from './data/core.mjs'
@@ -51,6 +60,13 @@ function sendJson(res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(body))
+}
+
+function sendBinary(res, statusCode, body, contentType) {
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Cache-Control', 'no-store')
+  res.end(body)
 }
 
 async function readJsonBody(req) {
@@ -514,6 +530,38 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
     return listAssetFaces(payload)
   }
 
+  if (pathname === '/v1/faces/list-review-faces') {
+    return listReviewFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/suggest-people') {
+    return suggestPeople(payload)
+  }
+
+  if (pathname === '/v1/faces/assign-faces') {
+    return assignFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/create-person-from-faces') {
+    return createPersonFromFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/unassign-faces') {
+    return unassignFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/ignore-faces') {
+    return ignoreFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/restore-ignored-faces') {
+    return restoreIgnoredFaces(payload)
+  }
+
+  if (pathname === '/v1/faces/requeue-faces') {
+    return requeueFaces(payload)
+  }
+
   throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
 }
 
@@ -638,6 +686,23 @@ export async function startGatewayServer(options = {}) {
           path: GLOBAL_SHORTCUTS_CONFIG_PATH,
           ...(result.loaded ? { config: result.config } : {}),
         })
+      } catch (error) {
+        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+      }
+      return
+    }
+
+    if (req.method === 'GET' && pathname.startsWith('/v1/faces/crops/')) {
+      try {
+        const faceId = decodeURIComponent(pathname.slice('/v1/faces/crops/'.length))
+        const size = requestUrl.searchParams.get('size')
+        const padding = requestUrl.searchParams.get('padding')
+        const result = await getFaceCrop({
+          faceId,
+          ...(size !== null ? { size } : {}),
+          ...(padding !== null ? { padding } : {}),
+        })
+        sendBinary(res, 200, result.body, result.contentType)
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
       }

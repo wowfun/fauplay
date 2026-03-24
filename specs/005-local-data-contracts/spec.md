@@ -75,7 +75,7 @@
 
 1. 数据库文件固定为：`${HOME}/.fauplay/global/faudb.sqlite`。
 2. 全应用共享单一全局库；`rootPath` 仅作为请求过滤条件，不是持久化实体。
-3. `schemaVersion=3`（`PRAGMA user_version=3`）。
+3. `schemaVersion=4`（`PRAGMA user_version=4`）。
 
 ### 5.2 统一主键与关系
 
@@ -93,7 +93,7 @@
 2. `file`：`absolutePath`、`assetId`、`fileMtimeMs`、`lastSeenAt`、`createdAt`、`updatedAt`。
 3. `tag`：`id`、`key`、`value`、`source`。
 4. `asset_tag`：`assetId`、`tagId`、`appliedAt`、`score`（可空，当前仅分类使用）。
-5. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `assetId` 关系。
+5. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `assetId` 关系；其中 `person_face` 是人物归属真源，`face.status` 负责表达自动/人工处理状态。
 6. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
 
 ### 5.4 路径与查询语义
@@ -152,11 +152,21 @@
 4. `POST /v1/faces/rename-person`
 5. `POST /v1/faces/merge-people`
 6. `POST /v1/faces/list-asset-faces`
+7. `POST /v1/faces/list-review-faces`
+8. `POST /v1/faces/suggest-people`
+9. `POST /v1/faces/assign-faces`
+10. `POST /v1/faces/create-person-from-faces`
+11. `POST /v1/faces/unassign-faces`
+12. `POST /v1/faces/ignore-faces`
+13. `POST /v1/faces/restore-ignored-faces`
+14. `POST /v1/faces/requeue-faces`
+15. `GET /v1/faces/crops/:faceId`
 
 说明：
 
 - `/v1/mcp` 继续保留用于通用插件调用，不承载上述业务主链路。
 - 前端业务侧应优先使用 Gateway 原生 HTTP 接口。
+- `list-people` 与人物上下文 `list-asset-faces` 必须支持显式 `scope: 'global' | 'root'`，不得仅通过是否携带 `rootPath` 推断查询作用域。
 
 ## 7. 插件职责约束 (Plugin Responsibility)
 
@@ -197,6 +207,11 @@
 22. `FR-LDC-22` Gateway 必须在启动前读取可选的 `~/.fauplay/global/.env` 作为 app-owned 进程环境层，且同名环境变量优先级固定为 `servers.<name>.env` > `~/.fauplay/global/.env` > shell env。
 23. `FR-LDC-23` `/mnt/<drive>/...` 上的 `No such device` 恢复必须由 Gateway 统一承担；tool-owned 插件不得再把该恢复逻辑作为私有配置契约对外承诺。
 24. `FR-LDC-24` `shortcuts` 配置域必须按 `src/config/shortcuts.json -> ~/.fauplay/global/shortcuts.json -> <root>/.fauplay/shortcuts.json` 解析，且仅 `shortcuts` 这类显式 root-scoped 域允许读取 root 层文件。
+25. `FR-LDC-25` face correction 相关写请求必须直接修改 `person_face` 与 `face.status`，不得把 `vision.face` 标签当作人物归属真源。
+26. `FR-LDC-26` `person_face.assignedBy` 必须支持 `auto | manual | merge`。
+27. `FR-LDC-27` `face.status` 必须支持 `assigned | unassigned | deferred | manual_unassigned | ignored`。
+28. `FR-LDC-28` 自动聚类默认仅处理 `unassigned | deferred`；`manual_unassigned` 与 `ignored` 不得被后台自动改写。
+29. `FR-LDC-29` 人脸 mutation 接口必须允许部分成功，并返回逐项结果与稳定错误码。
 
 ## 10. 验收标准 (AC)
 
@@ -219,6 +234,7 @@
 17. `AC-LDC-17` `~/.fauplay/global/.env` 缺失时 Gateway 仍可正常启动；当其与 shell 中同名环境变量冲突时，以 `.env` 值为准，但 `servers.<name>.env` 仍可继续覆盖。
 18. `AC-LDC-18` Gateway 自身文件访问或经 Gateway 发起的路径型工具调用在 `/mnt/<drive>/...` 命中 `No such device` 时，可自动重挂载后单次重试成功；失败时返回可读错误且不升级为前端 `MCP_CLIENT_TIMEOUT`。
 19. `AC-LDC-19` `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 缺失时，系统继续使用 `src/config/shortcuts.json` 默认值；当其存在时，仅覆盖已声明的快捷键动作。
+20. `AC-LDC-20` 对 face 执行 assign/create-person/unassign/ignore/restore/requeue 后，`person_face`、`face.status`、人物列表计数与 `vision.face` 资产标签结果保持一致。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 

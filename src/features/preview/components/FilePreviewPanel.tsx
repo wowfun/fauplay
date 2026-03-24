@@ -23,6 +23,7 @@ import {
 import { FilePreviewCanvas } from './FilePreviewCanvas'
 import { PreviewHeaderBar, type PreviewHeaderAnnotationTag } from './PreviewHeaderBar'
 import type { PreviewRenameResult } from './PreviewTitleRow'
+import { PreviewFaceCorrectionPanel } from '@/features/faces/components/PreviewFaceCorrectionPanel'
 import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 
@@ -208,6 +209,7 @@ export function FilePreviewPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedFaceForCorrection, setSelectedFaceForCorrection] = useState<PreviewFaceOverlayItem | null>(null)
   const currentUrlRef = useRef<string | null>(null)
   const handledLocalDataQueueItemIdRef = useRef<string | null>(null)
   const handledVisionFaceQueueItemIdRef = useRef<string | null>(null)
@@ -315,6 +317,7 @@ export function FilePreviewPanel({
     items: faceOverlays,
     isLoading: faceOverlayLoading,
     error: faceOverlayError,
+    reload: reloadFaceOverlays,
   } = usePreviewFaceOverlays({
     file,
     rootHandle,
@@ -326,9 +329,16 @@ export function FilePreviewPanel({
   })
 
   const handleFaceOverlayClick = useCallback((overlay: PreviewFaceOverlayItem) => {
-    if (!overlay.personId) return
-    onOpenPersonDetail?.(overlay.personId)
-  }, [onOpenPersonDetail])
+    setSelectedFaceForCorrection(overlay)
+  }, [])
+
+  const handleFaceMutationCommitted = useCallback(async () => {
+    await Promise.allSettled([
+      refreshCurrentPreviewFileTags(),
+      onMutationCommitted?.(),
+    ])
+    reloadFaceOverlays()
+  }, [onMutationCommitted, refreshCurrentPreviewFileTags, reloadFaceOverlays])
 
   const handleRequestAnnotationTagOptions = useCallback(() => {
     if (!canManageAnnotationTags) return
@@ -565,6 +575,10 @@ export function FilePreviewPanel({
     }
   }, [])
 
+  useEffect(() => {
+    setSelectedFaceForCorrection(null)
+  }, [file?.path])
+
   const handleSubmitFileNameRename = useCallback(async (nextBaseName: string): Promise<PreviewRenameResult> => {
     if (!file || file.kind !== 'file') {
       return { ok: false, error: '当前项不可重命名' }
@@ -732,7 +746,7 @@ export function FilePreviewPanel({
   const showFaceBboxToggle = hasVisionFaceTool && previewKind === 'image'
 
   return (
-    <div className={isFullscreen ? 'flex flex-col h-full bg-background' : 'flex flex-col h-full bg-card border-l border-border'}>
+    <div className={isFullscreen ? 'relative flex h-full flex-col bg-background' : 'relative flex h-full flex-col border-l border-border bg-card'}>
       <PreviewHeaderBar
         fileName={file.name}
         isFullscreen={isFullscreen}
@@ -768,6 +782,15 @@ export function FilePreviewPanel({
         enableOpenAnnotationTagByShortcut={enableAnnotationTagShortcutOwner}
         rootId={rootId}
         relativePath={file.kind === 'file' ? file.path : null}
+      />
+
+      <PreviewFaceCorrectionPanel
+        face={selectedFaceForCorrection}
+        rootHandle={rootHandle}
+        rootId={rootId || ''}
+        onClose={() => setSelectedFaceForCorrection(null)}
+        onMutationCommitted={handleFaceMutationCommitted}
+        onOpenPersonDetail={onOpenPersonDetail}
       />
 
       <FilePreviewCanvas

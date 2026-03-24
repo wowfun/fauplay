@@ -13,7 +13,7 @@
 2. `file` 记录物理位置实体，以 `absolutePath` 表示当前有效位置。
 3. `tag` 记录标签身份（去重维度为 `key + value + source`）。
 4. `asset_tag` 记录资产与标签绑定，并承载绑定时间与可选评分。
-5. 人脸业务以 `person_face` 为人物归属真源，再投影到 `vision.face` 资产标签；file-centered 查询会把资产标签展开到每个可见 `file`。
+5. 人脸业务以 `person_face` 为人物归属真源，再投影到 `vision.face` 资产标签；`face.status` 用于表达自动待处理、人工移出与忽略状态；file-centered 查询会把资产标签展开到每个可见 `file`。
 
 ## 3. 契约级 DDL
 
@@ -131,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 2. `vision.face`：`key='person'`、`value=personName`，按 `person_face` 投影到资产标签。
 3. `ml.classify`：`key='class'`、`value=label`，`score` 写入 `asset_tag.score`。
 4. 同名人物允许存在；资产级 `vision.face` 标签在名字维度合并。
+5. face correction 必须直接修改 `person_face + face.status`；`vision.face` 标签只允许作为投影结果同步，不得被当作纠错写入真源。
 
 ## 6. 接口行为映射
 
@@ -142,6 +143,8 @@ CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 3. `/v1/data/tags/*` 的时间语义以 `asset_tag.appliedAt` 为准。
 4. 普通查询默认仅返回 `asset.deletedAt IS NULL` 的活跃资产。
 5. 人脸接口路径不变，但内部流程不依赖 `face_job_state`，且默认工作在全局人物空间。
+6. `list-people` 与人物上下文 `list-asset-faces` 支持显式 `scope: 'global' | 'root'`。
+7. 人脸 mutation 接口统一返回批量摘要与逐项结果，允许部分成功。
 
 ## 7. 迁移策略
 
@@ -157,6 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_deleted_at ON asset(deletedAt);
 2. 同一物理文件从重叠 root 打开两次时，只存在一条 `file(absolutePath)`。
 3. `file-annotations` 同资产同字段重复写入时，只保留一个当前值绑定。
 4. 分类落库后 `asset_tag.score` 可查询，非分类标签 `score` 为 `NULL`。
-5. 人脸检测/聚类/改名/合并后，资产级 `vision.face` 标签与 `person_face` 结果一致。
+5. 人脸检测/聚类/改名/合并/纠错后，资产级 `vision.face` 标签与 `person_face` 结果一致。
 6. 同内容文件位于不同路径时，file-centered 查询会返回多条 `file`，但这些结果共享同一套资产标签与人脸数据。
 7. 缺失路径清理只删除不存在的 `file.absolutePath` 行；当最后一个 `file` 消失时，`asset` 进入软删除；同内容文件再次出现时，原 `asset` 自动复活。
+8. `manual_unassigned` 与 `ignored` face 不会被后台自动聚类直接改写；只有 `unassigned` 与 `deferred` 会进入自动聚类候选集。

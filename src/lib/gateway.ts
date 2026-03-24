@@ -13,6 +13,11 @@ const MCP_CLIENT_INFO = {
   version: '0.0.1',
 }
 
+interface FaceCropUrlOptions {
+  size?: number
+  padding?: number
+}
+
 export interface GatewayToolDescriptor {
   name: string
   title: string
@@ -543,6 +548,25 @@ export async function callGatewayHttp<T = ToolCallResult>(
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+export function buildGatewayFaceCropUrl(faceId: string, options: FaceCropUrlOptions = {}): string {
+  const normalizedFaceId = String(faceId || '').trim()
+  if (!normalizedFaceId) {
+    return `${GATEWAY_BASE_URL}/v1/faces/crops/invalid`
+  }
+
+  const params = new URLSearchParams()
+  if (typeof options.size === 'number' && Number.isFinite(options.size) && options.size > 0) {
+    params.set('size', String(Math.trunc(options.size)))
+  }
+  if (typeof options.padding === 'number' && Number.isFinite(options.padding) && options.padding >= 0) {
+    params.set('padding', String(options.padding))
+  }
+
+  const query = params.toString()
+  const endpoint = `${GATEWAY_BASE_URL}/v1/faces/crops/${encodeURIComponent(normalizedFaceId)}`
+  return query ? `${endpoint}?${query}` : endpoint
 }
 
 export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise<GatewayCapabilitiesSnapshot> {

@@ -5,7 +5,7 @@
 定义 Fauplay 人脸识别能力在 Gateway 统一数据层下的契约：
 
 1. 检测与 embedding 推理由插件提供。
-2. 聚类、人物归属、人物管理、持久化由 Gateway 执行。
+2. 聚类、人物归属、人物管理、人脸纠错、持久化由 Gateway 执行。
 3. 人脸与人物数据统一持久化在全局数据库 `faudb.sqlite`。
 4. 人脸与人物关系统一以 `assetId` 为业务真源；同内容文件的多路径位置共享同一套人脸结果。
 
@@ -14,8 +14,8 @@
 范围内：
 
 1. 单资产检测并产出检测框与 embedding。
-2. Gateway 侧全局增量聚类、人物命名、人物合并。
-3. 预览人脸框展示与人物详情查询（含显示/隐藏切换）。
+2. Gateway 侧全局增量聚类、人物命名、人物合并、face 级纠错。
+3. 预览人脸框展示、单脸纠错与人物详情查询（含显示/隐藏切换）。
 4. 统一标签系统的人物标签写入（`source=vision.face`）。
 
 范围外：
@@ -66,7 +66,7 @@
 2. 标签格式固定为：`source=vision.face`、`key='person'`、`value=person.name`。
 3. 同名人物允许存在；资产级标签在名字维度合并，不保证人物级可区分过滤。
 4. file-centered 查询必须把资产级 `vision.face` 标签展开到每个可见 `file`，且公开结果不依赖 `fileId`。
-5. `rename-person` 与 `merge-people` 后，相关资产及其所有可见文件结果的 `vision.face` 标签必须同步更新。
+5. `rename-person`、`merge-people` 与所有 face correction mutation 后，相关资产及其所有可见文件结果的 `vision.face` 标签必须同步更新。
 
 ## 5. Gateway HTTP 接口契约 (HTTP Contract)
 
@@ -76,11 +76,21 @@
 4. `POST /v1/faces/rename-person`
 5. `POST /v1/faces/merge-people`
 6. `POST /v1/faces/list-asset-faces`
+7. `POST /v1/faces/list-review-faces`
+8. `POST /v1/faces/suggest-people`
+9. `POST /v1/faces/assign-faces`
+10. `POST /v1/faces/create-person-from-faces`
+11. `POST /v1/faces/unassign-faces`
+12. `POST /v1/faces/ignore-faces`
+13. `POST /v1/faces/restore-ignored-faces`
+14. `POST /v1/faces/requeue-faces`
+15. `GET /v1/faces/crops/:faceId`
 
 输入参数语义：
 
 1. `detect-asset` 与文件上下文 `list-asset-faces` 继续通过 `rootPath + relativePath` 解析到 `absolutePath -> file -> asset`。
-2. `list-people`、`rename-person` 与 `merge-people` 默认工作在全局人物空间，不按当前 root 隔离。
+2. `list-people` 与人物上下文 `list-asset-faces` 必须支持显式 `scope: 'global' | 'root'`；`scope='root'` 时 `rootPath` 必填。
+3. `rename-person`、`merge-people` 与 face correction mutation 默认工作在全局人物空间，不按当前 root 隔离。
 
 ## 6. 聚类契约 (Incremental Clustering)
 
@@ -89,6 +99,7 @@
 3. 分配顺序：优先已有人物 -> 否则新建人物 -> 否则 deferred。
 4. 聚类与归属变更必须事务提交。
 5. 聚类与人物管理默认在全部活跃资产范围内运行，不以当前 root 作为隔离边界。
+6. 自动聚类仅处理 `face.status IN ('unassigned', 'deferred')`，不得自动改写 `manual_unassigned` 与 `ignored`。
 
 ## 7. 功能需求 (FR)
 
@@ -104,6 +115,14 @@
 10. `FR-FACE-10` 人脸框显示状态仅影响前端覆盖层渲染，不得作为后台检测/识别（`detect-asset/list-asset-faces/cluster-pending/list-people`）的门控条件。
 11. `FR-FACE-11` 预览文件的人脸检测/识别完成后，当前预览头部标签必须在同一预览会话内即时同步，无需切换文件。
 12. `FR-FACE-12` 同内容文件位于不同路径时，所有可见路径必须共享同一套人脸框、人物归属与人物标签结果。
+13. `FR-FACE-13` 人脸归属的单一真源必须是 `person_face`；前端与 Gateway 不得通过写 `vision.face` 标签直接实现人物纠错。
+14. `FR-FACE-14` `person_face.assignedBy` 必须支持 `auto | manual | merge`。
+15. `FR-FACE-15` `face.status` 必须支持 `assigned | unassigned | deferred | manual_unassigned | ignored`。
+16. `FR-FACE-16` 系统必须提供 face 级纠错 HTTP 接口，至少支持 assign/create-person/unassign/ignore/restore/requeue。
+17. `FR-FACE-17` 人物详情区必须支持基于 face crop 的批量纠错，不得仅停留在关联文件汇总。
+18. `FR-FACE-18` 点击预览人脸框时，系统必须支持进入单脸纠错，而不是仅允许跳转人物详情。
+19. `FR-FACE-19` 系统必须提供跨 Root 可读的人脸裁切接口，用于全局人物整理。
+20. `FR-FACE-20` 改变人物有效归属的 mutation 后，人物缓存与 `vision.face` 标签投影必须同步刷新。
 
 ## 8. 验收标准 (AC)
 
@@ -118,6 +137,14 @@
 9. `AC-FACE-09` 在图片预览中关闭人脸框后，后台仍可继续执行检测/识别流程并更新人物归属；再次开启时可直接展示最新识别结果。
 10. `AC-FACE-10` 自动 `detect-asset/cluster-pending` 或预览内手动 `vision.face` 成功后，当前文件预览标签在一次异步刷新内可见，不依赖切换文件触发。
 11. `AC-FACE-11` 同内容文件在不同路径下出现时，这些 file-centered 结果可看到同一套人脸框与人物信息。
+12. `AC-FACE-12` 将某张已归属 face 从人物 A 移到人物 B 后，人物列表、人脸详情与预览头部 `vision.face` 标签结果保持一致。
+13. `AC-FACE-13` 将某张已归属 face 移出后，其状态变为 `manual_unassigned`，且不会在后台自动聚类中立刻被改回。
+14. `AC-FACE-14` 将 face 标记为 `ignored` 后，其不会继续出现在普通未归属自动整理流程中。
+15. `AC-FACE-15` 恢复 `ignored` face 后，其状态变为 `manual_unassigned`。
+16. `AC-FACE-16` 对 `manual_unassigned` face 执行 requeue 后，其状态变为 `deferred`，可再次参与自动聚类。
+17. `AC-FACE-17` 人物工作台可在 `人物 / 未归属 / 误检/忽略` 之间切换，并支持 `全局 / 当前 Root` 作用域切换。
+18. `AC-FACE-18` 预览中点击任意脸框时可进入单脸纠错，并支持目标人物选择或建新人。
+19. `AC-FACE-19` 跨 Root 的 face 卡片可通过裁切接口显示并执行纠错，不依赖当前 root 下主预览成功打开。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -127,6 +154,7 @@
 4. `localStorage` 不可用时允许降级为仅会话内状态，且默认仍为隐藏。
 5. “即时同步”语义为同一预览会话内完成一次文件级标签快照刷新即可，不要求阻塞 UI。
 6. 普通人物与人脸查询默认排除软删除资产；软删除资产仅为未来全局管理/校验接口预留。
+7. face correction mutation 默认允许部分成功，并返回逐项结果。
 
 ## 10. 关联主题 (Related Specs)
 

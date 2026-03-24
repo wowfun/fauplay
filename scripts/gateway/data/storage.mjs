@@ -539,7 +539,7 @@ export function updateFaceAssignmentStatus(db) {
     UPDATE face
     SET status = 'unassigned', updatedAt = ?
     WHERE id NOT IN (SELECT faceId FROM person_face)
-      AND status != 'deferred'
+      AND status NOT IN ('deferred', 'manual_unassigned', 'ignored')
   `).run(ts)
 }
 

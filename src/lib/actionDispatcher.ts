@@ -144,6 +144,54 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
         payload,
       }
     }
+    if (operation === 'listReviewFaces') {
+      return {
+        endpointPath: '/v1/faces/list-review-faces',
+        payload,
+      }
+    }
+    if (operation === 'suggestPeople') {
+      return {
+        endpointPath: '/v1/faces/suggest-people',
+        payload,
+      }
+    }
+    if (operation === 'assignFaces') {
+      return {
+        endpointPath: '/v1/faces/assign-faces',
+        payload,
+      }
+    }
+    if (operation === 'createPersonFromFaces') {
+      return {
+        endpointPath: '/v1/faces/create-person-from-faces',
+        payload,
+      }
+    }
+    if (operation === 'unassignFaces') {
+      return {
+        endpointPath: '/v1/faces/unassign-faces',
+        payload,
+      }
+    }
+    if (operation === 'ignoreFaces') {
+      return {
+        endpointPath: '/v1/faces/ignore-faces',
+        payload,
+      }
+    }
+    if (operation === 'restoreIgnoredFaces') {
+      return {
+        endpointPath: '/v1/faces/restore-ignored-faces',
+        payload,
+      }
+    }
+    if (operation === 'requeueFaces') {
+      return {
+        endpointPath: '/v1/faces/requeue-faces',
+        payload,
+      }
+    }
     return null
   }
 

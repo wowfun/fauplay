@@ -1,7 +1,12 @@
 # CHANGELOG
 
+## 2026-03-25
+### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md`：按基础规范补充 `关键术语 (Terminology)` 章节，并将专题中的人物管理、人脸纠错、人物归属、人工未归属、忽略态与 Root 作用域等核心术语显式收敛。
+
 ## 2026-03-24
 ### Changed
+- 新增 `specs/119-person-management-face-correction/spec.md`，并更新 `specs/115-facial-recognition/spec.md`、`specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/tag-core-v2-reference.md`：新增“人物级管理 + face 级纠错”专题，明确 `person_face` 为人物归属真源、`face.status` 的五态语义、`global/root` 显式查询作用域、批量纠错 HTTP 接口，以及跨 Root 人脸裁切与人物工作台整理契约。
 - 新增 `specs/118-toolbar-help-shortcuts/spec.md`，并更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/areas.md` 与 `docs/shortcuts.md`：顶部工具栏新增只读 `帮助` 入口专题，首批支持查看当前运行时快捷键；列表固定按 `App / Grid / Preview / Tag` 分组展示，动态逻辑标签快捷键单列为 `Tag` 组，状态指示基于运行时上下文而非单次按键事件。
 - 新增 `specs/116-configurable-shortcuts/spec.md`，并更新 `specs/003-ui-ux/spec.md`、`specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/runtime-config-reference.md`：将快捷键定义为 root-scoped 的 app-owned 配置域，默认真源切换为 `src/config/shortcuts.json`，配置链统一为 `src/config -> ~/.fauplay/global -> <root>/.fauplay`；同时明确扁平 `snake_case` action id、单次组合键 DSL、`none` 禁用语义、局部容错与 Gateway 全局只读配置接口契约。
 - 更新 `specs/116-configurable-shortcuts/spec.md`、`specs/117-preview-header-tag-management/spec.md` 与 `docs/shortcuts.md`：将动态逻辑标签快捷键契约收敛为所见即所得的 `tag:${key}=${value}` 原始字符串语法，支持直接写中文、空格与常见特殊字符；仅当目标逻辑标签存在于当前候选快照时才生效，并在与预览内建快捷键冲突时由逻辑标签快捷键优先。
