@@ -31,3 +31,12 @@ export {
   getFaceCrop,
   callVisionInference,
 } from './faces.mjs'
+export {
+  ensureFileEntries,
+  queryDuplicateFiles,
+  moveFilesToRecycle,
+  listRecycleItems,
+  restoreRecycleItems,
+  readFileContentByAbsolutePath,
+  readFileTextPreview,
+} from './files.mjs'

@@ -1,5 +1,6 @@
 import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { stripProjectionFromResult } from '@/lib/projection'
 import type { PluginResultQueueItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 import { PluginResultStructuredView, type StructuredToolCallAction } from './PluginResultStructuredView'
 
@@ -12,6 +13,8 @@ interface PluginToolResultPanelProps {
   subzone?: string
   emptyHint?: string
   onResultAction?: (params: { item: PluginResultQueueItem; action: StructuredToolCallAction }) => void
+  onActivateProjection?: (params: { item: PluginResultQueueItem }) => void
+  activeProjectionId?: string | null
   panelWidthPx?: number
   minPanelWidthPx?: number
   maxPanelWidthPx?: number
@@ -62,6 +65,8 @@ export function PluginToolResultPanel({
   subzone,
   emptyHint,
   onResultAction,
+  onActivateProjection,
+  activeProjectionId = null,
   panelWidthPx = DEFAULT_PANEL_WIDTH_PX,
   minPanelWidthPx = DEFAULT_PANEL_WIDTH_PX,
   maxPanelWidthPx = DEFAULT_PANEL_WIDTH_PX,
@@ -87,6 +92,9 @@ export function PluginToolResultPanel({
   const resizeHandleClassName = side === 'left'
     ? 'absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 bg-transparent transition-colors z-20'
     : 'absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 bg-transparent transition-colors z-20'
+  const projectionButtonClassName = isLightbox
+    ? 'rounded-md border border-white/20 px-2 py-1 text-xs text-white transition-colors hover:bg-white/10'
+    : 'rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40'
 
   const handleResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!isResizable || !onPanelWidthChange) return
@@ -137,6 +145,9 @@ export function PluginToolResultPanel({
             {items.map((item) => {
               const statusLabel = resolveStatusLabel(item)
               const headerText = `${item.title}: ${formatTimestamp(item.finishedAt ?? item.startedAt)} ${statusLabel}`
+              const projection = item.projection
+              const hasProjection = Boolean(projection && onActivateProjection)
+              const isProjectionActive = projection?.id === activeProjectionId
 
               return (
                 <section key={item.id} className={cardClassName}>
@@ -161,6 +172,22 @@ export function PluginToolResultPanel({
 
                   {!item.collapsed && (
                     <div className="border-t border-inherit px-3 py-2 space-y-2">
+                      {hasProjection && projection && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className={projectionButtonClassName}
+                            onClick={() => {
+                              onActivateProjection?.({ item })
+                            }}
+                          >
+                            {isProjectionActive ? '结果模式中' : (projection.entry === 'manual' ? '进入结果模式' : '打开结果模式')}
+                          </button>
+                          <span className={`text-xs ${statusClassName}`}>
+                            {projection.title}
+                          </span>
+                        </div>
+                      )}
                       {item.status === 'loading' ? (
                         <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -174,7 +201,7 @@ export function PluginToolResultPanel({
                         </div>
                       ) : typeof item.result !== 'undefined' ? (
                         <PluginResultStructuredView
-                          value={item.result}
+                          value={stripProjectionFromResult(item.result)}
                           surfaceVariant={surfaceVariant}
                           onAction={onResultAction
                             ? (action) => {

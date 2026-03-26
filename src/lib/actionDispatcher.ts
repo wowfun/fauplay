@@ -59,6 +59,14 @@ function toArgsWithoutOperation(args: Record<string, unknown>): Record<string, u
   return next
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isObjectArray(value: unknown): value is Record<string, unknown>[] {
+  return Array.isArray(value) && value.every((item) => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+}
+
 function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown>): DispatchHttpRoute | null {
   const operation = typeof args.operation === 'string' ? args.operation : ''
   const payload = toArgsWithoutOperation(args)
@@ -103,7 +111,24 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
         payload,
       }
     }
+    if (operation === 'ensureFileEntries') {
+      return {
+        method: 'POST',
+        endpointPath: '/v1/files/indexes',
+        payload,
+        timeoutMs: 120000,
+      }
+    }
     return null
+  }
+
+  if (toolName === 'data.findDuplicateFiles') {
+    return {
+      method: 'POST',
+      endpointPath: '/v1/files/duplicates/query',
+      payload,
+      timeoutMs: 120000,
+    }
   }
 
   if (toolName === 'vision.face') {
@@ -215,6 +240,29 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
       }
     }
     return null
+  }
+
+  if (toolName === 'fs.softDelete' && isStringArray(args.absolutePaths)) {
+    return {
+      method: 'POST',
+      endpointPath: '/v1/recycle/items/move',
+      payload: {
+        absolutePaths: args.absolutePaths,
+        ...(typeof args.reason === 'string' && args.reason.trim() ? { reason: args.reason.trim() } : {}),
+      },
+      timeoutMs: 120000,
+    }
+  }
+
+  if (toolName === 'fs.restore' && isObjectArray(args.items)) {
+    return {
+      method: 'POST',
+      endpointPath: '/v1/recycle/items/restore',
+      payload: {
+        items: args.items,
+      },
+      timeoutMs: 120000,
+    }
   }
 
   return null

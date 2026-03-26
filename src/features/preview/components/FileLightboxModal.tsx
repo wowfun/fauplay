@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import type { FileItem } from '@/types'
+import type { FileItem, ResultProjection } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -39,6 +39,8 @@ interface FileLightboxModalProps {
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
   onOpenPersonDetail?: (personId: string | null) => void
   enableAnnotationTagShortcutOwner?: boolean
+  activeProjection: ResultProjection | null
+  onActivateProjection: (projection: ResultProjection) => void
 }
 
 export function FileLightboxModal({
@@ -74,6 +76,8 @@ export function FileLightboxModal({
   onMutationCommitted,
   onOpenPersonDetail,
   enableAnnotationTagShortcutOwner = false,
+  activeProjection,
+  onActivateProjection,
 }: FileLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -111,6 +115,8 @@ export function FileLightboxModal({
         onMutationCommitted={onMutationCommitted}
         onOpenPersonDetail={onOpenPersonDetail}
         enableAnnotationTagShortcutOwner={enableAnnotationTagShortcutOwner}
+        activeProjection={activeProjection}
+        onActivateProjection={onActivateProjection}
       />
     </div>
   )

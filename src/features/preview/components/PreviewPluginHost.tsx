@@ -4,8 +4,9 @@ import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxCon
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { getBoundRootPath } from '@/lib/reveal'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
-import type { FileItem } from '@/types'
+import type { FileItem, ResultProjection } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import type { StructuredToolCallAction } from '@/features/plugin-runtime/components/PluginResultStructuredView'
@@ -38,6 +39,8 @@ interface PreviewPluginHostProps {
   onToolPanelWidthChange: (nextWidthPx: number) => void
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
   enableAnnotationTagShortcutOwner?: boolean
+  activeProjection: ResultProjection | null
+  onActivateProjection: (projection: ResultProjection) => void
 }
 
 interface ContinuousToolTask {
@@ -53,6 +56,10 @@ function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
 }
 
+function isAbsolutePathLike(value: string): boolean {
+  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)
+}
+
 function readFirstResultRelativePath(result: unknown): string | null {
   if (!isRecord(result)) return null
   if (!Array.isArray(result.items) || result.items.length === 0) return null
@@ -60,6 +67,33 @@ function readFirstResultRelativePath(result: unknown): string | null {
   if (!isRecord(first) || typeof first.relativePath !== 'string') return null
   const normalized = normalizeRelativePath(first.relativePath)
   return normalized || null
+}
+
+function resolvePreviewBaseArguments(file: FileItem): Record<string, unknown> | null {
+  if (file.kind !== 'file') return null
+  if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
+    const items = [{
+      sourceType: file.sourceType,
+      ...(typeof file.recycleId === 'string' && file.recycleId.trim() ? { recycleId: file.recycleId.trim() } : {}),
+      ...(typeof file.absolutePath === 'string' && file.absolutePath.trim() ? { absolutePath: file.absolutePath.trim() } : {}),
+    }]
+    return { items }
+  }
+
+  const relativePath = typeof file.sourceRelativePath === 'string' && file.sourceRelativePath.trim()
+    ? file.sourceRelativePath.trim()
+    : (!isAbsolutePathLike(file.path) ? file.path : '')
+  if (!relativePath) {
+    if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+      return {}
+    }
+    return null
+  }
+
+  return {
+    relativePath,
+    ...(typeof file.sourceRootPath === 'string' && file.sourceRootPath.trim() ? { rootPath: file.sourceRootPath.trim() } : {}),
+  }
 }
 
 export function PreviewPluginHost({
@@ -80,6 +114,8 @@ export function PreviewPluginHost({
   onToolPanelWidthChange,
   onMutationCommitted,
   enableAnnotationTagShortcutOwner = false,
+  activeProjection,
+  onActivateProjection,
 }: PreviewPluginHostProps) {
   const keyboardShortcuts = useKeyboardShortcuts()
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
@@ -89,18 +125,51 @@ export function PreviewPluginHost({
     () => file.path.split('/').filter(Boolean).join('/'),
     [file.path]
   )
+  const currentBoundRootPath = useMemo(
+    () => (rootId ? getBoundRootPath(rootId) : null),
+    [rootId]
+  )
+  const isCrossRootProjection = useMemo(() => (
+    Boolean(file.sourceRootPath && file.sourceRootPath !== currentBoundRootPath)
+  ), [currentBoundRootPath, file.sourceRootPath])
   const isTrashContext = useMemo(
-    () => normalizedFilePath === '.trash' || normalizedFilePath.startsWith('.trash/'),
-    [normalizedFilePath]
+    () => (
+      file.sourceType === 'root_trash'
+      || file.sourceType === 'global_recycle'
+      || normalizedFilePath === '@trash'
+      || normalizedFilePath === '.trash'
+      || normalizedFilePath.startsWith('.trash/')
+    ),
+    [file.sourceType, normalizedFilePath]
   )
   const contextualTools = useMemo(() => {
-    const filteredTools = previewActionTools.filter((tool) => {
-      if (tool.name === 'fs.softDelete') return !isTrashContext
-      if (tool.name === 'fs.restore') return isTrashContext
-      return true
-    })
+    const filteredTools = isTrashContext
+      ? previewActionTools.filter((tool) => tool.name === 'fs.restore')
+      : (isCrossRootProjection
+        ? previewActionTools.filter((tool) => (
+          tool.name === 'fs.softDelete' || tool.name === 'data.findDuplicateFiles'
+        ))
+        : previewActionTools.filter((tool) => tool.name !== 'fs.restore'))
     return orderToolsWithSoftDeleteLast(filteredTools)
-  }, [isTrashContext, previewActionTools])
+  }, [isCrossRootProjection, isTrashContext, previewActionTools])
+  const previewBaseArguments = useMemo(
+    () => resolvePreviewBaseArguments(file),
+    [file]
+  )
+  const hasRelativeToolContext = useMemo(
+    () => Boolean(previewBaseArguments && typeof previewBaseArguments.relativePath === 'string'),
+    [previewBaseArguments]
+  )
+  const canRunProjectedMutationTool = useCallback((tool: GatewayToolDescriptor) => {
+    if (file.kind !== 'file') return false
+    if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
+      return tool.name === 'fs.restore'
+    }
+    if (!hasRelativeToolContext) {
+      return tool.name === 'fs.softDelete' && typeof file.absolutePath === 'string' && file.absolutePath.trim().length > 0
+    }
+    return true
+  }, [file, hasRelativeToolContext])
 
   const pluginRuntime = usePluginRuntime({
     scope: 'file',
@@ -112,11 +181,8 @@ export function PreviewPluginHost({
     setResultQueueState: setToolResultQueueState,
     workbenchState: toolWorkbenchState,
     setWorkbenchState: setToolWorkbenchState,
-    buildBaseArguments: useCallback(() => {
-      if (file.kind !== 'file') return null
-      return { relativePath: file.path }
-    }, [file.kind, file.path]),
-    canRunTool: useCallback(() => file.kind === 'file', [file.kind]),
+    buildBaseArguments: useCallback(() => previewBaseArguments, [previewBaseArguments]),
+    canRunTool: useCallback((tool: GatewayToolDescriptor) => canRunProjectedMutationTool(tool), [canRunProjectedMutationTool]),
     onMutationCommitted: onMutationCommitted
       ? async ({ tool, result }) => {
         const mutationParams: PreviewMutationCommitParams = {
@@ -139,6 +205,54 @@ export function PreviewPluginHost({
     }
     return map
   }, [fileActionTools])
+  const resolveToolArguments = useCallback((tool: GatewayToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
+    if (tool.name === 'fs.softDelete') {
+      if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+        return {
+          absolutePaths: [file.absolutePath.trim()],
+          ...(extraArgs ?? {}),
+        }
+      }
+      if (previewBaseArguments) {
+        return {
+          ...previewBaseArguments,
+          ...(extraArgs ?? {}),
+        }
+      }
+      return null
+    }
+
+    if (tool.name === 'fs.restore') {
+      if (previewBaseArguments) {
+        return {
+          ...previewBaseArguments,
+          ...(extraArgs ?? {}),
+        }
+      }
+      return null
+    }
+
+    if (!previewBaseArguments) {
+      return null
+    }
+
+    return {
+      ...previewBaseArguments,
+      ...(extraArgs ?? {}),
+    }
+  }, [file.absolutePath, previewBaseArguments])
+  const handledAutoProjectionIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const autoProjectionItem = pluginRuntime.currentQueue.find((item) => (
+      item.status === 'success'
+      && item.projection?.entry === 'auto'
+    ))
+    if (!autoProjectionItem?.projection) return
+    if (handledAutoProjectionIdRef.current === autoProjectionItem.id) return
+    handledAutoProjectionIdRef.current = autoProjectionItem.id
+    onActivateProjection(autoProjectionItem.projection)
+  }, [onActivateProjection, pluginRuntime.currentQueue])
   const softDeleteTool = useMemo(
     () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
     [fileActionTools]
@@ -149,8 +263,16 @@ export function PreviewPluginHost({
   )
   const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
     rootId,
-    relativePath: file.kind === 'file' ? file.path : null,
-    enabled: enableAnnotationTagShortcutOwner && file.kind === 'file' && annotationTool !== null,
+    relativePath: (
+      previewBaseArguments
+      && typeof previewBaseArguments.relativePath === 'string'
+      ? previewBaseArguments.relativePath
+      : null
+    ),
+    enabled: enableAnnotationTagShortcutOwner
+      && file.kind === 'file'
+      && annotationTool !== null
+      && !isTrashContext,
   })
   const currentFileQueue = pluginRuntime.currentQueue
   const showActionRail = fileActionTools.length > 0
@@ -296,14 +418,25 @@ export function PreviewPluginHost({
       if (!matchesAnyShortcut(event, keyboardShortcuts.preview.softDelete)) return
 
       event.preventDefault()
+      const additionalArgs = resolveToolArguments(softDeleteTool)
+      if (!additionalArgs) return
       void runToolCall(softDeleteTool, {
         trigger: 'manual',
+        additionalArgs,
       })
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [enableContinuousAutoRunOwner, file.kind, getMatchingPreviewTagShortcut, keyboardShortcuts, runToolCall, softDeleteTool])
+  }, [
+    enableContinuousAutoRunOwner,
+    file.kind,
+    getMatchingPreviewTagShortcut,
+    keyboardShortcuts,
+    resolveToolArguments,
+    runToolCall,
+    softDeleteTool,
+  ])
 
   useEffect(() => {
     if (!enableContinuousAutoRunOwner) return
@@ -347,38 +480,69 @@ export function PreviewPluginHost({
     () => pluginRuntime.railActions.map((action) => ({
       ...action,
       highlighted: continuousEnabledToolNames.has(action.toolName),
+      onClick: () => {
+        const tool = toolByName.get(action.toolName)
+        if (!tool) return
+        const additionalArgs = resolveToolArguments(tool)
+        if (!additionalArgs) return
+        pluginRuntime.handleWorkbenchContextChange(tool.name)
+        void pluginRuntime.runToolCall(tool, {
+          trigger: 'manual',
+          additionalArgs,
+        })
+      },
     })),
-    [continuousEnabledToolNames, pluginRuntime.railActions]
+    [continuousEnabledToolNames, pluginRuntime, resolveToolArguments, toolByName]
   )
 
   const workbenchNode = useMemo(() => {
     const tool = pluginRuntime.activeWorkbenchTool
     if (!tool || !hasWorkbenchMetadata(tool)) return null
+    const previewWorkbenchTool = tool.name === 'local.data'
+      ? {
+        ...tool,
+        toolActions: tool.toolActions.filter((action) => action.arguments?.operation !== 'ensureFileEntries'),
+      }
+      : tool
 
     return (
       <PluginToolWorkbench
-        tool={tool}
-        optionValues={toolWorkbenchState.optionValuesByTool[tool.name]}
+        tool={previewWorkbenchTool}
+        optionValues={toolWorkbenchState.optionValuesByTool[previewWorkbenchTool.name]}
         onOptionChange={pluginRuntime.handleWorkbenchOptionChange}
-        onRunAction={pluginRuntime.handleRunWorkbenchAction}
+        onRunAction={(toolItem, action) => {
+          const additionalArgs = resolveToolArguments(toolItem, action.arguments)
+          if (!additionalArgs) return
+          pluginRuntime.handleWorkbenchContextChange(toolItem.name)
+          void pluginRuntime.runToolCall(toolItem, {
+            trigger: 'manual',
+            actionKey: action.key,
+            actionLabel: action.label,
+            additionalArgs,
+          })
+        }}
         onRunCustomToolCall={(toolItem, params) => {
+          const additionalArgs = resolveToolArguments(toolItem, params.additionalArgs)
+          if (!additionalArgs) return
           pluginRuntime.handleWorkbenchContextChange(toolItem.name)
           void pluginRuntime.runToolCall(toolItem, {
             trigger: 'manual',
             actionLabel: params.actionLabel,
-            additionalArgs: params.additionalArgs,
+            additionalArgs,
           })
         }}
         rootId={rootId}
-        annotationTargetPath={file.kind === 'file' ? file.path : null}
+        annotationTargetPath={previewBaseArguments && typeof previewBaseArguments.relativePath === 'string'
+          ? previewBaseArguments.relativePath
+          : null}
         surfaceVariant={surfaceVariant}
         subzone="PreviewToolWorkbench"
       />
     )
   }, [
-    file.kind,
-    file.path,
     pluginRuntime,
+    previewBaseArguments,
+    resolveToolArguments,
     rootId,
     surfaceVariant,
     toolWorkbenchState.optionValuesByTool,
@@ -390,11 +554,13 @@ export function PreviewPluginHost({
 
     const targetTool = toolByName.get(item.toolName)
     if (!targetTool) return
+    const additionalArgs = resolveToolArguments(targetTool, action.arguments)
+    if (!additionalArgs) return
 
     if (action.execution === 'enqueue') {
       void pluginRuntime.runToolCall(targetTool, {
         trigger: 'manual',
-        additionalArgs: action.arguments,
+        additionalArgs,
       })
       return
     }
@@ -404,9 +570,9 @@ export function PreviewPluginHost({
       toolName: item.toolName,
       rootHandle,
       rootId,
-      additionalArgs: action.arguments ?? {},
+      additionalArgs,
     })
-  }, [pluginRuntime, rootHandle, rootId, toolByName])
+  }, [pluginRuntime, resolveToolArguments, rootHandle, rootId, toolByName])
 
   if (!showActionRail && !showResultPanel) {
     return null
@@ -436,6 +602,12 @@ export function PreviewPluginHost({
           items={currentFileQueue}
           onToggleItemCollapsed={pluginRuntime.handleToggleResultItemCollapsed}
           onResultAction={handleResultAction}
+          onActivateProjection={({ item }) => {
+            if (item.projection) {
+              onActivateProjection(item.projection)
+            }
+          }}
+          activeProjectionId={activeProjection?.id ?? null}
           surfaceVariant={surfaceVariant}
           side="left"
           subzone="PreviewToolResultPanel"

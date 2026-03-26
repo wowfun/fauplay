@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAc
 import { isUnlimited, toolResultQueueConfig } from '@/config/toolResultQueue'
 import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
 import { dispatchSystemTool, type DispatchSystemToolResult } from '@/lib/actionDispatcher'
+import { extractResultProjection } from '@/lib/projection'
 import type {
   PluginActionRailItem,
   PluginActionState,
@@ -345,6 +346,7 @@ export function usePluginRuntime({
       rootId,
       additionalArgs: argumentsPayload,
     })
+    const resultProjection = dispatchResult.ok ? extractResultProjection(dispatchResult.result) : null
 
     const finishedAt = Date.now()
 
@@ -360,6 +362,7 @@ export function usePluginRuntime({
             ...item,
             status: 'success' as const,
             result: dispatchResult.result,
+            projection: resultProjection ?? undefined,
             error: undefined,
             errorCode: undefined,
             finishedAt,

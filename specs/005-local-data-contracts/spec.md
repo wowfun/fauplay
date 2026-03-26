@@ -9,6 +9,7 @@
 3. 内容身份（`assetId`）与路径索引（`file.absolutePath`）在标签、人脸、分类等能力域下职责清晰。
 4. 人脸、标注、分类能力在同一数据层下可查询、可组合、可演进。
 5. 文件型运行时配置按“应用配置归应用、工具配置归工具”收敛，不再把 repo 默认值、工具默认值、全局覆盖、root 覆盖与浏览器私有状态混作一层。
+6. 基于 `asset + file` 的重复文件查询与显式建档继续复用同一数据模型，不引入并行身份体系。
 
 ## 2. 关键术语 (Terminology)
 
@@ -33,12 +34,14 @@
 4. 定义 Gateway 原生 HTTP 读写接口契约。
 5. 定义插件“只计算不直写”约束。
 6. 定义文件型运行时配置的统一分层、路径与覆盖顺序。
+7. 定义基于 `assetId` 的重复文件查询与显式建档接口契约。
 
 范围外：
 
 1. 旧 per-root 数据导入与兼容迁移。
 2. `sha256` 生成流程与人工校验工作流。
 3. 全局管理/校验 UI 设计细节。
+4. 全库后台自动补索引策略。
 
 ## 4. 架构契约 (Gateway as Single Data Layer)
 
@@ -113,7 +116,17 @@
 6. 前端展示、过滤与候选去重的逻辑标签身份固定为 `key + value`；`source` 是同一逻辑标签的附加来源维度。
 7. 当同一逻辑标签同时存在 `meta.annotation` 与其他来源时，前端代表来源必须优先选择 `meta.annotation`。
 
-### 5.6 参考文档
+### 5.6 资产级重复文件语义
+
+1. “重复文件”固定定义为：多个 `file.absolutePath` 命中同一 `assetId`。
+2. 查询作用域 `global/root` 只影响候选副本过滤，不改变请求方提交的种子集合。
+3. `missing index` 固定表示：当前文件不存在对应 `file` 记录。
+4. `stale index` 固定表示：存在 `file` 记录，但记录内 `fileMtimeMs` 与当前文件实际 `mtime` 不一致。
+5. 预览区查重允许在请求链路内对“当前文件”执行隐式单文件补索引；该能力不得扩展为工作区批量自动索引。
+6. 工作区显式索引只允许处理 `missing | stale` 文件；`fresh` 文件必须返回 `skipped`。
+7. 工作区对 `stale` 种子执行查重时，可先基于旧索引召回候选，但最终结果必须经过“种子 + 命中项”双方当前特征二次校验。
+
+### 5.7 参考文档
 
 1. 详细 DDL 与行为映射见：[`./tag-core-v2-reference.md`](./tag-core-v2-reference.md)。
 2. 文件型运行时配置分层、路径矩阵与作用域表见：[`./runtime-config-reference.md`](./runtime-config-reference.md)。
@@ -139,10 +152,14 @@
 3. `POST /v1/file-annotations/tags/unbind`
 4. `PATCH /v1/files/relative-paths`
 5. `POST /v1/files/missing/cleanups`
-6. `file-annotations/tags/bind` 仅新增 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
-7. `file-annotations/tags/unbind` 仅移除 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
-8. 以上接口对外继续接收 `rootPath + relativePath`，但持久化层只落 `absolutePath`。
-9. 历史维护接口全部下线（返回下线错误或 404）。
+6. `POST /v1/files/indexes`
+7. `POST /v1/files/duplicates/query`
+8. `file-annotations/tags/bind` 仅新增 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
+9. `file-annotations/tags/unbind` 仅移除 `source=meta.annotation` 的同名标签绑定，不删除同 `key + value` 的派生来源。
+10. 以上接口对外继续接收 `rootPath + relativePath`，但持久化层只落 `absolutePath`。
+11. 历史维护接口全部下线（返回下线错误或 404）。
+12. `POST /v1/files/indexes` 只允许显式补建当前目标文件的 `file/asset` 记录，不得承诺全库扫描。
+13. `POST /v1/files/duplicates/query` 必须继续以同一 `assetId` 作为重复身份判断依据，不得引入新的 v1 重复真源。
 
 ### 6.3 人脸流程
 
@@ -212,6 +229,10 @@
 27. `FR-LDC-27` `face.status` 必须支持 `assigned | unassigned | deferred | manual_unassigned | ignored`。
 28. `FR-LDC-28` 自动聚类默认仅处理 `unassigned | deferred`；`manual_unassigned` 与 `ignored` 不得被后台自动改写。
 29. `FR-LDC-29` 人脸 mutation 接口必须允许部分成功，并返回逐项结果与稳定错误码。
+30. `FR-LDC-30` 系统必须提供 `POST /v1/files/indexes` 作为显式补建 `file/asset` 记录的统一入口。
+31. `FR-LDC-31` 显式补建接口必须只处理 `missing | stale` 文件；`fresh` 文件不得重复建档。
+32. `FR-LDC-32` 系统必须提供 `POST /v1/files/duplicates/query` 作为按 `assetId` 查重的统一查询入口。
+33. `FR-LDC-33` 工作区查重对 `stale` 种子必须执行当前特征二次校验后再保留结果。
 
 ## 10. 验收标准 (AC)
 
@@ -235,6 +256,10 @@
 18. `AC-LDC-18` Gateway 自身文件访问或经 Gateway 发起的路径型工具调用在 `/mnt/<drive>/...` 命中 `No such device` 时，可自动重挂载后单次重试成功；失败时返回可读错误且不升级为前端 `MCP_CLIENT_TIMEOUT`。
 19. `AC-LDC-19` `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 缺失时，系统继续使用 `src/config/shortcuts.json` 默认值；当其存在时，仅覆盖已声明的快捷键动作。
 20. `AC-LDC-20` 对 face 执行 assign/create-person/unassign/ignore/restore/requeue 后，`person_face`、`face.status`、人物列表计数与 `vision.face` 资产标签结果保持一致。
+21. `AC-LDC-21` 对 `POST /v1/files/indexes` 提交一组混合 `fresh/missing/stale` 文件时，仅 `missing/stale` 项会被实际建档，`fresh` 项返回 `skipped`。
+22. `AC-LDC-22` 对 `POST /v1/files/duplicates/query` 发起预览单文件查重时，当前文件无索引或索引过期可先被隐式补建，再返回重复结果。
+23. `AC-LDC-23` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`missing` 种子会出现在覆盖率统计中而不是被静默忽略。
+24. `AC-LDC-24` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`stale` 种子的旧命中若经当前特征二次校验失效，则不会出现在最终结果中。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -243,6 +268,9 @@
 3. file-centered 查询结果统一返回 `assetId + absolutePath`；`relativePath` 仅在请求携带 `rootPath` 时返回。
 4. 标注与文件维护接口保持 `/v1/file-annotations`、`/v1/files/relative-paths`、`/v1/files/missing/cleanups` 路径，但内部真源切换到 `absolutePath -> file -> asset`。
 5. 前端逻辑标签主模型新增 `tagKey/key/value/sources/hasMetaAnnotation/representativeSource`，用于按 `key + value` 聚合多来源标签。
+6. 新增显式建档接口：`POST /v1/files/indexes`。
+7. 新增重复文件查询接口：`POST /v1/files/duplicates/query`。
+8. 重复文件查询结果需支持覆盖率字段（如 `seedCount/indexedSeedCount/needsIndexingCount`）与分组结果（如 `groups[]`）。
 
 ## 12. 关联主题 (Related Specs)
 
@@ -251,3 +279,4 @@
 - 人脸识别：[`../115-facial-recognition/spec.md`](../115-facial-recognition/spec.md)
 - 图像分类：[`../104-timm-classification-mcp/spec.md`](../104-timm-classification-mcp/spec.md)
 - 预览头部逻辑标签管理：[`../117-preview-header-tag-management/spec.md`](../117-preview-header-tag-management/spec.md)
+- 资产级重复文件检测：[`../120-asset-duplicate-detection/spec.md`](../120-asset-duplicate-detection/spec.md)

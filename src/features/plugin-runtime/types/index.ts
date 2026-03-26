@@ -1,3 +1,5 @@
+import type { ResultProjection } from '@/types'
+
 export type PluginResultStatus = 'loading' | 'success' | 'error'
 export type PluginResultTrigger = 'manual' | 'continuous'
 export type ToolWorkbenchOptionValue = boolean | string
@@ -14,6 +16,7 @@ export interface PluginResultQueueItem {
   requestSignature?: string
   status: PluginResultStatus
   result?: unknown
+  projection?: ResultProjection
   error?: string
   errorCode?: string
   startedAt: number

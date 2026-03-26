@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { getFilePreviewKind } from '@/lib/filePreview'
-import type { FileItem, TextPreviewPayload } from '@/types'
+import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -42,6 +42,8 @@ interface FilePreviewCanvasProps {
   faceOverlayLoading: boolean
   faceOverlayError: string | null
   onFaceOverlayClick?: (item: PreviewFaceOverlayItem) => void
+  activeProjection: ResultProjection | null
+  onActivateProjection: (projection: ResultProjection) => void
 }
 
 type FilePreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
@@ -85,6 +87,8 @@ export function FilePreviewCanvas({
   faceOverlayLoading,
   faceOverlayError,
   onFaceOverlayClick,
+  activeProjection,
+  onActivateProjection,
 }: FilePreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -131,6 +135,8 @@ export function FilePreviewCanvas({
             toolPanelWidthPx={toolPanelWidthPx}
             onToolPanelWidthChange={onToolPanelWidthChange}
             onMutationCommitted={onMutationCommitted}
+            activeProjection={activeProjection}
+            onActivateProjection={onActivateProjection}
           />
         </Suspense>
       )}

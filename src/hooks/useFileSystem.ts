@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { appConfig } from '@/config/appConfig'
+import { callGatewayHttp } from '@/lib/gateway'
 import type {
   AddressPathHistoryEntry,
   CachedRootEntry,
@@ -22,6 +23,24 @@ const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新�
 const FAVORITE_FOLDERS_STORAGE_KEY = 'fauplay:favorite-folders'
 const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
 const ROOT_LABEL_FALLBACK = '根目录'
+const VIRTUAL_TRASH_PATH = '@trash'
+
+interface RecycleListItem {
+  path?: string
+  absolutePath?: string
+  name?: string
+  size?: number
+  mimeType?: string
+  previewKind?: string
+  displayPath?: string
+  deletedAt?: number
+  sourceType?: string
+  sourceRootPath?: string
+  sourceRelativePath?: string
+  recycleId?: string
+  originalAbsolutePath?: string
+  lastModifiedMs?: number
+}
 
 function withBasePath(items: FileItem[], basePath: string): FileItem[] {
   if (!basePath) return items
@@ -33,6 +52,48 @@ function withBasePath(items: FileItem[], basePath: string): FileItem[] {
 
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+function isVirtualTrashPath(path: string): boolean {
+  return normalizeRelativePath(path) === VIRTUAL_TRASH_PATH
+}
+
+function toTrashFileItem(item: RecycleListItem): FileItem | null {
+  const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
+  const name = typeof item.name === 'string' ? item.name.trim() : ''
+  if (!absolutePath || !name) {
+    return null
+  }
+
+  const filePath = typeof item.path === 'string' && item.path.trim()
+    ? item.path.trim()
+    : absolutePath
+  const lastModifiedMs = Number.isFinite(Number(item.lastModifiedMs))
+    ? Number(item.lastModifiedMs)
+    : (Number.isFinite(Number(item.deletedAt)) ? Number(item.deletedAt) : undefined)
+
+  return {
+    name,
+    path: filePath,
+    kind: 'file',
+    absolutePath,
+    size: Number.isFinite(Number(item.size)) ? Number(item.size) : undefined,
+    mimeType: typeof item.mimeType === 'string' ? item.mimeType : undefined,
+    previewKind: (
+      item.previewKind === 'image'
+      || item.previewKind === 'video'
+      || item.previewKind === 'text'
+    ) ? item.previewKind : 'unsupported',
+    displayPath: typeof item.displayPath === 'string' ? item.displayPath : absolutePath,
+    deletedAt: Number.isFinite(Number(item.deletedAt)) ? Number(item.deletedAt) : undefined,
+    sourceType: typeof item.sourceType === 'string' ? item.sourceType : undefined,
+    sourceRootPath: typeof item.sourceRootPath === 'string' ? item.sourceRootPath : undefined,
+    sourceRelativePath: typeof item.sourceRelativePath === 'string' ? item.sourceRelativePath : undefined,
+    recycleId: typeof item.recycleId === 'string' ? item.recycleId : undefined,
+    originalAbsolutePath: typeof item.originalAbsolutePath === 'string' ? item.originalAbsolutePath : undefined,
+    lastModifiedMs,
+    lastModified: typeof lastModifiedMs === 'number' ? new Date(lastModifiedMs) : undefined,
+  }
 }
 
 function createSessionRootId(handle: FileSystemDirectoryHandle): string {
@@ -184,6 +245,30 @@ export function useFileSystem() {
     setFiles(withBasePath(allItems, basePath))
   }, [])
 
+  const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
+    const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
+    const response = await callGatewayHttp<{ items?: RecycleListItem[] }>('/v1/recycle/items/list', {
+      ...(boundRootPath ? { rootPath: boundRootPath } : {}),
+      includeRootTrash: true,
+      includeGlobalRecycle: true,
+    }, 120000)
+    const nextFiles = Array.isArray(response.items)
+      ? response.items
+        .map((item) => toTrashFileItem(item))
+        .filter((item): item is FileItem => item !== null)
+      : []
+
+    setFiles(nextFiles)
+    setCurrentPath(VIRTUAL_TRASH_PATH)
+    setIsFlattenView(false)
+    if (targetRootHandle) {
+      setRootHandle(targetRootHandle)
+    }
+    if (targetRootId) {
+      setRootId(targetRootId)
+    }
+  }, [])
+
   const ensureDirectoryReadable = useCallback(async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
     const opts: FileSystemPermissionDescriptor = { mode: 'read' }
     const permission = await handle.queryPermission(opts)
@@ -227,13 +312,17 @@ export function useFileSystem() {
     targetPath: string
   ) => {
     const normalizedPath = normalizeRelativePath(targetPath)
+    if (isVirtualTrashPath(normalizedPath)) {
+      await loadUnifiedTrashItems(nextRootId, nextRootHandle)
+      return
+    }
     const targetDirectory = await getDirectoryHandleByPathFromRoot(nextRootHandle, normalizedPath)
     await loadDirectoryItems(targetDirectory, normalizedPath, false)
     setRootHandle(nextRootHandle)
     setRootId(nextRootId)
     setCurrentPath(normalizedPath)
     setIsFlattenView(false)
-  }, [getDirectoryHandleByPathFromRoot, loadDirectoryItems])
+  }, [getDirectoryHandleByPathFromRoot, loadDirectoryItems, loadUnifiedTrashItems])
 
   const warmupRootPathBinding = useCallback((targetRootId: string, targetRootLabel: string) => {
     try {
@@ -260,6 +349,9 @@ export function useFileSystem() {
     if (!rootHandle) return []
 
     const normalizedPath = normalizeRelativePath(targetPath)
+    if (isVirtualTrashPath(normalizedPath)) {
+      return []
+    }
     const directory = await getDirectoryHandleByPath(normalizedPath)
     if (!directory) return []
 
@@ -365,6 +457,10 @@ export function useFileSystem() {
     setError(null)
 
     try {
+      if (isVirtualTrashPath(normalizedPath)) {
+        await loadUnifiedTrashItems(rootId, rootHandle)
+        return true
+      }
       const targetDirectory = await getDirectoryHandleByPath(normalizedPath)
       if (!targetDirectory) return false
       await loadDirectoryItems(targetDirectory, normalizedPath, nextFlattenView)
@@ -379,7 +475,7 @@ export function useFileSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [rootHandle, isFlattenView, getDirectoryHandleByPath, loadDirectoryItems])
+  }, [rootHandle, isFlattenView, getDirectoryHandleByPath, loadDirectoryItems, loadUnifiedTrashItems, rootId])
 
   const openPathInRoot = useCallback(async (targetRootId: string, targetPath: string): Promise<boolean> => {
     if (!targetRootId) return false
@@ -450,6 +546,7 @@ export function useFileSystem() {
   const toggleCurrentFolderFavorite = useCallback((): void => {
     if (!rootId) return
     const normalizedPath = normalizeRelativePath(currentPath)
+    if (isVirtualTrashPath(normalizedPath)) return
     const targetKey = `${rootId}:${normalizedPath}`
 
     setFavoriteFolders((previous) => {
@@ -500,6 +597,10 @@ export function useFileSystem() {
   }, [currentPath, navigateToPath])
 
   const navigateUp = useCallback(async () => {
+    if (isVirtualTrashPath(currentPath)) {
+      await navigateToPath('')
+      return
+    }
     if (!currentPath) return
     const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
     await navigateToPath(parentPath)
@@ -579,6 +680,7 @@ export function useFileSystem() {
   const isCurrentPathFavorited = (() => {
     if (!rootId) return false
     const normalizedPath = normalizeRelativePath(currentPath)
+    if (isVirtualTrashPath(normalizedPath)) return false
     return favoriteFolders.some((item) => {
       return item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
     })

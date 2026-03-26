@@ -2,8 +2,9 @@ import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
-import type { FileItem, TextPreviewPayload } from '@/types'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
+import { buildGatewayFileContentUrl, loadGatewayTextPreview, type GatewayToolDescriptor } from '@/lib/gateway'
+import { getBoundRootPath } from '@/lib/reveal'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -62,6 +63,8 @@ interface FilePreviewPanelProps {
   onMutationCommitted?: (params?: PreviewMutationCommitParams) => void | Promise<void>
   onOpenPersonDetail?: (personId: string | null) => void
   enableAnnotationTagShortcutOwner?: boolean
+  activeProjection: ResultProjection | null
+  onActivateProjection: (projection: ResultProjection) => void
 }
 
 interface BatchRenameItemResult {
@@ -95,6 +98,10 @@ function containsNullByte(bytes: Uint8Array): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isAbsolutePathLike(value: string): boolean {
+  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)
 }
 
 function splitFileName(fileName: string): { baseName: string; extension: string } {
@@ -200,6 +207,8 @@ export function FilePreviewPanel({
   onMutationCommitted,
   onOpenPersonDetail,
   enableAnnotationTagShortcutOwner = false,
+  activeProjection,
+  onActivateProjection,
 }: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
@@ -215,6 +224,32 @@ export function FilePreviewPanel({
   const handledVisionFaceQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
   const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
+  const boundRootPath = useMemo(
+    () => (rootId ? getBoundRootPath(rootId) : null),
+    [rootId]
+  )
+  const canAccessThroughCurrentRoot = useMemo(() => {
+    if (!file || file.kind !== 'file' || !rootHandle) return false
+    if (!file.path || isAbsolutePathLike(file.path)) return false
+    if (file.sourceRootPath && file.sourceRootPath !== boundRootPath) {
+      return false
+    }
+    return true
+  }, [boundRootPath, file, rootHandle])
+  const shouldUseAbsolutePathFetch = useMemo(() => (
+    Boolean(file && file.kind === 'file' && file.absolutePath && !canAccessThroughCurrentRoot)
+  ), [canAccessThroughCurrentRoot, file])
+  const canUseAnnotationContext = useMemo(() => (
+    Boolean(
+      file
+      && file.kind === 'file'
+      && rootId
+      && rootHandle
+      && canAccessThroughCurrentRoot
+      && file.sourceType !== 'root_trash'
+      && file.sourceType !== 'global_recycle'
+    )
+  ), [canAccessThroughCurrentRoot, file, rootHandle, rootId])
   useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
@@ -226,12 +261,18 @@ export function FilePreviewPanel({
     [previewActionTools]
   )
   const hasVisionFaceTool = useMemo(
-    () => previewActionTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('file')),
-    [previewActionTools]
+    () => (
+      canUseAnnotationContext
+      && previewActionTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('file'))
+    ),
+    [canUseAnnotationContext, previewActionTools]
   )
   const hasLocalDataTool = useMemo(
-    () => previewActionTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file')),
-    [previewActionTools]
+    () => (
+      canUseAnnotationContext
+      && previewActionTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file'))
+    ),
+    [canUseAnnotationContext, previewActionTools]
   )
 
   const renameUnavailableReason = useMemo(() => {
@@ -241,11 +282,14 @@ export function FilePreviewPanel({
     if (!rootHandle || !rootId) {
       return '工具上下文不完整'
     }
+    if (!canAccessThroughCurrentRoot || file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
+      return '当前结果项不支持重命名'
+    }
     if (!hasBatchRenameTool) {
       return '重命名能力不可用（网关离线或未注册 fs.batchRename）'
     }
     return null
-  }, [file, hasBatchRenameTool, rootHandle, rootId])
+  }, [canAccessThroughCurrentRoot, file, hasBatchRenameTool, rootHandle, rootId])
 
   const canRenameFileName = renameUnavailableReason === null
   const annotationTagManageUnavailableReason = useMemo(() => {
@@ -255,33 +299,36 @@ export function FilePreviewPanel({
     if (!rootHandle || !rootId) {
       return '工具上下文不完整'
     }
+    if (!canUseAnnotationContext) {
+      return '当前结果项不支持标签管理'
+    }
     if (!hasLocalDataTool) {
       return '标签管理能力不可用（网关离线或未注册 local.data）'
     }
     return null
-  }, [file, hasLocalDataTool, rootHandle, rootId])
+  }, [canUseAnnotationContext, file, hasLocalDataTool, rootHandle, rootId])
   const canManageAnnotationTags = annotationTagManageUnavailableReason === null
 
   useEffect(() => {
-    if (!rootId || !rootHandle) return
+    if (!rootId || !rootHandle || !canUseAnnotationContext) return
     void preloadAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
     })
-  }, [rootHandle, rootId])
+  }, [canUseAnnotationContext, rootHandle, rootId])
 
   useEffect(() => {
-    if (!rootId || !rootHandle || !file || file.kind !== 'file') return
+    if (!rootId || !rootHandle || !file || file.kind !== 'file' || !canUseAnnotationContext) return
     void preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
       relativePath: file.path,
       force: true,
     })
-  }, [file, rootHandle, rootId])
+  }, [canUseAnnotationContext, file, rootHandle, rootId])
 
   const replacePreviewUrl = useCallback((nextUrl: string | null) => {
-    if (currentUrlRef.current) {
+    if (currentUrlRef.current?.startsWith('blob:')) {
       URL.revokeObjectURL(currentUrlRef.current)
     }
     currentUrlRef.current = nextUrl
@@ -300,14 +347,14 @@ export function FilePreviewPanel({
       .join('|')
   }, [currentFileQueue, file])
   const refreshCurrentPreviewFileTags = useCallback(async () => {
-    if (!file || file.kind !== 'file' || !rootId || !rootHandle) return
+    if (!file || file.kind !== 'file' || !rootId || !rootHandle || !canUseAnnotationContext) return
     await preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
       relativePath: file.path,
       force: true,
     })
-  }, [file, rootHandle, rootId])
+  }, [canUseAnnotationContext, file, rootHandle, rootId])
   const refreshGlobalAnnotationTagOptions = useCallback(async () => {
     await preloadGlobalAnnotationTagOptions({
       force: true,
@@ -454,7 +501,7 @@ export function FilePreviewPanel({
   ])
 
   useEffect(() => {
-    if (!file || !rootHandle) {
+    if (!file || file.kind !== 'file') {
       replacePreviewUrl(null)
       setTextPreview(INITIAL_TEXT_PREVIEW)
       setFileMimeType(null)
@@ -479,6 +526,38 @@ export function FilePreviewPanel({
       )
 
       try {
+        if (shouldUseAbsolutePathFetch && file.absolutePath) {
+          setFileMimeType(file.mimeType || getMimeType(file.name))
+          setFileSizeBytes(file.size ?? null)
+          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
+
+          if (previewKind === 'text') {
+            replacePreviewUrl(null)
+            const textResult = await loadGatewayTextPreview(file.absolutePath, TEXT_PREVIEW_MAX_BYTES)
+            if (cancelled) return
+            setTextPreview({
+              status: textResult.status,
+              content: textResult.content,
+              fileSizeBytes: textResult.fileSizeBytes,
+              sizeLimitBytes: textResult.sizeLimitBytes,
+              error: textResult.error,
+            })
+            return
+          }
+
+          setTextPreview(INITIAL_TEXT_PREVIEW)
+          if (previewKind === 'image' || previewKind === 'video') {
+            replacePreviewUrl(buildGatewayFileContentUrl(file.absolutePath))
+            return
+          }
+          replacePreviewUrl(null)
+          return
+        }
+
+        if (!rootHandle) {
+          throw new Error('当前文件无法通过工作区目录句柄读取')
+        }
+
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (cancelled) return
 
@@ -565,11 +644,11 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true
     }
-  }, [file, rootHandle, replacePreviewUrl])
+  }, [file, replacePreviewUrl, rootHandle, shouldUseAbsolutePathFetch])
 
   useEffect(() => {
     return () => {
-      if (currentUrlRef.current) {
+      if (currentUrlRef.current?.startsWith('blob:')) {
         URL.revokeObjectURL(currentUrlRef.current)
       }
     }
@@ -666,7 +745,7 @@ export function FilePreviewPanel({
   }, [canRenameFileName, file, onMutationCommitted, renameUnavailableReason, rootHandle, rootId])
 
   useEffect(() => {
-    if (!file || file.kind !== 'file' || !rootId) {
+    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) {
       handledLocalDataQueueItemIdRef.current = null
       return
     }
@@ -697,10 +776,10 @@ export function FilePreviewPanel({
       relativePath: file.path,
       force: true,
     })
-  }, [currentFileQueue, file, rootHandle, rootId])
+  }, [canUseAnnotationContext, currentFileQueue, file, rootHandle, rootId])
 
   useEffect(() => {
-    if (!file || file.kind !== 'file' || !rootId) {
+    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) {
       handledVisionFaceQueueItemIdRef.current = null
       return
     }
@@ -714,10 +793,10 @@ export function FilePreviewPanel({
     handledVisionFaceQueueItemIdRef.current = latestVisionFaceSuccess.id
 
     void refreshCurrentPreviewFileTags()
-  }, [currentFileQueue, file, refreshCurrentPreviewFileTags, rootId])
+  }, [canUseAnnotationContext, currentFileQueue, file, refreshCurrentPreviewFileTags, rootId])
 
   const annotationTags: PreviewHeaderAnnotationTag[] = (
-    file && file.kind === 'file' && rootId
+    file && file.kind === 'file' && rootId && canUseAnnotationContext
       ? getFileLogicalTags(rootId, file.path).map((tag) => ({
         tagKey: tag.tagKey,
         key: tag.key,
@@ -781,7 +860,7 @@ export function FilePreviewPanel({
         onUnbindAnnotationTag={handleUnbindAnnotationTag}
         enableOpenAnnotationTagByShortcut={enableAnnotationTagShortcutOwner}
         rootId={rootId}
-        relativePath={file.kind === 'file' ? file.path : null}
+        relativePath={canUseAnnotationContext && file.kind === 'file' ? file.path : null}
       />
 
       <PreviewFaceCorrectionPanel
@@ -827,6 +906,8 @@ export function FilePreviewPanel({
         faceOverlayLoading={faceOverlayLoading}
         faceOverlayError={faceOverlayError}
         onFaceOverlayClick={handleFaceOverlayClick}
+        activeProjection={activeProjection}
+        onActivateProjection={onActivateProjection}
       />
     </div>
   )

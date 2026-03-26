@@ -2,7 +2,7 @@
 
 ## 1. 目的 (Purpose)
 
-定义 Fauplay 回收站能力的统一契约，包含 `fs.softDelete` 与 `fs.restore` 两个工具、Toolbar 回收站入口、`.trash` 可见性控制，以及“回收站上下文下软删/还原互斥显示”语义。
+定义 Fauplay 目录浏览上下文下的软删除能力契约，包含 `fs.softDelete` 与 `fs.restore` 两个工具、Toolbar 回收站入口、`.trash` 可见性控制，以及“回收站上下文下软删/还原互斥显示”语义；结果模式与统一回收站的跨 Root 回收行为由 `122-unified-trash-route` 另行定义。
 
 ## 2. 关键术语 (Terminology)
 
@@ -24,12 +24,15 @@
 5. Toolbar 提供“回收站入口”（不承载还原动作）。
 6. 回收站上下文插件可见性切换：显示 `fs.restore`、隐藏 `fs.softDelete`；非回收站相反。
 7. `.trash` 在网格与地址栏子目录候选中默认隐藏。
+8. `.trash` 目标语义只作用于普通目录浏览上下文。
 
 范围外：
 
 1. 清空回收站（empty trash）。
 2. 基于元数据索引恢复原路径（本期仅按 `.trash/` 前缀推导）。
 3. 调用系统回收站能力。
+4. 结果模式删除进入全局回收区的行为（归属 `122-unified-trash-route`）。
+5. 统一回收站中 `global_recycle` 项的恢复参数模型（归属 `122-unified-trash-route`）。
 
 ## 4. 用户可见行为契约 (User-visible Contract)
 
@@ -43,10 +46,11 @@
 8. `workspace` 作用域还原支持选中项批量还原（文件+目录）。
 9. `file` 作用域还原支持当前预览文件还原。
 10. 回收站上下文下 `Delete` 不触发任何操作（由于 `fs.softDelete` 隐藏）。
-11. Toolbar 仅保留“回收站”按钮；当 `.trash` 不存在或为空时禁用。
+11. Toolbar 仅保留“回收站”按钮；其最终入口与可用性由 `122-unified-trash-route` 的统一回收站契约定义，本专题不再以当前 Root `.trash` 是否存在作为唯一启用条件。
 12. Gateway 离线时，回收站可浏览，插件能力按现有降级不可用。
 13. 预览作用域 `fs.softDelete confirm=true` 成功删除“当前预览文件”后，系统必须自动续选下一个预览目标，不得回退到目录首项。
 14. 自动续选规则：媒体文件按当前预览遍历模式（顺序/随机）取下一项；非媒体文件按当前列表顺序取下一项，末项回绕到首项。
+15. 当删除动作发生在结果模式投射列表上时，不得沿用本专题的 `.trash` 目标语义；该场景必须按 `122-unified-trash-route` 的统一回收站契约处理。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -145,13 +149,15 @@
 5. `FR-SD-05` 软删除目标固定为 `.trash` 并支持冲突自动序号去重。
 6. `FR-SD-06` 还原目标由 `.trash/` 前缀剥离推导并支持冲突自动序号去重。
 7. `FR-SD-07` ActionRail 默认点击软删除应直接执行提交语义。
-8. `FR-SD-08` Toolbar 仅提供回收站入口，且在 `.trash` 缺失或为空时禁用。
+8. `FR-SD-08` Toolbar 仅提供回收站入口；入口路由与启用条件由 `122-unified-trash-route` 的统一回收站契约统一定义。
 9. `FR-SD-09` 回收站上下文必须隐藏 `fs.softDelete` 并显示 `fs.restore`。
 10. `FR-SD-10` 非回收站上下文必须显示 `fs.softDelete` 并隐藏 `fs.restore`。
 11. `FR-SD-11` 回收站上下文下 `Delete` 快捷键不得触发软删除。
 12. `FR-SD-12` 非回收站上下文下，`workspace` 与 `preview` 的 ActionRail 按钮顺序必须满足 `fs.softDelete` 固定置尾。
 13. `FR-SD-13` 预览作用域软删除提交成功且删除目标为当前预览文件时，系统必须在刷新前完成自动续选。
 14. `FR-SD-14` 自动续选时，媒体文件必须复用 `100-preview-playback` 的当前遍历策略；非媒体文件必须按当前列表顺序前进并在末项回绕到首项。
+15. `FR-SD-15` 本专题的 `.trash` 目标语义必须只适用于普通目录浏览与直接 `.trash` 上下文，不覆盖结果模式删除。
+16. `FR-SD-16` 本专题的 `fs.restore` 参数模型必须只覆盖 `.trash` 路径，不覆盖统一回收站中的 `global_recycle` 项恢复。
 
 ## 8. 验收标准 (AC)
 
@@ -165,11 +171,13 @@
 8. `AC-SD-08` 非回收站中显示软删除插件并隐藏还原插件（workspace + preview）。
 9. `AC-SD-09` 回收站中显示还原插件并隐藏软删除插件（workspace + preview）。
 10. `AC-SD-10` 回收站上下文下按 `Delete` 不触发操作。
-11. `AC-SD-11` Toolbar 无“还原”按钮，仅保留“回收站”入口。
+11. `AC-SD-11` Toolbar 无“还原”按钮，仅保留“回收站”入口；其最终打开目标由 `122` 定义。
 12. `AC-SD-12` `.trash` 不出现在网格和地址栏子目录候选中。
 13. `AC-SD-13` 非回收站上下文中，不论网关返回工具顺序如何，`workspace` 与 `preview` ActionRail 内 `fs.softDelete` 均显示在最后一个按钮位。
 14. `AC-SD-14` 预览中删除当前媒体文件后，顺序/随机模式均按对应“下一项”续播，不回退到目录首项。
 15. `AC-SD-15` 预览中删除当前非媒体文件后，按当前列表顺序跳到下一文件；删除末项时回绕到首项。
+16. `AC-SD-16` 结果模式下删除跨 Root 文件时，不会尝试把文件移动到当前 `rootPath/.trash`。
+17. `AC-SD-17` 当统一回收站中存在 `global_recycle` 项时，前端不会尝试用 `fs.restore(rootPath + relativePath)` 直接恢复该类项。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -184,3 +192,4 @@
 - 协议契约：[`../002-contracts/spec.md`](../002-contracts/spec.md)
 - UI 分区：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
 - 插件运行时交互：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)
+- 统一回收站虚拟路由：[`../122-unified-trash-route/spec.md`](../122-unified-trash-route/spec.md)

@@ -8,6 +8,7 @@
 2. `file` 仅作为当前路径索引；批量路径重绑只维护 `absolutePath`，不再承诺位置身份连续性。
 3. 提供缺失路径的 dry-run/commit 清理能力，并在最后一个 `file` 消失时将对应 `asset` 软删除。
 4. 人脸、分类、标注继续共享同一 `asset + file + tag + asset_tag` 数据模型。
+5. 提供工作区专用的显式建档入口，仅对缺失索引或索引过期的文件生效。
 
 ## 2. 范围与非目标 (In Scope / Out of Scope)
 
@@ -16,6 +17,7 @@
 1. `setAnnotationValue`：同资产同字段覆盖写入。
 2. `batchRebindPaths`：按相对路径映射批量更新 `file.absolutePath`（支持链式映射）。
 3. `cleanupMissingFiles`：缺失路径预演与提交清理。
+4. `ensureFileEntries`：工作区当前目标文件的显式建档。
 5. 预览态 `0..9` 快捷打标链路与工作台标注面板。
 
 范围外：
@@ -27,12 +29,12 @@
 ## 3. 工具契约 (MCP Tool Contract)
 
 1. 工具名固定为：`local.data`。
-2. `operation` 枚举固定为：`setAnnotationValue | bindAnnotationTag | unbindAnnotationTag | batchRebindPaths | cleanupMissingFiles`。
+2. `operation` 枚举固定为：`setAnnotationValue | bindAnnotationTag | unbindAnnotationTag | batchRebindPaths | cleanupMissingFiles | ensureFileEntries`。
 3. `local.data` 仅承载工作台元数据与操作入口；持久化由 Gateway HTTP 接口执行。
 
 ### 3.1 命名分层与入口收敛
 
-1. 外部语义层（HTTP / MCP 操作名）固定使用业务语义：`setAnnotationValue`、`bindAnnotationTag`、`unbindAnnotationTag`、`batchRebindPaths`、`cleanupMissingFiles`。
+1. 外部语义层（HTTP / MCP 操作名）固定使用业务语义：`setAnnotationValue`、`bindAnnotationTag`、`unbindAnnotationTag`、`batchRebindPaths`、`cleanupMissingFiles`、`ensureFileEntries`。
 2. 内部数据层（仓储 / 核心函数）可保留 CRUD 风格或实现导向命名，但不得改变外部语义层契约。
 3. `batchRebindPaths` 是改名后路径维护的统一入口；工作区批量改名与预览单文件改名成功后，均应通过该入口执行后处理重绑。
 
@@ -60,8 +62,13 @@
    - 输入：`rootPath, confirm?`
    - 语义：按当前 `rootPath` 作用域扫描缺失路径；`confirm=false` 仅预演，`confirm=true` 提交删除缺失 `file`，并在必要时软删除最后一个 `file` 对应的 `asset`
    - 输出：`{ ok, dryRun, missingAbsolutePaths[], impact, removed? }`
-6. `POST /v1/file-bindings/reconciliations` 已下线；调用时返回下线错误或 404。
-7. 历史维护接口已下线；调用时返回下线错误或 404。
+6. `POST /v1/files/indexes`
+   - 输入：`rootPath, relativePaths[]`
+   - 语义：只对当前目标集合中的 `missing | stale` 文件显式补建或刷新 `file/asset` 记录；`fresh` 文件逐项返回 `skipped`
+   - 约束：只允许工作区发起，不提供预览区单文件显式入口
+   - 输出：`{ ok, total, indexed, skipped, failed, items[] }`
+7. `POST /v1/file-bindings/reconciliations` 已下线；调用时返回下线错误或 404。
+8. 历史维护接口已下线；调用时返回下线错误或 404。
 
 ## 5. 数据与行为契约 (Data & Behavior Contract)
 
@@ -100,9 +107,17 @@
 4. 不再提供基于候选搜索的自动重绑；外部重命名后若新路径已被建档，内容连续性由共享 `assetId` 承担。
 5. 提交后必须刷新人物缓存与 `vision.face` 标签投影，并保证普通查询只读取活跃资产。
 
+### 5.5 显式建档（`ensureFileEntries`）
+
+1. `ensureFileEntries` 只允许在工作区上下文触发；预览区不得暴露该动作。
+2. 动作目标集合固定为：已选文件优先，否则当前可见文件。
+3. 仅 `missing | stale` 文件允许实际建档或刷新；`fresh` 文件必须返回 `skipped`。
+4. 每项结果独立返回，允许部分成功。
+5. 该能力只负责补建当前目标文件索引，不承诺全库扫描或后台补索引。
+
 ## 6. 功能需求 (FR)
 
-1. `FR-LD-01` 系统必须暴露 `local.data` 工具，且操作枚举仅包含 `setAnnotationValue/bindAnnotationTag/unbindAnnotationTag/batchRebindPaths/cleanupMissingFiles`。
+1. `FR-LD-01` 系统必须暴露 `local.data` 工具，且操作枚举仅包含 `setAnnotationValue/bindAnnotationTag/unbindAnnotationTag/batchRebindPaths/cleanupMissingFiles/ensureFileEntries`。
 2. `FR-LD-02` 标注写入必须投影到统一标签模型，且来源固定为 `meta.annotation`。
 3. `FR-LD-03` `batchRebindPaths` 必须只维护路径索引，不再对外暴露 `fileId`。
 4. `FR-LD-04` `cleanupMissingFiles` 必须支持 dry-run 与 commit 双阶段。
@@ -111,6 +126,9 @@
 8. `FR-LD-08` 标签读取接口用于顶部过滤与预览显示时，不得默认限制为 `source=meta.annotation`。
 9. `FR-LD-09` 系统必须支持对现有逻辑标签单独补一条 `meta.annotation` 来源绑定，而不删除同名派生来源。
 10. `FR-LD-10` 系统必须支持仅移除逻辑标签的 `meta.annotation` 来源绑定，而不删除同名派生来源。
+11. `FR-LD-11` 系统必须提供工作区专用 `ensureFileEntries`，用于显式补建当前目标文件索引。
+12. `FR-LD-12` `ensureFileEntries` 只允许处理 `missing | stale` 文件；`fresh` 文件必须返回 `skipped`。
+13. `FR-LD-13` 预览区不得暴露 `ensureFileEntries` 入口。
 
 ## 7. 验收标准 (AC)
 
@@ -122,6 +140,9 @@
 7. `AC-LD-07` 当文件仅存在非 `meta.annotation` 来源标签时，`/v1/data/tags/file` 与 `/v1/data/tags/query` 仍可返回该标签供顶部过滤与预览显示使用。
 8. `AC-LD-08` 当文件已有 `vision.face(person=Alice)` 时，调用 `bindAnnotationTag(person, Alice)` 后会额外新增 `meta.annotation(person=Alice)`，且不会删除原 `vision.face(person=Alice)`。
 9. `AC-LD-09` 当文件同时拥有 `meta.annotation(person=Alice)` 与 `vision.face(person=Alice)` 时，调用 `unbindAnnotationTag(person, Alice)` 后仅移除 `meta.annotation`，`vision.face` 结果保留。
+10. `AC-LD-10` 在工作区存在选中文件时，调用 `ensureFileEntries` 只处理选中文件；无选择时处理当前可见文件。
+11. `AC-LD-11` `ensureFileEntries` 遇到混合 `fresh/missing/stale` 目标时，仅 `missing/stale` 项会被实际建档，`fresh` 项返回 `skipped`。
+12. `AC-LD-12` 预览区工具面板中不存在 `ensureFileEntries` 的显式动作入口。
 
 ## 8. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -129,6 +150,7 @@
 2. 所有写请求必须事务化（全成或全败）。
 3. 不新增 file 绑定状态持久化表，状态只在请求结果中返回。
 4. Gateway 侧 ES 搜索默认配置固定读取 `tools/mcp/local-data/config.json`，不自动叠加 `~/.fauplay/global/local-data.json`。
+5. `ensureFileEntries` 的工作台动作文案固定为 `索引当前目标文件`。
 
 ## 9. 关联主题 (Related Specs)
 
@@ -138,3 +160,4 @@
 - 人脸识别：[`../115-facial-recognition/spec.md`](../115-facial-recognition/spec.md)
 - 契约基线：[`../002-contracts/spec.md`](../002-contracts/spec.md)
 - 预览头部逻辑标签管理：[`../117-preview-header-tag-management/spec.md`](../117-preview-header-tag-management/spec.md)
+- 资产级重复文件检测：[`../120-asset-duplicate-detection/spec.md`](../120-asset-duplicate-detection/spec.md)

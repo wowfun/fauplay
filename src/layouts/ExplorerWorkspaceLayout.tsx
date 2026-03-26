@@ -14,6 +14,7 @@ import type {
   FavoriteFolderEntry,
   FileItem,
   FilterState,
+  ResultProjection,
   ThumbnailSizePreset,
 } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
@@ -199,6 +200,9 @@ interface ExplorerWorkspaceLayoutProps {
   previewFile: FileItem | null
   previewAutoPlayOnOpen: boolean
   onClosePreview: () => void
+  activeProjection: ResultProjection | null
+  onActivateProjection: (projection: ResultProjection) => void
+  onCloseProjection: () => void
 }
 
 export function ExplorerWorkspaceLayout({
@@ -276,6 +280,9 @@ export function ExplorerWorkspaceLayout({
   previewFile,
   previewAutoPlayOnOpen,
   onClosePreview,
+  activeProjection,
+  onActivateProjection,
+  onCloseProjection,
 }: ExplorerWorkspaceLayoutProps) {
   const [previewPluginResultQueueState, setPreviewPluginResultQueueState] = useState<PluginResultQueueState>({
     byContextKey: {},
@@ -388,18 +395,37 @@ export function ExplorerWorkspaceLayout({
             </div>
           ) : (
             <>
-              <FileBrowserGrid
-                ref={fileGridRef}
-                files={files}
-                rootHandle={rootHandle}
-                thumbnailSizePreset={thumbnailSizePreset}
-                onFileClick={onFileClick}
-                onFileDoubleClick={onFileDoubleClick}
-                onDirectoryClick={onDirectoryClick}
-                selectionScopeKey={currentPath}
-                canClearSelectionWithEscape={!hasOpenPreview}
-                onSelectionChange={onGridSelectionChange}
-              />
+              <div className="flex-1 min-w-0 flex flex-col">
+                {activeProjection && (
+                  <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{activeProjection.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        当前为结果模式，共 {files.length} 个文件
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40"
+                      onClick={onCloseProjection}
+                    >
+                      关闭结果模式
+                    </button>
+                  </div>
+                )}
+                <FileBrowserGrid
+                  ref={fileGridRef}
+                  files={files}
+                  rootHandle={rootHandle}
+                  thumbnailSizePreset={thumbnailSizePreset}
+                  onFileClick={onFileClick}
+                  onFileDoubleClick={onFileDoubleClick}
+                  onDirectoryClick={onDirectoryClick}
+                  selectionScopeKey={activeProjection ? `${currentPath}::projection:${activeProjection.id}` : currentPath}
+                  canClearSelectionWithEscape={!hasOpenPreview}
+                  onSelectionChange={onGridSelectionChange}
+                />
+              </div>
               {pluginTools.length > 0 && (
                 <Suspense fallback={null}>
                 <WorkspacePluginHost
@@ -414,6 +440,8 @@ export function ExplorerWorkspaceLayout({
                     workbenchState={workspacePluginWorkbenchState}
                     setWorkbenchState={setWorkspacePluginWorkbenchState}
                     onMutationCommitted={onWorkspaceMutationCommitted}
+                    activeProjection={activeProjection}
+                    onActivateProjection={onActivateProjection}
                     toolPanelCollapsed={workspaceToolPanelCollapsed}
                     onToggleToolPanelCollapsed={() => {
                       setWorkspaceToolPanelCollapsed((prev) => !prev)
@@ -483,6 +511,8 @@ export function ExplorerWorkspaceLayout({
                 onMutationCommitted={onPreviewMutationCommitted}
                 onOpenPersonDetail={onOpenPeopleForPerson}
                 enableAnnotationTagShortcutOwner={!previewFile}
+                activeProjection={activeProjection}
+                onActivateProjection={onActivateProjection}
               />
             </Suspense>
           </div>
@@ -540,6 +570,8 @@ export function ExplorerWorkspaceLayout({
             onMutationCommitted={onPreviewMutationCommitted}
             onOpenPersonDetail={onOpenPeopleForPerson}
             enableAnnotationTagShortcutOwner
+            activeProjection={activeProjection}
+            onActivateProjection={onActivateProjection}
           />
         </Suspense>
       )}

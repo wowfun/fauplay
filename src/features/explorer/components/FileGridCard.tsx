@@ -3,6 +3,7 @@ import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
+import { buildGatewayFileThumbnailUrl } from '@/lib/gateway'
 import {
   getExactCachedThumbnailFromPipeline,
   getLatestCachedThumbnailFromPipeline,
@@ -82,6 +83,12 @@ export function FileGridCard({
     useState<ThumbnailLoadState>('placeholder')
   const [directoryItemCount, setDirectoryItemCount] = useState<number | null>(null)
   const requestIdentityRef = useRef<string | null>(null)
+  const shouldUseGatewayThumbnail = Boolean(
+    !isDir
+    && mediaType === 'image'
+    && file.absolutePath
+    && (!rootHandle || file.path === file.absolutePath || file.sourceType === 'global_recycle')
+  )
   const requestIdentity = !isDir && mediaType
     ? [
       file.path,
@@ -109,12 +116,22 @@ export function FileGridCard({
       fileLastModifiedMs,
     })
     : null
+  const gatewayThumbnailUrl = shouldUseGatewayThumbnail && file.absolutePath
+    ? buildGatewayFileThumbnailUrl(file.absolutePath, {
+      sizePreset: thumbnailSizePreset,
+    })
+    : null
   const displayedThumbnailUrl =
+    gatewayThumbnailUrl ??
     (requestIdentity && thumbnailUrlIdentity === requestIdentity ? thumbnailUrl : null) ??
     latestCachedThumbnailUrl
 
   useEffect(() => {
     if (!rootHandle || isDir) {
+      if (shouldUseGatewayThumbnail) {
+        setThumbnailState('ready')
+        return
+      }
       setThumbnailUrl(null)
       setThumbnailUrlIdentity(null)
       setThumbnailState('placeholder')
@@ -125,6 +142,13 @@ export function FileGridCard({
       setThumbnailUrl(null)
       setThumbnailUrlIdentity(null)
       setThumbnailState('placeholder')
+      return
+    }
+
+    if (shouldUseGatewayThumbnail) {
+      setThumbnailUrl(null)
+      setThumbnailUrlIdentity(null)
+      setThumbnailState('ready')
       return
     }
 
@@ -216,6 +240,7 @@ export function FileGridCard({
     thumbnailPriority,
     requestIdentity,
     exactCachedThumbnailUrl,
+    shouldUseGatewayThumbnail,
   ])
 
   useEffect(() => {
@@ -316,6 +341,11 @@ export function FileGridCard({
         <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>
           {file.name}
         </span>
+        {file.displayPath && file.displayPath !== file.name && (
+          <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-center text-muted-foreground" title={file.displayPath}>
+            {file.displayPath}
+          </span>
+        )}
         {!isDir && (
           <span className="text-xs text-muted-foreground">
             {formatSize(file.size)}

@@ -18,6 +18,10 @@ interface FaceCropUrlOptions {
   padding?: number
 }
 
+interface AbsoluteFileUrlOptions {
+  sizePreset?: string
+}
+
 export interface GatewayToolDescriptor {
   name: string
   title: string
@@ -548,6 +552,40 @@ export async function callGatewayHttp<T = ToolCallResult>(
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+function appendAbsolutePathQuery(endpointPath: string, absolutePath: string, options: AbsoluteFileUrlOptions = {}): string {
+  const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
+  const endpoint = new URL(`${GATEWAY_BASE_URL}${normalizedPath}`)
+  endpoint.searchParams.set('absolutePath', absolutePath)
+  if (typeof options.sizePreset === 'string' && options.sizePreset.trim()) {
+    endpoint.searchParams.set('sizePreset', options.sizePreset.trim())
+  }
+  return endpoint.toString()
+}
+
+export function buildGatewayFileContentUrl(absolutePath: string): string {
+  return appendAbsolutePathQuery('/v1/files/content', absolutePath)
+}
+
+export function buildGatewayFileThumbnailUrl(absolutePath: string, options: AbsoluteFileUrlOptions = {}): string {
+  return appendAbsolutePathQuery('/v1/files/thumbnail', absolutePath, options)
+}
+
+export async function loadGatewayTextPreview(
+  absolutePath: string,
+  sizeLimitBytes?: number
+): Promise<{
+  status: 'idle' | 'loading' | 'ready' | 'too_large' | 'binary' | 'error'
+  content: string | null
+  fileSizeBytes: number | null
+  sizeLimitBytes: number
+  error: string | null
+}> {
+  return callGatewayHttp('/v1/files/text-preview', {
+    absolutePath,
+    ...(typeof sizeLimitBytes === 'number' ? { sizeLimitBytes } : {}),
+  })
 }
 
 export function buildGatewayFaceCropUrl(faceId: string, options: FaceCropUrlOptions = {}): string {

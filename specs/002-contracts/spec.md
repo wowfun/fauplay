@@ -11,6 +11,7 @@
 - 生命周期（Lifecycle）
 - 工具发现（Tool Discovery）
 - 工具调用（Tool Call）
+- 结果投射（Result Projection）
 
 ## 范围
 
@@ -19,6 +20,7 @@
 - MCP 生命周期方法与顺序约束。
 - `POST /v1/mcp` 的 JSON-RPC 请求/响应契约。
 - `tools/list`、`tools/call` 的标准结果结构。
+- `tools/call` 可选结果投射扩展结构。
 - 错误响应结构与扩展错误码承载方式。
 
 范围外：
@@ -239,6 +241,24 @@
 
 1. `params.name` 必须为非空字符串。
 2. `params.arguments` 必须为对象（可为空对象）。
+
+### `tools/call` 结果投射扩展（Tool Result Projection Extension）
+
+用途：允许具体工具调用结果把一组文件投射到工作区网格，而不修改 `tools/list` 静态结构。
+
+约束：
+
+1. `tools/call.result` 可选携带顶层字段 `projection`。
+2. `projection` 只绑定到“该次具体结果项”，不得被解释为工具级静态能力声明。
+3. `projection.entry` 取值固定为 `auto | manual`。
+4. `projection.ordering.mode` 取值固定为 `listed | group_contiguous | mixed`。
+5. `projection.files[]` 最小字段至少应包含：
+   - `absolutePath`
+   - `name`
+   - `previewKind`
+   - `displayPath`
+   - `sourceType`
+6. 不支持结果投射的客户端必须安全忽略 `projection` 字段，而不是把整条结果判定为协议错误。
 
 ### 作用域同构约定（Scope-isomorphic Runtime Semantics）
 

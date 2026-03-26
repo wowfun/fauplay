@@ -1,8 +1,14 @@
 # CHANGELOG
 
 ## 2026-03-25
+### Added
+- 新增 `specs/120-asset-duplicate-detection/spec.md`：定义基于现有 `assetId` 的重复文件检测专题，明确预览区单文件隐式补索引、工作区“已选优先否则当前可见”查重、`missing/stale` 覆盖率统计，以及工作区专用 `索引当前目标文件` 语义。
+- 新增 `specs/121-projected-file-grid/spec.md`：定义通用结果投射与结果模式专题，明确 `projection` 来自具体结果 payload、`auto/manual` 进入方式、`listed/group_contiguous/mixed` 排序模式，以及基于 `absolutePath` 的跨 Root 预览读取链路。
+- 新增 `specs/122-unified-trash-route/spec.md`：定义统一回收站虚拟路由专题，明确 `@trash` 路由、当前 Root `.trash` + 全局回收区混排、结果模式删除进入全局回收区，以及恢复冲突自动改名语义。
+
 ### Changed
 - 更新 `specs/119-person-management-face-correction/spec.md`：按基础规范补充 `关键术语 (Terminology)` 章节，并将专题中的人物管理、人脸纠错、人物归属、人工未归属、忽略态与 Root 作用域等核心术语显式收敛。
+- 更新 `specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/102-address-bar-navigation/spec.md`、`specs/105-plugin-runtime-interaction/spec.md`、`specs/109-soft-delete/spec.md`、`specs/111-local-file-browser/spec.md`、`specs/114-local-data-plugin/spec.md` 与 `specs/README.md`：为 `120/121/122` 补齐上游与相邻专题锚点，收敛 `tools/call.result.projection`、`POST /v1/files/indexes` / `POST /v1/files/duplicates/query`、`@trash` 虚拟路由、工作区结果模式，以及目录浏览 `.trash` 与结果模式全局回收区的职责边界。
 
 ## 2026-03-24
 ### Changed

@@ -27,6 +27,12 @@
       "callTimeoutMs": 120000,
       "args": ["tools/mcp/local-data/server.mjs"]
     },
+    "duplicate-files": {
+      "type": "stdio",
+      "command": "node",
+      "callTimeoutMs": 120000,
+      "args": ["tools/mcp/duplicate-files/server.mjs"]
+    },
     "video-same-duration": {
       "type": "stdio",
       "command": "node",

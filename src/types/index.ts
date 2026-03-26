@@ -1,3 +1,5 @@
+export type FilePreviewKind = 'image' | 'video' | 'text' | 'unsupported'
+
 export interface FileItem {
   name: string
   path: string
@@ -5,7 +7,20 @@ export interface FileItem {
   isEmpty?: boolean
   size?: number
   lastModified?: Date
+  lastModifiedMs?: number
   mimeType?: string
+  absolutePath?: string
+  displayPath?: string
+  previewKind?: FilePreviewKind
+  sourceType?: string
+  sourceRootPath?: string
+  sourceRelativePath?: string
+  groupId?: string
+  groupRank?: number
+  isCurrentFile?: boolean
+  deletedAt?: number
+  recycleId?: string
+  originalAbsolutePath?: string
 }
 
 export interface DirectoryHandle {
@@ -43,7 +58,21 @@ export interface AnnotationFilterTagOption {
   fileCount?: number
 }
 
-export type FilePreviewKind = 'image' | 'video' | 'text' | 'unsupported'
+export type ResultProjectionEntry = 'auto' | 'manual'
+export type ResultProjectionOrderingMode = 'listed' | 'group_contiguous' | 'mixed'
+
+export interface ResultProjectionOrdering {
+  mode: ResultProjectionOrderingMode
+  keys?: string[]
+}
+
+export interface ResultProjection {
+  id: string
+  title: string
+  entry: ResultProjectionEntry
+  ordering?: ResultProjectionOrdering
+  files: FileItem[]
+}
 
 export type TextPreviewStatus = 'idle' | 'loading' | 'ready' | 'too_large' | 'binary' | 'error'
 

@@ -5,79 +5,43 @@ const MCP_PROTOCOL_VERSION = '2025-11-05'
 
 const TOOL_DEFINITIONS = [
   {
-    name: 'local.data',
-    description: '本地数据管理：标注写入、逻辑标签补删来源、file 重绑与失效清理',
+    name: 'data.findDuplicateFiles',
+    description: '根据现有 asset/file 索引查询重复文件',
     inputSchema: {
       type: 'object',
       properties: {
         rootPath: { type: 'string' },
-        operation: {
-          type: 'string',
-          enum: [
-            'setAnnotationValue',
-            'bindAnnotationTag',
-            'unbindAnnotationTag',
-            'batchRebindPaths',
-            'cleanupMissingFiles',
-            'ensureFileEntries',
-          ],
-        },
         relativePath: { type: 'string' },
         relativePaths: {
           type: 'array',
           items: { type: 'string' },
           minItems: 1,
         },
-        mappings: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              fromRelativePath: { type: 'string' },
-              toRelativePath: { type: 'string' },
-            },
-            required: ['fromRelativePath', 'toRelativePath'],
-            additionalProperties: false,
-          },
-        },
-        fieldKey: { type: 'string' },
-        key: { type: 'string' },
-        value: { type: 'string' },
-        source: {
+        searchScope: {
           type: 'string',
-          enum: ['hotkey', 'click'],
+          enum: ['global', 'root'],
         },
-        confirm: { type: 'boolean' },
       },
-      required: ['rootPath', 'operation'],
+      required: ['rootPath'],
       additionalProperties: false,
     },
     annotations: {
-      title: '本地数据',
-      mutation: true,
-      icon: 'database',
+      title: '重复文件',
+      mutation: false,
+      icon: 'copy',
       scopes: ['file', 'workspace'],
-      toolActions: [
+      toolOptions: [
         {
-          key: 'cleanupMissingFilesDryRun',
-          label: '预演清理缺失路径',
-          description: '仅统计，不执行删除',
-          intent: 'outline',
-          arguments: { operation: 'cleanupMissingFiles', confirm: false },
-        },
-        {
-          key: 'cleanupMissingFilesCommit',
-          label: '执行清理缺失路径',
-          description: '删除缺失 file 行并级联清理',
-          intent: 'accent',
-          arguments: { operation: 'cleanupMissingFiles', confirm: true },
-        },
-        {
-          key: 'ensureFileEntries',
-          label: '索引当前目标文件',
-          description: '为缺失或过期文件补建 file/asset 记录',
-          intent: 'primary',
-          arguments: { operation: 'ensureFileEntries' },
+          key: 'search.scope',
+          label: '查找范围',
+          type: 'enum',
+          defaultValue: 'global',
+          values: [
+            { value: 'global', label: '全局' },
+            { value: 'root', label: '当前 Root' },
+          ],
+          sendToTool: true,
+          argumentKey: 'searchScope',
         },
       ],
     },
@@ -146,7 +110,7 @@ async function handleRequest(request) {
     return {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
-      serverInfo: { name: 'fauplay-local-data', version: '0.1.0' },
+      serverInfo: { name: 'fauplay-duplicate-files', version: '0.1.0' },
     }
   }
 
@@ -171,17 +135,14 @@ async function handleRequest(request) {
       error.code = 'MCP_INVALID_PARAMS'
       throw error
     }
-    if (toolName !== 'local.data') {
+    if (toolName !== 'data.findDuplicateFiles') {
       const error = new Error(`Unsupported tool: ${toolName}`)
       error.code = 'MCP_TOOL_NOT_FOUND'
       throw error
     }
 
-    const operation = typeof args?.operation === 'string' ? args.operation : ''
     const error = new Error(
-      operation
-        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/file-annotations/tags/bind, /v1/file-annotations/tags/unbind, /v1/files/relative-paths, /v1/files/missing/cleanups, /v1/files/indexes instead`
-        : 'local.data operation is required',
+      'data.findDuplicateFiles has moved to Gateway HTTP API; use /v1/files/duplicates/query instead',
     )
     error.code = 'MCP_TOOL_CALL_FAILED'
     throw error

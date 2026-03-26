@@ -27,9 +27,10 @@ import {
   type FavoriteFolderEntry,
   type FileItem,
   type FilterState,
+  type ResultProjection,
   type ThumbnailSizePreset,
 } from '@/types'
-import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
+import { callGatewayHttp, type GatewayCapabilitiesSnapshot, type GatewayToolDescriptor } from '@/lib/gateway'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
@@ -38,7 +39,8 @@ const PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY = 'fauplay:preview-pane-width-ratio'
 const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
 const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
-const TRASH_RELATIVE_PATH = '.trash'
+const TRASH_ROUTE_PATH = '@trash'
+const LEGACY_TRASH_RELATIVE_PATH = '.trash'
 
 let previewPanelModulesPreloaded = false
 
@@ -385,6 +387,7 @@ export function WorkspaceShell({
   const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
+  const [activeProjection, setActiveProjection] = useState<ResultProjection | null>(null)
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
@@ -392,6 +395,8 @@ export function WorkspaceShell({
   const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
   const fileGridRef = useRef<FileBrowserGridHandle>(null)
   const handleFilterChange = useCallback((nextFilter: FilterState) => {
+    setActiveProjection(null)
+    setGridSelectedPaths([])
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
   }, [])
   const showAnnotationFilterControls = isAnnotationFilterUiVisible(rootId)
@@ -431,28 +436,32 @@ export function WorkspaceShell({
 
     return nextFilteredFiles
   }, [annotationDisplayStoreVersion, files, filter, filterFiles, rootId])
+  const workspaceVisibleFiles = useMemo(
+    () => activeProjection?.files ?? filteredFiles,
+    [activeProjection, filteredFiles]
+  )
 
-  const totalCount = useMemo(() => files.length, [files])
+  const totalCount = useMemo(() => workspaceVisibleFiles.length, [workspaceVisibleFiles])
   const imageCount = useMemo(
-    () => files.filter((file) => file.kind === 'file' && isImageFile(file.name)).length,
-    [files]
+    () => workspaceVisibleFiles.filter((file) => file.kind === 'file' && isImageFile(file.name)).length,
+    [workspaceVisibleFiles]
   )
   const videoCount = useMemo(
-    () => files.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
-    [files]
+    () => workspaceVisibleFiles.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
+    [workspaceVisibleFiles]
   )
   const selectedGridItems = useMemo(() => {
     if (gridSelectedPaths.length === 0) return []
     const selectedPathSet = new Set(gridSelectedPaths)
-    return filteredFiles.filter((file) => selectedPathSet.has(file.path))
-  }, [filteredFiles, gridSelectedPaths])
+    return workspaceVisibleFiles.filter((file) => selectedPathSet.has(file.path))
+  }, [gridSelectedPaths, workspaceVisibleFiles])
   const selectedGridMetaFile = useMemo(() => {
     if (selectedGridItems.length !== 1) return null
     return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
   }, [selectedGridItems])
   const filteredFileItems = useMemo(
-    () => filteredFiles.filter((file): file is FileItem => file.kind === 'file'),
-    [filteredFiles]
+    () => workspaceVisibleFiles.filter((file): file is FileItem => file.kind === 'file'),
+    [workspaceVisibleFiles]
   )
   const {
     selectedFile,
@@ -484,7 +493,7 @@ export function WorkspaceShell({
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
-  } = usePreviewTraversal({ filteredFiles })
+  } = usePreviewTraversal({ filteredFiles: workspaceVisibleFiles })
   const hasActiveVideoPreview = useMemo(() => {
     const activePreviewFile = previewFile ?? (showPreviewPane ? selectedFile : null)
     if (!activePreviewFile || activePreviewFile.kind !== 'file') {
@@ -498,10 +507,15 @@ export function WorkspaceShell({
   )
   const canRunPreviewTagShortcuts = useMemo(() => (
     activePreviewFileForTagShortcuts?.kind === 'file'
+    && !activePreviewFileForTagShortcuts.path.startsWith('/')
+    && activePreviewFileForTagShortcuts.sourceType !== 'root_trash'
+    && activePreviewFileForTagShortcuts.sourceType !== 'global_recycle'
     && pluginTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file'))
   ), [activePreviewFileForTagShortcuts, pluginTools])
   const canSoftDeleteActivePreview = useMemo(() => (
     activePreviewFileForTagShortcuts?.kind === 'file'
+    && activePreviewFileForTagShortcuts.sourceType !== 'root_trash'
+    && activePreviewFileForTagShortcuts.sourceType !== 'global_recycle'
     && pluginTools.some((tool) => tool.name === 'fs.softDelete' && tool.scopes.includes('file'))
   ), [activePreviewFileForTagShortcuts, pluginTools])
   const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
@@ -512,7 +526,7 @@ export function WorkspaceShell({
   const shortcutHelpEntries = useShortcutHelpEntries({
     rootId,
     currentPath,
-    visibleItemCount: filteredFiles.length,
+    visibleItemCount: workspaceVisibleFiles.length,
     selectedGridCount: selectedGridItems.length,
     hasOpenPreview,
     hasActivePreviewFile: Boolean(
@@ -615,10 +629,25 @@ export function WorkspaceShell({
     void refreshAnnotationSnapshot()
   }, [refreshAnnotationSnapshot])
 
+  const handleActivateProjection = useCallback((projection: ResultProjection) => {
+    setActiveProjection(projection)
+    setGridSelectedPaths([])
+    alignPreviewToPath(projection.files[0]?.path ?? null)
+  }, [alignPreviewToPath])
+
+  const handleCloseProjection = useCallback(() => {
+    setActiveProjection(null)
+    setGridSelectedPaths([])
+  }, [])
+
   const handleWorkspaceMutationCommitted = useCallback(async () => {
+    if (activeProjection) {
+      setActiveProjection(null)
+      setGridSelectedPaths([])
+    }
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
-  }, [currentPath, navigateToPath, refreshAnnotationSnapshot])
+  }, [activeProjection, currentPath, navigateToPath, refreshAnnotationSnapshot])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
     const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
@@ -637,6 +666,10 @@ export function WorkspaceShell({
   }, [filteredFileItems])
 
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
+    if (activeProjection) {
+      setActiveProjection(null)
+      setGridSelectedPaths([])
+    }
     const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
@@ -677,6 +710,7 @@ export function WorkspaceShell({
     await refreshAnnotationSnapshot()
   }, [
     alignPreviewToPath,
+    activeProjection,
     currentPath,
     navigateMediaFromModal,
     navigateMediaFromPane,
@@ -690,7 +724,7 @@ export function WorkspaceShell({
 
   const handleOpenTrash = useCallback(() => {
     if (!hasTrashEntries) return
-    void navigateToPath(TRASH_RELATIVE_PATH, { resetFlattenView: true })
+    void navigateToPath(TRASH_ROUTE_PATH, { resetFlattenView: true })
   }, [hasTrashEntries, navigateToPath])
 
   const canOpenPeople = useMemo(() => (
@@ -727,17 +761,34 @@ export function WorkspaceShell({
   }, [recentPathHistory])
 
   useEffect(() => {
+    setActiveProjection(null)
+    setGridSelectedPaths([])
+  }, [currentPath, rootId])
+
+  useEffect(() => {
     let disposed = false
 
     const refreshTrashAvailability = async () => {
+      let hasLegacyTrashEntries = false
       try {
-        const itemCount = await getDirectoryItemCount(rootHandle, TRASH_RELATIVE_PATH, 1)
+        const itemCount = await getDirectoryItemCount(rootHandle, LEGACY_TRASH_RELATIVE_PATH, 1)
+        hasLegacyTrashEntries = itemCount > 0
+      } catch {
+        hasLegacyTrashEntries = false
+      }
+
+      try {
+        const result = await callGatewayHttp<{ items?: unknown[] }>('/v1/recycle/items/list', {
+          includeRootTrash: false,
+          includeGlobalRecycle: true,
+        }, 120000)
         if (!disposed) {
-          setHasTrashEntries(itemCount > 0)
+          const globalRecycleCount = Array.isArray(result.items) ? result.items.length : 0
+          setHasTrashEntries(hasLegacyTrashEntries || globalRecycleCount > 0)
         }
       } catch {
         if (!disposed) {
-          setHasTrashEntries(false)
+          setHasTrashEntries(hasLegacyTrashEntries)
         }
       }
     }
@@ -1040,7 +1091,7 @@ export function WorkspaceShell({
       onOpenFavoriteFolder={openFavoriteFolder}
       onRemoveFavoriteFolder={removeFavoriteFolder}
       onToggleCurrentPathFavorite={toggleCurrentFolderFavorite}
-      files={filteredFiles}
+      files={workspaceVisibleFiles}
       rootHandle={rootHandle}
       fileGridRef={fileGridRef}
       onFileClick={handleFileClick}
@@ -1078,6 +1129,9 @@ export function WorkspaceShell({
       previewFile={previewFile}
       previewAutoPlayOnOpen={previewAutoPlayOnOpen}
       onClosePreview={closePreviewModal}
+      activeProjection={activeProjection}
+      onActivateProjection={handleActivateProjection}
+      onCloseProjection={handleCloseProjection}
     />
   )
 }

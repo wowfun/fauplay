@@ -6,12 +6,18 @@ import path from 'node:path'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import {
   batchRebindPaths,
+  ensureFileEntries,
+  queryDuplicateFiles,
   assignFaces,
   bindAnnotationTag,
   callVisionInference,
   clusterPendingFaces,
+  listRecycleItems,
+  moveFilesToRecycle,
   createPersonFromFaces,
   getFileTags,
+  readFileContentByAbsolutePath,
+  readFileTextPreview,
   getFaceCrop,
   ignoreFaces,
   ingestClassificationResult,
@@ -23,6 +29,7 @@ import {
   queryFilesByTags,
   requeueFaces,
   renamePerson,
+  restoreRecycleItems,
   restoreIgnoredFaces,
   saveDetectedFaces,
   setAnnotationValue,
@@ -469,8 +476,32 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
     return batchRebindPaths(payload)
   }
 
+  if (method === 'POST' && pathname === '/v1/files/indexes') {
+    return ensureFileEntries(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/files/duplicates/query') {
+    return queryDuplicateFiles(payload)
+  }
+
   if (method === 'POST' && pathname === '/v1/files/missing/cleanups') {
     return cleanupMissingFiles(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/files/text-preview') {
+    return readFileTextPreview(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/recycle/items/move') {
+    return moveFilesToRecycle(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/recycle/items/list') {
+    return listRecycleItems(payload)
+  }
+
+  if (method === 'POST' && pathname === '/v1/recycle/items/restore') {
+    return restoreRecycleItems(payload)
   }
 
   if (pathname.startsWith('/v1/local-data/')) {
@@ -709,6 +740,32 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
+    if (req.method === 'GET' && pathname === '/v1/files/content') {
+      try {
+        const absolutePath = requestUrl.searchParams.get('absolutePath')
+        const result = await readFileContentByAbsolutePath({
+          absolutePath,
+        })
+        sendBinary(res, 200, result.body, result.contentType)
+      } catch (error) {
+        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+      }
+      return
+    }
+
+    if (req.method === 'GET' && pathname === '/v1/files/thumbnail') {
+      try {
+        const absolutePath = requestUrl.searchParams.get('absolutePath')
+        const result = await readFileContentByAbsolutePath({
+          absolutePath,
+        })
+        sendBinary(res, 200, result.body, result.contentType)
+      } catch (error) {
+        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+      }
+      return
+    }
+
     if (req.method === 'POST' && pathname === '/v1/mcp') {
       let request = null
       let requestIsNotification = false
@@ -807,9 +864,13 @@ export async function startGatewayServer(options = {}) {
       (req.method === 'POST' && (
         pathname.startsWith('/v1/data/tags/')
         || pathname.startsWith('/v1/file-annotations/tags/')
+        || pathname.startsWith('/v1/files/duplicates/')
+        || pathname === '/v1/files/indexes'
         || pathname.startsWith('/v1/files/missing/')
+        || pathname === '/v1/files/text-preview'
         || pathname.startsWith('/v1/file-bindings/')
         || pathname.startsWith('/v1/faces/')
+        || pathname.startsWith('/v1/recycle/')
         || pathname.startsWith('/v1/local-data/')
         || pathname.startsWith('/v1/annotations/')
       ))
