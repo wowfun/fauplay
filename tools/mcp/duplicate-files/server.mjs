@@ -32,6 +32,13 @@ const TOOL_DEFINITIONS = [
       scopes: ['file', 'workspace'],
       toolOptions: [
         {
+          key: 'preview.continuousCall.enabled',
+          label: '持续调用',
+          type: 'boolean',
+          defaultValue: false,
+          description: '切换预览文件后自动触发重复文件查重',
+        },
+        {
           key: 'search.scope',
           label: '查找范围',
           type: 'enum',

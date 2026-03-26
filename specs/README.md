@@ -41,11 +41,10 @@
 
 - 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)
 - 收藏夹目录专题：[`110-folder-favorites/spec.md`](./110-folder-favorites/spec.md)
-- 本地文件浏览器转向专题：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)
+- 本地文件浏览器专题（含底部结果面板）：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)
 - 相同时长视频搜索专题：[`112-video-same-duration-search/spec.md`](./112-video-same-duration-search/spec.md)
 - 预览标题点击重命名专题：[`113-preview-inline-rename/spec.md`](./113-preview-inline-rename/spec.md)
 - 本地数据管理插件专题：[`114-local-data-plugin/spec.md`](./114-local-data-plugin/spec.md)
 - 预览头部逻辑标签管理专题：[`117-preview-header-tag-management/spec.md`](./117-preview-header-tag-management/spec.md)
 - 资产级重复文件检测专题：[`120-asset-duplicate-detection/spec.md`](./120-asset-duplicate-detection/spec.md)
-- 结果投射文件网格专题：[`121-projected-file-grid/spec.md`](./121-projected-file-grid/spec.md)
 - 统一回收站虚拟路由专题：[`122-unified-trash-route/spec.md`](./122-unified-trash-route/spec.md)

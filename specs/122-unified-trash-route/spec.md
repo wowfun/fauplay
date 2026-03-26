@@ -5,7 +5,7 @@
 定义 Fauplay 的统一回收站（Unified Trash）契约，确保：
 
 1. 回收站入口统一收敛为虚拟工作区路由 `@trash`，而不是直接暴露某个真实目录。
-2. 结果模式下的删除落点切换为全局回收区（Global Recycle Pool），不再复用旧 `.trash` 路径模型。
+2. 结果投射标签上下文下的删除落点切换为全局回收区（Global Recycle Pool），不再复用旧 `.trash` 路径模型。
 3. 普通目录浏览下的软删除/还原继续保留 `rootPath/.trash` 语义，不做破坏性迁移。
 4. 统一回收站可混排展示“当前 Root 的旧 `.trash`”与“全局回收区”两类来源，并按统一时间口径排序。
 
@@ -15,6 +15,7 @@
 - 虚拟路由（Virtual Route）
 - 全局回收区（Global Recycle Pool）
 - 旧 Root 回收目录（Legacy Root Trash）
+- 结果投射标签上下文（Projection Tab Context）
 - 来源类型（Source Type）
 - 原始路径（Original Path）
 - 托管文件池（Managed File Pool）
@@ -32,7 +33,7 @@
 
 1. `@trash` 路由的地址栏、历史与工作区展示语义。
 2. 当前 Root `.trash` 与全局回收区的聚合浏览。
-3. 结果模式删除进入全局回收区的落点语义。
+3. 结果投射标签删除进入全局回收区的落点语义。
 4. 全局回收区的列出、移动、恢复接口契约。
 5. 恢复冲突自动重命名语义。
 
@@ -55,7 +56,7 @@
    - `deletedAt DESC`
    - `sourceType ASC`
 6. 列表项必须展示来源类型徽标，便于用户区分旧 `.trash` 与全局回收区。
-7. 结果模式下触发删除时，目标必须进入全局回收区，而不是当前 Root 的 `.trash`。
+7. 在结果投射标签中触发删除时，目标必须进入全局回收区，而不是当前 Root 的 `.trash`。
 8. 普通目录浏览下的 `fs.softDelete / fs.restore` 语义继续保持 `109-soft-delete` 现状，不被本专题覆盖。
 9. 恢复回原路径时若发生命名冲突，系统必须按 Windows 风格 ` (1)/(2)` 自动改名，不弹阻塞确认。
 
@@ -82,7 +83,7 @@
    - `createdAt`
    - `updatedAt`
 3. 全局回收区中的文件物理位置不得继续依赖原 Root 的 `.trash` 目录结构。
-4. 从结果模式进入全局回收区的删除动作必须保留可恢复原路径所需的最小元数据。
+4. 从结果投射标签进入全局回收区的删除动作必须保留可恢复原路径所需的最小元数据。
 
 ## 7. Gateway HTTP 接口契约 (HTTP Contract)
 
@@ -166,7 +167,7 @@
 2. `FR-UTR-02` `@trash` 必须参与最近路径历史，但不得允许加入收藏。
 3. `FR-UTR-03` `@trash` 默认必须混排“当前 Root 的旧 `.trash` + 全局回收区”两类来源。
 4. `FR-UTR-04` 统一回收站默认排序必须为 `deletedAt DESC`、`sourceType ASC`。
-5. `FR-UTR-05` 结果模式删除必须进入全局回收区，而不是旧 `.trash`。
+5. `FR-UTR-05` 结果投射标签删除必须进入全局回收区，而不是旧 `.trash`。
 6. `FR-UTR-06` 普通目录浏览下的删除/还原语义必须继续保持 `109-soft-delete` 的 `.trash` 模型。
 7. `FR-UTR-07` 全局回收区必须采用“托管文件池 + 元数据记录”模型存储。
 8. `FR-UTR-08` 恢复冲突时系统必须自动生成 ` (1)/(2)` 后缀目标名。
@@ -178,7 +179,7 @@
 2. `AC-UTR-02` `@trash` 会写入最近路径历史，并可从历史重新打开。
 3. `AC-UTR-03` `@trash` 不会出现在收藏列表，也无法被加入收藏。
 4. `AC-UTR-04` 统一回收站列表可同时看到当前 Root `.trash` 项与全局回收区项，且默认按 `deletedAt DESC` 混排。
-5. `AC-UTR-05` 在结果模式下删除跨 Root 文件后，该文件进入全局回收区而不是任意 Root 的 `.trash`。
+5. `AC-UTR-05` 在结果投射标签中删除跨 Root 文件后，该文件进入全局回收区而不是任意 Root 的 `.trash`。
 6. `AC-UTR-06` 在普通目录浏览模式下执行软删除后，文件仍进入当前 Root 的 `.trash`，不进入全局回收区。
 7. `AC-UTR-07` 从统一回收站恢复文件时，若原路径已存在同名文件，系统自动恢复为 `name (1).ext` 等可用目标名。
 8. `AC-UTR-08` 关闭并重新打开应用后，全局回收区项仍可通过元数据记录列出与恢复。
@@ -195,4 +196,4 @@
 
 - 地址栏导航：[`../102-address-bar-navigation/spec.md`](../102-address-bar-navigation/spec.md)
 - 软删除：[`../109-soft-delete/spec.md`](../109-soft-delete/spec.md)
-- 结果投射文件网格：[`../121-projected-file-grid/spec.md`](../121-projected-file-grid/spec.md)
+- 本地文件浏览器：[`../111-local-file-browser/spec.md`](../111-local-file-browser/spec.md)

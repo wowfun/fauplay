@@ -60,6 +60,7 @@ export interface AnnotationFilterTagOption {
 
 export type ResultProjectionEntry = 'auto' | 'manual'
 export type ResultProjectionOrderingMode = 'listed' | 'group_contiguous' | 'mixed'
+export type ResultPanelDisplayMode = 'normal' | 'maximized'
 
 export interface ResultProjectionOrdering {
   mode: ResultProjectionOrderingMode

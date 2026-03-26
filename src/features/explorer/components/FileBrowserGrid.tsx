@@ -12,6 +12,8 @@ interface FileBrowserGridProps {
   onDirectoryClick: (dirName: string) => void
   selectionScopeKey: string
   canClearSelectionWithEscape: boolean
+  keyboardNavigationEnabled?: boolean
+  selectedPaths?: string[]
   onSelectionChange: (selectedPaths: string[]) => void
 }
 
@@ -26,6 +28,8 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
   onDirectoryClick,
   selectionScopeKey,
   canClearSelectionWithEscape,
+  keyboardNavigationEnabled,
+  selectedPaths,
   onSelectionChange,
 }, ref) {
   return (
@@ -39,6 +43,8 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
       onDirectoryClick={onDirectoryClick}
       selectionScopeKey={selectionScopeKey}
       canClearSelectionWithEscape={canClearSelectionWithEscape}
+      keyboardNavigationEnabled={keyboardNavigationEnabled}
+      selectedPaths={selectedPaths}
       onSelectionChange={onSelectionChange}
     />
   )

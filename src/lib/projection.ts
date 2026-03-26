@@ -70,6 +70,21 @@ function toProjectionFileItem(value: unknown): FileItem | null {
   }
 }
 
+export function toToolScopedProjectionId(toolName: string): string {
+  return `tool:${toolName}`
+}
+
+export function withToolScopedProjection(projection: ResultProjection, toolName: string): ResultProjection {
+  const scopedId = toToolScopedProjectionId(toolName)
+  if (projection.id === scopedId) {
+    return projection
+  }
+  return {
+    ...projection,
+    id: scopedId,
+  }
+}
+
 export function extractResultProjection(result: unknown): ResultProjection | null {
   if (!isRecord(result) || !isRecord(result.projection)) {
     return null

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import { withToolScopedProjection } from '@/lib/projection'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
@@ -25,6 +26,7 @@ interface WorkspacePluginHostProps {
   onMutationCommitted?: () => void | Promise<void>
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
+  onDismissProjectionTool: (toolName: string) => void
   toolPanelCollapsed: boolean
   onToggleToolPanelCollapsed: () => void
   toolPanelWidthPx: number
@@ -114,11 +116,13 @@ export function WorkspacePluginHost({
   onMutationCommitted,
   activeProjection,
   onActivateProjection,
+  onDismissProjectionTool,
   toolPanelCollapsed,
   onToggleToolPanelCollapsed,
   toolPanelWidthPx,
   onToolPanelWidthChange,
 }: WorkspacePluginHostProps) {
+  const handledDuplicateProjectionDismissResultIdRef = useRef<string | null>(null)
   const normalizedCurrentPath = useMemo(
     () => currentPath.split('/').filter(Boolean).join('/'),
     [currentPath]
@@ -251,15 +255,43 @@ export function WorkspacePluginHost({
   const handledAutoProjectionIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    handledAutoProjectionIdRef.current = null
+    handledDuplicateProjectionDismissResultIdRef.current = null
+  }, [contextKey])
+
+  useEffect(() => {
+    const latestDuplicateResult = runtime.currentQueue.find((item) => (
+      item.toolName === 'data.findDuplicateFiles'
+      && item.status === 'success'
+    ))
     const autoProjectionItem = runtime.currentQueue.find((item) => (
       item.status === 'success'
       && item.projection?.entry === 'auto'
+      && !(
+        item.toolName === 'data.findDuplicateFiles'
+        && latestDuplicateResult
+        && latestDuplicateResult.id !== item.id
+        && !latestDuplicateResult.projection
+      )
     ))
     if (!autoProjectionItem?.projection) return
     if (handledAutoProjectionIdRef.current === autoProjectionItem.id) return
     handledAutoProjectionIdRef.current = autoProjectionItem.id
-    onActivateProjection(autoProjectionItem.projection)
+    onActivateProjection(withToolScopedProjection(autoProjectionItem.projection, autoProjectionItem.toolName))
   }, [onActivateProjection, runtime.currentQueue])
+
+  useEffect(() => {
+    const latestDuplicateResult = runtime.currentQueue.find((item) => (
+      item.toolName === 'data.findDuplicateFiles'
+      && item.status === 'success'
+    ))
+    if (!latestDuplicateResult) return
+    if (latestDuplicateResult.projection) return
+    if (handledDuplicateProjectionDismissResultIdRef.current === latestDuplicateResult.id) return
+
+    handledDuplicateProjectionDismissResultIdRef.current = latestDuplicateResult.id
+    onDismissProjectionTool(latestDuplicateResult.toolName)
+  }, [onDismissProjectionTool, runtime.currentQueue])
 
   const handleWorkbenchRunAction = useCallback((tool: GatewayToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
     const additionalArgs = resolveToolArguments(tool, action.arguments)
@@ -329,7 +361,7 @@ export function WorkspacePluginHost({
           onToggleItemCollapsed={runtime.handleToggleResultItemCollapsed}
           onActivateProjection={({ item }) => {
             if (item.projection) {
-              onActivateProjection(item.projection)
+              onActivateProjection(withToolScopedProjection(item.projection, item.toolName))
             }
           }}
           activeProjectionId={activeProjection?.id ?? null}

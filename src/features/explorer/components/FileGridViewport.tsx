@@ -26,6 +26,8 @@ interface FileGridViewportProps {
   onDirectoryClick: (dirName: string) => void
   selectionScopeKey: string
   canClearSelectionWithEscape: boolean
+  keyboardNavigationEnabled?: boolean
+  selectedPaths?: string[]
   onSelectionChange: (selectedPaths: string[]) => void
 }
 
@@ -79,6 +81,8 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   onDirectoryClick,
   selectionScopeKey,
   canClearSelectionWithEscape,
+  keyboardNavigationEnabled = true,
+  selectedPaths,
   onSelectionChange,
 }, ref) {
   const keyboardShortcuts = useKeyboardShortcuts()
@@ -158,6 +162,14 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   useEffect(() => {
     onSelectionChange(orderedSelectedPaths)
   }, [orderedSelectedPaths, onSelectionChange])
+
+  useEffect(() => {
+    if (!selectedPaths) return
+    const nextPathSet = new Set(selectedPaths)
+    setCheckedPathSet((previous) => (
+      arePathSetsEqual(previous, nextPathSet) ? previous : nextPathSet
+    ))
+  }, [selectedPaths, setCheckedPathSet])
 
   const handleItemsRendered = useCallback((window: GridRenderWindow) => {
     setRenderWindow((previous) => {
@@ -303,8 +315,11 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   useEffect(() => {
     selectionAnchorPathRef.current = null
     pendingPreviewPathDuringRangeRef.current = null
+    if (selectedPaths) {
+      return
+    }
     clearCheckedPaths()
-  }, [clearCheckedPaths, selectionScopeKey])
+  }, [clearCheckedPaths, selectedPaths, selectionScopeKey])
 
   useEffect(() => {
     const visiblePathSet = new Set(files.map((file) => file.path))
@@ -355,6 +370,10 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [files, markSelectedElement])
 
   useEffect(() => {
+    if (!keyboardNavigationEnabled) {
+      return
+    }
+
     const getCurrentIndex = () => {
       const active = document.activeElement as HTMLElement | null
       const rawIndex = active?.dataset?.gridIndex
@@ -446,6 +465,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     files,
     selectedPathSet.size,
     canClearSelectionWithEscape,
+    keyboardNavigationEnabled,
     columnCount,
     pageSize,
     onDirectoryClick,
@@ -458,14 +478,14 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
 
   if (files.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground">
+      <div className="h-full w-full flex items-center justify-center text-muted-foreground">
         <p>没有文件</p>
       </div>
     )
   }
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-hidden">
+    <div ref={containerRef} className="h-full w-full overflow-hidden">
       <Grid
         ref={gridRef}
         columnCount={columnCount}

@@ -41,6 +41,7 @@ interface FileLightboxModalProps {
   enableAnnotationTagShortcutOwner?: boolean
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
+  onDismissProjectionTool: (toolName: string) => void
 }
 
 export function FileLightboxModal({
@@ -78,6 +79,7 @@ export function FileLightboxModal({
   enableAnnotationTagShortcutOwner = false,
   activeProjection,
   onActivateProjection,
+  onDismissProjectionTool,
 }: FileLightboxModalProps) {
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -117,6 +119,7 @@ export function FileLightboxModal({
         enableAnnotationTagShortcutOwner={enableAnnotationTagShortcutOwner}
         activeProjection={activeProjection}
         onActivateProjection={onActivateProjection}
+        onDismissProjectionTool={onDismissProjectionTool}
       />
     </div>
   )

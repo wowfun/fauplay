@@ -1,6 +1,6 @@
 import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import { stripProjectionFromResult } from '@/lib/projection'
+import { stripProjectionFromResult, toToolScopedProjectionId } from '@/lib/projection'
 import type { PluginResultQueueItem, PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 import { PluginResultStructuredView, type StructuredToolCallAction } from './PluginResultStructuredView'
 
@@ -147,7 +147,9 @@ export function PluginToolResultPanel({
               const headerText = `${item.title}: ${formatTimestamp(item.finishedAt ?? item.startedAt)} ${statusLabel}`
               const projection = item.projection
               const hasProjection = Boolean(projection && onActivateProjection)
-              const isProjectionActive = projection?.id === activeProjectionId
+              const isProjectionActive = projection
+                ? toToolScopedProjectionId(item.toolName) === activeProjectionId
+                : false
 
               return (
                 <section key={item.id} className={cardClassName}>
@@ -181,7 +183,7 @@ export function PluginToolResultPanel({
                               onActivateProjection?.({ item })
                             }}
                           >
-                            {isProjectionActive ? '结果模式中' : (projection.entry === 'manual' ? '进入结果模式' : '打开结果模式')}
+                            {isProjectionActive ? '结果标签中' : '打开结果标签'}
                           </button>
                           <span className={`text-xs ${statusClassName}`}>
                             {projection.title}

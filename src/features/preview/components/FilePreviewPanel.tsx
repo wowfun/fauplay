@@ -65,6 +65,7 @@ interface FilePreviewPanelProps {
   enableAnnotationTagShortcutOwner?: boolean
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
+  onDismissProjectionTool: (toolName: string) => void
 }
 
 interface BatchRenameItemResult {
@@ -209,6 +210,7 @@ export function FilePreviewPanel({
   enableAnnotationTagShortcutOwner = false,
   activeProjection,
   onActivateProjection,
+  onDismissProjectionTool,
 }: FilePreviewPanelProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
@@ -908,6 +910,7 @@ export function FilePreviewPanel({
         onFaceOverlayClick={handleFaceOverlayClick}
         activeProjection={activeProjection}
         onActivateProjection={onActivateProjection}
+        onDismissProjectionTool={onDismissProjectionTool}
       />
     </div>
   )

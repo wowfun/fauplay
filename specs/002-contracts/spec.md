@@ -244,7 +244,7 @@
 
 ### `tools/call` 结果投射扩展（Tool Result Projection Extension）
 
-用途：允许具体工具调用结果把一组文件投射到工作区网格，而不修改 `tools/list` 静态结构。
+用途：允许具体工具调用结果把一组文件投射到工作区底部结果面板中的投射标签，而不修改 `tools/list` 静态结构。
 
 约束：
 
@@ -259,6 +259,7 @@
    - `displayPath`
    - `sourceType`
 6. 不支持结果投射的客户端必须安全忽略 `projection` 字段，而不是把整条结果判定为协议错误。
+7. `projection` 的工作区呈现、底部结果面板与活动表面语义归属 [`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)。
 
 ### 作用域同构约定（Scope-isomorphic Runtime Semantics）
 

@@ -5,6 +5,7 @@ import type { ShortcutHelpEntry } from '@/features/explorer/hooks/useShortcutHel
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
+import { WorkspaceResultPanel } from '@/features/workspace/components/WorkspaceResultPanel'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -15,6 +16,7 @@ import type {
   FileItem,
   FilterState,
   ResultProjection,
+  ResultPanelDisplayMode,
   ThumbnailSizePreset,
 } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
@@ -162,14 +164,32 @@ interface ExplorerWorkspaceLayoutProps {
   onClosePeoplePanel: () => void
   error: string | null
   isLoading: boolean
-  files: FileItem[]
+  directoryFiles: FileItem[]
+  activeSurfaceFiles: FileItem[]
   rootHandle: FileSystemDirectoryHandle
-  fileGridRef: MutableRefObject<FileBrowserGridHandle | null>
-  onFileClick: (file: FileItem) => void
-  onFileDoubleClick: (file: FileItem) => void
+  directoryFileGridRef: MutableRefObject<FileBrowserGridHandle | null>
+  projectionFileGridRef: MutableRefObject<FileBrowserGridHandle | null>
+  onDirectoryFileClick: (file: FileItem) => void
+  onDirectoryFileDoubleClick: (file: FileItem) => void
+  onProjectionFileClick: (file: FileItem) => void
+  onProjectionFileDoubleClick: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
-  onGridSelectionChange: (selectedPaths: string[]) => void
-  gridSelectedPaths: string[]
+  onDirectoryGridSelectionChange: (selectedPaths: string[]) => void
+  directoryGridSelectedPaths: string[]
+  projectionTabs: ResultProjection[]
+  activeProjectionTabId: string | null
+  onProjectionGridSelectionChange: (selectedPaths: string[]) => void
+  projectionGridSelectedPaths: string[]
+  isDirectorySurfaceActive: boolean
+  isResultPanelOpen: boolean
+  resultPanelDisplayMode: ResultPanelDisplayMode
+  resultPanelHeightPx: number
+  onOpenResultPanel: () => void
+  onCloseResultPanel: () => void
+  onToggleResultPanelMaximized: () => void
+  onResultPanelResizeStart: (event: ReactMouseEvent<HTMLDivElement>) => void
+  onActivateProjectionTab: (tabId: string) => void
+  onCloseProjectionTab: (tabId: string) => void
   onWorkspaceMutationCommitted: () => void | Promise<void>
   onPreviewMutationCommitted: (params?: PreviewMutationCommitParams) => void | Promise<void>
   showPreviewPane: boolean
@@ -202,7 +222,7 @@ interface ExplorerWorkspaceLayoutProps {
   onClosePreview: () => void
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
-  onCloseProjection: () => void
+  onDismissProjectionTool: (toolName: string) => void
 }
 
 export function ExplorerWorkspaceLayout({
@@ -242,14 +262,32 @@ export function ExplorerWorkspaceLayout({
   onClosePeoplePanel,
   error,
   isLoading,
-  files,
+  directoryFiles,
+  activeSurfaceFiles,
   rootHandle,
-  fileGridRef,
-  onFileClick,
-  onFileDoubleClick,
+  directoryFileGridRef,
+  projectionFileGridRef,
+  onDirectoryFileClick,
+  onDirectoryFileDoubleClick,
+  onProjectionFileClick,
+  onProjectionFileDoubleClick,
   onDirectoryClick,
-  onGridSelectionChange,
-  gridSelectedPaths,
+  onDirectoryGridSelectionChange,
+  directoryGridSelectedPaths,
+  projectionTabs,
+  activeProjectionTabId,
+  onProjectionGridSelectionChange,
+  projectionGridSelectedPaths,
+  isDirectorySurfaceActive,
+  isResultPanelOpen,
+  resultPanelDisplayMode,
+  resultPanelHeightPx,
+  onOpenResultPanel,
+  onCloseResultPanel,
+  onToggleResultPanelMaximized,
+  onResultPanelResizeStart,
+  onActivateProjectionTab,
+  onCloseProjectionTab,
   onWorkspaceMutationCommitted,
   onPreviewMutationCommitted,
   showPreviewPane,
@@ -282,7 +320,7 @@ export function ExplorerWorkspaceLayout({
   onClosePreview,
   activeProjection,
   onActivateProjection,
-  onCloseProjection,
+  onDismissProjectionTool,
 }: ExplorerWorkspaceLayoutProps) {
   const [previewPluginResultQueueState, setPreviewPluginResultQueueState] = useState<PluginResultQueueState>({
     byContextKey: {},
@@ -396,34 +434,46 @@ export function ExplorerWorkspaceLayout({
           ) : (
             <>
               <div className="flex-1 min-w-0 flex flex-col">
-                {activeProjection && (
-                  <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{activeProjection.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        当前为结果模式，共 {files.length} 个文件
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40"
-                      onClick={onCloseProjection}
-                    >
-                      关闭结果模式
-                    </button>
+                {!(isResultPanelOpen && resultPanelDisplayMode === 'maximized') && (
+                  <div className="flex-1 min-h-0">
+                    <FileBrowserGrid
+                      ref={directoryFileGridRef}
+                      files={directoryFiles}
+                      rootHandle={rootHandle}
+                      thumbnailSizePreset={thumbnailSizePreset}
+                      onFileClick={onDirectoryFileClick}
+                      onFileDoubleClick={onDirectoryFileDoubleClick}
+                      onDirectoryClick={onDirectoryClick}
+                      selectionScopeKey={currentPath}
+                      canClearSelectionWithEscape={!hasOpenPreview}
+                      keyboardNavigationEnabled={isDirectorySurfaceActive}
+                      selectedPaths={directoryGridSelectedPaths}
+                      onSelectionChange={onDirectoryGridSelectionChange}
+                    />
                   </div>
                 )}
-                <FileBrowserGrid
-                  ref={fileGridRef}
-                  files={files}
+                <WorkspaceResultPanel
+                  open={isResultPanelOpen}
+                  displayMode={resultPanelDisplayMode}
+                  heightPx={resultPanelHeightPx}
+                  tabs={projectionTabs}
+                  activeTabId={activeProjectionTabId}
                   rootHandle={rootHandle}
                   thumbnailSizePreset={thumbnailSizePreset}
-                  onFileClick={onFileClick}
-                  onFileDoubleClick={onFileDoubleClick}
+                  gridRef={projectionFileGridRef}
+                  selectedPaths={projectionGridSelectedPaths}
+                  keyboardNavigationEnabled={!isDirectorySurfaceActive}
+                  hasOpenPreview={hasOpenPreview}
+                  onSelectionChange={onProjectionGridSelectionChange}
+                  onFileClick={onProjectionFileClick}
+                  onFileDoubleClick={onProjectionFileDoubleClick}
                   onDirectoryClick={onDirectoryClick}
-                  selectionScopeKey={activeProjection ? `${currentPath}::projection:${activeProjection.id}` : currentPath}
-                  canClearSelectionWithEscape={!hasOpenPreview}
-                  onSelectionChange={onGridSelectionChange}
+                  onOpenPanel={onOpenResultPanel}
+                  onClosePanel={onCloseResultPanel}
+                  onToggleMaximized={onToggleResultPanelMaximized}
+                  onResizeStart={onResultPanelResizeStart}
+                  onActivateTab={onActivateProjectionTab}
+                  onCloseTab={onCloseProjectionTab}
                 />
               </div>
               {pluginTools.length > 0 && (
@@ -433,8 +483,8 @@ export function ExplorerWorkspaceLayout({
                   rootHandle={rootHandle}
                   rootId={rootId}
                   currentPath={currentPath}
-                    visibleFiles={files}
-                    selectedPaths={gridSelectedPaths}
+                    visibleFiles={activeSurfaceFiles}
+                    selectedPaths={isDirectorySurfaceActive ? directoryGridSelectedPaths : projectionGridSelectedPaths}
                     resultQueueState={workspacePluginResultQueueState}
                     setResultQueueState={setWorkspacePluginResultQueueState}
                     workbenchState={workspacePluginWorkbenchState}
@@ -442,6 +492,7 @@ export function ExplorerWorkspaceLayout({
                     onMutationCommitted={onWorkspaceMutationCommitted}
                     activeProjection={activeProjection}
                     onActivateProjection={onActivateProjection}
+                    onDismissProjectionTool={onDismissProjectionTool}
                     toolPanelCollapsed={workspaceToolPanelCollapsed}
                     onToggleToolPanelCollapsed={() => {
                       setWorkspaceToolPanelCollapsed((prev) => !prev)
@@ -513,6 +564,7 @@ export function ExplorerWorkspaceLayout({
                 enableAnnotationTagShortcutOwner={!previewFile}
                 activeProjection={activeProjection}
                 onActivateProjection={onActivateProjection}
+                onDismissProjectionTool={onDismissProjectionTool}
               />
             </Suspense>
           </div>
@@ -520,7 +572,7 @@ export function ExplorerWorkspaceLayout({
       </div>
 
       <ExplorerStatusBar
-        visibleFiles={files}
+        visibleFiles={activeSurfaceFiles}
         selectedCount={gridSelectedCount}
         selectedMetaFile={selectedGridMetaFile}
       />
@@ -572,6 +624,7 @@ export function ExplorerWorkspaceLayout({
             enableAnnotationTagShortcutOwner
             activeProjection={activeProjection}
             onActivateProjection={onActivateProjection}
+            onDismissProjectionTool={onDismissProjectionTool}
           />
         </Suspense>
       )}

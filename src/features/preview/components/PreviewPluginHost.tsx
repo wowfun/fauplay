@@ -4,6 +4,7 @@ import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxCon
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import type { FileItem, ResultProjection } from '@/types'
@@ -41,6 +42,7 @@ interface PreviewPluginHostProps {
   enableAnnotationTagShortcutOwner?: boolean
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
+  onDismissProjectionTool: (toolName: string) => void
 }
 
 interface ContinuousToolTask {
@@ -116,6 +118,7 @@ export function PreviewPluginHost({
   enableAnnotationTagShortcutOwner = false,
   activeProjection,
   onActivateProjection,
+  onDismissProjectionTool,
 }: PreviewPluginHostProps) {
   const keyboardShortcuts = useKeyboardShortcuts()
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
@@ -242,17 +245,46 @@ export function PreviewPluginHost({
     }
   }, [file.absolutePath, previewBaseArguments])
   const handledAutoProjectionIdRef = useRef<string | null>(null)
+  const handledDuplicateProjectionDismissResultIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    handledAutoProjectionIdRef.current = null
+    handledDuplicateProjectionDismissResultIdRef.current = null
+  }, [file.path])
+
+  useEffect(() => {
+    const latestDuplicateResult = pluginRuntime.currentQueue.find((item) => (
+      item.toolName === 'data.findDuplicateFiles'
+      && item.status === 'success'
+    ))
     const autoProjectionItem = pluginRuntime.currentQueue.find((item) => (
       item.status === 'success'
       && item.projection?.entry === 'auto'
+      && !(
+        item.toolName === 'data.findDuplicateFiles'
+        && latestDuplicateResult
+        && latestDuplicateResult.id !== item.id
+        && !latestDuplicateResult.projection
+      )
     ))
     if (!autoProjectionItem?.projection) return
     if (handledAutoProjectionIdRef.current === autoProjectionItem.id) return
     handledAutoProjectionIdRef.current = autoProjectionItem.id
-    onActivateProjection(autoProjectionItem.projection)
+    onActivateProjection(withToolScopedProjection(autoProjectionItem.projection, autoProjectionItem.toolName))
   }, [onActivateProjection, pluginRuntime.currentQueue])
+
+  useEffect(() => {
+    const latestDuplicateResult = pluginRuntime.currentQueue.find((item) => (
+      item.toolName === 'data.findDuplicateFiles'
+      && item.status === 'success'
+    ))
+    if (!latestDuplicateResult) return
+    if (latestDuplicateResult.projection) return
+    if (handledDuplicateProjectionDismissResultIdRef.current === latestDuplicateResult.id) return
+
+    handledDuplicateProjectionDismissResultIdRef.current = latestDuplicateResult.id
+    onDismissProjectionTool(latestDuplicateResult.toolName)
+  }, [onDismissProjectionTool, pluginRuntime.currentQueue])
   const softDeleteTool = useMemo(
     () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
     [fileActionTools]
@@ -604,7 +636,7 @@ export function PreviewPluginHost({
           onResultAction={handleResultAction}
           onActivateProjection={({ item }) => {
             if (item.projection) {
-              onActivateProjection(item.projection)
+              onActivateProjection(withToolScopedProjection(item.projection, item.toolName))
             }
           }}
           activeProjectionId={activeProjection?.id ?? null}

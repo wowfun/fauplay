@@ -8,6 +8,7 @@
 2. 预览区与工作区都可发起“按资产查重”，但两者的索引策略与进入方式明确区分。
 3. 预览区允许对“当前文件”执行隐式单文件补索引后再查重；工作区不自动补索引。
 4. 手动索引能力只对工作区开放，且仅对“缺失索引或索引过期”的文件生效。
+5. 预览区重复文件工具支持标准持续调用能力，用于在切换预览文件后自动执行查重。
 
 ## 2. 关键术语 (Terminology)
 
@@ -15,6 +16,7 @@
 - 种子文件（Seed File）
 - 重复组（Duplicate Group）
 - 查询作用域（Search Scope）
+- 返回模式（Response Mode）
 - 缺失索引（Missing Index）
 - 过期索引（Stale Index）
 - 显式索引（Explicit Indexing）
@@ -23,7 +25,7 @@
 术语值映射：
 
 1. 查询作用域固定为：`global | root`。
-2. 结果模式固定为：`file | workspace`。
+2. 返回模式固定为：`file | workspace`。
 3. 索引状态固定为：`fresh | missing | stale`。
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
@@ -41,8 +43,8 @@
 1. `sha256` 精确校验工作流。
 2. 全库后台自动建档或周期性重扫。
 3. 工作区查重时的隐式自动补索引。
-4. 统一结果模式与跨 Root 预览主链路细节（归属 `121-projected-file-grid`）。
-5. 统一回收站与结果模式删除落点（归属 `122-unified-trash-route`）。
+4. 统一底部结果面板与跨 Root 预览主链路细节（归属 `111-local-file-browser`）。
+5. 统一回收站与投射结果标签删除落点（归属 `122-unified-trash-route`）。
 
 ## 4. 核心语义 (Core Semantics)
 
@@ -69,7 +71,11 @@
    - 当前文件固定第一位。
    - 其余副本按“当前 Root 优先”排序。
    - 同桶内按 `lastModifiedMs DESC`，再按 `displayPath ASC` 稳定排序。
-5. 预览区结果投射入口固定为 `projection.entry='auto'`。
+5. 仅当 `duplicateCount > 0` 时，预览区才允许返回结果投射，且其入口固定为 `projection.entry='auto'`。
+6. 当 `duplicateCount = 0` 时，预览区不得返回只包含当前文件的投射结果；系统必须保持或恢复底部结果面板隐藏态，而不是展示单文件标签。
+7. 预览区工作台必须支持 `preview.continuousCall.enabled` 标准选项；开启后，切换预览文件并进入 `ready` 态时自动触发查重。
+8. 对同一预览文件、同一 `searchScope` 与同一请求签名，持续调用命中历史成功或失败记录时必须静默跳过；手动调用仍必须强制执行并生成新结果项。
+9. 若某个预览文件已有保留的成功重复结果，且此前因切换到“无重复文件”而关闭了底部结果面板，则切回该文件时系统必须重新激活对应结果标签。
 
 ### 5.2 工作区查重
 
@@ -78,7 +84,7 @@
 3. 对 `missing` 种子，不得伪造旧命中；结果中必须以“需索引”状态可见返回。
 4. 对 `stale` 种子，允许先以旧索引召回候选，但最终保留结果前必须对“种子 + 命中项”双方执行当前特征二次校验。
 5. 多个种子若最终落入同一 `assetId`，工作区结果中必须只产生一个重复组（Duplicate Group）。
-6. 工作区结果投射入口固定为 `projection.entry='manual'`。
+6. 工作区查重若最终存在至少一个重复组，结果投射入口固定为 `projection.entry='auto'`；若不存在重复组，则不得返回空投射，也不得因本次调用自动打开结果标签。
 
 ### 5.3 工作区显式索引
 
@@ -100,6 +106,10 @@
    - `defaultValue='global'`
    - `sendToTool=true`
    - `argumentKey='searchScope'`
+5. `file` 作用域工作台必须额外声明：
+   - `key='preview.continuousCall.enabled'`
+   - `type='boolean'`
+   - `defaultValue=false`
 
 输入参数：
 
@@ -140,7 +150,7 @@
 - `duplicateCount`
 - `duplicates[]`
 - `indexing`
-- `projection`
+- `projection?`
 
 其中：
 
@@ -148,7 +158,8 @@
 2. `indexing` 至少包含：
    - `strategy: 'implicit_current_file'`
    - `targetStatus: 'fresh' | 'reindexed'`
-3. `projection` 必须符合 `121-projected-file-grid` 的通用投射契约。
+3. 当 `duplicateCount > 0` 时，`projection` 必须符合 `111-local-file-browser` 的通用投射契约。
+4. 当 `duplicateCount = 0` 时，`projection` 必须省略。
 
 ### 7.2 工作区模式
 
@@ -163,7 +174,7 @@
 - `skippedSeeds[]`
 - `duplicateGroupCount`
 - `groups[]`
-- `projection`
+- `projection?`
 
 其中：
 
@@ -179,7 +190,8 @@
    - `assetId`
    - `seedRelativePaths[]`
    - `items[]`
-4. 工作区 `projection.ordering.mode` 固定为 `group_contiguous`。
+4. 当 `duplicateGroupCount > 0` 时，工作区 `projection.ordering.mode` 固定为 `group_contiguous`。
+5. 当 `duplicateGroupCount = 0` 时，`projection` 必须省略。
 
 ## 8. 功能需求 (FR)
 
@@ -195,6 +207,13 @@
 10. `FR-ADD-10` 文件模式结果必须包含当前文件自身，且当前文件固定排序第一。
 11. `FR-ADD-11` 工作区结果必须按 `assetId` 聚合重复组，并保证同一 `assetId` 只返回一个组。
 12. `FR-ADD-12` 查询作用域默认值必须为 `global`，并支持显式切换到 `root`。
+13. `FR-ADD-13` 工作区查重在存在至少一个重复组时，必须自动打开对应结果标签。
+14. `FR-ADD-14` 预览区重复文件工具必须支持 `preview.continuousCall.enabled` 标准持续调用能力。
+15. `FR-ADD-15` 重复文件工具的持续调用请求签名必须包含 `searchScope` 等所有 sendToTool 选项值。
+16. `FR-ADD-16` 同 `tool + file + requestSignature` 命中历史成功或失败记录时，持续调用必须静默跳过；手动调用不得跳过。
+17. `FR-ADD-17` 当查重结果不存在任何重复项时，系统不得生成只包含当前文件或空列表的投射结果。
+18. `FR-ADD-18` 当重复文件工具的最新成功结果不存在任何重复项时，系统必须自动关闭该工具已有的底部结果标签。
+19. `FR-ADD-19` 当用户返回到已存在成功重复结果的文件上下文时，系统必须允许重新激活该文件既有结果标签，不得因历史“已处理”标记而保持关闭。
 
 ## 9. 验收标准 (AC)
 
@@ -206,6 +225,13 @@
 6. `AC-ADD-06` 工作区存在 `stale` 种子且旧索引命中已失效时，二次校验后该失效命中不会继续出现在最终结果中。
 7. `AC-ADD-07` 多个工作区种子命中同一 `assetId` 时，最终只返回一个重复组。
 8. `AC-ADD-08` 执行工作区 `索引当前目标文件` 时，仅 `missing/stale` 文件被实际建档；已是新鲜索引的文件返回 `skipped`。
+9. `AC-ADD-09` 工作区查重结果存在至少一个重复组时，底部结果标签会自动打开；当不存在重复组时，本次调用不会自动切换到底部结果标签。
+10. `AC-ADD-10` 预览区开启持续调用后，切换到新的可预览文件并进入 `ready` 态时会自动执行重复文件查重。
+11. `AC-ADD-11` 持续调用开启后，若同文件与同 `search.scope` 已存在成功或失败结果，则本次自动调用静默跳过，不重复新增结果项。
+12. `AC-ADD-12` 在持续调用开启状态下，用户手动再次点击“重复文件”仍会强制执行并新增一条结果项。
+13. `AC-ADD-13` 预览区查重未命中任何重复副本时，底部结果面板不会显示只包含当前文件的结果标签；若此前存在该工具旧标签，会被自动关闭。
+14. `AC-ADD-14` 工作区查重未命中任何重复组时，不会返回空结果标签；若此前存在该工具旧标签，会被自动关闭。
+15. `AC-ADD-15` 预览区从“无重复文件”切回到已有成功重复结果的文件后，即使本次持续调用因历史命中而静默跳过，底部结果面板仍会重新打开该文件既有结果标签。
 
 ## 10. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -221,4 +247,4 @@
 - 插件运行时交互：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)
 - 本地文件浏览器：[`../111-local-file-browser/spec.md`](../111-local-file-browser/spec.md)
 - 本地数据管理插件：[`../114-local-data-plugin/spec.md`](../114-local-data-plugin/spec.md)
-- 结果投射文件网格：[`../121-projected-file-grid/spec.md`](../121-projected-file-grid/spec.md)
+- 统一回收站虚拟路由：[`../122-unified-trash-route/spec.md`](../122-unified-trash-route/spec.md)

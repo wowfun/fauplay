@@ -44,6 +44,7 @@ interface FilePreviewCanvasProps {
   onFaceOverlayClick?: (item: PreviewFaceOverlayItem) => void
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
+  onDismissProjectionTool: (toolName: string) => void
 }
 
 type FilePreviewViewState = 'loading' | 'error' | 'ready' | 'empty'
@@ -89,6 +90,7 @@ export function FilePreviewCanvas({
   onFaceOverlayClick,
   activeProjection,
   onActivateProjection,
+  onDismissProjectionTool,
 }: FilePreviewCanvasProps) {
   const [playbackError, setPlaybackError] = useState(false)
 
@@ -137,6 +139,7 @@ export function FilePreviewCanvas({
             onMutationCommitted={onMutationCommitted}
             activeProjection={activeProjection}
             onActivateProjection={onActivateProjection}
+            onDismissProjectionTool={onDismissProjectionTool}
           />
         </Suspense>
       )}

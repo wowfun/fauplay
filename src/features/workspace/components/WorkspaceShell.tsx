@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { toToolScopedProjectionId } from '@/lib/projection'
 import {
   getAnnotationDisplayStoreVersion,
   getFileAnnotationUpdatedAt,
@@ -27,6 +28,7 @@ import {
   type FavoriteFolderEntry,
   type FileItem,
   type FilterState,
+  type ResultPanelDisplayMode,
   type ResultProjection,
   type ThumbnailSizePreset,
 } from '@/types'
@@ -41,8 +43,14 @@ const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
 const TRASH_ROUTE_PATH = '@trash'
 const LEGACY_TRASH_RELATIVE_PATH = '.trash'
+const DEFAULT_RESULT_PANEL_HEIGHT_PX = 280
+const MIN_RESULT_PANEL_HEIGHT_PX = 180
 
 let previewPanelModulesPreloaded = false
+
+type WorkspaceActiveSurface =
+  | { kind: 'directory' }
+  | { kind: 'projection'; tabId: string }
 
 interface WorkspaceShellProps {
   rootHandle: FileSystemDirectoryHandle
@@ -137,8 +145,31 @@ function savePersistedPreviewPaneWidthRatio(value: number): void {
   }
 }
 
+function getMaxResultPanelHeightPx(): number {
+  if (typeof window === 'undefined') {
+    return 640
+  }
+  return Math.max(MIN_RESULT_PANEL_HEIGHT_PX, window.innerHeight - 220)
+}
+
+function clampResultPanelHeightPx(value: number): number {
+  return Math.min(getMaxResultPanelHeightPx(), Math.max(MIN_RESULT_PANEL_HEIGHT_PX, value))
+}
+
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+function resolveProjectionPreferredPath(projection: ResultProjection | null, preferredPath: string | null | undefined): string | null {
+  if (!projection) return null
+  const normalizedPreferredPath = normalizeRelativePath(preferredPath || '')
+  if (
+    normalizedPreferredPath
+    && projection.files.some((file) => normalizeRelativePath(file.path) === normalizedPreferredPath)
+  ) {
+    return normalizedPreferredPath
+  }
+  return projection.files[0]?.path ?? null
 }
 
 function isAnnotationFilterAtDefault(filter: FilterState): boolean {
@@ -384,19 +415,29 @@ export function WorkspaceShell({
   const [filter, setFilter] = useState<FilterState>(defaultFilter)
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(initialPreviewPaneWidthStateRef.current.ratio)
-  const [gridSelectedPaths, setGridSelectedPaths] = useState<string[]>([])
+  const [directorySelectedPaths, setDirectorySelectedPaths] = useState<string[]>([])
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
-  const [activeProjection, setActiveProjection] = useState<ResultProjection | null>(null)
+  const [projectionTabs, setProjectionTabs] = useState<ResultProjection[]>([])
+  const [activeProjectionTabId, setActiveProjectionTabId] = useState<string | null>(null)
+  const [activeSurface, setActiveSurface] = useState<WorkspaceActiveSurface>({ kind: 'directory' })
+  const [projectionSelectedPathsById, setProjectionSelectedPathsById] = useState<Record<string, string[]>>({})
+  const [directoryFocusedPath, setDirectoryFocusedPath] = useState<string | null>(null)
+  const [projectionFocusedPathById, setProjectionFocusedPathById] = useState<Record<string, string | null>>({})
+  const [isResultPanelOpen, setIsResultPanelOpen] = useState(false)
+  const [resultPanelDisplayMode, setResultPanelDisplayMode] = useState<ResultPanelDisplayMode>('normal')
+  const [resultPanelHeightPx, setResultPanelHeightPx] = useState(DEFAULT_RESULT_PANEL_HEIGHT_PX)
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
-  const fileGridRef = useRef<FileBrowserGridHandle>(null)
+  const directoryFileGridRef = useRef<FileBrowserGridHandle>(null)
+  const projectionFileGridRef = useRef<FileBrowserGridHandle>(null)
+  const lastNormalResultPanelHeightRef = useRef(DEFAULT_RESULT_PANEL_HEIGHT_PX)
+  const lastProjectionTabIdRef = useRef<string | null>(null)
   const handleFilterChange = useCallback((nextFilter: FilterState) => {
-    setActiveProjection(null)
-    setGridSelectedPaths([])
+    setDirectorySelectedPaths([])
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
   }, [])
   const showAnnotationFilterControls = isAnnotationFilterUiVisible(rootId)
@@ -436,32 +477,51 @@ export function WorkspaceShell({
 
     return nextFilteredFiles
   }, [annotationDisplayStoreVersion, files, filter, filterFiles, rootId])
-  const workspaceVisibleFiles = useMemo(
-    () => activeProjection?.files ?? filteredFiles,
-    [activeProjection, filteredFiles]
+  const activeProjectionTab = useMemo(
+    () => projectionTabs.find((projection) => projection.id === activeProjectionTabId) ?? projectionTabs[0] ?? null,
+    [activeProjectionTabId, projectionTabs]
+  )
+  const activeSurfaceProjection = useMemo(() => {
+    if (activeSurface.kind !== 'projection') return null
+    return projectionTabs.find((projection) => projection.id === activeSurface.tabId) ?? null
+  }, [activeSurface, projectionTabs])
+  const activeSurfaceFiles = useMemo(
+    () => activeSurfaceProjection?.files ?? filteredFiles,
+    [activeSurfaceProjection, filteredFiles]
+  )
+  const isDirectorySurfaceActive = activeSurface.kind === 'directory'
+  const projectionGridSelectedPaths = useMemo(
+    () => (activeProjectionTab?.id ? projectionSelectedPathsById[activeProjectionTab.id] ?? [] : []),
+    [activeProjectionTab?.id, projectionSelectedPathsById]
+  )
+  const activeSurfaceSelectedPaths = useMemo(
+    () => (activeSurface.kind === 'projection'
+      ? projectionSelectedPathsById[activeSurface.tabId] ?? []
+      : directorySelectedPaths),
+    [activeSurface, directorySelectedPaths, projectionSelectedPathsById]
   )
 
-  const totalCount = useMemo(() => workspaceVisibleFiles.length, [workspaceVisibleFiles])
+  const totalCount = useMemo(() => filteredFiles.length, [filteredFiles])
   const imageCount = useMemo(
-    () => workspaceVisibleFiles.filter((file) => file.kind === 'file' && isImageFile(file.name)).length,
-    [workspaceVisibleFiles]
+    () => filteredFiles.filter((file) => file.kind === 'file' && isImageFile(file.name)).length,
+    [filteredFiles]
   )
   const videoCount = useMemo(
-    () => workspaceVisibleFiles.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
-    [workspaceVisibleFiles]
+    () => filteredFiles.filter((file) => file.kind === 'file' && isVideoFile(file.name)).length,
+    [filteredFiles]
   )
   const selectedGridItems = useMemo(() => {
-    if (gridSelectedPaths.length === 0) return []
-    const selectedPathSet = new Set(gridSelectedPaths)
-    return workspaceVisibleFiles.filter((file) => selectedPathSet.has(file.path))
-  }, [gridSelectedPaths, workspaceVisibleFiles])
+    if (activeSurfaceSelectedPaths.length === 0) return []
+    const selectedPathSet = new Set(activeSurfaceSelectedPaths)
+    return activeSurfaceFiles.filter((file) => selectedPathSet.has(file.path))
+  }, [activeSurfaceFiles, activeSurfaceSelectedPaths])
   const selectedGridMetaFile = useMemo(() => {
     if (selectedGridItems.length !== 1) return null
     return selectedGridItems[0]?.kind === 'file' ? selectedGridItems[0] : null
   }, [selectedGridItems])
-  const filteredFileItems = useMemo(
-    () => workspaceVisibleFiles.filter((file): file is FileItem => file.kind === 'file'),
-    [workspaceVisibleFiles]
+  const activeSurfaceFileItems = useMemo(
+    () => activeSurfaceFiles.filter((file): file is FileItem => file.kind === 'file'),
+    [activeSurfaceFiles]
   )
   const {
     selectedFile,
@@ -493,7 +553,7 @@ export function WorkspaceShell({
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
-  } = usePreviewTraversal({ filteredFiles: workspaceVisibleFiles })
+  } = usePreviewTraversal({ filteredFiles: activeSurfaceFiles })
   const hasActiveVideoPreview = useMemo(() => {
     const activePreviewFile = previewFile ?? (showPreviewPane ? selectedFile : null)
     if (!activePreviewFile || activePreviewFile.kind !== 'file') {
@@ -526,7 +586,7 @@ export function WorkspaceShell({
   const shortcutHelpEntries = useShortcutHelpEntries({
     rootId,
     currentPath,
-    visibleItemCount: workspaceVisibleFiles.length,
+    visibleItemCount: activeSurfaceFiles.length,
     selectedGridCount: selectedGridItems.length,
     hasOpenPreview,
     hasActivePreviewFile: Boolean(
@@ -591,23 +651,66 @@ export function WorkspaceShell({
   }, [getActivePreviewVideoElement, videoSeekStepSec])
 
   const handleDirectoryClick = useCallback((dirName: string) => {
+    setActiveSurface({ kind: 'directory' })
     void navigateToDirectory(dirName)
   }, [navigateToDirectory])
 
-  const handleFileClick = useCallback((file: FileItem) => {
+  const handleDirectoryFileClick = useCallback((file: FileItem) => {
+    setActiveSurface({ kind: 'directory' })
     if (file.kind === 'directory') {
       void navigateToDirectory(file.name)
     } else {
+      setDirectoryFocusedPath(file.path)
       preloadPreviewModules()
       showFileInPane(file)
     }
   }, [navigateToDirectory, showFileInPane])
 
-  const handleFileDoubleClick = useCallback((file: FileItem) => {
+  const handleDirectoryFileDoubleClick = useCallback((file: FileItem) => {
     if (file.kind === 'file') {
+      setActiveSurface({ kind: 'directory' })
+      setDirectoryFocusedPath(file.path)
       openFileInModal(file)
     }
   }, [openFileInModal])
+
+  const handleProjectionFileClick = useCallback((file: FileItem) => {
+    const tabId = activeProjectionTab?.id
+    if (!tabId) return
+    setActiveProjectionTabId(tabId)
+    lastProjectionTabIdRef.current = tabId
+    setActiveSurface({ kind: 'projection', tabId })
+    if (file.kind === 'directory') {
+      return
+    }
+    setProjectionFocusedPathById((previous) => (
+      previous[tabId] === file.path
+        ? previous
+        : {
+          ...previous,
+          [tabId]: file.path,
+        }
+    ))
+    preloadPreviewModules()
+    showFileInPane(file)
+  }, [activeProjectionTab?.id, showFileInPane])
+
+  const handleProjectionFileDoubleClick = useCallback((file: FileItem) => {
+    const tabId = activeProjectionTab?.id
+    if (!tabId || file.kind !== 'file') return
+    setActiveProjectionTabId(tabId)
+    lastProjectionTabIdRef.current = tabId
+    setActiveSurface({ kind: 'projection', tabId })
+    setProjectionFocusedPathById((previous) => (
+      previous[tabId] === file.path
+        ? previous
+        : {
+          ...previous,
+          [tabId]: file.path,
+        }
+    ))
+    openFileInModal(file)
+  }, [activeProjectionTab?.id, openFileInModal])
 
   const handleNavigateToPath = useCallback((path: string) => {
     return navigateToPath(path, { resetFlattenView: true })
@@ -629,47 +732,177 @@ export function WorkspaceShell({
     void refreshAnnotationSnapshot()
   }, [refreshAnnotationSnapshot])
 
-  const handleActivateProjection = useCallback((projection: ResultProjection) => {
-    setActiveProjection(projection)
-    setGridSelectedPaths([])
-    alignPreviewToPath(projection.files[0]?.path ?? null)
+  const alignPreviewToProjection = useCallback((projection: ResultProjection | null, preferredPath?: string | null) => {
+    alignPreviewToPath(resolveProjectionPreferredPath(projection, preferredPath))
   }, [alignPreviewToPath])
 
-  const handleCloseProjection = useCallback(() => {
-    setActiveProjection(null)
-    setGridSelectedPaths([])
-  }, [])
+  const handleActivateProjection = useCallback((projection: ResultProjection) => {
+    setProjectionTabs((previous) => {
+      const existingIndex = previous.findIndex((item) => item.id === projection.id)
+      if (existingIndex < 0) {
+        return [...previous, projection]
+      }
+      const next = [...previous]
+      next[existingIndex] = projection
+      return next
+    })
+    setIsResultPanelOpen(true)
+    setActiveProjectionTabId(projection.id)
+    lastProjectionTabIdRef.current = projection.id
+    setActiveSurface({ kind: 'projection', tabId: projection.id })
+    alignPreviewToProjection(projection, projectionFocusedPathById[projection.id])
+  }, [alignPreviewToProjection, projectionFocusedPathById])
+
+  const handleActivateProjectionTab = useCallback((tabId: string) => {
+    const targetProjection = projectionTabs.find((projection) => projection.id === tabId)
+    if (!targetProjection) return
+    setIsResultPanelOpen(true)
+    setActiveProjectionTabId(tabId)
+    lastProjectionTabIdRef.current = tabId
+    setActiveSurface({ kind: 'projection', tabId })
+    alignPreviewToProjection(targetProjection, projectionFocusedPathById[tabId])
+  }, [alignPreviewToProjection, projectionFocusedPathById, projectionTabs])
+
+  const handleOpenResultPanel = useCallback(() => {
+    const fallbackTabId = activeProjectionTab?.id ?? lastProjectionTabIdRef.current ?? projectionTabs[0]?.id ?? null
+    if (!fallbackTabId) return
+    const targetProjection = projectionTabs.find((projection) => projection.id === fallbackTabId) ?? null
+    setIsResultPanelOpen(true)
+    setActiveProjectionTabId(fallbackTabId)
+    lastProjectionTabIdRef.current = fallbackTabId
+    setActiveSurface({ kind: 'projection', tabId: fallbackTabId })
+    alignPreviewToProjection(targetProjection, projectionFocusedPathById[fallbackTabId])
+  }, [activeProjectionTab?.id, alignPreviewToProjection, projectionFocusedPathById, projectionTabs])
+
+  const handleCloseResultPanel = useCallback(() => {
+    setIsResultPanelOpen(false)
+    setActiveSurface({ kind: 'directory' })
+    alignPreviewToPath(directoryFocusedPath)
+  }, [alignPreviewToPath, directoryFocusedPath])
+
+  const handleToggleResultPanelMaximized = useCallback(() => {
+    const fallbackTabId = activeProjectionTab?.id ?? projectionTabs[0]?.id ?? null
+    if (fallbackTabId) {
+      const targetProjection = projectionTabs.find((projection) => projection.id === fallbackTabId) ?? null
+      setActiveProjectionTabId(fallbackTabId)
+      lastProjectionTabIdRef.current = fallbackTabId
+      setActiveSurface({ kind: 'projection', tabId: fallbackTabId })
+      alignPreviewToProjection(targetProjection, projectionFocusedPathById[fallbackTabId])
+    }
+    setResultPanelDisplayMode((previous) => {
+      if (previous === 'maximized') {
+        setResultPanelHeightPx(lastNormalResultPanelHeightRef.current)
+        return 'normal'
+      }
+      return 'maximized'
+    })
+  }, [activeProjectionTab?.id, alignPreviewToProjection, projectionFocusedPathById, projectionTabs])
+
+  const handleResultPanelResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (resultPanelDisplayMode !== 'normal') return
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = resultPanelHeightPx
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const nextHeight = clampResultPanelHeightPx(startHeight + (startY - moveEvent.clientY))
+      lastNormalResultPanelHeightRef.current = nextHeight
+      setResultPanelHeightPx(nextHeight)
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [resultPanelDisplayMode, resultPanelHeightPx])
+
+  const handleCloseProjectionTab = useCallback((tabId: string) => {
+    const closingIndex = projectionTabs.findIndex((projection) => projection.id === tabId)
+    const remainingTabs = projectionTabs.filter((projection) => projection.id !== tabId)
+    const nextActiveTabId = (() => {
+      if (remainingTabs.length === 0) return null
+      if (closingIndex < 0) return remainingTabs[0]?.id ?? null
+      return remainingTabs[closingIndex]?.id ?? remainingTabs[closingIndex - 1]?.id ?? remainingTabs[0]?.id ?? null
+    })()
+
+    setProjectionTabs(remainingTabs)
+    setProjectionSelectedPathsById((previous) => {
+      if (!(tabId in previous)) return previous
+      const next = { ...previous }
+      delete next[tabId]
+      return next
+    })
+    setProjectionFocusedPathById((previous) => {
+      if (!(tabId in previous)) return previous
+      const next = { ...previous }
+      delete next[tabId]
+      return next
+    })
+
+    if (lastProjectionTabIdRef.current === tabId) {
+      lastProjectionTabIdRef.current = nextActiveTabId
+    }
+
+    setActiveProjectionTabId(nextActiveTabId)
+    if (!nextActiveTabId) {
+      setIsResultPanelOpen(false)
+      setActiveSurface({ kind: 'directory' })
+      alignPreviewToPath(directoryFocusedPath)
+      return
+    }
+
+    if (activeSurface.kind === 'projection' && activeSurface.tabId === tabId) {
+      const nextProjection = remainingTabs.find((projection) => projection.id === nextActiveTabId) ?? null
+      setActiveSurface({ kind: 'projection', tabId: nextActiveTabId })
+      alignPreviewToProjection(nextProjection, projectionFocusedPathById[nextActiveTabId])
+    }
+  }, [activeSurface, alignPreviewToPath, alignPreviewToProjection, directoryFocusedPath, projectionFocusedPathById, projectionTabs])
+
+  const handleDismissProjectionTool = useCallback((toolName: string) => {
+    handleCloseProjectionTab(toToolScopedProjectionId(toolName))
+  }, [handleCloseProjectionTab])
+
+  const handleProjectionGridSelectionChange = useCallback((selectedPaths: string[]) => {
+    if (!activeProjectionTabId) return
+    setProjectionSelectedPathsById((previous) => {
+      const currentSelectedPaths = previous[activeProjectionTabId] ?? []
+      const isSame = currentSelectedPaths.length === selectedPaths.length
+        && currentSelectedPaths.every((path, index) => path === selectedPaths[index])
+      if (isSame) {
+        return previous
+      }
+      return {
+        ...previous,
+        [activeProjectionTabId]: selectedPaths,
+      }
+    })
+  }, [activeProjectionTabId])
 
   const handleWorkspaceMutationCommitted = useCallback(async () => {
-    if (activeProjection) {
-      setActiveProjection(null)
-      setGridSelectedPaths([])
-    }
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
-  }, [activeProjection, currentPath, navigateToPath, refreshAnnotationSnapshot])
+  }, [currentPath, navigateToPath, refreshAnnotationSnapshot])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
     const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
-    if (!normalizedDeletedPath || filteredFileItems.length <= 1) return null
+    if (!normalizedDeletedPath || activeSurfaceFileItems.length <= 1) return null
 
-    const deletedIndex = filteredFileItems.findIndex((file) => (
+    const deletedIndex = activeSurfaceFileItems.findIndex((file) => (
       normalizeRelativePath(file.path) === normalizedDeletedPath
     ))
     if (deletedIndex < 0) return null
 
-    const nextIndex = (deletedIndex + 1) % filteredFileItems.length
-    const nextFile = filteredFileItems[nextIndex]
+    const nextIndex = (deletedIndex + 1) % activeSurfaceFileItems.length
+    const nextFile = activeSurfaceFileItems[nextIndex]
     if (!nextFile) return null
     if (normalizeRelativePath(nextFile.path) === normalizedDeletedPath) return null
     return nextFile
-  }, [filteredFileItems])
+  }, [activeSurfaceFileItems])
 
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
-    if (activeProjection) {
-      setActiveProjection(null)
-      setGridSelectedPaths([])
-    }
     const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
@@ -710,7 +943,6 @@ export function WorkspaceShell({
     await refreshAnnotationSnapshot()
   }, [
     alignPreviewToPath,
-    activeProjection,
     currentPath,
     navigateMediaFromModal,
     navigateMediaFromPane,
@@ -761,9 +993,61 @@ export function WorkspaceShell({
   }, [recentPathHistory])
 
   useEffect(() => {
-    setActiveProjection(null)
-    setGridSelectedPaths([])
-  }, [currentPath, rootId])
+    setDirectorySelectedPaths([])
+    setDirectoryFocusedPath(null)
+  }, [currentPath])
+
+  useEffect(() => {
+    setProjectionTabs([])
+    setActiveProjectionTabId(null)
+    setActiveSurface({ kind: 'directory' })
+    setProjectionSelectedPathsById({})
+    setProjectionFocusedPathById({})
+    setDirectorySelectedPaths([])
+    setDirectoryFocusedPath(null)
+    setIsResultPanelOpen(false)
+  }, [rootId])
+
+  useEffect(() => {
+    if (resultPanelDisplayMode === 'normal') {
+      lastNormalResultPanelHeightRef.current = resultPanelHeightPx
+    }
+  }, [resultPanelDisplayMode, resultPanelHeightPx])
+
+  useEffect(() => {
+    if (resultPanelDisplayMode !== 'normal') return
+
+    const handleResize = () => {
+      setResultPanelHeightPx((previous) => clampResultPanelHeightPx(previous))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [resultPanelDisplayMode])
+
+  useEffect(() => {
+    if (projectionTabs.length === 0) {
+      if (activeProjectionTabId !== null) {
+        setActiveProjectionTabId(null)
+      }
+      return
+    }
+
+    if (!activeProjectionTabId || !projectionTabs.some((projection) => projection.id === activeProjectionTabId)) {
+      const fallbackTabId = projectionTabs[0]?.id ?? null
+      setActiveProjectionTabId(fallbackTabId)
+      lastProjectionTabIdRef.current = fallbackTabId
+    }
+  }, [activeProjectionTabId, projectionTabs])
+
+  useEffect(() => {
+    if (activeSurface.kind !== 'projection') return
+    if (projectionTabs.some((projection) => projection.id === activeSurface.tabId)) return
+    setActiveSurface({ kind: 'directory' })
+    alignPreviewToPath(directoryFocusedPath)
+  }, [activeSurface, alignPreviewToPath, directoryFocusedPath, projectionTabs])
 
   useEffect(() => {
     let disposed = false
@@ -865,11 +1149,32 @@ export function WorkspaceShell({
   }, [])
 
   useEffect(() => {
-    fileGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
+    if (selectedFile?.kind !== 'file') return
+    if (activeSurface.kind === 'projection') {
+      const activeProjection = projectionTabs.find((projection) => projection.id === activeSurface.tabId) ?? null
+      if (!activeProjection || !activeProjection.files.some((file) => file.path === selectedFile.path)) {
+        return
+      }
+      setProjectionFocusedPathById((previous) => (
+        previous[activeSurface.tabId] === selectedFile.path
+          ? previous
+          : {
+            ...previous,
+            [activeSurface.tabId]: selectedFile.path,
+          }
+      ))
+      return
+    }
+    setDirectoryFocusedPath((previous) => (previous === selectedFile.path ? previous : selectedFile.path))
+  }, [activeSurface, projectionTabs, selectedFile])
+
+  useEffect(() => {
+    const activeGridRef = activeSurface.kind === 'projection' ? projectionFileGridRef : directoryFileGridRef
+    activeGridRef.current?.syncSelectedPath(selectedFile?.path ?? null, {
       scroll: true,
       focus: false,
     })
-  }, [selectedFile])
+  }, [activeSurface, selectedFile])
 
   useEffect(() => {
     if (!hasActiveVideoPreview) return
@@ -1091,14 +1396,32 @@ export function WorkspaceShell({
       onOpenFavoriteFolder={openFavoriteFolder}
       onRemoveFavoriteFolder={removeFavoriteFolder}
       onToggleCurrentPathFavorite={toggleCurrentFolderFavorite}
-      files={workspaceVisibleFiles}
+      directoryFiles={filteredFiles}
+      activeSurfaceFiles={activeSurfaceFiles}
       rootHandle={rootHandle}
-      fileGridRef={fileGridRef}
-      onFileClick={handleFileClick}
-      onFileDoubleClick={handleFileDoubleClick}
+      directoryFileGridRef={directoryFileGridRef}
+      projectionFileGridRef={projectionFileGridRef}
+      onDirectoryFileClick={handleDirectoryFileClick}
+      onDirectoryFileDoubleClick={handleDirectoryFileDoubleClick}
+      onProjectionFileClick={handleProjectionFileClick}
+      onProjectionFileDoubleClick={handleProjectionFileDoubleClick}
       onDirectoryClick={handleDirectoryClick}
-      onGridSelectionChange={setGridSelectedPaths}
-      gridSelectedPaths={gridSelectedPaths}
+      onDirectoryGridSelectionChange={setDirectorySelectedPaths}
+      directoryGridSelectedPaths={directorySelectedPaths}
+      projectionTabs={projectionTabs}
+      activeProjectionTabId={activeProjectionTab?.id ?? null}
+      onProjectionGridSelectionChange={handleProjectionGridSelectionChange}
+      projectionGridSelectedPaths={projectionGridSelectedPaths}
+      isDirectorySurfaceActive={isDirectorySurfaceActive}
+      isResultPanelOpen={isResultPanelOpen}
+      resultPanelDisplayMode={resultPanelDisplayMode}
+      resultPanelHeightPx={resultPanelHeightPx}
+      onOpenResultPanel={handleOpenResultPanel}
+      onCloseResultPanel={handleCloseResultPanel}
+      onToggleResultPanelMaximized={handleToggleResultPanelMaximized}
+      onResultPanelResizeStart={handleResultPanelResizeStart}
+      onActivateProjectionTab={handleActivateProjectionTab}
+      onCloseProjectionTab={handleCloseProjectionTab}
       onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
       onPreviewMutationCommitted={handlePreviewMutationCommitted}
       showPreviewPane={showPreviewPane}
@@ -1129,9 +1452,9 @@ export function WorkspaceShell({
       previewFile={previewFile}
       previewAutoPlayOnOpen={previewAutoPlayOnOpen}
       onClosePreview={closePreviewModal}
-      activeProjection={activeProjection}
+      activeProjection={activeSurfaceProjection}
       onActivateProjection={handleActivateProjection}
-      onCloseProjection={handleCloseProjection}
+      onDismissProjectionTool={handleDismissProjectionTool}
     />
   )
 }

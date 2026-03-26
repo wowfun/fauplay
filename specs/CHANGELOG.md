@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-03-26
+### Changed
+- 合并活动专题 `specs/111-local-file-browser/spec.md` 与 `specs/121-projected-file-grid/spec.md`：新的活动 `111` 吸收目录文件浏览、统一预览能力、`projection` payload、底部结果面板、投射标签、活动表面与跨 Root `absolutePath` 读取契约；原“结果模式接管主网格”语义退役。
+- 归档旧活动 `111` 与 `121` 到 `specs/_archive/2026-03-26/`，并在归档文档顶部补充 merged-into 声明；同步移除 `specs/README.md` 中的活动 `121` 入口。
+- 更新 `specs/002-contracts/spec.md`、`specs/105-plugin-runtime-interaction/spec.md`、`specs/120-asset-duplicate-detection/spec.md`、`specs/122-unified-trash-route/spec.md` 与根 `README.md`：将结果投射结构归属统一切换到新的活动 `111`，并把“结果模式”相关表述收敛为“底部结果面板/投射标签”语义。
+- 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：为新的工作区 IA 补充 B3 底部结果面板区，明确投射文件视图落位、与 `PluginToolResultPanel` 的职责分离，以及“目录主区保持可见、投射结果进入底部面板”的高层布局约束。
+- 更新 `specs/111-local-file-browser/spec.md`、`specs/105-plugin-runtime-interaction/spec.md`、`specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：参考 VS Code 收敛底部结果面板交互，新增面板高度拖拽、显式打开/关闭、最大化覆盖整个文件网格区、恢复最近正常高度与重开恢复最近面板状态等契约。
+- 更新 `specs/120-asset-duplicate-detection/spec.md` 与 `specs/111-local-file-browser/spec.md`：工作区重复文件在命中重复组时改为自动打开结果标签；`group_contiguous` 投射新增“按组分行、单行只显示一个 groupId”展示约束。
+- 更新 `specs/111-local-file-browser/spec.md`：明确按组分行的底部结果标签仍需保留面板内垂直滚动能力，并继续复用工作区网格现有快捷键语义，不新增新的快捷键集合。
+- 更新 `specs/120-asset-duplicate-detection/spec.md` 与 `specs/105-plugin-runtime-interaction/spec.md`：为 `data.findDuplicateFiles` 增补预览区 `preview.continuousCall.enabled` 持续调用语义，并明确该开关仅在 `file` 作用域预览实例可见，工作区工作台不得展示。
+- 更新 `specs/120-asset-duplicate-detection/spec.md`：收紧“无重复命中”语义，要求重复文件工具在 `duplicateCount/duplicateGroupCount = 0` 时不返回空投射或单文件投射，并自动关闭该工具旧的底部结果标签。
+- 更新 `specs/120-asset-duplicate-detection/spec.md`：补充“切回已有成功重复结果的文件时应重新激活结果标签”语义，避免历史静默跳过后底部结果面板保持关闭。
+
 ## 2026-03-25
 ### Added
 - 新增 `specs/120-asset-duplicate-detection/spec.md`：定义基于现有 `assetId` 的重复文件检测专题，明确预览区单文件隐式补索引、工作区“已选优先否则当前可见”查重、`missing/stale` 覆盖率统计，以及工作区专用 `索引当前目标文件` 语义。

@@ -1,5 +1,7 @@
 # 121 Projected File Grid 结果投射文件网格规范
 
+> Archived on 2026-03-26. Remaining valid contract content has been merged into [`../../../111-local-file-browser/spec.md`](../../../111-local-file-browser/spec.md).
+
 ## 1. 目的 (Purpose)
 
 定义 Fauplay 的通用结果投射（Result Projection）与结果模式（Result Mode）契约，确保：

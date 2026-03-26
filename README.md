@@ -74,7 +74,7 @@ npm run build
 - 预览播放专题：[`specs/100-preview-playback/spec.md`](specs/100-preview-playback/spec.md)
 - 缩略图管线专题：[`specs/101-thumbnail-pipeline/spec.md`](specs/101-thumbnail-pipeline/spec.md)
 - 地址栏导航专题：[`specs/102-address-bar-navigation/spec.md`](specs/102-address-bar-navigation/spec.md)
-- 本地文件浏览器转向专题：[`specs/111-local-file-browser/spec.md`](specs/111-local-file-browser/spec.md)
+- 本地文件浏览器专题（含底部结果面板）：[`specs/111-local-file-browser/spec.md`](specs/111-local-file-browser/spec.md)
 - 规范变更日志：[`specs/CHANGELOG.md`](specs/CHANGELOG.md)
 
 ## 项目结构

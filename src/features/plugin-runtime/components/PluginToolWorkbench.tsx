@@ -1,4 +1,5 @@
 import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
+import { CONTINUOUS_CALL_OPTION_KEY } from '@/config/toolContinuousCall'
 import type { PluginSurfaceVariant, ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
@@ -61,7 +62,10 @@ export function PluginToolWorkbench({
 }: PluginToolWorkbenchProps) {
   if (!tool) return null
 
-  const hasOptions = tool.toolOptions.length > 0
+  const visibleOptions = tool.toolOptions.filter((option) => (
+    !(surfaceVariant === 'workspace-grid' && option.key === CONTINUOUS_CALL_OPTION_KEY)
+  ))
+  const hasOptions = visibleOptions.length > 0
   const visibleActions = tool.toolActions.filter((action) => action.visible !== false)
   const hasActions = visibleActions.length > 0
   if (!hasOptions && !hasActions) return null
@@ -91,7 +95,7 @@ export function PluginToolWorkbench({
 
       {hasOptions && (
         <div className="space-y-2">
-          {tool.toolOptions.map((option) => {
+          {visibleOptions.map((option) => {
             const optionId = `${tool.name}-${option.key}`
             const optionValue = resolveOptionValue(option, optionValues)
             return (

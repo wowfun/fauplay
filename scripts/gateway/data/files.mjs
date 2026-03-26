@@ -557,16 +557,20 @@ export async function queryDuplicateFiles(payload = {}) {
           strategy: 'implicit_current_file',
           targetStatus,
         },
-        projection: {
-          id: makeProjectionId('duplicates:file'),
-          title: '重复文件',
-          entry: 'auto',
-          ordering: {
-            mode: 'listed',
-            keys: ['isCurrentFile:desc', 'lastModifiedMs:desc', 'displayPath:asc'],
-          },
-          files: [target, ...duplicates],
-        },
+        ...(duplicates.length > 0
+          ? {
+            projection: {
+              id: makeProjectionId('duplicates:file'),
+              title: '重复文件',
+              entry: 'auto',
+              ordering: {
+                mode: 'listed',
+                keys: ['isCurrentFile:desc', 'lastModifiedMs:desc', 'displayPath:asc'],
+              },
+              files: [target, ...duplicates],
+            },
+          }
+          : {}),
       }
     }
 
@@ -703,16 +707,20 @@ export async function queryDuplicateFiles(payload = {}) {
       skippedSeeds,
       duplicateGroupCount: groups.length,
       groups,
-      projection: {
-        id: makeProjectionId('duplicates:workspace'),
-        title: '重复文件',
-        entry: 'manual',
-        ordering: {
-          mode: 'group_contiguous',
-          keys: ['groupRank:asc', 'lastModifiedMs:desc', 'displayPath:asc'],
-        },
-        files: projectionFiles,
-      },
+      ...(projectionFiles.length > 0
+        ? {
+          projection: {
+            id: makeProjectionId('duplicates:workspace'),
+            title: '重复文件',
+            entry: 'auto',
+            ordering: {
+              mode: 'group_contiguous',
+              keys: ['groupRank:asc', 'lastModifiedMs:desc', 'displayPath:asc'],
+            },
+            files: projectionFiles,
+          },
+        }
+        : {}),
     }
   })
 }
