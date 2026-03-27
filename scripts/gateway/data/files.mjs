@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
+  DB_DIRNAME,
   GLOBAL_CONFIG_DIR,
+  GLOBAL_CONFIG_DIRNAME,
   computeFingerprintsForFile,
   normalizeRelativePath,
   nowTs,
@@ -113,7 +115,6 @@ const MIME_BY_EXTENSION = {
   rs: 'text/x-rust',
 }
 const GLOBAL_RECYCLE_DIR = path.join(GLOBAL_CONFIG_DIR, 'recycle')
-const GLOBAL_RECYCLE_FILES_DIR = path.join(GLOBAL_RECYCLE_DIR, 'files')
 const GLOBAL_RECYCLE_META_PATH = path.join(GLOBAL_RECYCLE_DIR, 'items.json')
 
 function resolveSearchScope(value) {
@@ -726,7 +727,7 @@ export async function queryDuplicateFiles(payload = {}) {
 }
 
 async function ensureGlobalRecycleStorage() {
-  await fs.mkdir(GLOBAL_RECYCLE_FILES_DIR, { recursive: true })
+  await fs.mkdir(GLOBAL_RECYCLE_DIR, { recursive: true })
 }
 
 async function readGlobalRecycleMeta() {
@@ -749,6 +750,50 @@ async function readGlobalRecycleMeta() {
 async function writeGlobalRecycleMeta(items) {
   await ensureGlobalRecycleStorage()
   await fs.writeFile(GLOBAL_RECYCLE_META_PATH, JSON.stringify(items, null, 2), 'utf8')
+}
+
+async function findDeviceRootPath(absolutePath, deviceId) {
+  let currentPath = resolveAbsolutePathInput(absolutePath)
+
+  while (true) {
+    const parentPath = path.dirname(currentPath)
+    if (parentPath === currentPath) {
+      return currentPath
+    }
+
+    const parentStat = await statPath(parentPath)
+    if (Number(parentStat.dev) !== Number(deviceId)) {
+      return currentPath
+    }
+
+    currentPath = parentPath
+  }
+}
+
+async function resolveRecycleStorageRootForFile(sourceAbsolutePath, sourceStatResult) {
+  await ensureGlobalRecycleStorage()
+
+  const globalStorageStat = await statPath(GLOBAL_CONFIG_DIR)
+  if (Number(globalStorageStat.dev) === Number(sourceStatResult.dev)) {
+    return GLOBAL_CONFIG_DIR
+  }
+
+  const deviceRootPath = await findDeviceRootPath(sourceAbsolutePath, sourceStatResult.dev)
+  return path.join(deviceRootPath, DB_DIRNAME, GLOBAL_CONFIG_DIRNAME)
+}
+
+async function resolveRecycleStoredAbsolutePath(sourceAbsolutePath, sourceStatResult, recycleId) {
+  const storageRootPath = await resolveRecycleStorageRootForFile(sourceAbsolutePath, sourceStatResult)
+  const storageFilesDir = path.join(storageRootPath, 'recycle', 'files')
+  await fs.mkdir(storageFilesDir, { recursive: true })
+  return {
+    storageRootPath,
+    storedAbsolutePath: path.join(storageFilesDir, `${recycleId}${path.extname(sourceAbsolutePath)}`),
+  }
+}
+
+async function moveFileWithinSameDevice(sourceAbsolutePath, targetAbsolutePath) {
+  await fs.rename(sourceAbsolutePath, targetAbsolutePath)
 }
 
 async function allocateRestorePath(candidateAbsolutePath) {
@@ -843,14 +888,17 @@ export async function moveFilesToRecycle(payload = {}) {
       }
 
       const recycleId = randomUUID()
-      const ext = path.extname(absolutePath)
-      const storedAbsolutePath = path.join(GLOBAL_RECYCLE_FILES_DIR, `${recycleId}${ext}`)
+      const {
+        storageRootPath,
+        storedAbsolutePath,
+      } = await resolveRecycleStoredAbsolutePath(absolutePath, statResult, recycleId)
       const deletedAt = nowTs()
 
-      await fs.rename(absolutePath, storedAbsolutePath)
+      await moveFileWithinSameDevice(absolutePath, storedAbsolutePath)
 
       metaItems.push({
         recycleId,
+        storageRootPath,
         storedAbsolutePath,
         originalAbsolutePath: absolutePath,
         originalRootPath: null,
@@ -983,7 +1031,7 @@ export async function restoreRecycleItems(payload = {}) {
           absolutePath.replace('/.trash/', '/')
         )
         await fs.mkdir(path.dirname(restoredAbsolutePath), { recursive: true })
-        await fs.rename(absolutePath, restoredAbsolutePath)
+        await moveFileWithinSameDevice(absolutePath, restoredAbsolutePath)
         restored += 1
         resultItems.push({
           sourceType,
@@ -1022,7 +1070,7 @@ export async function restoreRecycleItems(payload = {}) {
         resolveAbsolutePathInput(metaEntry.originalAbsolutePath, 'originalAbsolutePath')
       )
       await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true })
-      await fs.rename(sourceAbsolutePath, targetAbsolutePath)
+      await moveFileWithinSameDevice(sourceAbsolutePath, targetAbsolutePath)
       nextMetaItems.splice(metaIndex, 1)
       restored += 1
       resultItems.push({

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-03-28
+### Changed
+- 更新 `specs/120-asset-duplicate-detection/spec.md` 与 `specs/111-local-file-browser/spec.md`：为重复文件底部结果标签新增 Duplicate Cleaner Pro 风格的快捷选择规则，首期提供 `保留最新/保留最旧/保留当前文件或首项/清空全部`、组头 `重应用本组/清空本组`，并固定“已选 = 待处理项”语义。
+- 更新 `specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：收紧结果投射标签删除后的前端收尾语义，要求删除成功后立即从当前投射标签移除已删文件、清理对应选择态，并在标签删空时自动关闭空标签。
+- 更新 `specs/122-unified-trash-route/spec.md`：将统一回收区物理存储收敛为“全局元数据 + 同卷托管池”，对非 home 卷文件改为使用该卷上的 `.fauplay/global/recycle/files`，避免结果标签删除跨卷写入 home 托管池。
+- 更新 `specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：进一步收紧按组分行结果标签的删除收尾语义，要求删除成功后同步清除组内残留缩略图、复选框与组头统计，避免已删文件继续可见或被重新勾选。
+- 更新 `specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：明确结果投射标签删除后的清理语义同样覆盖右侧预览动作区触发的删除，不得只刷新预览而遗漏底部结果标签。
+
 ## 2026-03-26
 ### Changed
 - 合并活动专题 `specs/111-local-file-browser/spec.md` 与 `specs/121-projected-file-grid/spec.md`：新的活动 `111` 吸收目录文件浏览、统一预览能力、`projection` payload、底部结果面板、投射标签、活动表面与跨 Root `absolutePath` 读取契约；原“结果模式接管主网格”语义退役。

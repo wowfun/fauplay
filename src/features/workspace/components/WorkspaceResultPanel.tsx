@@ -2,6 +2,7 @@ import type { MouseEvent as ReactMouseEvent, MutableRefObject } from 'react'
 import { ChevronUp, Maximize2, Minimize2, X } from 'lucide-react'
 import { FileBrowserGrid, type FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { WorkspaceGroupedProjectionRows } from '@/features/workspace/components/WorkspaceGroupedProjectionRows'
+import { isDuplicateProjection, type DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
 import type { FileItem, ResultPanelDisplayMode, ResultProjection, ThumbnailSizePreset } from '@/types'
 
 interface WorkspaceResultPanelProps {
@@ -14,9 +15,14 @@ interface WorkspaceResultPanelProps {
   thumbnailSizePreset: ThumbnailSizePreset
   gridRef: MutableRefObject<FileBrowserGridHandle | null>
   selectedPaths: string[]
+  activeDuplicateSelectionRule: DuplicateSelectionRule | null
   keyboardNavigationEnabled: boolean
   hasOpenPreview: boolean
   onSelectionChange: (selectedPaths: string[]) => void
+  onApplyDuplicateSelectionRule: (rule: DuplicateSelectionRule) => void
+  onClearDuplicateSelection: () => void
+  onReapplyDuplicateGroup: (groupId: string) => void
+  onClearDuplicateGroup: (groupId: string) => void
   onFileClick: (file: FileItem) => void
   onFileDoubleClick: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
@@ -38,9 +44,14 @@ export function WorkspaceResultPanel({
   thumbnailSizePreset,
   gridRef,
   selectedPaths,
+  activeDuplicateSelectionRule,
   keyboardNavigationEnabled,
   hasOpenPreview,
   onSelectionChange,
+  onApplyDuplicateSelectionRule,
+  onClearDuplicateSelection,
+  onReapplyDuplicateGroup,
+  onClearDuplicateGroup,
   onFileClick,
   onFileDoubleClick,
   onDirectoryClick,
@@ -56,12 +67,18 @@ export function WorkspaceResultPanel({
   }
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null
+  const isDuplicateProjectionTab = isDuplicateProjection(activeTab)
   const shouldRenderGroupedRows = Boolean(
     activeTab
     && activeTab.ordering?.mode === 'group_contiguous'
     && activeTab.files.length > 0
     && activeTab.files.every((file) => typeof file.groupId === 'string' && file.groupId.length > 0)
   )
+  const duplicateRuleActions: Array<{ rule: DuplicateSelectionRule; label: string }> = [
+    { rule: 'keep_newest', label: '保留最新' },
+    { rule: 'keep_oldest', label: '保留最旧' },
+    { rule: 'keep_current_or_first', label: '保留当前文件/首项' },
+  ]
   if (!open) {
     return (
       <div className="shrink-0 border-t border-border bg-card/70 px-3 py-2">
@@ -166,6 +183,40 @@ export function WorkspaceResultPanel({
           </button>
         </div>
       </div>
+      {isDuplicateProjectionTab && (
+        <div className="border-b border-border/70 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-foreground">快捷选择</span>
+            {duplicateRuleActions.map((action) => {
+              const isActive = activeDuplicateSelectionRule === action.rule
+              return (
+                <button
+                  key={action.rule}
+                  type="button"
+                  className={`rounded-md border px-2 py-1 text-xs transition-colors ${
+                    isActive
+                      ? 'border-primary/40 bg-accent/60 text-foreground'
+                      : 'border-border/80 text-foreground hover:bg-accent/40'
+                  }`}
+                  onClick={() => {
+                    onApplyDuplicateSelectionRule(action.rule)
+                  }}
+                >
+                  {action.label}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              className="rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40"
+              onClick={onClearDuplicateSelection}
+            >
+              清空全部
+            </button>
+            <span className="ml-auto text-xs text-muted-foreground">已选 = 待处理项</span>
+          </div>
+        </div>
+      )}
       {activeTab ? (
         <div className="flex-1 min-h-0">
           {shouldRenderGroupedRows ? (
@@ -179,6 +230,10 @@ export function WorkspaceResultPanel({
               keyboardNavigationEnabled={keyboardNavigationEnabled}
               selectedPaths={selectedPaths}
               onSelectionChange={onSelectionChange}
+              showGroupActions={isDuplicateProjectionTab}
+              canReapplyGroup={activeDuplicateSelectionRule !== null}
+              onReapplyGroup={onReapplyDuplicateGroup}
+              onClearGroup={onClearDuplicateGroup}
               onFileClick={onFileClick}
               onFileDoubleClick={onFileDoubleClick}
               onDirectoryClick={onDirectoryClick}

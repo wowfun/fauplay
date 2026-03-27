@@ -6,6 +6,8 @@ import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatusBar'
 import { WorkspaceResultPanel } from '@/features/workspace/components/WorkspaceResultPanel'
+import type { DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
+import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -180,6 +182,11 @@ interface ExplorerWorkspaceLayoutProps {
   activeProjectionTabId: string | null
   onProjectionGridSelectionChange: (selectedPaths: string[]) => void
   projectionGridSelectedPaths: string[]
+  activeDuplicateSelectionRule: DuplicateSelectionRule | null
+  onApplyDuplicateSelectionRule: (rule: DuplicateSelectionRule) => void
+  onClearDuplicateSelection: () => void
+  onReapplyDuplicateGroup: (groupId: string) => void
+  onClearDuplicateGroup: (groupId: string) => void
   isDirectorySurfaceActive: boolean
   isResultPanelOpen: boolean
   resultPanelDisplayMode: ResultPanelDisplayMode
@@ -190,7 +197,7 @@ interface ExplorerWorkspaceLayoutProps {
   onResultPanelResizeStart: (event: ReactMouseEvent<HTMLDivElement>) => void
   onActivateProjectionTab: (tabId: string) => void
   onCloseProjectionTab: (tabId: string) => void
-  onWorkspaceMutationCommitted: () => void | Promise<void>
+  onWorkspaceMutationCommitted: (params?: WorkspaceMutationCommitParams) => void | Promise<void>
   onPreviewMutationCommitted: (params?: PreviewMutationCommitParams) => void | Promise<void>
   showPreviewPane: boolean
   hasOpenPreview: boolean
@@ -278,6 +285,11 @@ export function ExplorerWorkspaceLayout({
   activeProjectionTabId,
   onProjectionGridSelectionChange,
   projectionGridSelectedPaths,
+  activeDuplicateSelectionRule,
+  onApplyDuplicateSelectionRule,
+  onClearDuplicateSelection,
+  onReapplyDuplicateGroup,
+  onClearDuplicateGroup,
   isDirectorySurfaceActive,
   isResultPanelOpen,
   resultPanelDisplayMode,
@@ -462,9 +474,14 @@ export function ExplorerWorkspaceLayout({
                   thumbnailSizePreset={thumbnailSizePreset}
                   gridRef={projectionFileGridRef}
                   selectedPaths={projectionGridSelectedPaths}
+                  activeDuplicateSelectionRule={activeDuplicateSelectionRule}
                   keyboardNavigationEnabled={!isDirectorySurfaceActive}
                   hasOpenPreview={hasOpenPreview}
                   onSelectionChange={onProjectionGridSelectionChange}
+                  onApplyDuplicateSelectionRule={onApplyDuplicateSelectionRule}
+                  onClearDuplicateSelection={onClearDuplicateSelection}
+                  onReapplyDuplicateGroup={onReapplyDuplicateGroup}
+                  onClearDuplicateGroup={onClearDuplicateGroup}
                   onFileClick={onProjectionFileClick}
                   onFileDoubleClick={onProjectionFileDoubleClick}
                   onDirectoryClick={onDirectoryClick}

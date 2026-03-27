@@ -71,6 +71,24 @@ function readFirstResultRelativePath(result: unknown): string | null {
   return normalized || null
 }
 
+function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    return []
+  }
+
+  const unique = new Set<string>()
+  for (const item of result.items) {
+    if (!isRecord(item) || item.ok !== true || typeof item.absolutePath !== 'string') {
+      continue
+    }
+    const absolutePath = item.absolutePath.trim()
+    if (!absolutePath) continue
+    unique.add(absolutePath)
+  }
+
+  return [...unique]
+}
+
 function resolvePreviewBaseArguments(file: FileItem): Record<string, unknown> | null {
   if (file.kind !== 'file') return null
   if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
@@ -193,6 +211,22 @@ export function PreviewPluginHost({
         }
         if (tool.name === 'fs.softDelete') {
           mutationParams.deletedRelativePath = readFirstResultRelativePath(result.result) ?? file.path
+          const deletedAbsolutePathSet = new Set<string>()
+          for (const absolutePath of readSuccessfulResultAbsolutePaths(result.result)) {
+            if (absolutePath) {
+              deletedAbsolutePathSet.add(absolutePath)
+            }
+          }
+          if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+            deletedAbsolutePathSet.add(file.absolutePath.trim())
+          }
+          if (deletedAbsolutePathSet.size > 0) {
+            mutationParams.deletedAbsolutePaths = [...deletedAbsolutePathSet]
+          }
+          if (activeProjection?.id) {
+            mutationParams.projectionTabId = activeProjection.id
+            mutationParams.deletedProjectionPaths = [file.path]
+          }
         }
         await onMutationCommitted(mutationParams)
       }

@@ -8,6 +8,15 @@ import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useReso
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
+import {
+  buildDuplicateSelectionForGroup,
+  buildDuplicateSelectionForProjection,
+  type DuplicateSelectionRule,
+  groupDuplicateProjectionFiles,
+  isDuplicateProjection,
+  replaceDuplicateGroupSelection,
+} from '@/features/workspace/lib/duplicateSelection'
+import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
@@ -97,6 +106,10 @@ interface PersistedPreviewPaneWidthState {
 
 function clampPaneWidthRatio(value: number): number {
   return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, value))
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index])
 }
 
 function loadPersistedPreviewPaneWidthState(): PersistedPreviewPaneWidthState {
@@ -422,6 +435,7 @@ export function WorkspaceShell({
   const [activeProjectionTabId, setActiveProjectionTabId] = useState<string | null>(null)
   const [activeSurface, setActiveSurface] = useState<WorkspaceActiveSurface>({ kind: 'directory' })
   const [projectionSelectedPathsById, setProjectionSelectedPathsById] = useState<Record<string, string[]>>({})
+  const [duplicateSelectionRuleByProjectionId, setDuplicateSelectionRuleByProjectionId] = useState<Record<string, DuplicateSelectionRule | null>>({})
   const [directoryFocusedPath, setDirectoryFocusedPath] = useState<string | null>(null)
   const [projectionFocusedPathById, setProjectionFocusedPathById] = useState<Record<string, string | null>>({})
   const [isResultPanelOpen, setIsResultPanelOpen] = useState(false)
@@ -436,6 +450,7 @@ export function WorkspaceShell({
   const projectionFileGridRef = useRef<FileBrowserGridHandle>(null)
   const lastNormalResultPanelHeightRef = useRef(DEFAULT_RESULT_PANEL_HEIGHT_PX)
   const lastProjectionTabIdRef = useRef<string | null>(null)
+  const deletedProjectionAbsolutePathSetRef = useRef<Set<string>>(new Set())
   const handleFilterChange = useCallback((nextFilter: FilterState) => {
     setDirectorySelectedPaths([])
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
@@ -493,6 +508,10 @@ export function WorkspaceShell({
   const projectionGridSelectedPaths = useMemo(
     () => (activeProjectionTab?.id ? projectionSelectedPathsById[activeProjectionTab.id] ?? [] : []),
     [activeProjectionTab?.id, projectionSelectedPathsById]
+  )
+  const activeDuplicateSelectionRule = useMemo(
+    () => (activeProjectionTab?.id ? duplicateSelectionRuleByProjectionId[activeProjectionTab.id] ?? null : null),
+    [activeProjectionTab?.id, duplicateSelectionRuleByProjectionId]
   )
   const activeSurfaceSelectedPaths = useMemo(
     () => (activeSurface.kind === 'projection'
@@ -736,43 +755,124 @@ export function WorkspaceShell({
     alignPreviewToPath(resolveProjectionPreferredPath(projection, preferredPath))
   }, [alignPreviewToPath])
 
-  const handleActivateProjection = useCallback((projection: ResultProjection) => {
-    setProjectionTabs((previous) => {
-      const existingIndex = previous.findIndex((item) => item.id === projection.id)
-      if (existingIndex < 0) {
-        return [...previous, projection]
+  const setProjectionSelectedPathsForTab = useCallback((tabId: string, selectedPaths: string[]) => {
+    setProjectionSelectedPathsById((previous) => {
+      const currentSelectedPaths = previous[tabId] ?? []
+      if (areStringArraysEqual(currentSelectedPaths, selectedPaths)) {
+        return previous
       }
-      const next = [...previous]
-      next[existingIndex] = projection
-      return next
+      if (selectedPaths.length === 0) {
+        if (!(tabId in previous)) {
+          return previous
+        }
+        const next = { ...previous }
+        delete next[tabId]
+        return next
+      }
+      return {
+        ...previous,
+        [tabId]: selectedPaths,
+      }
     })
-    setIsResultPanelOpen(true)
-    setActiveProjectionTabId(projection.id)
-    lastProjectionTabIdRef.current = projection.id
-    setActiveSurface({ kind: 'projection', tabId: projection.id })
-    alignPreviewToProjection(projection, projectionFocusedPathById[projection.id])
-  }, [alignPreviewToProjection, projectionFocusedPathById])
+  }, [])
 
-  const handleActivateProjectionTab = useCallback((tabId: string) => {
-    const targetProjection = projectionTabs.find((projection) => projection.id === tabId)
-    if (!targetProjection) return
+  const setDuplicateSelectionRuleForTab = useCallback((tabId: string, rule: DuplicateSelectionRule | null) => {
+    setDuplicateSelectionRuleByProjectionId((previous) => {
+      const currentRule = previous[tabId] ?? null
+      if (currentRule === rule) {
+        return previous
+      }
+      if (rule === null) {
+        if (!(tabId in previous)) {
+          return previous
+        }
+        const next = { ...previous }
+        delete next[tabId]
+        return next
+      }
+      return {
+        ...previous,
+        [tabId]: rule,
+      }
+    })
+  }, [])
+
+  const activateProjectionSurface = useCallback((tabId: string, projection: ResultProjection | null) => {
+    if (!projection) {
+      return
+    }
     setIsResultPanelOpen(true)
     setActiveProjectionTabId(tabId)
     lastProjectionTabIdRef.current = tabId
     setActiveSurface({ kind: 'projection', tabId })
-    alignPreviewToProjection(targetProjection, projectionFocusedPathById[tabId])
-  }, [alignPreviewToProjection, projectionFocusedPathById, projectionTabs])
+    alignPreviewToProjection(projection, projectionFocusedPathById[tabId])
+  }, [alignPreviewToProjection, projectionFocusedPathById])
+
+  const activateProjectionSurfaceWithoutPreviewAlignment = useCallback((tabId: string) => {
+    if (!isResultPanelOpen) {
+      setIsResultPanelOpen(true)
+    }
+    if (activeProjectionTabId !== tabId) {
+      setActiveProjectionTabId(tabId)
+    }
+    if (lastProjectionTabIdRef.current !== tabId) {
+      lastProjectionTabIdRef.current = tabId
+    }
+    if (activeSurface.kind !== 'projection' || activeSurface.tabId !== tabId) {
+      setActiveSurface({ kind: 'projection', tabId })
+    }
+  }, [activeProjectionTabId, activeSurface, isResultPanelOpen])
+
+  const sanitizeProjectionAgainstDeletedFiles = useCallback((projection: ResultProjection): ResultProjection | null => {
+    const deletedAbsolutePathSet = deletedProjectionAbsolutePathSetRef.current
+    if (deletedAbsolutePathSet.size === 0) {
+      return projection
+    }
+
+    const nextFiles = projection.files.filter((file) => {
+      const absolutePath = typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''
+      return !absolutePath || !deletedAbsolutePathSet.has(absolutePath)
+    })
+    if (nextFiles.length === 0) {
+      return null
+    }
+    if (nextFiles.length === projection.files.length) {
+      return projection
+    }
+    return {
+      ...projection,
+      files: nextFiles,
+    }
+  }, [])
+
+  const handleActivateProjection = useCallback((projection: ResultProjection) => {
+    const sanitizedProjection = sanitizeProjectionAgainstDeletedFiles(projection)
+    if (!sanitizedProjection) {
+      return
+    }
+    setProjectionTabs((previous) => {
+      const existingIndex = previous.findIndex((item) => item.id === sanitizedProjection.id)
+      if (existingIndex < 0) {
+        return [...previous, sanitizedProjection]
+      }
+      const next = [...previous]
+      next[existingIndex] = sanitizedProjection
+      return next
+    })
+    activateProjectionSurface(sanitizedProjection.id, sanitizedProjection)
+  }, [activateProjectionSurface, sanitizeProjectionAgainstDeletedFiles])
+
+  const handleActivateProjectionTab = useCallback((tabId: string) => {
+    const targetProjection = projectionTabs.find((projection) => projection.id === tabId)
+    activateProjectionSurface(tabId, targetProjection ?? null)
+  }, [activateProjectionSurface, projectionTabs])
 
   const handleOpenResultPanel = useCallback(() => {
     const fallbackTabId = activeProjectionTab?.id ?? lastProjectionTabIdRef.current ?? projectionTabs[0]?.id ?? null
     if (!fallbackTabId) return
     const targetProjection = projectionTabs.find((projection) => projection.id === fallbackTabId) ?? null
-    setIsResultPanelOpen(true)
-    setActiveProjectionTabId(fallbackTabId)
-    lastProjectionTabIdRef.current = fallbackTabId
-    setActiveSurface({ kind: 'projection', tabId: fallbackTabId })
-    alignPreviewToProjection(targetProjection, projectionFocusedPathById[fallbackTabId])
-  }, [activeProjectionTab?.id, alignPreviewToProjection, projectionFocusedPathById, projectionTabs])
+    activateProjectionSurface(fallbackTabId, targetProjection)
+  }, [activeProjectionTab?.id, activateProjectionSurface, projectionTabs])
 
   const handleCloseResultPanel = useCallback(() => {
     setIsResultPanelOpen(false)
@@ -835,6 +935,12 @@ export function WorkspaceShell({
       delete next[tabId]
       return next
     })
+    setDuplicateSelectionRuleByProjectionId((previous) => {
+      if (!(tabId in previous)) return previous
+      const next = { ...previous }
+      delete next[tabId]
+      return next
+    })
     setProjectionFocusedPathById((previous) => {
       if (!(tabId in previous)) return previous
       const next = { ...previous }
@@ -867,24 +973,221 @@ export function WorkspaceShell({
 
   const handleProjectionGridSelectionChange = useCallback((selectedPaths: string[]) => {
     if (!activeProjectionTabId) return
-    setProjectionSelectedPathsById((previous) => {
-      const currentSelectedPaths = previous[activeProjectionTabId] ?? []
-      const isSame = currentSelectedPaths.length === selectedPaths.length
-        && currentSelectedPaths.every((path, index) => path === selectedPaths[index])
-      if (isSame) {
-        return previous
-      }
-      return {
-        ...previous,
-        [activeProjectionTabId]: selectedPaths,
-      }
-    })
-  }, [activeProjectionTabId])
+    activateProjectionSurfaceWithoutPreviewAlignment(activeProjectionTabId)
+    setProjectionSelectedPathsForTab(activeProjectionTabId, selectedPaths)
+  }, [activeProjectionTabId, activateProjectionSurfaceWithoutPreviewAlignment, setProjectionSelectedPathsForTab])
 
-  const handleWorkspaceMutationCommitted = useCallback(async () => {
+  const handleApplyDuplicateSelectionRule = useCallback((rule: DuplicateSelectionRule) => {
+    if (!activeProjectionTab || !isDuplicateProjection(activeProjectionTab)) {
+      return
+    }
+    const nextSelectedPaths = buildDuplicateSelectionForProjection(activeProjectionTab.files, rule)
+    activateProjectionSurfaceWithoutPreviewAlignment(activeProjectionTab.id)
+    setProjectionSelectedPathsForTab(activeProjectionTab.id, nextSelectedPaths)
+    setDuplicateSelectionRuleForTab(activeProjectionTab.id, rule)
+  }, [
+    activateProjectionSurfaceWithoutPreviewAlignment,
+    activeProjectionTab,
+    setDuplicateSelectionRuleForTab,
+    setProjectionSelectedPathsForTab,
+  ])
+
+  const handleClearDuplicateSelection = useCallback(() => {
+    if (!activeProjectionTab || !isDuplicateProjection(activeProjectionTab)) {
+      return
+    }
+    activateProjectionSurfaceWithoutPreviewAlignment(activeProjectionTab.id)
+    setProjectionSelectedPathsForTab(activeProjectionTab.id, [])
+    setDuplicateSelectionRuleForTab(activeProjectionTab.id, null)
+  }, [
+    activateProjectionSurfaceWithoutPreviewAlignment,
+    activeProjectionTab,
+    setDuplicateSelectionRuleForTab,
+    setProjectionSelectedPathsForTab,
+  ])
+
+  const handleReapplyDuplicateGroup = useCallback((groupId: string) => {
+    if (!activeProjectionTab || !isDuplicateProjection(activeProjectionTab) || !activeDuplicateSelectionRule) {
+      return
+    }
+
+    const targetGroup = groupDuplicateProjectionFiles(activeProjectionTab.files).find((group) => group.groupId === groupId)
+    if (!targetGroup) {
+      return
+    }
+
+    const currentSelectedPaths = projectionSelectedPathsById[activeProjectionTab.id] ?? []
+    const nextSelectedPaths = replaceDuplicateGroupSelection(
+      activeProjectionTab.files,
+      currentSelectedPaths,
+      groupId,
+      buildDuplicateSelectionForGroup(targetGroup.items, activeDuplicateSelectionRule)
+    )
+
+    activateProjectionSurfaceWithoutPreviewAlignment(activeProjectionTab.id)
+    setProjectionSelectedPathsForTab(activeProjectionTab.id, nextSelectedPaths)
+  }, [
+    activateProjectionSurfaceWithoutPreviewAlignment,
+    activeDuplicateSelectionRule,
+    activeProjectionTab,
+    projectionSelectedPathsById,
+    setProjectionSelectedPathsForTab,
+  ])
+
+  const handleClearDuplicateGroup = useCallback((groupId: string) => {
+    if (!activeProjectionTab || !isDuplicateProjection(activeProjectionTab)) {
+      return
+    }
+
+    const currentSelectedPaths = projectionSelectedPathsById[activeProjectionTab.id] ?? []
+    const nextSelectedPaths = replaceDuplicateGroupSelection(
+      activeProjectionTab.files,
+      currentSelectedPaths,
+      groupId,
+      []
+    )
+
+    activateProjectionSurfaceWithoutPreviewAlignment(activeProjectionTab.id)
+    setProjectionSelectedPathsForTab(activeProjectionTab.id, nextSelectedPaths)
+  }, [
+    activateProjectionSurfaceWithoutPreviewAlignment,
+    activeProjectionTab,
+    projectionSelectedPathsById,
+    setProjectionSelectedPathsForTab,
+  ])
+
+  const pruneDeletedFilesFromProjectionTabs = useCallback((params: {
+    deletedAbsolutePaths?: string[]
+    deletedProjectionPaths?: string[]
+    projectionTabId?: string | null
+  }) => {
+    if (projectionTabs.length === 0) {
+      return
+    }
+
+    const deletedAbsolutePathSet = new Set(
+      (params.deletedAbsolutePaths ?? [])
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+    for (const absolutePath of deletedAbsolutePathSet) {
+      deletedProjectionAbsolutePathSetRef.current.add(absolutePath)
+    }
+    const deletedProjectionPathSet = new Set(
+      (params.deletedProjectionPaths ?? [])
+        .map((item) => normalizeRelativePath(item))
+        .filter(Boolean)
+    )
+    if (deletedAbsolutePathSet.size === 0 && deletedProjectionPathSet.size === 0) {
+      return
+    }
+
+    let didChange = false
+    const nextTabs = projectionTabs
+      .map((projection) => {
+        const isTargetProjection = projection.id === params.projectionTabId
+        const nextFiles = projection.files.filter((file) => {
+          const absolutePath = typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''
+          const filePath = normalizeRelativePath(file.path)
+          if (absolutePath && deletedAbsolutePathSet.has(absolutePath)) {
+            return false
+          }
+          if (isTargetProjection && filePath && deletedProjectionPathSet.has(filePath)) {
+            return false
+          }
+          return true
+        })
+        if (nextFiles.length !== projection.files.length) {
+          didChange = true
+        }
+        return nextFiles.length === projection.files.length
+          ? projection
+          : {
+            ...projection,
+            files: nextFiles,
+          }
+      })
+      .filter((projection) => projection.files.length > 0)
+
+    if (!didChange && nextTabs.length === projectionTabs.length) {
+      return
+    }
+
+    const nextTabIdSet = new Set(nextTabs.map((projection) => projection.id))
+    setProjectionTabs(nextTabs)
+    setProjectionSelectedPathsById((previous) => {
+      const next: Record<string, string[]> = {}
+      for (const projection of nextTabs) {
+        const visiblePathSet = new Set(projection.files.map((file) => file.path))
+        const nextSelectedPaths = (previous[projection.id] ?? []).filter((path) => visiblePathSet.has(path))
+        if (nextSelectedPaths.length > 0) {
+          next[projection.id] = nextSelectedPaths
+        }
+      }
+      return next
+    })
+    setDuplicateSelectionRuleByProjectionId((previous) => {
+      const next: Record<string, DuplicateSelectionRule | null> = {}
+      for (const [tabId, rule] of Object.entries(previous)) {
+        if (nextTabIdSet.has(tabId)) {
+          next[tabId] = rule
+        }
+      }
+      return next
+    })
+    setProjectionFocusedPathById((previous) => {
+      const next: Record<string, string | null> = {}
+      for (const projection of nextTabs) {
+        const currentFocusedPath = previous[projection.id] ?? null
+        const visiblePathSet = new Set(projection.files.map((file) => file.path))
+        if (currentFocusedPath && visiblePathSet.has(currentFocusedPath)) {
+          next[projection.id] = currentFocusedPath
+        }
+      }
+      return next
+    })
+
+    const nextActiveTabId = (() => {
+      if (nextTabs.length === 0) return null
+      if (activeProjectionTabId && nextTabIdSet.has(activeProjectionTabId)) {
+        return activeProjectionTabId
+      }
+      return nextTabs[0]?.id ?? null
+    })()
+
+    setActiveProjectionTabId(nextActiveTabId)
+    if (!nextActiveTabId) {
+      lastProjectionTabIdRef.current = null
+      setIsResultPanelOpen(false)
+      setActiveSurface({ kind: 'directory' })
+      return
+    }
+
+    if (activeSurface.kind === 'projection' && !nextTabIdSet.has(activeSurface.tabId)) {
+      setActiveSurface({ kind: 'projection', tabId: nextActiveTabId })
+    }
+    if (lastProjectionTabIdRef.current && !nextTabIdSet.has(lastProjectionTabIdRef.current)) {
+      lastProjectionTabIdRef.current = nextActiveTabId
+    }
+  }, [activeProjectionTabId, activeSurface, projectionTabs])
+
+  const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
+    if (
+      params?.mutationToolName === 'fs.softDelete'
+      && (
+        (Array.isArray(params.deletedAbsolutePaths) && params.deletedAbsolutePaths.length > 0)
+        || (Array.isArray(params.deletedProjectionPaths) && params.deletedProjectionPaths.length > 0)
+      )
+    ) {
+      pruneDeletedFilesFromProjectionTabs({
+        deletedAbsolutePaths: params.deletedAbsolutePaths,
+        deletedProjectionPaths: params.deletedProjectionPaths,
+        projectionTabId: params.projectionTabId,
+      })
+    }
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
-  }, [currentPath, navigateToPath, refreshAnnotationSnapshot])
+  }, [currentPath, navigateToPath, pruneDeletedFilesFromProjectionTabs, refreshAnnotationSnapshot])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
     const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
@@ -912,8 +1215,36 @@ export function WorkspaceShell({
     }
 
     if (params?.mutationToolName === 'fs.softDelete') {
-      const deletedRelativePath = normalizeRelativePath(params.deletedRelativePath || '')
       const activePreviewFile = previewFile ?? selectedFile
+      const fallbackProjectionTabId = params.projectionTabId
+        ?? (activeSurface.kind === 'projection' ? activeSurface.tabId : null)
+      const fallbackDeletedProjectionPaths = (
+        Array.isArray(params.deletedProjectionPaths) && params.deletedProjectionPaths.length > 0
+      )
+        ? params.deletedProjectionPaths
+        : (
+          fallbackProjectionTabId && activePreviewFile?.kind === 'file'
+            ? [activePreviewFile.path]
+            : []
+        )
+      const fallbackDeletedAbsolutePaths = (
+        Array.isArray(params.deletedAbsolutePaths) && params.deletedAbsolutePaths.length > 0
+      )
+        ? params.deletedAbsolutePaths
+        : (
+          activePreviewFile?.kind === 'file' && typeof activePreviewFile.absolutePath === 'string' && activePreviewFile.absolutePath.trim()
+            ? [activePreviewFile.absolutePath.trim()]
+            : []
+        )
+      if (fallbackDeletedAbsolutePaths.length > 0 || fallbackDeletedProjectionPaths.length > 0) {
+        pruneDeletedFilesFromProjectionTabs({
+          deletedAbsolutePaths: fallbackDeletedAbsolutePaths,
+          deletedProjectionPaths: fallbackDeletedProjectionPaths,
+          projectionTabId: fallbackProjectionTabId,
+        })
+      }
+
+      const deletedRelativePath = normalizeRelativePath(params.deletedRelativePath || '')
       const activePreviewPath = activePreviewFile?.kind === 'file'
         ? normalizeRelativePath(activePreviewFile.path)
         : ''
@@ -942,12 +1273,14 @@ export function WorkspaceShell({
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
   }, [
+    activeSurface,
     alignPreviewToPath,
     currentPath,
     navigateMediaFromModal,
     navigateMediaFromPane,
     navigateToPath,
     previewFile,
+    pruneDeletedFilesFromProjectionTabs,
     refreshAnnotationSnapshot,
     resolveNextFileAfterDelete,
     selectedFile,
@@ -1002,6 +1335,7 @@ export function WorkspaceShell({
     setActiveProjectionTabId(null)
     setActiveSurface({ kind: 'directory' })
     setProjectionSelectedPathsById({})
+    setDuplicateSelectionRuleByProjectionId({})
     setProjectionFocusedPathById({})
     setDirectorySelectedPaths([])
     setDirectoryFocusedPath(null)
@@ -1412,6 +1746,11 @@ export function WorkspaceShell({
       activeProjectionTabId={activeProjectionTab?.id ?? null}
       onProjectionGridSelectionChange={handleProjectionGridSelectionChange}
       projectionGridSelectedPaths={projectionGridSelectedPaths}
+      activeDuplicateSelectionRule={activeDuplicateSelectionRule}
+      onApplyDuplicateSelectionRule={handleApplyDuplicateSelectionRule}
+      onClearDuplicateSelection={handleClearDuplicateSelection}
+      onReapplyDuplicateGroup={handleReapplyDuplicateGroup}
+      onClearDuplicateGroup={handleClearDuplicateGroup}
       isDirectorySurfaceActive={isDirectorySurfaceActive}
       isResultPanelOpen={isResultPanelOpen}
       resultPanelDisplayMode={resultPanelDisplayMode}

@@ -1,7 +1,5 @@
-export interface PreviewMutationCommitParams {
-  preferredPreviewPath?: string
+export interface WorkspaceMutationCommitParams {
   mutationToolName?: string
-  deletedRelativePath?: string
   deletedAbsolutePaths?: string[]
   deletedProjectionPaths?: string[]
   projectionTabId?: string | null

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { withToolScopedProjection } from '@/lib/projection'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
+import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import {
   hasWorkbenchMetadata,
   usePluginRuntime,
@@ -23,7 +25,7 @@ interface WorkspacePluginHostProps {
   setResultQueueState: Dispatch<SetStateAction<PluginResultQueueState>>
   workbenchState: PluginWorkbenchState
   setWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
-  onMutationCommitted?: () => void | Promise<void>
+  onMutationCommitted?: (params?: WorkspaceMutationCommitParams) => void | Promise<void>
   activeProjection: ResultProjection | null
   onActivateProjection: (projection: ResultProjection) => void
   onDismissProjectionTool: (toolName: string) => void
@@ -100,6 +102,28 @@ function resolveAbsoluteDeletePayload(files: FileItem[]): { absolutePaths: strin
     return null
   }
   return { absolutePaths }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    return []
+  }
+
+  const unique = new Set<string>()
+  for (const item of result.items) {
+    if (!isRecord(item) || item.ok !== true || typeof item.absolutePath !== 'string') {
+      continue
+    }
+    const absolutePath = item.absolutePath.trim()
+    if (!absolutePath) continue
+    unique.add(absolutePath)
+  }
+
+  return [...unique]
 }
 
 export function WorkspacePluginHost({
@@ -221,6 +245,39 @@ export function WorkspacePluginHost({
     selectedRestoreItems,
   ])
 
+  const handleRuntimeMutationCommitted = useCallback(async ({ tool, result }: { tool: GatewayToolDescriptor; result: DispatchSystemToolResult }) => {
+    if (!onMutationCommitted) {
+      return
+    }
+
+    const mutationParams: WorkspaceMutationCommitParams = {
+      mutationToolName: tool.name,
+    }
+    if (tool.name === 'fs.softDelete') {
+      const successfulAbsolutePaths = readSuccessfulResultAbsolutePaths(result.result)
+      const requestedAbsolutePaths = selectedDeleteAbsoluteArgs?.absolutePaths ?? []
+      const deletedAbsolutePathSet = new Set<string>()
+      for (const absolutePath of successfulAbsolutePaths) {
+        if (absolutePath) {
+          deletedAbsolutePathSet.add(absolutePath)
+        }
+      }
+      for (const absolutePath of requestedAbsolutePaths) {
+        if (absolutePath) {
+          deletedAbsolutePathSet.add(absolutePath)
+        }
+      }
+      if (deletedAbsolutePathSet.size > 0) {
+        mutationParams.deletedAbsolutePaths = [...deletedAbsolutePathSet]
+      }
+      if (activeProjection?.id) {
+        mutationParams.projectionTabId = activeProjection.id
+        mutationParams.deletedProjectionPaths = selectedFileEntries.map((file) => file.path)
+      }
+    }
+    await onMutationCommitted(mutationParams)
+  }, [activeProjection?.id, onMutationCommitted, selectedDeleteAbsoluteArgs?.absolutePaths, selectedFileEntries])
+
   const runtime = usePluginRuntime({
     scope: 'workspace',
     tools: contextualTools,
@@ -238,11 +295,7 @@ export function WorkspacePluginHost({
       }
       return hasTargets && relativeTargetArgs !== null
     }, [hasSelectedEntries, hasTargets, relativeTargetArgs]),
-    onMutationCommitted: onMutationCommitted
-      ? async () => {
-        await onMutationCommitted()
-      }
-      : undefined,
+    onMutationCommitted: onMutationCommitted ? handleRuntimeMutationCommitted : undefined,
   })
 
   const toolByName = useMemo(() => {
