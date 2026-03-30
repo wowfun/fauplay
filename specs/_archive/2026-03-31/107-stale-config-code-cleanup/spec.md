@@ -1,5 +1,7 @@
 # 107 过期配置与冗余代码清理规范
 
+> Archived on 2026-03-31. Kept for historical reference.
+
 ## 1. 目的 (Purpose)
 
 以不改变用户可见功能为前提，清理仓库中的过期配置、冗余类型别名和错误纳入版本控制的构建缓存，降低维护成本并保持增量构建效率。
@@ -56,6 +58,6 @@
 
 ## 8. 关联主题 (Related Specs)
 
-- 架构边界：[`../001-architecture/spec.md`](../001-architecture/spec.md)
-- 契约规范：[`../002-contracts/spec.md`](../002-contracts/spec.md)
-- 插件运行时交互：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)
+- 架构边界：[`../../../001-architecture/spec.md`](../../../001-architecture/spec.md)
+- 契约规范：[`../../../002-contracts/spec.md`](../../../002-contracts/spec.md)
+- 插件运行时交互：[`../../../105-plugin-runtime-interaction/spec.md`](../../../105-plugin-runtime-interaction/spec.md)

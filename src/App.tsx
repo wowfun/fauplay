@@ -1,8 +1,9 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { useKeyboardShortcuts, useKeyboardShortcutsRuntime } from '@/config/shortcutStore'
 import { useFileSystem } from '@/hooks/useFileSystem'
-import { matchesAnyShortcut } from '@/lib/keyboard'
+import { matchesAnyShortcut, type ShortcutBinding } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
+
 const WorkspaceShell = lazy(async () => {
   const mod = await import('@/features/workspace/components/WorkspaceShell')
   return { default: mod.WorkspaceShell }
@@ -18,6 +19,28 @@ function getFallbackSessionRootId(handle: FileSystemDirectoryHandle): string {
   const next = `session:${handle.name}:${suffix}`
   fallbackSessionRootIdByHandle.set(handle, next)
   return next
+}
+
+function useDirectorySelectionShortcut(
+  isEnabled: boolean,
+  openDirectoryShortcut: ShortcutBinding[],
+  selectDirectory: () => Promise<void>
+) {
+  useEffect(() => {
+    if (!isEnabled) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+
+      if (matchesAnyShortcut(event, openDirectoryShortcut)) {
+        event.preventDefault()
+        void selectDirectory()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isEnabled, openDirectoryShortcut, selectDirectory])
 }
 
 function WorkspaceLoadingFallback({ rootName }: { rootName: string }) {
@@ -60,23 +83,7 @@ function App() {
   } = useFileSystem()
   useKeyboardShortcutsRuntime(rootHandle, rootId)
   const keyboardShortcuts = useKeyboardShortcuts()
-
-  useEffect(() => {
-    if (rootHandle) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-
-      // Ctrl/Cmd + O: open folder picker
-      if (matchesAnyShortcut(event, keyboardShortcuts.app.openDirectory)) {
-        event.preventDefault()
-        void selectDirectory()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardShortcuts, rootHandle, selectDirectory])
+  useDirectorySelectionShortcut(rootHandle === null, keyboardShortcuts.app.openDirectory, selectDirectory)
 
   if (!rootHandle) {
     return (
@@ -86,25 +93,21 @@ function App() {
         onSelectDirectory={selectDirectory}
         cachedRoots={cachedRoots}
         favoriteFolders={favoriteFolders}
-        onOpenCachedRoot={(nextRootId) => {
-          void openCachedRoot(nextRootId)
-        }}
-        onRebindCachedRootPath={(nextRootId) => {
-          void rebindCachedRootPath(nextRootId)
-        }}
-        onOpenFavoriteFolder={(entry) => {
-          void openFavoriteFolder(entry)
-        }}
+        onOpenCachedRoot={openCachedRoot}
+        onRebindCachedRootPath={rebindCachedRootPath}
+        onOpenFavoriteFolder={openFavoriteFolder}
         onRemoveFavoriteFolder={removeFavoriteFolder}
       />
     )
   }
 
+  const resolvedRootId = rootId ?? getFallbackSessionRootId(rootHandle)
+
   return (
     <Suspense fallback={<WorkspaceLoadingFallback rootName={rootHandle.name} />}>
       <WorkspaceShell
         rootHandle={rootHandle}
-        rootId={rootId ?? getFallbackSessionRootId(rootHandle)}
+        rootId={resolvedRootId}
         files={files}
         currentPath={currentPath}
         isFlattenView={isFlattenView}

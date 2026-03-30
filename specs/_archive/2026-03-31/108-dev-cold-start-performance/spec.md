@@ -1,5 +1,7 @@
 # 108 Dev Cold Start Performance 冷启动性能专题规范
 
+> Archived on 2026-03-31. Kept for historical reference.
+
 ## 1. 目的 (Purpose)
 
 定义 Fauplay 在开发模式下“服务重启后首次刷新进入开始页慢”的专项性能契约，确保开始页优先可见、工作区重模块延后加载，并为首次进入工作区提供可感知反馈。
@@ -107,7 +109,7 @@
 
 ## 12. 关联主题 (Related Specs)
 
-- 性能治理：[`../004-performance-governance/spec.md`](../004-performance-governance/spec.md)
-- 基线规范：[`../000-foundation/spec.md`](../000-foundation/spec.md)
-- 架构规范：[`../001-architecture/spec.md`](../001-architecture/spec.md)
-- 交互规范：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
+- 性能治理：[`../../../004-performance-governance/spec.md`](../../../004-performance-governance/spec.md)
+- 基线规范：[`../../../000-foundation/spec.md`](../../../000-foundation/spec.md)
+- 架构规范：[`../../../001-architecture/spec.md`](../../../001-architecture/spec.md)
+- 交互规范：[`../../../003-ui-ux/spec.md`](../../../003-ui-ux/spec.md)

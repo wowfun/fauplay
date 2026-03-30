@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-03-31
+### Added
+- 新增 `specs/124-app-entry-composition/spec.md`：定义应用入口装配重构专题，约束 `src/App.tsx` 仅整理目录选择快捷键副作用、目录选择页/工作区分支 props 装配与稳定兜底 `rootId` 语义，不引入新的用户可见行为。
+- 新增 `specs/125-gateway-route-composition/spec.md`：定义 Gateway 路由装配重构专题，要求 `scripts/gateway/server.mjs` 的 JSON HTTP 路由可达判断与执行处理共享单一注册表，并将 `tools/call` 后处理从主请求分支中抽离，保持对外协议不变。
+
+### Changed
+- 归档 `specs/107-stale-config-code-cleanup/`、`specs/108-dev-cold-start-performance/`、`specs/124-app-entry-composition/` 与 `specs/125-gateway-route-composition/` 到 `specs/_archive/2026-03-31/`，并为归档文档补充历史引用头注与迁移后相对链接修正。
+
 ## 2026-03-30
 ### Added
 - 新增 `specs/123-status-bar/spec.md`：定义底部状态栏专题，收敛状态栏统计、单文件元信息、父目录路径解析与全屏预览可见性契约。

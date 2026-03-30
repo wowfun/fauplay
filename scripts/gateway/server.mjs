@@ -447,88 +447,60 @@ function toHttpErrorBody(error) {
   }
 }
 
-async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
-  if (pathname === '/v1/data/tags/file') {
-    return getFileTags(payload)
-  }
+function throwHttpGatewayRouteNotFound(pathname) {
+  throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
+}
 
-  if (pathname === '/v1/data/tags/options') {
-    return listTagOptions(payload)
-  }
+function throwHttpGatewayRouteOffline(pathname) {
+  throw createMcpRuntimeError(
+    'MCP_METHOD_NOT_FOUND',
+    `Endpoint offline: ${pathname}`,
+    404,
+  )
+}
 
-  if (pathname === '/v1/data/tags/query') {
-    return queryFilesByTags(payload)
+function createExactHttpGatewayRoute(method, pathname, handler) {
+  return {
+    method,
+    matches(candidatePathname) {
+      return candidatePathname === pathname
+    },
+    handler,
   }
+}
 
-  if (method === 'PUT' && pathname === '/v1/file-annotations') {
-    return setAnnotationValue(payload)
+function createPrefixHttpGatewayRoute(method, prefix, handler) {
+  return {
+    method,
+    matches(candidatePathname) {
+      return candidatePathname.startsWith(prefix)
+    },
+    handler,
   }
+}
 
-  if (method === 'POST' && pathname === '/v1/file-annotations/tags/bind') {
-    return bindAnnotationTag(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/file-annotations/tags/unbind') {
-    return unbindAnnotationTag(payload)
-  }
-
-  if (method === 'PATCH' && pathname === '/v1/files/relative-paths') {
-    return batchRebindPaths(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/files/indexes') {
-    return ensureFileEntries(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/files/duplicates/query') {
-    return queryDuplicateFiles(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/files/missing/cleanups') {
-    return cleanupMissingFiles(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/files/text-preview') {
-    return readFileTextPreview(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/recycle/items/move') {
-    return moveFilesToRecycle(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/recycle/items/list') {
-    return listRecycleItems(payload)
-  }
-
-  if (method === 'POST' && pathname === '/v1/recycle/items/restore') {
-    return restoreRecycleItems(payload)
-  }
-
-  if (pathname.startsWith('/v1/local-data/')) {
-    throw createMcpRuntimeError(
-      'MCP_METHOD_NOT_FOUND',
-      `Endpoint offline: ${pathname}`,
-      404,
-    )
-  }
-
-  if (pathname.startsWith('/v1/annotations/')) {
-    throw createMcpRuntimeError(
-      'MCP_METHOD_NOT_FOUND',
-      `Endpoint offline: ${pathname}`,
-      404,
-    )
-  }
-
-  if (pathname === '/v1/file-bindings/reconciliations' || pathname === '/v1/file-bindings/cleanups') {
-    throw createMcpRuntimeError(
-      'MCP_METHOD_NOT_FOUND',
-      `Endpoint offline: ${pathname}`,
-      404,
-    )
-  }
-
-  if (pathname === '/v1/faces/detect-asset') {
+const httpGatewayRoutes = [
+  createExactHttpGatewayRoute('POST', '/v1/data/tags/file', ({ payload }) => getFileTags(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/data/tags/options', ({ payload }) => listTagOptions(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/data/tags/query', ({ payload }) => queryFilesByTags(payload)),
+  createExactHttpGatewayRoute('PUT', '/v1/file-annotations', ({ payload }) => setAnnotationValue(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/file-annotations/tags/bind', ({ payload }) => bindAnnotationTag(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/file-annotations/tags/unbind', ({ payload }) => unbindAnnotationTag(payload)),
+  createExactHttpGatewayRoute('PATCH', '/v1/files/relative-paths', ({ payload }) => batchRebindPaths(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/files/indexes', ({ payload }) => ensureFileEntries(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/files/duplicates/query', ({ payload }) => queryDuplicateFiles(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/files/missing/cleanups', ({ payload }) => cleanupMissingFiles(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/files/text-preview', ({ payload }) => readFileTextPreview(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/recycle/items/move', ({ payload }) => moveFilesToRecycle(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/recycle/items/list', ({ payload }) => listRecycleItems(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/recycle/items/restore', ({ payload }) => restoreRecycleItems(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/file-bindings/reconciliations', ({ pathname }) => {
+    throwHttpGatewayRouteOffline(pathname)
+  }),
+  createExactHttpGatewayRoute('POST', '/v1/file-bindings/cleanups', ({ pathname }) => {
+    throwHttpGatewayRouteOffline(pathname)
+  }),
+  createExactHttpGatewayRoute('POST', '/v1/faces/detect-asset', async ({ runtime, payload }) => {
     const inferred = await callVisionInference(runtime, payload)
     const persisted = await saveDetectedFaces({
       rootPath: inferred.rootPath,
@@ -539,61 +511,63 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
       ...persisted,
       inferenceDetected: inferred.detected,
     }
-  }
+  }),
+  createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/list-people', ({ payload }) => listPeople(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/rename-person', ({ payload }) => renamePerson(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/merge-people', ({ payload }) => mergePeople(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/list-asset-faces', ({ payload }) => listAssetFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/list-review-faces', ({ payload }) => listReviewFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/suggest-people', ({ payload }) => suggestPeople(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/assign-faces', ({ payload }) => assignFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/create-person-from-faces', ({ payload }) => createPersonFromFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/unassign-faces', ({ payload }) => unassignFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/ignore-faces', ({ payload }) => ignoreFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/restore-ignored-faces', ({ payload }) => restoreIgnoredFaces(payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/requeue-faces', ({ payload }) => requeueFaces(payload)),
+  createPrefixHttpGatewayRoute('POST', '/v1/local-data/', ({ pathname }) => {
+    throwHttpGatewayRouteOffline(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/annotations/', ({ pathname }) => {
+    throwHttpGatewayRouteOffline(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/data/tags/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/file-annotations/tags/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/files/duplicates/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/files/missing/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/file-bindings/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/faces/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/recycle/', ({ pathname }) => {
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+]
 
-  if (pathname === '/v1/faces/cluster-pending') {
-    return clusterPendingFaces(payload)
-  }
+function findHttpGatewayRoute(method, pathname) {
+  return httpGatewayRoutes.find((route) => route.method === method && route.matches(pathname)) ?? null
+}
 
-  if (pathname === '/v1/faces/list-people') {
-    return listPeople(payload)
+async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
+  const route = findHttpGatewayRoute(method, pathname)
+  if (!route) {
+    throwHttpGatewayRouteNotFound(pathname)
   }
-
-  if (pathname === '/v1/faces/rename-person') {
-    return renamePerson(payload)
-  }
-
-  if (pathname === '/v1/faces/merge-people') {
-    return mergePeople(payload)
-  }
-
-  if (pathname === '/v1/faces/list-asset-faces') {
-    return listAssetFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/list-review-faces') {
-    return listReviewFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/suggest-people') {
-    return suggestPeople(payload)
-  }
-
-  if (pathname === '/v1/faces/assign-faces') {
-    return assignFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/create-person-from-faces') {
-    return createPersonFromFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/unassign-faces') {
-    return unassignFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/ignore-faces') {
-    return ignoreFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/restore-ignored-faces') {
-    return restoreIgnoredFaces(payload)
-  }
-
-  if (pathname === '/v1/faces/requeue-faces') {
-    return requeueFaces(payload)
-  }
-
-  throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
+  return route.handler({
+    runtime,
+    pathname,
+    payload,
+  })
 }
 
 function buildInitializeResult() {
@@ -607,6 +581,70 @@ function buildInitializeResult() {
       version: GATEWAY_VERSION,
     },
   }
+}
+
+async function postProcessClassificationToolCall(toolName, toolArgs, result) {
+  if ((toolName !== 'ml.classifyImage' && toolName !== 'ml.classifyBatch') || !isObjectRecord(toolArgs)) {
+    return
+  }
+
+  const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath : ''
+  if (!rootPath) return
+
+  await ingestClassificationResult({
+    rootPath,
+    toolName,
+    toolArgs,
+    toolResult: result,
+  })
+}
+
+async function postProcessBatchRenameToolCall(toolName, toolArgs, result) {
+  if (toolName !== 'fs.batchRename' || !isObjectRecord(toolArgs) || !isObjectRecord(result)) {
+    return
+  }
+
+  const confirm = toolArgs.confirm === true
+  const renamed = Number(result.renamed ?? 0)
+
+  if (!confirm || renamed <= 0) {
+    return
+  }
+
+  const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath.trim() : ''
+  const mappings = parseBatchRenameRebindMappings(result)
+
+  if (!rootPath) {
+    appendPostProcessWarning(result, 'batchRebindPaths skipped: missing rootPath')
+    return
+  }
+
+  if (mappings.length === 0) {
+    return
+  }
+
+  try {
+    const rebindResult = await batchRebindPaths({
+      rootPath,
+      mappings,
+    })
+    result.rebindResult = rebindResult
+    if (Number(rebindResult?.failed ?? 0) > 0) {
+      appendPostProcessWarning(
+        result,
+        `batchRebindPaths completed with ${rebindResult.failed} failed item(s)`,
+      )
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'unknown error'
+    console.warn(`[gateway] fs.batchRename post-process batchRebindPaths failed: ${reason}`)
+    appendPostProcessWarning(result, `batchRebindPaths failed: ${reason}`)
+  }
+}
+
+async function postProcessToolCallResult(toolName, toolArgs, result) {
+  await postProcessClassificationToolCall(toolName, toolArgs, result)
+  await postProcessBatchRenameToolCall(toolName, toolArgs, result)
 }
 
 async function handleMcpRequest(runtime, request, sessions, sessionId) {
@@ -665,6 +703,17 @@ async function handleMcpRequest(runtime, request, sessions, sessionId) {
   throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Unsupported MCP method: ${request.method}`, 404)
 }
 
+async function sendFileContentBinaryResponse(res, absolutePath) {
+  try {
+    const result = await readFileContentByAbsolutePath({
+      absolutePath,
+    })
+    sendBinary(res, 200, result.body, result.contentType)
+  } catch (error) {
+    sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
+  }
+}
+
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
@@ -689,8 +738,9 @@ export async function startGatewayServer(options = {}) {
 
   const server = http.createServer(async (req, res) => {
     setCorsHeaders(res)
+    const method = req.method || 'GET'
 
-    if (req.method === 'OPTIONS') {
+    if (method === 'OPTIONS') {
       res.statusCode = 204
       res.end()
       return
@@ -699,7 +749,7 @@ export async function startGatewayServer(options = {}) {
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`)
     const pathname = requestUrl.pathname
 
-    if (req.method === 'GET' && pathname === '/v1/health') {
+    if (method === 'GET' && pathname === '/v1/health') {
       sendJson(res, 200, {
         service: 'fauplay-local-gateway',
         version: GATEWAY_VERSION,
@@ -708,7 +758,7 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    if (req.method === 'GET' && pathname === '/v1/config/shortcuts') {
+    if (method === 'GET' && pathname === '/v1/config/shortcuts') {
       try {
         const result = await readOptionalJsonFile(GLOBAL_SHORTCUTS_CONFIG_PATH)
         sendJson(res, 200, {
@@ -723,7 +773,7 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    if (req.method === 'GET' && pathname.startsWith('/v1/faces/crops/')) {
+    if (method === 'GET' && pathname.startsWith('/v1/faces/crops/')) {
       try {
         const faceId = decodeURIComponent(pathname.slice('/v1/faces/crops/'.length))
         const size = requestUrl.searchParams.get('size')
@@ -740,33 +790,19 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    if (req.method === 'GET' && pathname === '/v1/files/content') {
-      try {
-        const absolutePath = requestUrl.searchParams.get('absolutePath')
-        const result = await readFileContentByAbsolutePath({
-          absolutePath,
-        })
-        sendBinary(res, 200, result.body, result.contentType)
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
+    if (method === 'GET' && pathname === '/v1/files/content') {
+      const absolutePath = requestUrl.searchParams.get('absolutePath')
+      await sendFileContentBinaryResponse(res, absolutePath)
       return
     }
 
-    if (req.method === 'GET' && pathname === '/v1/files/thumbnail') {
-      try {
-        const absolutePath = requestUrl.searchParams.get('absolutePath')
-        const result = await readFileContentByAbsolutePath({
-          absolutePath,
-        })
-        sendBinary(res, 200, result.body, result.contentType)
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
+    if (method === 'GET' && pathname === '/v1/files/thumbnail') {
+      const absolutePath = requestUrl.searchParams.get('absolutePath')
+      await sendFileContentBinaryResponse(res, absolutePath)
       return
     }
 
-    if (req.method === 'POST' && pathname === '/v1/mcp') {
+    if (method === 'POST' && pathname === '/v1/mcp') {
       let request = null
       let requestIsNotification = false
       let responseSessionId = null
@@ -778,50 +814,7 @@ export async function startGatewayServer(options = {}) {
         const requestSessionId = request.method === 'initialize' ? null : readSessionId(req)
         const { sessionId, result } = await handleMcpRequest(runtime, request, clientSessions, requestSessionId)
         if (request.method === 'tools/call') {
-          const toolName = request.params?.name
-          const toolArgs = request.params?.arguments
-          if ((toolName === 'ml.classifyImage' || toolName === 'ml.classifyBatch') && isObjectRecord(toolArgs)) {
-            const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath : ''
-            if (rootPath) {
-              await ingestClassificationResult({
-                rootPath,
-                toolName,
-                toolArgs,
-                toolResult: result,
-              })
-            }
-          }
-
-          if (toolName === 'fs.batchRename' && isObjectRecord(toolArgs) && isObjectRecord(result)) {
-            const confirm = toolArgs.confirm === true
-            const renamed = Number(result.renamed ?? 0)
-
-            if (confirm && renamed > 0) {
-              const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath.trim() : ''
-              const mappings = parseBatchRenameRebindMappings(result)
-              if (!rootPath) {
-                appendPostProcessWarning(result, 'batchRebindPaths skipped: missing rootPath')
-              } else if (mappings.length > 0) {
-                try {
-                  const rebindResult = await batchRebindPaths({
-                    rootPath,
-                    mappings,
-                  })
-                  result.rebindResult = rebindResult
-                  if (Number(rebindResult?.failed ?? 0) > 0) {
-                    appendPostProcessWarning(
-                      result,
-                      `batchRebindPaths completed with ${rebindResult.failed} failed item(s)`,
-                    )
-                  }
-                } catch (error) {
-                  const reason = error instanceof Error ? error.message : 'unknown error'
-                  console.warn(`[gateway] fs.batchRename post-process batchRebindPaths failed: ${reason}`)
-                  appendPostProcessWarning(result, `batchRebindPaths failed: ${reason}`)
-                }
-              }
-            }
-          }
+          await postProcessToolCallResult(request.params?.name, request.params?.arguments, result)
         }
         responseSessionId = sessionId
 
@@ -860,32 +853,14 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    const supportsHttpRoute = (
-      (req.method === 'POST' && (
-        pathname.startsWith('/v1/data/tags/')
-        || pathname.startsWith('/v1/file-annotations/tags/')
-        || pathname.startsWith('/v1/files/duplicates/')
-        || pathname === '/v1/files/indexes'
-        || pathname.startsWith('/v1/files/missing/')
-        || pathname === '/v1/files/text-preview'
-        || pathname.startsWith('/v1/file-bindings/')
-        || pathname.startsWith('/v1/faces/')
-        || pathname.startsWith('/v1/recycle/')
-        || pathname.startsWith('/v1/local-data/')
-        || pathname.startsWith('/v1/annotations/')
-      ))
-      || (req.method === 'PUT' && pathname === '/v1/file-annotations')
-      || (req.method === 'PATCH' && pathname === '/v1/files/relative-paths')
-    )
-
-    if (supportsHttpRoute) {
+    if (findHttpGatewayRoute(method, pathname)) {
       try {
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
 
-        const result = await handleHttpGatewayRoute(runtime, req.method || 'GET', pathname, payload)
+        const result = await handleHttpGatewayRoute(runtime, method, pathname, payload)
         sendJson(res, 200, result ?? { ok: true })
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))

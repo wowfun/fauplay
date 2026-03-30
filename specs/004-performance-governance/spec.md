@@ -91,4 +91,3 @@
 - 基线规范：[`../000-foundation/spec.md`](../000-foundation/spec.md)
 - 架构规范：[`../001-architecture/spec.md`](../001-architecture/spec.md)
 - 交互规范：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
-- 冷启动专题：[`../108-dev-cold-start-performance/spec.md`](../108-dev-cold-start-performance/spec.md)
