@@ -7,6 +7,7 @@
 ### Changed
 - 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：补充底部状态区展示约束，并明确全屏预览覆盖层不得遮挡状态栏。
 - 更新 `specs/123-status-bar/spec.md`：状态栏单文件元信息目标从“单个勾选文件优先”收敛为“当前预览文件优先，缺失时再回退到单个勾选文件”。
+- 更新 `specs/100-preview-playback/spec.md`、`src/features/preview/hooks/usePreviewTraversal.ts` 与 `docs/shortcuts.md`：预览遍历模式改为写入本地存储，刷新后恢复最近一次顺序/随机选择，同时保持“仅恢复设置、不自动打开预览”的约束。
 
 ## 2026-03-28
 ### Changed

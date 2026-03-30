@@ -13,6 +13,7 @@ const VIDEO_PLAYBACK_RATE_CYCLE_ORDER = [1, 3, 5, 0.5] as const
 const DEFAULT_VIDEO_PLAYBACK_RATE = 1
 const VIDEO_SEEK_STEP_STORAGE_KEY = 'fauplay:preview-video-seek-step-sec'
 const VIDEO_PLAYBACK_RATE_STORAGE_KEY = 'fauplay:preview-video-playback-rate'
+const PLAYBACK_ORDER_STORAGE_KEY = 'fauplay:preview-playback-order'
 const FACE_BBOX_VISIBLE_STORAGE_KEY = 'fauplay:preview-face-bbox-visible'
 const DEFAULT_FACE_BBOX_VISIBLE = false
 const WRAP_AT_BOUNDARY = true
@@ -83,6 +84,25 @@ function savePersistedVideoPlaybackRate(value: number): void {
   }
 }
 
+function readPersistedPlaybackOrder(): PlaybackOrder {
+  if (typeof window === 'undefined') return 'sequential'
+  try {
+    const raw = window.localStorage.getItem(PLAYBACK_ORDER_STORAGE_KEY)
+    return raw === 'shuffle' || raw === 'sequential' ? raw : 'sequential'
+  } catch {
+    return 'sequential'
+  }
+}
+
+function savePersistedPlaybackOrder(value: PlaybackOrder): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(PLAYBACK_ORDER_STORAGE_KEY, value)
+  } catch {
+    // Ignore storage write failures and keep runtime state available.
+  }
+}
+
 function readPersistedFaceBboxVisible(): boolean {
   if (typeof window === 'undefined') return DEFAULT_FACE_BBOX_VISIBLE
   try {
@@ -129,7 +149,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const [videoPlaybackRate, setVideoPlaybackRateState] = useState<number>(() => readPersistedVideoPlaybackRate())
   const [faceBboxVisible, setFaceBboxVisible] = useState<boolean>(() => readPersistedFaceBboxVisible())
   const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
-  const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>('sequential')
+  const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>(() => readPersistedPlaybackOrder())
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
   const [shuffleHistory, setShuffleHistory] = useState<string[]>([])
   const autoPlayTimerRef = useRef<number | null>(null)
@@ -587,6 +607,10 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   useEffect(() => {
     savePersistedVideoPlaybackRate(videoPlaybackRate)
   }, [videoPlaybackRate])
+
+  useEffect(() => {
+    savePersistedPlaybackOrder(playbackOrder)
+  }, [playbackOrder])
 
   useEffect(() => {
     savePersistedFaceBboxVisible(faceBboxVisible)
