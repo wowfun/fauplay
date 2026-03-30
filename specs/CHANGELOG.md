@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-03-30
+### Added
+- 新增 `specs/123-status-bar/spec.md`：定义底部状态栏专题，收敛状态栏统计、单文件元信息、父目录路径解析与全屏预览可见性契约。
+
+### Changed
+- 更新 `specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/areas.md`：补充底部状态区展示约束，并明确全屏预览覆盖层不得遮挡状态栏。
+- 更新 `specs/123-status-bar/spec.md`：状态栏单文件元信息目标从“单个勾选文件优先”收敛为“当前预览文件优先，缺失时再回退到单个勾选文件”。
+
 ## 2026-03-28
 ### Changed
 - 更新 `specs/109-soft-delete/spec.md`、`specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：新增统一“删除撤销”契约，明确删除后会话级撤销栈、`Ctrl/Cmd + Z`、提示条、删除前 UI 快照，以及文件网格/底部结果面板/预览状态的恢复语义。

@@ -4,6 +4,7 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
+import { EXPLORER_STATUS_BAR_HEIGHT_PX } from '@/features/explorer/constants/statusBar'
 import { FilePreviewPanel } from './FilePreviewPanel'
 
 interface FileLightboxModalProps {
@@ -82,7 +83,10 @@ export function FileLightboxModal({
   onDismissProjectionTool,
 }: FileLightboxModalProps) {
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+    <div
+      className="fixed inset-x-0 top-0 z-50 flex flex-col bg-background"
+      style={{ bottom: EXPLORER_STATUS_BAR_HEIGHT_PX }}
+    >
       <FilePreviewPanel
         file={file}
         rootHandle={rootHandle}

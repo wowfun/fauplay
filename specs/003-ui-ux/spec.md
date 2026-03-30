@@ -67,6 +67,7 @@
 4. 两种表现态允许差异仅限表现层（Presentation Layer）：容器形态、边框样式、覆盖层层级（z-index）与焦点管理（Focus Management）。
 5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
 6. 插件运行时状态共享、折叠策略与三段式细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
+7. 全屏预览覆盖层不得遮挡底部状态区（Status Bar Zone）；状态栏在侧栏与全屏预览两种表现态下都必须持续可见。
 
 ## 插件运行时引用契约 (Plugin Runtime Reference Contract)
 
@@ -91,6 +92,7 @@
 10. 文件网格区应支持复选框多选，且文件与目录均可被勾选。
 11. 网格区应支持范围选择（`Shift + 单击`、`Shift + 方向键`），默认覆盖当前勾选集合。
 12. `Ctrl/Cmd + 单击` 网格项应仅切换勾选态，不触发目录进入或预览打开。
+13. 底部状态区必须持续展示当前活动表面的 `可见 / 已选` 统计，并在存在明确目标文件时补充 `大小 / 修改时间 / 父目录路径` 元信息。
 
 ## 布局默认值契约 (Layout Default Contract)
 

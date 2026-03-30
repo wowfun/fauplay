@@ -1,0 +1,1 @@
+export const EXPLORER_STATUS_BAR_HEIGHT_PX = 32

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ExplorerToolbar } from '@/features/explorer/components/ExplorerToolbar'
+import { EXPLORER_STATUS_BAR_HEIGHT_PX } from '@/features/explorer/constants/statusBar'
 import type { ShortcutHelpEntry } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { FileBrowserGrid } from '@/features/explorer/components/FileBrowserGrid'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
@@ -623,15 +624,21 @@ export function ExplorerWorkspaceLayout({
       )}
 
       <ExplorerStatusBar
+        rootHandle={rootHandle}
+        rootId={rootId}
         visibleFiles={activeSurfaceFiles}
         selectedCount={gridSelectedCount}
         selectedMetaFile={selectedGridMetaFile}
+        previewMetaFile={previewFile ?? (showPreviewPane ? selectedFile : null)}
       />
 
       {previewFile && (
         <Suspense
           fallback={(
-            <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
+            <div
+              className="fixed inset-x-0 top-0 z-50 flex items-center justify-center bg-background"
+              style={{ bottom: EXPLORER_STATUS_BAR_HEIGHT_PX }}
+            >
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           )}

@@ -79,12 +79,15 @@
 - 职责：展示可见项统计与当前选中项元信息。
 - 当前组件：`features/explorer/components/ExplorerStatusBar`
 - 边界：只读展示，不触发目录变更与预览控制；不得承载结果投射文件视图。
+- 展示约束：默认展示当前活动表面的 `可见 / 已选` 统计；当存在明确目标文件时，补充 `大小 / 修改时间 / 父目录路径` 元信息。
+- 一致性约束：全屏预览打开时，C 区必须继续可见，不得被 D 覆盖层遮挡。
 
 ### D 全屏预览区（Lightbox Modal Zone）
 
 - 职责：沉浸式文件查看，复用预览域逻辑。
 - 当前组件：`features/preview/components/FileLightboxModal`
 - 边界：作为覆盖层，不改变底层 A/B1/C 布局状态。
+- 可见性约束：D 必须为 C 区预留固定高度；loading / error / ready 等所有表现态都不得遮挡底部状态区。
 
 ## 插件三段式子分区命名规范（Canonical Plugin Sub-zones）
 
