@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
-import { isUnlimited, toolResultQueueConfig } from '@/config/toolResultQueue'
-import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
+import type { GatewayToolDescriptor, ToolActionAnnotation } from '@/lib/gateway'
 import { dispatchSystemTool, type DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { extractResultProjection } from '@/lib/projection'
 import type {
@@ -14,8 +13,17 @@ import type {
   PluginWorkbenchState,
   ToolWorkbenchOptionValue,
 } from '@/features/plugin-runtime/types'
-
-const QUEUE_ID_RANDOM_MAX = 1_000_000
+import {
+  createQueueItemId,
+  enqueueLoadingResult,
+  finalizeQueueItem,
+  shouldSkipCompletedRequest,
+  toggleQueueItemCollapsed,
+} from '@/features/plugin-runtime/utils/resultQueueState'
+import {
+  hasWorkbenchMetadata,
+  resolveToolOptionValue,
+} from '@/features/plugin-runtime/utils/toolRuntime'
 
 interface RunToolCallOptions {
   trigger: PluginResultTrigger
@@ -39,42 +47,6 @@ interface UsePluginRuntimeOptions {
   buildBaseArguments: () => Record<string, unknown> | null
   canRunTool?: (tool: GatewayToolDescriptor) => boolean
   onMutationCommitted?: (params: { tool: GatewayToolDescriptor; result: DispatchSystemToolResult }) => void | Promise<void>
-}
-
-function createQueueItemId(toolName: string): string {
-  return `${Date.now()}-${Math.floor(Math.random() * QUEUE_ID_RANDOM_MAX)}-${toolName}`
-}
-
-function touchContextOrder(contextOrder: string[], contextKey: string): string[] {
-  return [contextKey, ...contextOrder.filter((item) => item !== contextKey)]
-}
-
-function trimQueueByItemLimit(queue: PluginResultQueueItem[]): PluginResultQueueItem[] {
-  if (isUnlimited(toolResultQueueConfig.maxItemsPerFile)) {
-    return queue
-  }
-  return queue.slice(0, Math.max(toolResultQueueConfig.maxItemsPerFile, 0))
-}
-
-function trimQueueStateByContextLimit(state: PluginResultQueueState): PluginResultQueueState {
-  if (isUnlimited(toolResultQueueConfig.maxFiles) || state.contextOrder.length <= toolResultQueueConfig.maxFiles) {
-    return state
-  }
-
-  const keepContextKeys = state.contextOrder.slice(0, Math.max(toolResultQueueConfig.maxFiles, 0))
-  const byContextKey: Record<string, PluginResultQueueItem[]> = {}
-
-  for (const item of keepContextKeys) {
-    const queue = state.byContextKey[item]
-    if (queue) {
-      byContextKey[item] = queue
-    }
-  }
-
-  return {
-    byContextKey,
-    contextOrder: keepContextKeys,
-  }
 }
 
 function toSortedSerializable(value: unknown): unknown {
@@ -139,66 +111,12 @@ export function createPluginRequestSignature(params: {
     argumentsPayload: toSortedSerializable(params.argumentsPayload),
   })
 }
-
-function shouldSkipCompletedRequest(
-  queue: PluginResultQueueItem[],
-  toolName: string,
-  requestSignature: string
-): boolean {
-  return queue.some((item) => (
-    item.toolName === toolName
-    && item.requestSignature === requestSignature
-    && (item.status === 'success' || item.status === 'error')
-  ))
-}
-
-export function hasWorkbenchMetadata(tool: GatewayToolDescriptor): boolean {
-  return tool.toolOptions.length > 0 || tool.toolActions.some((action) => action.visible !== false)
-}
-
-export function findToolOption(tool: GatewayToolDescriptor, optionKey: string): ToolOptionAnnotation | null {
-  return tool.toolOptions.find((option) => option.key === optionKey) ?? null
-}
-
-export function resolveToolOptionValue(
-  tool: GatewayToolDescriptor,
-  optionKey: string,
-  optionState: Record<string, ToolWorkbenchOptionValue> | undefined
-): ToolWorkbenchOptionValue | undefined {
-  const option = findToolOption(tool, optionKey)
-  if (!option) return undefined
-
-  const currentValue = optionState?.[optionKey]
-  if (option.type === 'boolean') {
-    if (typeof currentValue === 'boolean') return currentValue
-    return typeof option.defaultValue === 'boolean' ? option.defaultValue : false
-  }
-
-  if (option.type === 'string') {
-    if (typeof currentValue === 'string') return currentValue
-    return typeof option.defaultValue === 'string' ? option.defaultValue : ''
-  }
-
-  const values = option.values ?? []
-  if (typeof currentValue === 'string' && values.some((value) => value.value === currentValue)) {
-    return currentValue
-  }
-  if (typeof option.defaultValue === 'string' && values.some((value) => value.value === option.defaultValue)) {
-    return option.defaultValue
-  }
-  return values[0]?.value
-}
-
-export function isBooleanToolOptionEnabled(
-  tool: GatewayToolDescriptor,
-  optionKey: string,
-  optionValuesByTool: Record<string, Record<string, ToolWorkbenchOptionValue>>
-): boolean {
-  const option = findToolOption(tool, optionKey)
-  if (!option || option.type !== 'boolean') return false
-  const value = resolveToolOptionValue(tool, optionKey, optionValuesByTool[tool.name])
-  return value === true
-}
+export {
+  findToolOption,
+  hasWorkbenchMetadata,
+  isBooleanToolOptionEnabled,
+  resolveToolOptionValue,
+} from '@/features/plugin-runtime/utils/toolRuntime'
 
 function resolveToolActionState(
   queue: PluginResultQueueItem[],
@@ -306,38 +224,16 @@ export function usePluginRuntime({
     const queueItemTitle = options.actionLabel ? `${tool.title || tool.name} · ${options.actionLabel}` : (tool.title || tool.name)
 
     setResultQueueState((prev) => {
-      const previousQueue = prev.byContextKey[contextKey] ?? []
-      const collapsedHistory = previousQueue.map((item) => (
-        item.toolName === tool.name
-          ? { ...item, collapsed: true }
-          : item
-      ))
-
-      const nextQueue = trimQueueByItemLimit([
-        {
-          id: queueItemId,
-          contextKey,
-          toolName: tool.name,
-          title: queueItemTitle,
-          trigger: options.trigger,
-          actionKey: options.actionKey,
-          requestSignature,
-          status: 'loading',
-          startedAt,
-          collapsed: false,
-        },
-        ...collapsedHistory,
-      ])
-
-      const nextState: PluginResultQueueState = {
-        byContextKey: {
-          ...prev.byContextKey,
-          [contextKey]: nextQueue,
-        },
-        contextOrder: touchContextOrder(prev.contextOrder, contextKey),
-      }
-
-      return trimQueueStateByContextLimit(nextState)
+      return enqueueLoadingResult(prev, {
+        queueItemId,
+        contextKey,
+        toolName: tool.name,
+        title: queueItemTitle,
+        trigger: options.trigger,
+        actionKey: options.actionKey,
+        requestSignature,
+        startedAt,
+      })
     })
 
     const dispatchResult = await dispatchSystemTool({
@@ -351,43 +247,23 @@ export function usePluginRuntime({
     const finishedAt = Date.now()
 
     setResultQueueState((prev) => {
-      const queue = prev.byContextKey[contextKey] ?? []
-      let hasMatched = false
-      const nextQueue = queue.map((item) => {
-        if (item.id !== queueItemId) return item
-        hasMatched = true
-
-        if (dispatchResult.ok) {
-          return {
-            ...item,
-            status: 'success' as const,
-            result: dispatchResult.result,
-            projection: resultProjection ?? undefined,
-            error: undefined,
-            errorCode: undefined,
-            finishedAt,
-          }
+      return finalizeQueueItem(prev, dispatchResult.ok
+        ? {
+          contextKey,
+          queueItemId,
+          status: 'success',
+          result: dispatchResult.result,
+          projection: resultProjection ?? undefined,
+          finishedAt,
         }
-
-        return {
-          ...item,
-          status: 'error' as const,
-          result: undefined,
+        : {
+          contextKey,
+          queueItemId,
+          status: 'error',
           error: dispatchResult.error || `${tool.title || tool.name} 失败`,
           errorCode: dispatchResult.errorCode,
           finishedAt,
-        }
-      })
-
-      if (!hasMatched) return prev
-
-      return {
-        ...prev,
-        byContextKey: {
-          ...prev.byContextKey,
-          [contextKey]: nextQueue,
-        },
-      }
+        })
     })
 
     if (shouldTriggerMutationRefresh(tool, dispatchResult) && onMutationCommitted) {
@@ -433,25 +309,10 @@ export function usePluginRuntime({
 
   const handleToggleResultItemCollapsed = useCallback((id: string) => {
     setResultQueueState((prev) => {
-      const queue = prev.byContextKey[contextKey] ?? []
-      let hasMatched = false
-      const nextQueue = queue.map((item) => {
-        if (item.id !== id) return item
-        hasMatched = true
-        return {
-          ...item,
-          collapsed: !item.collapsed,
-        }
+      return toggleQueueItemCollapsed(prev, {
+        contextKey,
+        id,
       })
-
-      if (!hasMatched) return prev
-      return {
-        ...prev,
-        byContextKey: {
-          ...prev.byContextKey,
-          [contextKey]: nextQueue,
-        },
-      }
     })
   }, [contextKey, setResultQueueState])
 

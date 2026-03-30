@@ -1,6 +1,10 @@
-import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
+import type { GatewayToolDescriptor, ToolActionAnnotation } from '@/lib/gateway'
 import { CONTINUOUS_CALL_OPTION_KEY } from '@/config/toolContinuousCall'
 import type { PluginSurfaceVariant, ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
+import {
+  getVisibleToolActions,
+  resolveToolOptionValueFromDefinition,
+} from '@/features/plugin-runtime/utils/toolRuntime'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
 import { AnnotationQuickTagPanel } from '@/features/plugin-runtime/components/AnnotationQuickTagPanel'
@@ -15,32 +19,6 @@ interface PluginToolWorkbenchProps {
   annotationTargetPath?: string | null
   surfaceVariant: PluginSurfaceVariant
   subzone?: string
-}
-
-function resolveOptionValue(
-  option: ToolOptionAnnotation,
-  optionValues: Record<string, ToolWorkbenchOptionValue> | undefined
-): ToolWorkbenchOptionValue {
-  const currentValue = optionValues?.[option.key]
-
-  if (option.type === 'boolean') {
-    if (typeof currentValue === 'boolean') return currentValue
-    return typeof option.defaultValue === 'boolean' ? option.defaultValue : false
-  }
-
-  if (option.type === 'string') {
-    if (typeof currentValue === 'string') return currentValue
-    return typeof option.defaultValue === 'string' ? option.defaultValue : ''
-  }
-
-  const values = option.values ?? []
-  if (typeof currentValue === 'string' && values.some((value) => value.value === currentValue)) {
-    return currentValue
-  }
-  if (typeof option.defaultValue === 'string' && values.some((value) => value.value === option.defaultValue)) {
-    return option.defaultValue
-  }
-  return values[0]?.value ?? ''
 }
 
 function toActionVariant(action: ToolActionAnnotation): 'default' | 'outline' | 'accent' {
@@ -66,7 +44,7 @@ export function PluginToolWorkbench({
     !(surfaceVariant === 'workspace-grid' && option.key === CONTINUOUS_CALL_OPTION_KEY)
   ))
   const hasOptions = visibleOptions.length > 0
-  const visibleActions = tool.toolActions.filter((action) => action.visible !== false)
+  const visibleActions = getVisibleToolActions(tool)
   const hasActions = visibleActions.length > 0
   if (!hasOptions && !hasActions) return null
 
@@ -97,7 +75,7 @@ export function PluginToolWorkbench({
         <div className="space-y-2">
           {visibleOptions.map((option) => {
             const optionId = `${tool.name}-${option.key}`
-            const optionValue = resolveOptionValue(option, optionValues)
+            const optionValue = resolveToolOptionValueFromDefinition(option, optionValues?.[option.key])
             return (
               <div key={option.key} className={`p-2 ${rowClassName}`}>
                 <div className="flex items-start justify-between gap-2">
