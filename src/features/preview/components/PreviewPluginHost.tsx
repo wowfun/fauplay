@@ -6,6 +6,7 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
+import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import type { FileItem, ResultProjection } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -210,6 +211,7 @@ export function PreviewPluginHost({
           mutationToolName: tool.name,
         }
         if (tool.name === 'fs.softDelete') {
+          mutationParams.undoRestoreItems = readDeleteUndoRestoreItems(result.result)
           mutationParams.deletedRelativePath = readFirstResultRelativePath(result.result) ?? file.path
           const deletedAbsolutePathSet = new Set<string>()
           for (const absolutePath of readSuccessfulResultAbsolutePaths(result.result)) {

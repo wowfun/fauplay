@@ -551,6 +551,8 @@ function toResponseItems(items) {
   return items.map((item) => ({
     relativePath: item.relativePath,
     nextRelativePath: item.nextRelativePath,
+    absolutePath: item.sourceAbsolutePath,
+    nextAbsolutePath: item.targetAbsolutePath,
     ok: item.ok,
     skipped: item.skipped,
     reasonCode: item.reasonCode,

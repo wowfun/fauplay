@@ -913,6 +913,7 @@ export async function moveFilesToRecycle(payload = {}) {
       moved += 1
       items.push({
         absolutePath,
+        originalAbsolutePath: absolutePath,
         ok: true,
         recycleId,
         deletedAt,

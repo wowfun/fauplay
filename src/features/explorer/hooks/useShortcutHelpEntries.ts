@@ -32,6 +32,7 @@ export interface ShortcutHelpEntry {
 interface UseShortcutHelpEntriesParams {
   rootId?: string | null
   currentPath: string
+  canUndoDelete: boolean
   visibleItemCount: number
   selectedGridCount: number
   hasOpenPreview: boolean
@@ -67,6 +68,7 @@ function appendPriorityNote(statusText: string, hasPriorityNote: boolean): strin
 function buildBuiltInStatus(params: {
   actionId: ShortcutActionId
   currentPath: string
+  canUndoDelete: boolean
   visibleItemCount: number
   selectedGridCount: number
   hasOpenPreview: boolean
@@ -81,6 +83,7 @@ function buildBuiltInStatus(params: {
   const {
     actionId,
     currentPath,
+    canUndoDelete,
     visibleItemCount,
     selectedGridCount,
     hasOpenPreview,
@@ -111,6 +114,16 @@ function buildBuiltInStatus(params: {
         : {
           statusKind: 'unavailable',
           statusText: '已在根目录',
+        }
+    case 'app_undo_delete':
+      return canUndoDelete
+        ? {
+          statusKind: 'available',
+          statusText: '当前有可撤销删除',
+        }
+        : {
+          statusKind: 'unavailable',
+          statusText: '当前无可撤销删除',
         }
     case 'grid_select_all':
     case 'grid_move_right':
@@ -247,6 +260,7 @@ function buildBuiltInStatus(params: {
 export function useShortcutHelpEntries({
   rootId,
   currentPath,
+  canUndoDelete,
   visibleItemCount,
   selectedGridCount,
   hasOpenPreview,
@@ -302,6 +316,7 @@ export function useShortcutHelpEntries({
       const status = buildBuiltInStatus({
         actionId: descriptor.actionId,
         currentPath,
+        canUndoDelete,
         visibleItemCount,
         selectedGridCount,
         hasOpenPreview,
@@ -381,6 +396,7 @@ export function useShortcutHelpEntries({
     canManagePreviewTags,
     canSoftDeletePreview,
     configuredPreviewTagShortcuts,
+    canUndoDelete,
     currentPath,
     digitAssignment,
     globalTagOptionsState.error,

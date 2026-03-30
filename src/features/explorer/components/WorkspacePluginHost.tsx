@@ -3,6 +3,7 @@ import type { FileItem, ResultProjection } from '@/types'
 import type { GatewayToolDescriptor } from '@/lib/gateway'
 import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { withToolScopedProjection } from '@/lib/projection'
+import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
@@ -254,6 +255,7 @@ export function WorkspacePluginHost({
       mutationToolName: tool.name,
     }
     if (tool.name === 'fs.softDelete') {
+      mutationParams.undoRestoreItems = readDeleteUndoRestoreItems(result.result)
       const successfulAbsolutePaths = readSuccessfulResultAbsolutePaths(result.result)
       const requestedAbsolutePaths = selectedDeleteAbsoluteArgs?.absolutePaths ?? []
       const deletedAbsolutePathSet = new Set<string>()

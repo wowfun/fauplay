@@ -22,6 +22,16 @@ import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSyste
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { toToolScopedProjectionId } from '@/lib/projection'
 import {
+  type DeleteUndoBatch,
+  type DeleteUndoPreviewSnapshot,
+  type DeleteUndoRestoreItem,
+  type DeleteUndoSnapshot,
+  normalizeAbsolutePath,
+  normalizeRelativePath as normalizeUndoRelativePath,
+  remapFileItemAfterRestore,
+  remapPathForRoot,
+} from '@/features/workspace/lib/deleteUndo'
+import {
   getAnnotationDisplayStoreVersion,
   getFileAnnotationUpdatedAt,
   getFileAnnotationTagKeys,
@@ -30,6 +40,7 @@ import {
   preloadAnnotationDisplaySnapshot,
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
+import { getBoundRootPath } from '@/lib/reveal'
 import {
   ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AddressPathHistoryEntry,
@@ -54,6 +65,7 @@ const TRASH_ROUTE_PATH = '@trash'
 const LEGACY_TRASH_RELATIVE_PATH = '.trash'
 const DEFAULT_RESULT_PANEL_HEIGHT_PX = 280
 const MIN_RESULT_PANEL_HEIGHT_PX = 180
+const DELETE_UNDO_NOTICE_TIMEOUT_MS = 6000
 
 let previewPanelModulesPreloaded = false
 
@@ -87,6 +99,33 @@ interface WorkspaceShellProps {
   filterFiles: (files: FileItem[], filter: FilterState) => FileItem[]
 }
 
+type DeleteUndoNoticeTone = 'default' | 'error'
+
+interface DeleteUndoNoticeState {
+  id: string
+  message: string
+  tone: DeleteUndoNoticeTone
+}
+
+interface RestoreRecycleResponseItem {
+  ok?: boolean
+  nextAbsolutePath?: string
+  reasonCode?: string
+  error?: string
+}
+
+interface RestoreRecycleResponse {
+  ok?: boolean
+  total?: number
+  restored?: number
+  failed?: number
+  items?: RestoreRecycleResponseItem[]
+}
+
+interface PendingDeleteUndoRestoreState {
+  snapshot: DeleteUndoSnapshot
+}
+
 const defaultFilter: FilterState = {
   search: '',
   type: 'all',
@@ -110,6 +149,76 @@ function clampPaneWidthRatio(value: number): number {
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
+}
+
+function cloneFileItem(file: FileItem | null): FileItem | null {
+  if (!file) return null
+  return {
+    ...file,
+    lastModified: file.lastModified ? new Date(file.lastModified) : undefined,
+  }
+}
+
+function cloneResultProjection(projection: ResultProjection): ResultProjection {
+  return {
+    ...projection,
+    files: projection.files.map((file) => cloneFileItem(file) ?? file),
+  }
+}
+
+function cloneFilterState(filter: FilterState): FilterState {
+  return {
+    ...filter,
+    annotationIncludeTagKeys: [...filter.annotationIncludeTagKeys],
+    annotationExcludeTagKeys: [...filter.annotationExcludeTagKeys],
+  }
+}
+
+function cloneStringArrayRecord(record: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, [...value]])
+  )
+}
+
+function cloneNullableStringRecord(record: Record<string, string | null>): Record<string, string | null> {
+  return { ...record }
+}
+
+function cloneDuplicateSelectionRuleRecord(
+  record: Record<string, DuplicateSelectionRule | null>
+): Record<string, DuplicateSelectionRule | null> {
+  return { ...record }
+}
+
+function countDeleteUndoItems(items: DeleteUndoRestoreItem[]): number {
+  return items.length
+}
+
+function createDeleteUndoId(prefix: string): string {
+  return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function pathRefersToDeletedAbsolutePath(
+  value: string | null | undefined,
+  rootPath: string | null,
+  deletedAbsolutePathSet: Set<string>
+): boolean {
+  const normalizedValue = typeof value === 'string' ? value.trim() : ''
+  if (!normalizedValue) {
+    return false
+  }
+
+  if (normalizedValue.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(normalizedValue)) {
+    return deletedAbsolutePathSet.has(normalizeAbsolutePath(normalizedValue))
+  }
+
+  if (!rootPath) {
+    return false
+  }
+
+  return deletedAbsolutePathSet.has(
+    normalizeAbsolutePath(`${normalizeAbsolutePath(rootPath)}/${normalizeUndoRelativePath(normalizedValue)}`)
+  )
 }
 
 function loadPersistedPreviewPaneWidthState(): PersistedPreviewPaneWidthState {
@@ -441,6 +550,10 @@ export function WorkspaceShell({
   const [isResultPanelOpen, setIsResultPanelOpen] = useState(false)
   const [resultPanelDisplayMode, setResultPanelDisplayMode] = useState<ResultPanelDisplayMode>('normal')
   const [resultPanelHeightPx, setResultPanelHeightPx] = useState(DEFAULT_RESULT_PANEL_HEIGHT_PX)
+  const [deleteUndoBatches, setDeleteUndoBatches] = useState<DeleteUndoBatch[]>([])
+  const [isUndoingDelete, setIsUndoingDelete] = useState(false)
+  const [deleteUndoNotice, setDeleteUndoNotice] = useState<DeleteUndoNoticeState | null>(null)
+  const [pendingDeleteUndoRestore, setPendingDeleteUndoRestore] = useState<PendingDeleteUndoRestoreState | null>(null)
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
@@ -605,6 +718,7 @@ export function WorkspaceShell({
   const shortcutHelpEntries = useShortcutHelpEntries({
     rootId,
     currentPath,
+    canUndoDelete: deleteUndoBatches.length > 0,
     visibleItemCount: activeSurfaceFiles.length,
     selectedGridCount: selectedGridItems.length,
     hasOpenPreview,
@@ -754,6 +868,293 @@ export function WorkspaceShell({
   const alignPreviewToProjection = useCallback((projection: ResultProjection | null, preferredPath?: string | null) => {
     alignPreviewToPath(resolveProjectionPreferredPath(projection, preferredPath))
   }, [alignPreviewToPath])
+
+  const showDeleteUndoNoticeMessage = useCallback((message: string, tone: DeleteUndoNoticeTone = 'default') => {
+    setDeleteUndoNotice({
+      id: createDeleteUndoId('delete-undo-notice'),
+      message,
+      tone,
+    })
+  }, [])
+
+  const captureDeleteUndoPreviewSnapshot = useCallback((): DeleteUndoPreviewSnapshot => ({
+    showPreviewPane,
+    selectedFile: cloneFileItem(selectedFile),
+    previewFile: cloneFileItem(previewFile),
+  }), [previewFile, selectedFile, showPreviewPane])
+
+  const captureDeleteUndoSnapshot = useCallback((): DeleteUndoSnapshot | null => {
+    if (!rootId) {
+      return null
+    }
+
+    return {
+      historyEntry: {
+        rootId,
+        rootName: rootHandle.name || '根目录',
+        path: currentPath,
+        visitedAt: Date.now(),
+      },
+      rootPath: getBoundRootPath(rootId),
+      currentPath,
+      filter: cloneFilterState(filter),
+      isFlattenView,
+      activeSurface: activeSurface.kind === 'projection'
+        ? { kind: 'projection', tabId: activeSurface.tabId }
+        : { kind: 'directory' },
+      directorySelectedPaths: [...directorySelectedPaths],
+      directoryFocusedPath,
+      isResultPanelOpen,
+      resultPanelDisplayMode,
+      resultPanelHeightPx,
+      lastNormalResultPanelHeightPx: lastNormalResultPanelHeightRef.current,
+      projectionTabs: projectionTabs.map((projection) => cloneResultProjection(projection)),
+      activeProjectionTabId,
+      projectionSelectedPathsById: cloneStringArrayRecord(projectionSelectedPathsById),
+      projectionFocusedPathById: cloneNullableStringRecord(projectionFocusedPathById),
+      duplicateSelectionRuleByProjectionId: cloneDuplicateSelectionRuleRecord(duplicateSelectionRuleByProjectionId),
+      preview: captureDeleteUndoPreviewSnapshot(),
+    }
+  }, [
+    activeProjectionTabId,
+    activeSurface,
+    captureDeleteUndoPreviewSnapshot,
+    currentPath,
+    directoryFocusedPath,
+    directorySelectedPaths,
+    duplicateSelectionRuleByProjectionId,
+    filter,
+    isFlattenView,
+    isResultPanelOpen,
+    projectionFocusedPathById,
+    projectionSelectedPathsById,
+    projectionTabs,
+    resultPanelDisplayMode,
+    resultPanelHeightPx,
+    rootHandle.name,
+    rootId,
+  ])
+
+  const buildDeleteUndoBatch = useCallback((
+    restoreItems: DeleteUndoRestoreItem[] | undefined,
+    snapshot: DeleteUndoSnapshot | null
+  ): DeleteUndoBatch | null => {
+    if (!snapshot || !Array.isArray(restoreItems) || restoreItems.length === 0) {
+      return null
+    }
+
+    return {
+      id: createDeleteUndoId('delete-undo-batch'),
+      createdAt: Date.now(),
+      deletedCount: countDeleteUndoItems(restoreItems),
+      restoreItems,
+      snapshot,
+    }
+  }, [])
+
+  const pushDeleteUndoBatch = useCallback((batch: DeleteUndoBatch | null) => {
+    if (!batch) {
+      return
+    }
+
+    setDeleteUndoBatches((previous) => [batch, ...previous])
+    showDeleteUndoNoticeMessage(`已删除 ${batch.deletedCount} 项`, 'default')
+  }, [showDeleteUndoNoticeMessage])
+
+  const buildRestoredSnapshot = useCallback((
+    snapshot: DeleteUndoSnapshot,
+    restoredAbsolutePathByOriginalAbsolutePath: Map<string, string>,
+    failedOriginalAbsolutePathSet: Set<string>
+  ): DeleteUndoSnapshot => {
+    const projectionPathRemapById = new Map<string, Map<string, string>>()
+    const remappedProjectionTabs = snapshot.projectionTabs
+      .map((projection) => {
+        const pathMap = new Map<string, string>()
+        const remappedFiles = projection.files
+          .map((file) => {
+            const remappedFile = remapFileItemAfterRestore(
+              file,
+              file.sourceRootPath ?? snapshot.rootPath,
+              restoredAbsolutePathByOriginalAbsolutePath
+            )
+            pathMap.set(file.path, remappedFile.path)
+            return remappedFile
+          })
+          .filter((file) => {
+            const absolutePath = typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''
+            return !absolutePath || !failedOriginalAbsolutePathSet.has(normalizeAbsolutePath(absolutePath))
+          })
+
+        projectionPathRemapById.set(projection.id, pathMap)
+
+        return {
+          ...projection,
+          files: remappedFiles,
+        }
+      })
+      .filter((projection) => projection.files.length > 0)
+
+    const remapProjectionPath = (tabId: string, path: string | null | undefined): string | null => {
+      const normalizedPath = typeof path === 'string' ? path.trim() : ''
+      if (!normalizedPath) {
+        return null
+      }
+      const nextPath = projectionPathRemapById.get(tabId)?.get(normalizedPath)
+      return nextPath ?? normalizedPath
+    }
+
+    const nextProjectionSelectedPathsById: Record<string, string[]> = {}
+    const nextProjectionFocusedPathById: Record<string, string | null> = {}
+    for (const projection of remappedProjectionTabs) {
+      const visiblePathSet = new Set(projection.files.map((file) => file.path))
+      const nextSelectedPaths = (snapshot.projectionSelectedPathsById[projection.id] ?? [])
+        .map((path) => remapProjectionPath(projection.id, path))
+        .filter((path): path is string => typeof path === 'string' && path.length > 0)
+        .filter((path) => visiblePathSet.has(path))
+      if (nextSelectedPaths.length > 0) {
+        nextProjectionSelectedPathsById[projection.id] = nextSelectedPaths
+      }
+      const nextFocusedPath = remapProjectionPath(
+        projection.id,
+        snapshot.projectionFocusedPathById[projection.id] ?? null
+      )
+      if (nextFocusedPath && visiblePathSet.has(nextFocusedPath)) {
+        nextProjectionFocusedPathById[projection.id] = nextFocusedPath
+      }
+    }
+
+    const nextDirectorySelectedPaths = snapshot.directorySelectedPaths
+      .map((path) => remapPathForRoot(path, snapshot.rootPath, restoredAbsolutePathByOriginalAbsolutePath))
+      .filter((path): path is string => Boolean(path))
+      .filter((path) => !pathRefersToDeletedAbsolutePath(path, snapshot.rootPath, failedOriginalAbsolutePathSet))
+
+    const nextDirectoryFocusedPath = (() => {
+      const remappedPath = remapPathForRoot(
+        snapshot.directoryFocusedPath,
+        snapshot.rootPath,
+        restoredAbsolutePathByOriginalAbsolutePath
+      )
+      if (pathRefersToDeletedAbsolutePath(remappedPath, snapshot.rootPath, failedOriginalAbsolutePathSet)) {
+        return null
+      }
+      return remappedPath
+    })()
+
+    const remappedSelectedPreviewFile = snapshot.preview.selectedFile
+      ? remapFileItemAfterRestore(
+        snapshot.preview.selectedFile,
+        snapshot.preview.selectedFile.sourceRootPath ?? snapshot.rootPath,
+        restoredAbsolutePathByOriginalAbsolutePath
+      )
+      : null
+    const remappedPreviewFile = snapshot.preview.previewFile
+      ? remapFileItemAfterRestore(
+        snapshot.preview.previewFile,
+        snapshot.preview.previewFile.sourceRootPath ?? snapshot.rootPath,
+        restoredAbsolutePathByOriginalAbsolutePath
+      )
+      : null
+
+    const nextSelectedPreviewFile = (
+      remappedSelectedPreviewFile
+      && !pathRefersToDeletedAbsolutePath(
+        remappedSelectedPreviewFile.absolutePath ?? remappedSelectedPreviewFile.path,
+        remappedSelectedPreviewFile.sourceRootPath ?? snapshot.rootPath,
+        failedOriginalAbsolutePathSet
+      )
+    )
+      ? remappedSelectedPreviewFile
+      : null
+    const nextPreviewFile = (
+      remappedPreviewFile
+      && !pathRefersToDeletedAbsolutePath(
+        remappedPreviewFile.absolutePath ?? remappedPreviewFile.path,
+        remappedPreviewFile.sourceRootPath ?? snapshot.rootPath,
+        failedOriginalAbsolutePathSet
+      )
+    )
+      ? remappedPreviewFile
+      : null
+
+    const visibleTabIdSet = new Set(remappedProjectionTabs.map((projection) => projection.id))
+    const nextActiveProjectionTabId = (
+      snapshot.activeProjectionTabId
+      && visibleTabIdSet.has(snapshot.activeProjectionTabId)
+    )
+      ? snapshot.activeProjectionTabId
+      : (remappedProjectionTabs[0]?.id ?? null)
+    const nextActiveSurface = (
+      snapshot.activeSurface.kind === 'projection'
+      && nextActiveProjectionTabId
+    )
+      ? { kind: 'projection' as const, tabId: nextActiveProjectionTabId }
+      : { kind: 'directory' as const }
+
+    return {
+      ...snapshot,
+      directorySelectedPaths: nextDirectorySelectedPaths,
+      directoryFocusedPath: nextDirectoryFocusedPath,
+      isResultPanelOpen: snapshot.isResultPanelOpen && remappedProjectionTabs.length > 0,
+      projectionTabs: remappedProjectionTabs,
+      activeProjectionTabId: nextActiveProjectionTabId,
+      projectionSelectedPathsById: nextProjectionSelectedPathsById,
+      projectionFocusedPathById: nextProjectionFocusedPathById,
+      activeSurface: nextActiveSurface,
+      preview: {
+        showPreviewPane: snapshot.preview.showPreviewPane && nextSelectedPreviewFile?.kind === 'file',
+        selectedFile: nextSelectedPreviewFile,
+        previewFile: nextPreviewFile,
+      },
+    }
+  }, [])
+
+  const restoreDeleteUndoPreviewSnapshot = useCallback((previewSnapshot: DeleteUndoPreviewSnapshot) => {
+    if (previewSnapshot.showPreviewPane && previewSnapshot.selectedFile?.kind === 'file') {
+      showFileInPane(previewSnapshot.selectedFile)
+    } else {
+      closePreviewPane()
+    }
+
+    if (previewSnapshot.previewFile?.kind === 'file') {
+      openFileInModal(previewSnapshot.previewFile)
+    } else {
+      closePreviewModal()
+    }
+  }, [closePreviewModal, closePreviewPane, openFileInModal, showFileInPane])
+
+  const applyDeleteUndoSnapshot = useCallback(async (snapshot: DeleteUndoSnapshot) => {
+    setFilter(cloneFilterState(snapshot.filter))
+
+    if (isFlattenView !== snapshot.isFlattenView) {
+      await setFlattenView(snapshot.isFlattenView)
+    }
+
+    lastNormalResultPanelHeightRef.current = snapshot.lastNormalResultPanelHeightPx
+    setResultPanelHeightPx(snapshot.resultPanelHeightPx)
+    setResultPanelDisplayMode(snapshot.resultPanelDisplayMode)
+    setProjectionTabs(snapshot.projectionTabs.map((projection) => cloneResultProjection(projection)))
+    setActiveProjectionTabId(snapshot.activeProjectionTabId)
+    lastProjectionTabIdRef.current = snapshot.activeProjectionTabId
+    setProjectionSelectedPathsById(cloneStringArrayRecord(snapshot.projectionSelectedPathsById))
+    setDuplicateSelectionRuleByProjectionId(cloneDuplicateSelectionRuleRecord(snapshot.duplicateSelectionRuleByProjectionId))
+    setProjectionFocusedPathById(cloneNullableStringRecord(snapshot.projectionFocusedPathById))
+    setDirectorySelectedPaths([...snapshot.directorySelectedPaths])
+    setDirectoryFocusedPath(snapshot.directoryFocusedPath)
+    setIsResultPanelOpen(snapshot.isResultPanelOpen)
+    setActiveSurface(
+      snapshot.activeSurface.kind === 'projection' && snapshot.activeProjectionTabId
+        ? { kind: 'projection', tabId: snapshot.activeProjectionTabId }
+        : { kind: 'directory' }
+    )
+
+    restoreDeleteUndoPreviewSnapshot(snapshot.preview)
+    await refreshAnnotationSnapshot()
+  }, [
+    isFlattenView,
+    refreshAnnotationSnapshot,
+    restoreDeleteUndoPreviewSnapshot,
+    setFlattenView,
+  ])
 
   const setProjectionSelectedPathsForTab = useCallback((tabId: string, selectedPaths: string[]) => {
     setProjectionSelectedPathsById((previous) => {
@@ -1171,7 +1572,17 @@ export function WorkspaceShell({
     }
   }, [activeProjectionTabId, activeSurface, projectionTabs])
 
+  const createDeleteUndoBatchFromParams = useCallback((
+    params: WorkspaceMutationCommitParams | PreviewMutationCommitParams | undefined
+  ): DeleteUndoBatch | null => {
+    if (params?.mutationToolName !== 'fs.softDelete') {
+      return null
+    }
+    return buildDeleteUndoBatch(params.undoRestoreItems, captureDeleteUndoSnapshot())
+  }, [buildDeleteUndoBatch, captureDeleteUndoSnapshot])
+
   const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
+    const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
     if (
       params?.mutationToolName === 'fs.softDelete'
       && (
@@ -1187,7 +1598,15 @@ export function WorkspaceShell({
     }
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
-  }, [currentPath, navigateToPath, pruneDeletedFilesFromProjectionTabs, refreshAnnotationSnapshot])
+    pushDeleteUndoBatch(deleteUndoBatch)
+  }, [
+    createDeleteUndoBatchFromParams,
+    currentPath,
+    navigateToPath,
+    pruneDeletedFilesFromProjectionTabs,
+    pushDeleteUndoBatch,
+    refreshAnnotationSnapshot,
+  ])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
     const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
@@ -1206,11 +1625,13 @@ export function WorkspaceShell({
   }, [activeSurfaceFileItems])
 
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
+    const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
     const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
       await navigateToPath(currentPath)
       await refreshAnnotationSnapshot()
+      pushDeleteUndoBatch(deleteUndoBatch)
       return
     }
 
@@ -1272,19 +1693,139 @@ export function WorkspaceShell({
 
     await navigateToPath(currentPath)
     await refreshAnnotationSnapshot()
+    pushDeleteUndoBatch(deleteUndoBatch)
   }, [
     activeSurface,
     alignPreviewToPath,
+    createDeleteUndoBatchFromParams,
     currentPath,
     navigateMediaFromModal,
     navigateMediaFromPane,
     navigateToPath,
     previewFile,
+    pushDeleteUndoBatch,
     pruneDeletedFilesFromProjectionTabs,
     refreshAnnotationSnapshot,
     resolveNextFileAfterDelete,
     selectedFile,
     showFileInPane,
+  ])
+
+  const handleUndoDelete = useCallback(async () => {
+    const batch = deleteUndoBatches[0]
+    if (!batch || isUndoingDelete) {
+      return
+    }
+
+    setIsUndoingDelete(true)
+
+    try {
+      const response = await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
+        items: batch.restoreItems,
+      }, 120000)
+      const responseItems = Array.isArray(response.items) ? response.items : []
+      const restoredAbsolutePathByOriginalAbsolutePath = new Map<string, string>()
+      const failedRestoreItems: DeleteUndoRestoreItem[] = []
+
+      batch.restoreItems.forEach((restoreItem, index) => {
+        const responseItem = responseItems[index]
+        const nextAbsolutePath = typeof responseItem?.nextAbsolutePath === 'string'
+          ? responseItem.nextAbsolutePath.trim()
+          : ''
+        if (responseItem?.ok === true && nextAbsolutePath) {
+          const normalizedNextAbsolutePath = normalizeAbsolutePath(nextAbsolutePath)
+          restoredAbsolutePathByOriginalAbsolutePath.set(
+            normalizeAbsolutePath(restoreItem.originalAbsolutePath),
+            normalizedNextAbsolutePath
+          )
+          return
+        }
+        failedRestoreItems.push(restoreItem)
+      })
+
+      const failedOriginalAbsolutePathSet = new Set(
+        failedRestoreItems.map((item) => normalizeAbsolutePath(item.originalAbsolutePath))
+      )
+      const restoredCount = restoredAbsolutePathByOriginalAbsolutePath.size
+      const remainingUndoBatches = deleteUndoBatches.slice(1)
+      const retrySnapshot = buildRestoredSnapshot(
+        batch.snapshot,
+        restoredAbsolutePathByOriginalAbsolutePath,
+        new Set()
+      )
+      const restoredSnapshot = buildRestoredSnapshot(
+        batch.snapshot,
+        restoredAbsolutePathByOriginalAbsolutePath,
+        failedOriginalAbsolutePathSet
+      )
+      const failedRetryBatch = failedRestoreItems.length > 0
+        ? {
+          id: createDeleteUndoId('delete-undo-batch'),
+          createdAt: Date.now(),
+          deletedCount: failedRestoreItems.length,
+          restoreItems: failedRestoreItems,
+          snapshot: retrySnapshot,
+        }
+        : null
+
+      if (failedRetryBatch) {
+        setDeleteUndoBatches([failedRetryBatch, ...remainingUndoBatches])
+      } else {
+        setDeleteUndoBatches(remainingUndoBatches)
+      }
+
+      if (restoredCount === 0) {
+        showDeleteUndoNoticeMessage('撤销删除失败，请重试', 'error')
+        setIsUndoingDelete(false)
+        return
+      }
+
+      for (const restoredAbsolutePath of restoredAbsolutePathByOriginalAbsolutePath.values()) {
+        deletedProjectionAbsolutePathSetRef.current.delete(normalizeAbsolutePath(restoredAbsolutePath))
+      }
+
+      const shouldNavigateBack = (
+        rootId !== restoredSnapshot.historyEntry.rootId
+        || normalizeRelativePath(currentPath) !== normalizeRelativePath(restoredSnapshot.historyEntry.path)
+      )
+      if (shouldNavigateBack) {
+        const reopened = await openHistoryEntry(restoredSnapshot.historyEntry)
+        if (!reopened) {
+          showDeleteUndoNoticeMessage(
+            failedRetryBatch
+              ? `已恢复 ${restoredCount} 项，但仍有 ${failedRetryBatch.deletedCount} 项待重试，且无法自动跳回原目录`
+              : `已恢复 ${restoredCount} 项，但无法自动跳回原目录`,
+            'error'
+          )
+          setIsUndoingDelete(false)
+          return
+        }
+      }
+
+      setPendingDeleteUndoRestore({ snapshot: restoredSnapshot })
+      if (failedRetryBatch) {
+        showDeleteUndoNoticeMessage(
+          `已恢复 ${restoredCount} 项，仍有 ${failedRetryBatch.deletedCount} 项撤销失败`,
+          'error'
+        )
+      } else {
+        setDeleteUndoNotice(null)
+      }
+    } catch (error) {
+      showDeleteUndoNoticeMessage(
+        error instanceof Error ? error.message : '撤销删除失败',
+        'error'
+      )
+      setIsUndoingDelete(false)
+    }
+  }, [
+    buildRestoredSnapshot,
+    currentPath,
+    deleteUndoBatches,
+    isUndoingDelete,
+    openHistoryEntry,
+    rootId,
+    showDeleteUndoNoticeMessage,
   ])
 
   const handleOpenTrash = useCallback(() => {
@@ -1324,6 +1865,71 @@ export function WorkspaceShell({
   useEffect(() => {
     saveAddressPathHistory(recentPathHistory)
   }, [recentPathHistory])
+
+  useEffect(() => {
+    if (!deleteUndoNotice) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDeleteUndoNotice((previous) => (
+        previous?.id === deleteUndoNotice.id
+          ? null
+          : previous
+      ))
+    }, DELETE_UNDO_NOTICE_TIMEOUT_MS)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [deleteUndoNotice])
+
+  useEffect(() => {
+    if (!pendingDeleteUndoRestore) {
+      return
+    }
+    if (rootId !== pendingDeleteUndoRestore.snapshot.historyEntry.rootId) {
+      return
+    }
+    if (
+      normalizeRelativePath(currentPath)
+      !== normalizeRelativePath(pendingDeleteUndoRestore.snapshot.historyEntry.path)
+    ) {
+      return
+    }
+
+    let cancelled = false
+    const snapshot = pendingDeleteUndoRestore.snapshot
+    setPendingDeleteUndoRestore(null)
+
+    const applyPendingRestore = async () => {
+      try {
+        await applyDeleteUndoSnapshot(snapshot)
+      } catch (error) {
+        if (!cancelled) {
+          showDeleteUndoNoticeMessage(
+            error instanceof Error ? error.message : '恢复删除前状态失败',
+            'error'
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsUndoingDelete(false)
+        }
+      }
+    }
+
+    void applyPendingRestore()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    applyDeleteUndoSnapshot,
+    currentPath,
+    pendingDeleteUndoRestore,
+    rootId,
+    showDeleteUndoNoticeMessage,
+  ])
 
   useEffect(() => {
     setDirectorySelectedPaths([])
@@ -1527,6 +2133,11 @@ export function WorkspaceShell({
       }
 
       if (isTyping) return
+      if (matchesAnyShortcut(event, keyboardShortcuts.app.undoDelete)) {
+        event.preventDefault()
+        void handleUndoDelete()
+        return
+      }
       const matchedPreviewTagShortcut = getMatchingPreviewTagShortcut(event)
 
       if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleVideoPlayPause)) {
@@ -1614,6 +2225,7 @@ export function WorkspaceShell({
     closePreviewPane,
     hasActiveMediaPreview,
     hasActiveVideoPreview,
+    handleUndoDelete,
     currentPath,
     getMatchingPreviewTagShortcut,
     navigateMediaFromModal,
@@ -1794,6 +2406,13 @@ export function WorkspaceShell({
       activeProjection={activeSurfaceProjection}
       onActivateProjection={handleActivateProjection}
       onDismissProjectionTool={handleDismissProjectionTool}
+      deleteUndoNoticeMessage={deleteUndoNotice?.message ?? null}
+      deleteUndoNoticeTone={deleteUndoNotice?.tone ?? 'default'}
+      canUndoDelete={deleteUndoBatches.length > 0}
+      isUndoingDelete={isUndoingDelete}
+      onUndoDelete={() => {
+        void handleUndoDelete()
+      }}
     />
   )
 }

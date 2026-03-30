@@ -3,6 +3,7 @@
   "keybinds": {
     "app_open_directory": ["mod+o"],
     "app_navigate_up": ["backspace"],
+    "app_undo_delete": ["mod+z"],
     "preview_toggle_autoplay": ["p"],
     "preview_toggle_playback_order": ["t"],
     "preview_toggle_video_play_pause": ["space"],

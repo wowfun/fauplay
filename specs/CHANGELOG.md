@@ -2,6 +2,8 @@
 
 ## 2026-03-28
 ### Changed
+- 更新 `specs/109-soft-delete/spec.md`、`specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：新增统一“删除撤销”契约，明确删除后会话级撤销栈、`Ctrl/Cmd + Z`、提示条、删除前 UI 快照，以及文件网格/底部结果面板/预览状态的恢复语义。
+- 更新 `src/config/shortcuts.ts`、`src/config/shortcuts.json` 与 `docs/shortcuts.md`：新增应用级快捷键 `Ctrl/Cmd + Z`，用于撤销最近一次成功删除批次。
 - 更新 `specs/120-asset-duplicate-detection/spec.md` 与 `specs/111-local-file-browser/spec.md`：为重复文件底部结果标签新增 Duplicate Cleaner Pro 风格的快捷选择规则，首期提供 `保留最新/保留最旧/保留当前文件或首项/清空全部`、组头 `重应用本组/清空本组`，并固定“已选 = 待处理项”语义。
 - 更新 `specs/111-local-file-browser/spec.md` 与 `specs/122-unified-trash-route/spec.md`：收紧结果投射标签删除后的前端收尾语义，要求删除成功后立即从当前投射标签移除已删文件、清理对应选择态，并在标签删空时自动关闭空标签。
 - 更新 `specs/122-unified-trash-route/spec.md`：将统一回收区物理存储收敛为“全局元数据 + 同卷托管池”，对非 home 卷文件改为使用该卷上的 `.fauplay/global/recycle/files`，避免结果标签删除跨卷写入 home 托管池。

@@ -2,7 +2,7 @@
 
 ## 1. 目的 (Purpose)
 
-定义 Fauplay 目录浏览上下文下的软删除能力契约，包含 `fs.softDelete` 与 `fs.restore` 两个工具、Toolbar 回收站入口、`.trash` 可见性控制，以及“回收站上下文下软删/还原互斥显示”语义；结果模式与统一回收站的跨 Root 回收行为由 `122-unified-trash-route` 另行定义。
+定义 Fauplay 目录浏览上下文下的软删除能力契约，包含 `fs.softDelete` 与 `fs.restore` 两个工具、Toolbar 回收站入口、`.trash` 可见性控制、“回收站上下文下软删/还原互斥显示”语义，以及删除后的统一撤销能力；结果模式与统一回收站的跨 Root 回收行为由 `122-unified-trash-route` 另行定义。
 
 ## 2. 关键术语 (Terminology)
 
@@ -12,6 +12,9 @@
 - 提交执行（Commit）
 - 回收目录（Trash Directory）
 - 逐项结果（Item-level Result）
+- 删除撤销（Delete Undo）
+- 撤销批次（Undo Batch）
+- 删除前快照（Pre-delete Snapshot）
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
 
@@ -25,6 +28,7 @@
 6. 回收站上下文插件可见性切换：显示 `fs.restore`、隐藏 `fs.softDelete`；非回收站相反。
 7. `.trash` 在网格与地址栏子目录候选中默认隐藏。
 8. `.trash` 目标语义只作用于普通目录浏览上下文。
+9. 删除后的会话级撤销栈与 `Ctrl/Cmd + Z` 撤销入口。
 
 范围外：
 
@@ -33,6 +37,7 @@
 3. 调用系统回收站能力。
 4. 结果模式删除进入全局回收区的行为（归属 `122-unified-trash-route`）。
 5. 统一回收站中 `global_recycle` 项的恢复参数模型（归属 `122-unified-trash-route`）。
+6. “撤销还原”或通用历史回滚。
 
 ## 4. 用户可见行为契约 (User-visible Contract)
 
@@ -51,6 +56,10 @@
 13. 预览作用域 `fs.softDelete confirm=true` 成功删除“当前预览文件”后，系统必须自动续选下一个预览目标，不得回退到目录首项。
 14. 自动续选规则：媒体文件按当前预览遍历模式（顺序/随机）取下一项；非媒体文件按当前列表顺序取下一项，末项回绕到首项。
 15. 当删除动作发生在结果模式投射列表上时，不得沿用本专题的 `.trash` 目标语义；该场景必须按 `122-unified-trash-route` 的统一回收站契约处理。
+16. 删除成功后，系统必须把该次成功删除项压入会话级撤销栈，并显示一个可见但短时的“撤销”提示条。
+17. `Ctrl/Cmd + Z` 与提示条“撤销”按钮必须共享同一撤销语义：恢复最近一次成功删除批次。
+18. 撤销成功后，系统必须立即恢复删除前的 Root、路径、活动表面、选择态与预览态；若用户已切换到其他目录或 Root，也必须跳回删除前上下文。
+19. 撤销提示条自动隐藏后，撤销栈仍必须保留；用户可继续通过 `Ctrl/Cmd + Z` 撤销最近删除批次。
 
 ## 5. 工具契约 (Tool Contract)
 
@@ -87,6 +96,8 @@
 - `items: Array<{
   relativePath: string;
   nextRelativePath?: string;
+  absolutePath?: string;
+  nextAbsolutePath?: string;
   ok: boolean;
   skipped?: boolean;
   reasonCode?: string;
@@ -116,6 +127,7 @@
 1. 还原目标路径通过去掉 `.trash/` 前缀推导。
 2. 若目标冲突，按 Windows 风格 ` (1)/(2)` 后缀去重。
 3. 冲突来源覆盖磁盘已存在与同批次预分配。
+4. 还原成功后的实际目标路径必须通过 `nextRelativePath/nextAbsolutePath` 返回，供前端恢复 UI 锚点。
 
 返回结构：
 
@@ -127,6 +139,8 @@
 - `items: Array<{
   relativePath: string;
   nextRelativePath?: string;
+  absolutePath?: string;
+  nextAbsolutePath?: string;
   ok: boolean;
   skipped?: boolean;
   reasonCode?: string;
@@ -158,6 +172,11 @@
 14. `FR-SD-14` 自动续选时，媒体文件必须复用 `100-preview-playback` 的当前遍历策略；非媒体文件必须按当前列表顺序前进并在末项回绕到首项。
 15. `FR-SD-15` 本专题的 `.trash` 目标语义必须只适用于普通目录浏览与直接 `.trash` 上下文，不覆盖结果模式删除。
 16. `FR-SD-16` 本专题的 `fs.restore` 参数模型必须只覆盖 `.trash` 路径，不覆盖统一回收站中的 `global_recycle` 项恢复。
+17. `FR-SD-17` 删除成功后的逐项结果必须返回足以支持撤销的路径描述符；对 `.trash` 语义至少包括删除前原路径与删除后 `.trash` 绝对路径。
+18. `FR-SD-18` 系统必须提供会话级删除撤销栈，并按删除批次后进先出执行撤销。
+19. `FR-SD-19` 系统必须提供 `Ctrl/Cmd + Z` 作为删除撤销快捷键，但仅在工作区已打开且未聚焦文本输入时生效。
+20. `FR-SD-20` 删除撤销成功后，系统必须恢复删除前的目录/结果标签/预览状态，而不是只把文件还原到磁盘。
+21. `FR-SD-21` 删除撤销链路必须允许部分恢复成功；成功项立即恢复，失败项保留为新的可撤销批次并向用户显示部分失败反馈。
 
 ## 8. 验收标准 (AC)
 
@@ -178,13 +197,20 @@
 15. `AC-SD-15` 预览中删除当前非媒体文件后，按当前列表顺序跳到下一文件；删除末项时回绕到首项。
 16. `AC-SD-16` 结果模式下删除跨 Root 文件时，不会尝试把文件移动到当前 `rootPath/.trash`。
 17. `AC-SD-17` 当统一回收站中存在 `global_recycle` 项时，前端不会尝试用 `fs.restore(rootPath + relativePath)` 直接恢复该类项。
+18. `AC-SD-18` 文件网格删除单文件后，点击提示条“撤销”可恢复文件、选中态、焦点与侧栏预览。
+19. `AC-SD-19` 删除多个文件或目录后，按 `Ctrl/Cmd + Z` 会按整批恢复，而不是拆成单文件逐次恢复。
+20. `AC-SD-20` 删除后切换到其他路径或 Root，再执行撤销时，系统会跳回删除前上下文并恢复删除前 UI 状态。
+21. `AC-SD-21` 提示条自动隐藏后，`Ctrl/Cmd + Z` 仍可继续撤销最近删除批次。
+22. `AC-SD-22` 输入框聚焦时按 `Ctrl/Cmd + Z` 不会触发删除撤销。
+23. `AC-SD-23` 还原命中同名冲突时，实际恢复路径按 ` (1)/(2)` 改名返回，前端 UI 会跟随实际恢复路径重新对齐。
+24. `AC-SD-24` 当某批撤销只有部分项恢复成功时，成功项立即回到删除前可见状态，失败项保留为新的栈顶待撤销批次并显示非阻断提示。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
 1. `confirm` 默认值固定为 `true`。
 2. 回收目录名称固定为 `.trash`。
 3. `fs.restore` 与 `fs.softDelete` 共用同一 MCP server，不拆独立 server。
-4. 不新增还原快捷键；回收站中 `Delete` 保持无动作。
+4. 删除撤销快捷键固定新增为 `Ctrl/Cmd + Z`；回收站中 `Delete` 仍保持无动作。
 
 ## 10. 关联主题 (Related Specs)
 

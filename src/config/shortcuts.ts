@@ -7,6 +7,7 @@ export type TagShortcutActionId = `tag:${string}`
 export type ShortcutActionId =
   | 'app_open_directory'
   | 'app_navigate_up'
+  | 'app_undo_delete'
   | 'preview_toggle_autoplay'
   | 'preview_toggle_playback_order'
   | 'preview_toggle_video_play_pause'
@@ -46,6 +47,7 @@ export interface KeyboardShortcuts {
   app: {
     openDirectory: ShortcutBinding[]
     navigateUp: ShortcutBinding[]
+    undoDelete: ShortcutBinding[]
   }
   preview: {
     toggleAutoPlay: ShortcutBinding[]
@@ -112,6 +114,13 @@ const shortcutActionTargets: Record<ShortcutActionId, ShortcutActionTarget> = {
     implicitBinding: {},
     label: '返回上一级目录',
     order: 20,
+  },
+  app_undo_delete: {
+    group: 'app',
+    action: 'undoDelete',
+    implicitBinding: { primary: true },
+    label: '撤销最近删除',
+    order: 30,
   },
   preview_toggle_autoplay: {
     group: 'preview',
@@ -334,6 +343,7 @@ function createEmptyKeyboardShortcuts(): KeyboardShortcuts {
     app: {
       openDirectory: [],
       navigateUp: [],
+      undoDelete: [],
     },
     preview: {
       toggleAutoPlay: [],
@@ -372,6 +382,7 @@ export function cloneKeyboardShortcuts(shortcuts: KeyboardShortcuts): KeyboardSh
     app: {
       openDirectory: cloneBindings(shortcuts.app.openDirectory),
       navigateUp: cloneBindings(shortcuts.app.navigateUp),
+      undoDelete: cloneBindings(shortcuts.app.undoDelete),
     },
     preview: {
       toggleAutoPlay: cloneBindings(shortcuts.preview.toggleAutoPlay),
