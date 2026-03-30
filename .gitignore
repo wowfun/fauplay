@@ -41,6 +41,7 @@ __pycache__/
 
 # Local
 .fauplay/
+.codex
 tools/mcp-local/
 _local/
 .cache/
