@@ -3,6 +3,8 @@
 ## 2026-04-06
 ### Changed
 - 更新 `specs/111-local-file-browser/spec.md`、`specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/top-toolbar-tag-filter.md`：新增“顶部工具栏过滤状态按 root 持久化”契约，固定持久化范围为搜索、类型、隐藏空文件夹、排序与标签 include/exclude + `OR/AND`，并明确 `source/key` 分面、面板开关、缩略图尺寸与平铺视图不纳入持久化。
+- 更新 `specs/119-person-management-face-correction/spec.md`：补充“全屏预览打开人物详情时，人物管理抽屉必须覆盖显示于全屏预览之上”的可见性契约，避免人物详情被 lightbox 遮挡。
+- 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物工作台状态契约，要求“搜索人物名”仅更新人物列表且带短延迟去抖，不得触发全量刷新；同时明确预览传入的人物定位只作为打开时/再次显式跳转目标，不得锁死人物切换。
 
 ## 2026-03-31
 ### Added

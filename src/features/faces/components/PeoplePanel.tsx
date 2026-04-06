@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Users, X } from 'lucide-react'
 import {
   assignFaces,
@@ -141,6 +141,7 @@ export function PeoplePanel({
   preferredPersonId = null,
   onClose,
 }: PeoplePanelProps) {
+  const peopleListRequestIdRef = useRef(0)
   const context = useMemo(() => ({
     rootHandle,
     rootId,
@@ -192,34 +193,37 @@ export function PeoplePanel({
     setAllPeople(items)
   }, [context, scope])
 
-  const loadPeopleList = useCallback(async () => {
+  const loadPeopleList = useCallback(async (query = '') => {
+    const requestId = ++peopleListRequestIdRef.current
+    const trimmedQuery = query.trim()
     setIsLoadingPeople(true)
     try {
       const items = await listPeople(context, {
         scope,
-        query: peopleQuery.trim() || undefined,
+        query: trimmedQuery || undefined,
         size: 300,
       })
+      if (requestId !== peopleListRequestIdRef.current) return
       setPeople(items)
       setSelectedPersonId((previous) => {
-        if (preferredPersonId && items.some((item) => item.personId === preferredPersonId)) {
-          return preferredPersonId
-        }
         if (previous && items.some((item) => item.personId === previous)) {
           return previous
         }
         return items[0]?.personId ?? null
       })
     } catch (error) {
+      if (requestId !== peopleListRequestIdRef.current) return
       setPeople([])
       setNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : '人物列表读取失败',
       })
     } finally {
-      setIsLoadingPeople(false)
+      if (requestId === peopleListRequestIdRef.current) {
+        setIsLoadingPeople(false)
+      }
     }
-  }, [context, peopleQuery, preferredPersonId, scope])
+  }, [context, scope])
 
   const loadCurrentFaces = useCallback(async () => {
     setIsLoadingFaces(true)
@@ -255,22 +259,27 @@ export function PeoplePanel({
   const refreshAll = useCallback(async () => {
     await Promise.allSettled([
       loadAllPeople(),
-      loadPeopleList(),
+      loadPeopleList(peopleQuery),
       loadCurrentFaces(),
     ])
-  }, [loadAllPeople, loadCurrentFaces, loadPeopleList])
+  }, [loadAllPeople, loadCurrentFaces, loadPeopleList, peopleQuery])
 
   useEffect(() => {
     if (!open) return
     clearSelection()
     setNotice(null)
-    void refreshAll()
-  }, [clearSelection, open, refreshAll])
+  }, [clearSelection, open])
 
   useEffect(() => {
     if (!open || view !== 'people') return
-    void loadPeopleList()
-  }, [loadPeopleList, open, view])
+    const timeoutId = window.setTimeout(() => {
+      void loadPeopleList(peopleQuery)
+    }, peopleQuery.trim() ? 180 : 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [loadPeopleList, open, peopleQuery, view])
 
   useEffect(() => {
     if (!open) return
@@ -290,11 +299,10 @@ export function PeoplePanel({
 
   useEffect(() => {
     if (!open || !preferredPersonId) return
-    const matched = allPeople.find((person) => person.personId === preferredPersonId)
-    if (!matched) return
     setView('people')
-    setSelectedPersonId(matched.personId)
-  }, [allPeople, open, preferredPersonId])
+    clearSelection()
+    setSelectedPersonId(preferredPersonId)
+  }, [clearSelection, open, preferredPersonId])
 
   useEffect(() => {
     if (!open) return undefined
@@ -444,7 +452,7 @@ export function PeoplePanel({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] bg-black/40" onClick={onClose}>
       <div
         className="absolute right-0 top-0 h-full w-[1180px] max-w-[98vw] border-l border-border bg-background shadow-2xl"
         onClick={(event) => event.stopPropagation()}
