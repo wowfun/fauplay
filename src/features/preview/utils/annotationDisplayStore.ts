@@ -920,6 +920,12 @@ export function isAnnotationFilterUiVisible(rootId: string | null | undefined): 
   return gate.hasSidecarFile && gate.hasAnyFilterableAnnotation
 }
 
+export function isAnnotationFilterUiGateResolved(rootId: string | null | undefined): boolean {
+  if (!rootId) return false
+  const snapshot = rootSnapshots.get(rootId)
+  return snapshot?.status === 'ready'
+}
+
 export function getAnnotationFilterUiGateReason(
   rootId: string | null | undefined
 ): AnnotationFilterUiGateReason | null {

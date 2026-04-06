@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-04-06
+### Changed
+- 更新 `specs/111-local-file-browser/spec.md`、`specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/top-toolbar-tag-filter.md`：新增“顶部工具栏过滤状态按 root 持久化”契约，固定持久化范围为搜索、类型、隐藏空文件夹、排序与标签 include/exclude + `OR/AND`，并明确 `source/key` 分面、面板开关、缩略图尺寸与平铺视图不纳入持久化。
+
 ## 2026-03-31
 ### Added
 - 新增 `specs/124-app-entry-composition/spec.md`：定义应用入口装配重构专题，约束 `src/App.tsx` 仅整理目录选择快捷键副作用、目录选择页/工作区分支 props 装配与稳定兜底 `rootId` 语义，不引入新的用户可见行为。
