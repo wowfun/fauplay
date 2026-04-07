@@ -1,6 +1,7 @@
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type {
   FaceBoundingBox,
+  FaceMediaType,
   FaceMutationItem,
   FaceMutationResult,
   FaceRecord,
@@ -40,6 +41,10 @@ function readFaceStatus(value: unknown): FaceStatus {
     || value === 'ignored'
     ? value
     : 'unassigned'
+}
+
+function readFaceMediaType(value: unknown): FaceMediaType {
+  return value === 'video' ? 'video' : 'image'
 }
 
 function readBoundingBox(value: unknown): FaceBoundingBox | null {
@@ -107,6 +112,8 @@ function readFaceItems(result: unknown): FaceRecord[] {
       boundingBox,
       score: readNumber(item.score, 0),
       status: readFaceStatus(item.status),
+      mediaType: readFaceMediaType(item.mediaType),
+      frameTsMs: typeof item.frameTsMs === 'number' ? item.frameTsMs : null,
       personId: readNullableString(item.personId),
       personName: readNullableString(item.personName),
       assignedBy: readNullableString(item.assignedBy),
@@ -132,6 +139,8 @@ function readSuggestionItems(result: unknown): PersonSuggestion[] {
         faceId: readString(supportingFace.faceId),
         assetId: readString(supportingFace.assetId),
         assetPath: readNullableString(supportingFace.assetPath),
+        mediaType: readFaceMediaType(supportingFace.mediaType),
+        frameTsMs: typeof supportingFace.frameTsMs === 'number' ? supportingFace.frameTsMs : null,
         boundingBox,
       },
     }]

@@ -507,9 +507,19 @@ const httpGatewayRoutes = [
       relativePath: inferred.relativePath,
       facePayloads: inferred.faces,
     })
+    const runCluster = payload?.runCluster === true
+    const hasVideoFaces = persisted.faces.some((face) => face?.mediaType === 'video')
+    const cluster = runCluster && persisted.created > 0
+      ? await clusterPendingFaces({
+        limit: persisted.created,
+        assetId: persisted.assetId,
+        minFaces: hasVideoFaces ? 3 : 1,
+      })
+      : null
     return {
       ...persisted,
       inferenceDetected: inferred.detected,
+      ...(cluster ? { cluster } : {}),
     }
   }),
   createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),

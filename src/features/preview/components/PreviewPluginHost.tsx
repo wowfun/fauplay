@@ -6,6 +6,7 @@ import type { GatewayToolDescriptor } from '@/lib/gateway'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
+import { getFilePreviewKind } from '@/lib/filePreview'
 import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import type { FileItem, ResultProjection } from '@/types'
@@ -566,11 +567,31 @@ export function PreviewPluginHost({
   const workbenchNode = useMemo(() => {
     const tool = pluginRuntime.activeWorkbenchTool
     if (!tool || !hasWorkbenchMetadata(tool)) return null
+    const previewKind = file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
     const previewWorkbenchTool = tool.name === 'local.data'
       ? {
         ...tool,
         toolActions: tool.toolActions.filter((action) => action.arguments?.operation !== 'ensureFileEntries'),
       }
+      : tool.name === 'vision.face' && (previewKind === 'image' || previewKind === 'video')
+        ? {
+          ...tool,
+          toolActions: [
+            {
+              key: 'detectAssetRunCluster',
+              label: '检测并识别人脸',
+              description: previewKind === 'video'
+                ? '对当前视频抽帧检测并立即执行人物归属'
+                : '对当前图片执行检测并立即执行人物归属',
+              intent: 'primary',
+              arguments: {
+                operation: 'detectAsset',
+                runCluster: true,
+              },
+            },
+            ...tool.toolActions,
+          ],
+        }
       : tool
 
     return (
@@ -608,6 +629,8 @@ export function PreviewPluginHost({
       />
     )
   }, [
+    file.kind,
+    file.name,
     pluginRuntime,
     previewBaseArguments,
     resolveToolArguments,

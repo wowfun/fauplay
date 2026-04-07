@@ -1,7 +1,13 @@
 # CHANGELOG
 
+## 2026-04-08
+### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物级合并交互，明确“当前人物并入目标人物”的 source/target 方向，并要求目标候选展示代表脸或占位、人物名与数量上下文。
+
 ## 2026-04-06
 ### Changed
+- 更新 `specs/115-facial-recognition/spec.md`、`specs/119-person-management-face-correction/spec.md` 与 `specs/005-local-data-contracts/spec.md`：收紧视频人脸防爆策略，将视频抽帧改为短视频按 3s、长视频按 5% 等分采样，新增无可信 duration 时的递增间隔 fallback，并明确视频即时聚类采用保守策略，证据不足的人脸进入待整理而非直接创建大量新人。
+- 更新 `specs/115-facial-recognition/spec.md`、`specs/119-person-management-face-correction/spec.md` 与 `specs/005-local-data-contracts/spec.md`：将视频人脸识别并入现有人脸专题，明确视频抽帧检测、视频内去重、`runCluster`、`face.mediaType/frameTsMs`、视频来源 face crop 与人物工作台整理契约，且 v1 固定为文件级手动触发，不引入视频时序脸框。
 - 更新 `specs/111-local-file-browser/spec.md`、`specs/003-ui-ux/spec.md` 与 `specs/003-ui-ux/top-toolbar-tag-filter.md`：新增“顶部工具栏过滤状态按 root 持久化”契约，固定持久化范围为搜索、类型、隐藏空文件夹、排序与标签 include/exclude + `OR/AND`，并明确 `source/key` 分面、面板开关、缩略图尺寸与平铺视图不纳入持久化。
 - 更新 `specs/119-person-management-face-correction/spec.md`：补充“全屏预览打开人物详情时，人物管理抽屉必须覆盖显示于全屏预览之上”的可见性契约，避免人物详情被 lightbox 遮挡。
 - 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物工作台状态契约，要求“搜索人物名”仅更新人物列表且带短延迟去抖，不得触发全量刷新；同时明确预览传入的人物定位只作为打开时/再次显式跳转目标，不得锁死人物切换。

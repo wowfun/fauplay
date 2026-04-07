@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+import cv2
 from PIL import Image
 
 RESAMPLING = getattr(Image, "Resampling", Image)
@@ -48,6 +49,8 @@ def build_square_crop_bounds(width: int, height: int, x1: float, y1: float, x2: 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
+    parser.add_argument("--media-type", choices=["image", "video"], default="image")
+    parser.add_argument("--frame-ts-ms", type=int, default=None)
     parser.add_argument("--x1", type=float, required=True)
     parser.add_argument("--y1", type=float, required=True)
     parser.add_argument("--x2", type=float, required=True)
@@ -56,7 +59,27 @@ def main() -> int:
     parser.add_argument("--padding", type=float, default=0.35)
     args = parser.parse_args()
 
-    image = Image.open(args.input).convert("RGB")
+    if args.media_type == "video":
+        capture = cv2.VideoCapture(args.input)
+        if not capture.isOpened():
+            raise RuntimeError(f"failed to open video: {args.input}")
+        try:
+            target_ts_ms = max(0, int(args.frame_ts_ms or 0))
+            capture.set(cv2.CAP_PROP_POS_MSEC, float(target_ts_ms))
+            ok, frame = capture.read()
+            if (not ok or frame is None) and (capture.get(cv2.CAP_PROP_FPS) or 0) > 0:
+                fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+                frame_index = max(0, int(round((target_ts_ms / 1000.0) * fps)))
+                capture.set(cv2.CAP_PROP_POS_FRAMES, float(frame_index))
+                ok, frame = capture.read()
+            if not ok or frame is None:
+                raise RuntimeError(f"failed to read video frame: {args.input}")
+            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        finally:
+            capture.release()
+    else:
+        image = Image.open(args.input).convert("RGB")
+
     width, height = image.size
 
     bounds = build_square_crop_bounds(

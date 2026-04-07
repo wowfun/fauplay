@@ -134,6 +134,8 @@ export function usePreviewFaceOverlays({
           boundingBox: face.boundingBox,
           score: face.score,
           status: face.status,
+          mediaType: face.mediaType,
+          frameTsMs: face.frameTsMs,
           personId: face.personId,
           personName: face.personName,
         })))

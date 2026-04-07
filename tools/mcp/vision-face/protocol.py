@@ -26,6 +26,7 @@ TOOL_DEFINITIONS = [
                     ],
                 },
                 "relativePath": {"type": "string"},
+                "runCluster": {"type": "boolean"},
                 "personId": {"type": "string"},
                 "name": {"type": "string"},
                 "sourcePersonIds": {

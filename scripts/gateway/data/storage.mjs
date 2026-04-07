@@ -91,6 +91,8 @@ function createSchemaV4(db) {
     CREATE TABLE IF NOT EXISTS face (
       id TEXT PRIMARY KEY,
       assetId TEXT NOT NULL,
+      mediaType TEXT NOT NULL DEFAULT 'image',
+      frameTsMs INTEGER,
       x1 REAL NOT NULL,
       y1 REAL NOT NULL,
       x2 REAL NOT NULL,

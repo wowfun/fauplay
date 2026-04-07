@@ -78,7 +78,7 @@
 
 1. 数据库文件固定为：`${HOME}/.fauplay/global/faudb.sqlite`。
 2. 全应用共享单一全局库；`rootPath` 仅作为请求过滤条件，不是持久化实体。
-3. `schemaVersion=4`（`PRAGMA user_version=4`）。
+3. `schemaVersion=5`（`PRAGMA user_version=5`）。
 
 ### 5.2 统一主键与关系
 
@@ -97,7 +97,8 @@
 3. `tag`：`id`、`key`、`value`、`source`。
 4. `asset_tag`：`assetId`、`tagId`、`appliedAt`、`score`（可空，当前仅分类使用）。
 5. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `assetId` 关系；其中 `person_face` 是人物归属真源，`face.status` 负责表达自动/人工处理状态。
-6. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
+6. `face` 必须额外支持 `mediaType`（`image | video`）与 `frameTsMs`（视频采样帧毫秒时间点，可空）字段。
+7. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
 
 ### 5.4 路径与查询语义
 
@@ -184,19 +185,23 @@
 - `/v1/mcp` 继续保留用于通用插件调用，不承载上述业务主链路。
 - 前端业务侧应优先使用 Gateway 原生 HTTP 接口。
 - `list-people` 与人物上下文 `list-asset-faces` 必须支持显式 `scope: 'global' | 'root'`，不得仅通过是否携带 `rootPath` 推断查询作用域。
+- `detect-asset` 必须支持可选 `runCluster?: boolean`，用于检测写入后在同一次请求内串行补跑 `cluster-pending`；视频资产的即时聚类必须采用保守策略，避免陌生 face 单次触发大量创建人物。
+- 人脸相关公开结果必须支持 `mediaType: 'image' | 'video'` 与 `frameTsMs: number | null`。
+- `GET /v1/faces/crops/:faceId` 必须同时支持图片 face 与视频采样帧 face，不新增并行裁切路由。
 
 ## 7. 插件职责约束 (Plugin Responsibility)
 
 1. `vision-face` 插件仅保留推理能力（检测框与 embedding），不负责持久化。
-2. `local.data` 插件仅承载工作台入口与操作元数据，不直接读写 SQLite。
-3. `timm-classifier` 仅返回分类结果，落库由 Gateway 执行。
+2. `vision-face` 对视频输入仅负责按时长自适应抽帧检测、embedding 计算、视频内去重与候选上限收敛，不负责人物写入或标签投影。
+3. `local.data` 插件仅承载工作台入口与操作元数据，不直接读写 SQLite。
+4. `timm-classifier` 仅返回分类结果，落库由 Gateway 执行。
 
 ## 8. 兼容与迁移策略 (Compatibility)
 
 1. 不兼容旧数据：不读取、不导入旧 `faces.v1.sqlite`、旧 `.annotations.v1.json` 与旧 `<root>/.fauplay/faudb.v1.sqlite`。
 2. 若旧全局数据库 `${HOME}/.fauplay/faudb.global.sqlite` 存在且新路径 `${HOME}/.fauplay/global/faudb.sqlite` 缺失，系统必须先完成一次迁移，再打开新路径。
 3. 当检测到旧全局 schema 时，直接重建数据库（不备份）。
-4. 新版本仅认 `schemaVersion=3`。
+4. 新版本仅认 `schemaVersion=5`。
 
 ## 9. 功能需求 (FR)
 
@@ -233,6 +238,9 @@
 31. `FR-LDC-31` 显式补建接口必须只处理 `missing | stale` 文件；`fresh` 文件不得重复建档。
 32. `FR-LDC-32` 系统必须提供 `POST /v1/files/duplicates/query` 作为按 `assetId` 查重的统一查询入口。
 33. `FR-LDC-33` 工作区查重对 `stale` 种子必须执行当前特征二次校验后再保留结果。
+34. `FR-LDC-34` `face` 表必须支持同时持久化图片 face 与视频采样帧 face，并通过 `mediaType/frameTsMs` 区分来源。
+35. `FR-LDC-35` 对视频执行 `detect-asset` 时，系统必须支持把抽样后代表 faces 落到现有 `face/face_embedding` 模型，而不是引入并行视频人脸表。
+36. `FR-LDC-36` `GET /v1/faces/crops/:faceId` 必须可从视频文件按 `frameTsMs` 取帧后返回裁切图。
 
 ## 10. 验收标准 (AC)
 
@@ -260,6 +268,9 @@
 22. `AC-LDC-22` 对 `POST /v1/files/duplicates/query` 发起预览单文件查重时，当前文件无索引或索引过期可先被隐式补建，再返回重复结果。
 23. `AC-LDC-23` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`missing` 种子会出现在覆盖率统计中而不是被静默忽略。
 24. `AC-LDC-24` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`stale` 种子的旧命中若经当前特征二次校验失效，则不会出现在最终结果中。
+25. `AC-LDC-25` 对视频执行 `POST /v1/faces/detect-asset` 后，数据库中的 `face` 记录会写入 `mediaType='video'` 与非空 `frameTsMs`，并可继续参与既有人物聚类。
+26. `AC-LDC-26` 对视频执行 `POST /v1/faces/detect-asset` 且 `runCluster=true` 后，匹配已有人物或达到保守聚类证据要求的 face 可产生 `vision.face(person=...)` 标签投影；证据不足的陌生视频 face 保持待整理状态。
+27. `AC-LDC-27` 对视频来源 face 调用 `GET /v1/faces/crops/:faceId` 时，可返回裁切图而不是 404 或仅支持图片。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -271,6 +282,8 @@
 6. 新增显式建档接口：`POST /v1/files/indexes`。
 7. 新增重复文件查询接口：`POST /v1/files/duplicates/query`。
 8. 重复文件查询结果需支持覆盖率字段（如 `seedCount/indexedSeedCount/needsIndexingCount`）与分组结果（如 `groups[]`）。
+9. 人脸公开记录新增 `mediaType: 'image' | 'video'` 与 `frameTsMs: number | null`。
+10. 视频检测配置新增/收敛 `videoShortIntervalMs`、`videoShortMaxDurationMs`、`videoMaxFrames`、`videoMinScore`、`videoDedupeMaxDistance` 与 `videoMaxFacesPerAsset`，用于限制视频候选 face 数量。
 
 ## 12. 关联主题 (Related Specs)
 

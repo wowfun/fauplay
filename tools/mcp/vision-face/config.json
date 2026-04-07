@@ -6,6 +6,12 @@
   "minScore": 0.7,
   "maxDistance": 0.5,
   "minFaces": 3,
+  "videoShortIntervalMs": 3000,
+  "videoShortMaxDurationMs": 60000,
+  "videoMaxFrames": 20,
+  "videoMinScore": 0.8,
+  "videoDedupeMaxDistance": 0.4,
+  "videoMaxFacesPerAsset": 20,
   "clusterNewFacesNightly": true,
   "forceCpu": false
 }

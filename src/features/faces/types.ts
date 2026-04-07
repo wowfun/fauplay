@@ -5,6 +5,7 @@ export interface FaceBoundingBox {
   y2: number
 }
 
+export type FaceMediaType = 'image' | 'video'
 export type PersonScope = 'global' | 'root'
 export type FaceReviewBucket = 'unassigned' | 'ignored'
 export type FaceStatus = 'assigned' | 'unassigned' | 'deferred' | 'manual_unassigned' | 'ignored'
@@ -15,6 +16,8 @@ export interface PreviewFaceOverlayItem {
   boundingBox: FaceBoundingBox
   score: number
   status: FaceStatus
+  mediaType: FaceMediaType
+  frameTsMs: number | null
   personId: string | null
   personName: string | null
 }
@@ -36,6 +39,8 @@ export interface FaceRecord {
   boundingBox: FaceBoundingBox
   score: number
   status: FaceStatus
+  mediaType: FaceMediaType
+  frameTsMs: number | null
   personId: string | null
   personName: string | null
   assignedBy: string | null
@@ -51,6 +56,8 @@ export interface PersonSuggestion {
     faceId: string
     assetId: string
     assetPath: string | null
+    mediaType: FaceMediaType
+    frameTsMs: number | null
     boundingBox: FaceBoundingBox
   }
 }

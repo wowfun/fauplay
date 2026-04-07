@@ -22,6 +22,8 @@
 - 全局人物空间（Global People Space）
 - Root 作用域查询（Root-scoped Query）
 - 人脸裁切（Face Crop）
+- 视频来源人脸（Video-origin Face）
+- 采样帧时间点（Frame Timestamp）
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
 
@@ -32,6 +34,7 @@
 3. 人物工作台三段式信息架构：`人物`、`未归属`、`误检/忽略`。
 4. 预览区单脸快修与人物详情批量整理。
 5. 跨 Root 人脸卡片渲染所需的 Gateway 裁切接口。
+6. 视频抽样 face 进入人物工作台并复用既有纠错流程。
 
 范围外：
 
@@ -52,23 +55,25 @@
 ## 5. 数据与状态契约 (Data / State Contract)
 
 1. 不新增表；继续沿用 `face`、`face_embedding`、`person`、`person_face`。
-2. `person_face.assignedBy` 必须支持：
+2. `face` 可同时表示图片 face 与视频采样帧 face；两者共用同一人物空间与纠错接口。
+3. `person_face.assignedBy` 必须支持：
    - `auto`
    - `manual`
    - `merge`
-3. `face.status` 必须支持：
+4. `face.status` 必须支持：
    - `assigned`
    - `unassigned`
    - `deferred`
    - `manual_unassigned`
    - `ignored`
-4. 状态流转约束：
+5. 视频 face 需额外携带 `mediaType='video'` 与 `frameTsMs`；图片 face 固定为 `mediaType='image'` 且 `frameTsMs=NULL`。
+6. 状态流转约束：
    - 人工归属到某人物：写入/更新 `person_face`，`assignedBy='manual'`，`face.status='assigned'`
    - 人工移出：删除 `person_face`，`face.status='manual_unassigned'`
    - 误检忽略：删除 `person_face`，`face.status='ignored'`
    - 恢复误检：`face.status='manual_unassigned'`
    - 重新交还自动聚类：仅允许从 `manual_unassigned -> deferred`
-5. 任何改变有效人物归属的写请求都必须：
+7. 任何改变有效人物归属的写请求都必须：
    - 事务提交
    - 刷新人物缓存
    - 同步受影响资产的 `vision.face(person=...)` 标签投影
@@ -105,6 +110,7 @@
 2. `listAssetFaces`
    - 文件上下文查询继续使用 `rootPath + relativePath`
    - 人物上下文查询增加 `scope: 'global' | 'root'`，`scope='root'` 时 `rootPath` 必填
+   - 返回项需支持 `mediaType` 与 `frameTsMs`
 3. `listReviewFaces`
    - 输入：`scope`、`rootPath?`、`bucket: 'unassigned' | 'ignored'`、`page`、`size`
    - `bucket='unassigned'` 必须包含 `unassigned | deferred | manual_unassigned`
@@ -113,6 +119,7 @@
    - 输入：`faceId`、`candidateSize?`
    - v1 只支持单脸建议；批量 UI 使用最后聚焦脸作为建议锚点
    - 返回候选项必须包含 `personId`、`name`、`score` 或 `distance`、以及一个 `supportingFace`
+   - `supportingFace` 若来自视频，需保留 `frameTsMs`
 
 ### 5.2 批量写接口
 
@@ -154,6 +161,7 @@
    - 状态徽标
    - 当前人物名或未归属状态
    - 选中态
+   - 当 face 来自视频时，额外展示采样时间点
 5. 工作台必须支持多选批量整理，且允许混合来源 faces 一次执行同一动作。
 6. 预览区点击任意脸框后，必须打开 face 纠错面板，而不是仅在已归属时跳转人物详情。
 7. 预览纠错面板至少提供：
@@ -168,6 +176,8 @@
 9. 从预览纠错面板打开人物详情时，人物管理抽屉必须可见且可交互；若当前处于全屏预览，人物管理抽屉必须覆盖在全屏预览之上。
 10. 人物视图中的“搜索人物名”只得更新人物列表，不得触发人物工作台全量刷新；输入需做短延迟去抖，避免同一轮键入产生请求风暴或导致 Gateway 超时。
 11. 来自预览的“打开人物详情”定位仅作为当前打开会话的初始人物或后续显式再次跳转目标；进入人物工作台后，用户必须能够手动切换到其他人物，且不得被后台列表刷新自动改回。
+12. 人物级合并必须以“当前人物并入目标人物”为交互方向：当前正在查看的人物是 source，用户选择的目标人物是 target；目标候选必须展示可识别的代表脸或占位、人物名与数量上下文，避免只凭名称合并。
+13. v1 视频来源 faces 仅进入人物工作台与纠错面板，不要求在视频播放器内显示可点击的时序脸框。
 
 ## 8. 功能需求 (FR)
 
@@ -184,6 +194,10 @@
 11. `FR-PMFC-11` 系统必须支持显式把 `manual_unassigned` 重新交还自动聚类，状态转为 `deferred`。
 12. `FR-PMFC-12` 任一改变有效归属的 mutation 后，人物计数、人物列表、人脸详情与 `vision.face` 标签必须保持一致。
 13. `FR-PMFC-13` 系统必须提供跨 Root 可读的人脸裁切接口，用于全局人物整理。
+14. `FR-PMFC-14` 视频来源 faces 必须可在人物工作台中展示为可选择、可批量整理的 face 卡片。
+15. `FR-PMFC-15` 视频来源 face 卡片必须显示采样时间点，便于区分同一视频中的不同代表脸。
+16. `FR-PMFC-16` 视频即时识别中证据不足的陌生 faces 必须保留为待整理状态，不得因单次视频识别直接制造大量新人。
+17. `FR-PMFC-17` 人物级合并必须把当前人物作为 source、用户选择的人物作为 target，并在执行前让用户看见目标人物的代表脸或占位。
 
 ## 9. 验收标准 (AC)
 
@@ -200,6 +214,10 @@
 11. `AC-PMFC-11` 在全屏预览中从人脸纠错面板打开人物详情时，人物管理抽屉覆盖显示在全屏预览之上，且关闭人物管理后仍可返回原全屏预览。
 12. `AC-PMFC-12` 在人物工作台中连续输入人物名搜索时，只刷新人物列表查询，不会重复刷新人物详情与当前人脸网格，也不会因请求风暴导致页面持续闪动。
 13. `AC-PMFC-13` 从预览打开某人物详情后，用户仍可点击人物列表切换到其他人物；后续列表刷新或搜索结果更新不得自动跳回最初打开的人物。
+14. `AC-PMFC-14` 视频文件识别后，人物工作台可看到该视频产出的 face 卡片，并支持与图片来源 faces 一样执行批量纠错。
+15. `AC-PMFC-15` 视频来源 face 卡片会显示 `mm:ss` 级时间点文本，但不会要求播放器同步跳转或显示时序 bbox。
+16. `AC-PMFC-16` 对视频执行保守即时识别后，未能稳定匹配的人脸会出现在未归属/待整理视图中，可由用户手动归属或创建人物。
+17. `AC-PMFC-17` 打开人物 A 的详情后，选择人物 B 的目标卡片并执行合并，请求语义为 `target=B, source=[A]`；合并后 A 消失，当前详情切换到 B。
 
 ## 10. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -207,6 +225,7 @@
 2. 同一请求内的批量 mutation 默认允许部分成功，不采用全成全败策略。
 3. `person.name` 允许为空；空名人物的展示名由 UI 或投影层回退为稳定占位名。
 4. 本专题不修改快捷键配置契约，也不新增快捷键。
+5. v1 不新增“视频播放器时间轴脸框”或“按时间点回放定位”交互。
 
 ## 11. 关联主题 (Related Specs)
 

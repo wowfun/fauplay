@@ -134,6 +134,17 @@ function toDisplayPersonName(personId, name) {
   return `人物 ${String(personId || '').slice(0, 8)}`
 }
 
+function normalizeFaceMediaType(value) {
+  return value === 'video' ? 'video' : 'image'
+}
+
+function normalizeFaceFrameTsMs(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+  return Math.max(0, Math.round(value))
+}
+
 function toFaceDto(row, displayRootPath, assetPathOverride = null) {
   const assetPath = assetPathOverride
     || (typeof row.displayAbsolutePath === 'string' ? toDisplayPath(displayRootPath, row.displayAbsolutePath) : null)
@@ -153,6 +164,8 @@ function toFaceDto(row, displayRootPath, assetPathOverride = null) {
     },
     score: Number(row.score ?? 0),
     status: typeof row.status === 'string' ? row.status : 'unassigned',
+    mediaType: normalizeFaceMediaType(row.mediaType),
+    frameTsMs: normalizeFaceFrameTsMs(row.frameTsMs),
     personId,
     personName: personId ? toDisplayPersonName(personId, row.personName) : null,
     assignedBy: typeof row.assignedBy === 'string' ? row.assignedBy : null,
@@ -320,6 +333,10 @@ export async function saveDetectedFaces(params) {
         const x2 = parseFiniteNumber(box.x2, NaN)
         const y2 = parseFiniteNumber(box.y2, NaN)
         const score = parseFiniteNumber(payload.score, 0)
+        const mediaType = normalizeFaceMediaType(payload.mediaType)
+        const frameTsMs = mediaType === 'video'
+          ? Math.max(0, parseInteger(payload.frameTsMs, 0))
+          : null
 
         if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
           continue
@@ -329,9 +346,9 @@ export async function saveDetectedFaces(params) {
         const embeddingBlob = toEmbeddingBlob(embedding)
 
         db.prepare(`
-          INSERT INTO face(id, assetId, x1, y1, x2, y2, score, status, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'unassigned', ?, ?)
-        `).run(faceId, file.assetId, x1, y1, x2, y2, score, ts, ts)
+          INSERT INTO face(id, assetId, mediaType, frameTsMs, x1, y1, x2, y2, score, status, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unassigned', ?, ?)
+        `).run(faceId, file.assetId, mediaType, frameTsMs, x1, y1, x2, y2, score, ts, ts)
 
         db.prepare(`
           INSERT INTO face_embedding(faceId, dim, embedding)
@@ -343,6 +360,8 @@ export async function saveDetectedFaces(params) {
           assetPath: relativePath,
           score,
           boundingBox: { x1, y1, x2, y2 },
+          mediaType,
+          frameTsMs,
           personId: null,
           personName: null,
           assignedBy: null,
@@ -374,6 +393,9 @@ export async function clusterPendingFaces(params) {
   const limit = Math.min(2000, Math.max(1, parseInteger(params.limit, 100)))
   const maxDistance = parseFiniteNumber(params.maxDistance, 0.5)
   const minFaces = Math.max(1, parseInteger(params.minFaces, 3))
+  const assetId = typeof params.assetId === 'string' ? params.assetId.trim() : ''
+  const assetFilterSql = assetId ? 'AND face.assetId = ?' : ''
+  const assetFilterParams = assetId ? [assetId] : []
 
   return withDb(async (db) => (
     withTransaction(db, async () => {
@@ -389,9 +411,10 @@ export async function clusterPendingFaces(params) {
         INNER JOIN asset ON asset.id = face.assetId
         WHERE face.status IN ('unassigned', 'deferred')
           AND asset.deletedAt IS NULL
+          ${assetFilterSql}
         ORDER BY face.updatedAt ASC
         LIMIT ?
-      `).all(limit)
+      `).all(...assetFilterParams, limit)
 
       if (rows.length === 0) {
         return {
@@ -747,6 +770,8 @@ export async function listAssetFaces(params) {
         SELECT
           face.id AS id,
           face.assetId AS assetId,
+          face.mediaType AS mediaType,
+          face.frameTsMs AS frameTsMs,
           face.x1 AS x1,
           face.y1 AS y1,
           face.x2 AS x2,
@@ -799,14 +824,16 @@ export async function listAssetFaces(params) {
     }
 
     const rows = db.prepare(`
-      SELECT
-        face.id AS id,
-        face.assetId AS assetId,
-        face.x1 AS x1,
-        face.y1 AS y1,
-        face.x2 AS x2,
-        face.y2 AS y2,
-        face.score AS score,
+        SELECT
+          face.id AS id,
+          face.assetId AS assetId,
+          face.mediaType AS mediaType,
+          face.frameTsMs AS frameTsMs,
+          face.x1 AS x1,
+          face.y1 AS y1,
+          face.x2 AS x2,
+          face.y2 AS y2,
+          face.score AS score,
         face.status AS status,
         face.updatedAt AS updatedAt,
         person_face.personId AS personId,
@@ -862,6 +889,8 @@ export async function listReviewFaces(params) {
       SELECT
         face.id AS id,
         face.assetId AS assetId,
+        face.mediaType AS mediaType,
+        face.frameTsMs AS frameTsMs,
         face.x1 AS x1,
         face.y1 AS y1,
         face.x2 AS x2,
@@ -940,6 +969,8 @@ export async function suggestPeople(params) {
         person.name AS personName,
         face.id AS faceId,
         face.assetId AS assetId,
+        face.mediaType AS mediaType,
+        face.frameTsMs AS frameTsMs,
         face.x1 AS x1,
         face.y1 AS y1,
         face.x2 AS x2,
@@ -986,6 +1017,8 @@ export async function suggestPeople(params) {
             faceId: row.faceId,
             assetId: row.assetId,
             assetPath: typeof row.absolutePath === 'string' ? row.absolutePath : null,
+            mediaType: normalizeFaceMediaType(row.mediaType),
+            frameTsMs: normalizeFaceFrameTsMs(row.frameTsMs),
             boundingBox: {
               x1: Number(row.x1),
               y1: Number(row.y1),
@@ -1249,6 +1282,8 @@ export async function getFaceCrop(params) {
     const row = db.prepare(`
       SELECT
         face.id AS faceId,
+        face.mediaType AS mediaType,
+        face.frameTsMs AS frameTsMs,
         face.x1 AS x1,
         face.y1 AS y1,
         face.x2 AS x2,
@@ -1270,6 +1305,8 @@ export async function getFaceCrop(params) {
       FACE_CROP_SCRIPT_PATH,
       '--input',
       row.absolutePath,
+      '--media-type',
+      normalizeFaceMediaType(row.mediaType),
       '--x1',
       String(Number(row.x1)),
       '--y1',
@@ -1283,6 +1320,9 @@ export async function getFaceCrop(params) {
       '--padding',
       String(padding),
     ]
+    if (normalizeFaceMediaType(row.mediaType) === 'video') {
+      args.push('--frame-ts-ms', String(Math.max(0, parseInteger(row.frameTsMs, 0))))
+    }
 
     const { stdout } = await execFileAsync(pythonBinary, args, {
       encoding: 'buffer',
@@ -1321,6 +1361,8 @@ export async function callVisionInference(runtime, params) {
         y2: parseFiniteNumber(box.y2, NaN),
       },
       score: parseFiniteNumber(item.score, 0),
+      mediaType: normalizeFaceMediaType(item.mediaType),
+      frameTsMs: normalizeFaceFrameTsMs(item.frameTsMs),
       embedding,
     })
   }
