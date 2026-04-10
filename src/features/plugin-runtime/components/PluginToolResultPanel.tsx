@@ -14,6 +14,7 @@ interface PluginToolResultPanelProps {
   emptyHint?: string
   onResultAction?: (params: { item: PluginResultQueueItem; action: StructuredToolCallAction }) => void
   onActivateProjection?: (params: { item: PluginResultQueueItem }) => void
+  onCancelItem?: (params: { item: PluginResultQueueItem }) => void
   activeProjectionId?: string | null
   panelWidthPx?: number
   minPanelWidthPx?: number
@@ -45,8 +46,17 @@ function resolveResultOk(value: unknown): boolean | null {
   return typeof value.ok === 'boolean' ? value.ok : null
 }
 
-function resolveStatusLabel(item: PluginResultQueueItem): '运行中' | '成功' | '失败' {
+function resolveResultStatus(value: unknown): string | null {
+  if (!isObject(value)) return null
+  return typeof value.status === 'string' ? value.status : null
+}
+
+function resolveStatusLabel(item: PluginResultQueueItem): '运行中' | '成功' | '失败' | '已取消' {
   if (item.status === 'loading') return '运行中'
+
+  if (resolveResultStatus(item.result) === 'canceled') {
+    return '已取消'
+  }
 
   const resultOk = resolveResultOk(item.result)
   if (typeof resultOk === 'boolean') {
@@ -66,6 +76,7 @@ export function PluginToolResultPanel({
   emptyHint,
   onResultAction,
   onActivateProjection,
+  onCancelItem,
   activeProjectionId = null,
   panelWidthPx = DEFAULT_PANEL_WIDTH_PX,
   minPanelWidthPx = DEFAULT_PANEL_WIDTH_PX,
@@ -95,6 +106,11 @@ export function PluginToolResultPanel({
   const projectionButtonClassName = isLightbox
     ? 'rounded-md border border-white/20 px-2 py-1 text-xs text-white transition-colors hover:bg-white/10'
     : 'rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40'
+  const progressTrackClassName = isLightbox ? 'bg-white/10' : 'bg-muted'
+  const progressBarClassName = isLightbox ? 'bg-white/70' : 'bg-primary'
+  const cancelButtonClassName = isLightbox
+    ? 'rounded-md border border-white/20 px-2 py-1 text-xs text-white transition-colors hover:bg-white/10 disabled:opacity-50'
+    : 'rounded-md border border-border/80 px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent/40 disabled:opacity-50'
 
   const handleResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!isResizable || !onPanelWidthChange) return
@@ -191,10 +207,57 @@ export function PluginToolResultPanel({
                         </div>
                       )}
                       {item.status === 'loading' ? (
-                        <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span>{item.title} 执行中...</span>
-                        </div>
+                        item.progress ? (
+                          <div className={`space-y-2 text-xs ${statusClassName}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                <span className="truncate">
+                                  {item.progress.message || `${item.title} 执行中...`}
+                                </span>
+                              </div>
+                              {(item.progress.cancelable || item.progress.cancelRequested) && onCancelItem && (
+                                <button
+                                  type="button"
+                                  className={cancelButtonClassName}
+                                  disabled={item.progress.cancelRequested === true}
+                                  onClick={() => {
+                                    onCancelItem({ item })
+                                  }}
+                                >
+                                  {item.progress.cancelRequested ? '取消中' : '取消'}
+                                </button>
+                              )}
+                            </div>
+                            <div className={`h-1.5 overflow-hidden rounded-full ${progressTrackClassName}`}>
+                              <div
+                                className={`h-full rounded-full transition-all ${progressBarClassName}`}
+                                style={{
+                                  width: `${item.progress.total && item.progress.total > 0
+                                    ? Math.min(100, Math.max(0, Math.round(((item.progress.current ?? 0) / item.progress.total) * 100)))
+                                    : 0}%`,
+                                }}
+                              />
+                            </div>
+                            <p>
+                              已处理 {item.progress.current ?? 0}/{item.progress.total ?? 0}
+                              {typeof item.progress.batchIndex === 'number' && typeof item.progress.batchCount === 'number'
+                                ? ` · 批次 ${item.progress.batchIndex}/${item.progress.batchCount}`
+                                : ''}
+                            </p>
+                            {item.progress.currentPath && (
+                              <p className="break-all">当前：{item.progress.currentPath}</p>
+                            )}
+                            <p>
+                              扫描 {item.progress.scanned ?? 0} · 跳过 {item.progress.skipped ?? 0} · 失败 {item.progress.failed ?? 0} · 人脸 {item.progress.detectedFaces ?? 0}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className={`flex items-center gap-2 text-xs ${statusClassName}`}>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>{item.title} 执行中...</span>
+                          </div>
+                        )
                       ) : item.status === 'error' ? (
                         <div className="text-xs space-y-1">
                           <p className="font-medium">执行失败</p>

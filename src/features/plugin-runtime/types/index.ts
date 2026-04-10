@@ -6,6 +6,23 @@ export type ToolWorkbenchOptionValue = boolean | string
 export type PluginActionState = 'default' | 'disabled' | 'loading' | 'error'
 export type PluginActionIconName = string
 
+export interface PluginResultProgress {
+  jobId?: string
+  status?: string
+  current?: number
+  total?: number
+  currentPath?: string | null
+  batchIndex?: number
+  batchCount?: number
+  scanned?: number
+  skipped?: number
+  failed?: number
+  detectedFaces?: number
+  cancelable?: boolean
+  cancelRequested?: boolean
+  message?: string
+}
+
 export interface PluginResultQueueItem {
   id: string
   contextKey: string
@@ -19,6 +36,7 @@ export interface PluginResultQueueItem {
   projection?: ResultProjection
   error?: string
   errorCode?: string
+  progress?: PluginResultProgress
   startedAt: number
   finishedAt?: number
   collapsed: boolean

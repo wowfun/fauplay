@@ -17,6 +17,7 @@
 2. Gateway 侧全局增量聚类、人物命名、人物合并、face 级纠错。
 3. 预览人脸框展示、单脸纠错与人物详情查询（含显示/隐藏切换）。
 4. 统一标签系统的人物标签写入（`source=vision.face`）。
+5. 工作区对选中优先、否则当前可见的图片/视频执行一键扫描，并仅处理尚未成功完成人脸检测的资产。
 
 范围外：
 
@@ -51,6 +52,7 @@
 6. `person_face`
 7. `tag`
 8. `asset_tag`
+9. `asset_face_detection`
 
 约束：
 
@@ -61,6 +63,7 @@
 5. 普通人脸与人物查询默认仅返回活跃资产（`asset.deletedAt IS NULL`）。
 6. `face.mediaType` 必须支持 `image | video`。
 7. `face.frameTsMs` 对图片 face 固定为 `NULL`；对视频 face 表示采样帧时间点（毫秒）。
+8. `asset_face_detection` 以 `assetId` 为主键记录资产级人脸检测完成状态；即使检测结果为 0 张脸，也必须记录成功状态，供批量扫描跳过。
 
 ### 4.3 标签投影契约（`vision.face`）
 
@@ -86,7 +89,12 @@
 12. `POST /v1/faces/ignore-faces`
 13. `POST /v1/faces/restore-ignored-faces`
 14. `POST /v1/faces/requeue-faces`
-15. `GET /v1/faces/crops/:faceId`
+15. `POST /v1/faces/detect-assets`
+16. `POST /v1/faces/detect-assets/jobs`
+17. `GET /v1/faces/detect-assets/jobs/:jobId`
+18. `POST /v1/faces/detect-assets/jobs/:jobId/cancel`
+19. `GET /v1/faces/detect-assets/jobs/:jobId/items`
+20. `GET /v1/faces/crops/:faceId`
 
 输入参数语义：
 
@@ -96,6 +104,10 @@
 4. `GET /v1/faces/crops/:faceId` 不新增新路由；当目标为视频 face 时，必须按 `frameTsMs` 截帧后再裁切。
 5. `list-people` 与人物上下文 `list-asset-faces` 必须支持显式 `scope: 'global' | 'root'`；`scope='root'` 时 `rootPath` 必填。
 6. `rename-person`、`merge-people` 与 face correction mutation 默认工作在全局人物空间，不按当前 root 隔离。
+7. `detect-assets` 接收 `rootPath + relativePaths[]`，默认 `onlyUndetected=true`、`runCluster=true`、`preCluster=true`；只处理同一 root 下的图片/视频资产，跳过已成功检测、非媒体、重复路径与失败项，并返回逐项汇总。
+8. `detect-assets/jobs` 接收与 `detect-assets` 相同的输入语义，但仅创建后端内存任务并快速返回 `jobId/status/total/unique`；前端需通过任务查询接口获取进度与结果摘要。
+9. `detect-assets/jobs/:jobId` 返回任务状态 `queued | running | canceling | canceled | succeeded | failed`、进度计数、当前路径、聚类摘要、最近 items 与失败摘要；`items` 子接口通过 `offset/limit` 分页返回完整逐项结果。
+10. `detect-assets/jobs/:jobId/cancel` 只请求取消；已排队任务立即取消，运行中任务在当前单文件推理完成后停止，且取消任务不得执行最终 post-cluster。
 
 ## 6. 聚类契约 (Incremental Clustering)
 
@@ -106,6 +118,7 @@
 5. 聚类与人物管理默认在全部活跃资产范围内运行，不以当前 root 作为隔离边界。
 6. 自动聚类仅处理 `face.status IN ('unassigned', 'deferred')`，不得自动改写 `manual_unassigned` 与 `ignored`。
 7. 图片手动 `detect-asset(runCluster=true)` 可使用即时创建策略；视频手动 `detect-asset(runCluster=true)` 必须使用保守聚类策略，优先归到已有人物或强证据人物，证据不足时保持 `deferred/unassigned` 进入人工整理。
+8. 工作区批量 `detect-assets(runCluster=true)` 必须使用保守聚类策略：扫描前可先执行一次 `cluster-pending(minFaces=3)` 整理已有积压 faces，扫描后再对新增 faces 执行 `cluster-pending(minFaces=3)`；不得使用单图即时 `minFaces=1` 策略。
 
 ## 7. 功能需求 (FR)
 
@@ -134,6 +147,10 @@
 23. `FR-FACE-23` 视频来源 faces 必须支持通过现有 `face crop` 接口渲染到人物工作台，并可执行既有纠错动作。
 24. `FR-FACE-24` v1 视频人脸识别必须为文件级手动触发，不得在打开视频预览时自动启动。
 25. `FR-FACE-25` v1 不得在视频播放器中渲染时序人脸框覆盖层。
+26. `FR-FACE-26` 工作区必须提供“扫描当前目标媒体”动作，目标集合固定为选中媒体优先，否则当前可见媒体；动作必须同时覆盖图片与视频。
+27. `FR-FACE-27` 工作区批量扫描必须只处理尚未成功完成人脸检测的资产；检测过但 0 张脸的资产后续也应被跳过。
+28. `FR-FACE-28` 工作区批量扫描必须包含识别/聚类，并采用扫描前预聚类与扫描后保守聚类。
+29. `FR-FACE-29` 工作区一键扫描大量媒体时必须走 Gateway 内存任务队列，提供进度查询、批间取消与分页 items 查询，而不是依赖单个长 HTTP 请求完成全部体验。
 
 ## 8. 验收标准 (AC)
 
@@ -160,6 +177,11 @@
 21. `AC-FACE-21` 同一视频内多个相近采样帧命中同一人物时，最终落库 face 数会经视频内去重收敛，而不是逐帧全量写入。
 22. `AC-FACE-22` 人物工作台中的视频来源 face 卡片可通过 `GET /v1/faces/crops/:faceId` 正常显示裁切图并执行纠错。
 23. `AC-FACE-23` 打开视频预览后，系统不会像图片预览那样自动触发检测，也不会在播放器上显示时序脸框。
+24. `AC-FACE-24` 在工作区选择若干文件后执行一键扫描，只扫描选中的图片/视频；没有选择时扫描当前可见图片/视频。
+25. `AC-FACE-25` 对包含已检测资产、非媒体文件与未检测媒体的目标集合执行一键扫描时，结果会跳过已检测和非媒体，仅对未检测媒体写入检测状态与 face 数据。
+26. `AC-FACE-26` 一键扫描开始前会先处理已有 pending faces，扫描结束后会对新增 faces 执行保守聚类；未知单脸不会因批量扫描直接制造新人。
+27. `AC-FACE-27` 一键扫描大量文件时，前端结果面板显示单个任务卡片、进度、当前文件、计数摘要与取消入口；任务完成后不渲染超长逐项列表。
+28. `AC-FACE-28` 对运行中的一键扫描执行取消后，当前文件完成后停止，任务进入 `canceled`，且不会继续执行最终 post-cluster。
 
 ## 9. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -174,6 +196,8 @@
 9. v1 视频无法读取可信 duration 时，使用递增间隔 fallback：时间点为 `0s, 1s, 3s, 6s, 10s, 15s...`，最多 20 帧，首次取帧失败即停止。
 10. v1 视频检测默认收敛参数固定为：`videoMinScore = 0.80`、`videoDedupeMaxDistance = 0.40`、`videoMaxFacesPerAsset = 20`。
 11. v1 视频识别入口固定为预览文件级手动动作；不新增自动检测与视频时序 overlay。
+12. v1 工作区批量扫描仅支持同一 Root 的相对路径目标；跨 Root 混合投射结果不在首期支持范围内。
+13. v1 工作区扫描任务状态仅保存在 Gateway 内存中，不跨 Gateway 重启恢复；任务内部按图片权重 `1`、视频权重 `10`、批预算 `50` 保持原始顺序分批，但同一时间只运行一个任务。
 
 ## 10. 关联主题 (Related Specs)
 

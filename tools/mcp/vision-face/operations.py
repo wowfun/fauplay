@@ -10,6 +10,7 @@ from protocol import MCPError
 WINDOWS_ABS_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 SUPPORTED_OPERATIONS = {
     "detectAsset",
+    "detectAssets",
     "clusterPending",
     "listPeople",
     "renamePerson",

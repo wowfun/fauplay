@@ -9,6 +9,7 @@ import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatus
 import { WorkspaceResultPanel } from '@/features/workspace/components/WorkspaceResultPanel'
 import type { DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
+import type { FaceRecord } from '@/features/faces/types'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -165,6 +166,8 @@ interface ExplorerWorkspaceLayoutProps {
   showPeoplePanel: boolean
   peoplePanelPreferredPersonId: string | null
   onClosePeoplePanel: () => void
+  onOpenFaceSource: (face: FaceRecord) => boolean | Promise<boolean>
+  onProjectFaceSources: (faces: FaceRecord[]) => boolean | Promise<boolean>
   error: string | null
   isLoading: boolean
   directoryFiles: FileItem[]
@@ -273,6 +276,8 @@ export function ExplorerWorkspaceLayout({
   showPeoplePanel,
   peoplePanelPreferredPersonId,
   onClosePeoplePanel,
+  onOpenFaceSource,
+  onProjectFaceSources,
   error,
   isLoading,
   directoryFiles,
@@ -383,6 +388,13 @@ export function ExplorerWorkspaceLayout({
   const [previewToolPanelWidthPx, setPreviewToolPanelWidthPx] = useState<number>(() => (
     readPersistedToolPanelWidthPx(PREVIEW_TOOL_PANEL_WIDTH_STORAGE_KEY)
   ))
+  const [hasOpenedPeoplePanel, setHasOpenedPeoplePanel] = useState(showPeoplePanel)
+
+  useEffect(() => {
+    if (showPeoplePanel) {
+      setHasOpenedPeoplePanel(true)
+    }
+  }, [showPeoplePanel])
 
   useEffect(() => {
     writePersistedBoolean(WORKSPACE_TOOL_PANEL_COLLAPSED_STORAGE_KEY, workspaceToolPanelCollapsed)
@@ -687,7 +699,7 @@ export function ExplorerWorkspaceLayout({
         </Suspense>
       )}
 
-      {showPeoplePanel && (
+      {hasOpenedPeoplePanel && (
         <Suspense fallback={null}>
           <PeoplePanel
             open={showPeoplePanel}
@@ -695,6 +707,8 @@ export function ExplorerWorkspaceLayout({
             rootId={rootId ?? ''}
             preferredPersonId={peoplePanelPreferredPersonId}
             onClose={onClosePeoplePanel}
+            onOpenFaceSource={onOpenFaceSource}
+            onProjectFaceSources={onProjectFaceSources}
           />
         </Suspense>
       )}

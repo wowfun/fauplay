@@ -88,6 +88,17 @@ function createSchemaV4(db) {
       FOREIGN KEY(tagId) REFERENCES tag(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS asset_face_detection (
+      assetId TEXT PRIMARY KEY,
+      mediaType TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detectedAt INTEGER,
+      faceCount INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY(assetId) REFERENCES asset(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS face (
       id TEXT PRIMARY KEY,
       assetId TEXT NOT NULL,
@@ -135,6 +146,7 @@ function createSchemaV4(db) {
     CREATE INDEX IF NOT EXISTS idx_tag_source_key_value ON tag(source, key, value);
     CREATE INDEX IF NOT EXISTS idx_asset_tag_tag_id ON asset_tag(tagId);
     CREATE INDEX IF NOT EXISTS idx_asset_tag_applied_at ON asset_tag(appliedAt);
+    CREATE INDEX IF NOT EXISTS idx_asset_face_detection_status ON asset_face_detection(status);
     CREATE INDEX IF NOT EXISTS idx_face_asset_id ON face(assetId);
     CREATE INDEX IF NOT EXISTS idx_face_status ON face(status);
     CREATE INDEX IF NOT EXISTS idx_person_face_person_id ON person_face(personId);

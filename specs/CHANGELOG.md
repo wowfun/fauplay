@@ -2,6 +2,10 @@
 
 ## 2026-04-08
 ### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md`：人物工作台新增“投射源文件”契约，要求将已选 faces 的源图片/视频按源文件去重后投射到底部结果面板，并让预览遍历跟随该投射标签。
+- 更新 `specs/119-person-management-face-correction/spec.md`：收敛人物详情 face 卡片信息层级，保留 score 与来源路径但隐藏冗余归属文本，并要求 face 网格与文件网格共享 Ctrl/Cmd、Shift 与鼠标框选语义，同时明确双击当前 Root face 打开来源预览且不改变选择。
+- 更新 `specs/115-facial-recognition/spec.md` 与 `specs/005-local-data-contracts/spec.md`：将工作区大量人脸扫描收敛为 Gateway 内存任务队列，新增进度查询、批间取消、逐项结果分页与权重分批约束，同时保留同步 `detect-assets` 入口。
+- 更新 `specs/115-facial-recognition/spec.md` 与 `specs/005-local-data-contracts/spec.md`：新增工作区人脸一键扫描契约，固定目标为“选中优先，否则当前可见”的同 Root 图片/视频，要求仅处理未成功检测资产，并通过资产级检测状态区分“未检测”与“已检测但 0 张脸”。
 - 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物级合并交互，明确“当前人物并入目标人物”的 source/target 方向，并要求目标候选展示代表脸或占位、人物名与数量上下文。
 
 ## 2026-04-06

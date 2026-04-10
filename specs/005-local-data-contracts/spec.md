@@ -98,7 +98,8 @@
 4. `asset_tag`：`assetId`、`tagId`、`appliedAt`、`score`（可空，当前仅分类使用）。
 5. `face`、`face_embedding`、`person`、`person_face` 保留并对齐统一 `assetId` 关系；其中 `person_face` 是人物归属真源，`face.status` 负责表达自动/人工处理状态。
 6. `face` 必须额外支持 `mediaType`（`image | video`）与 `frameTsMs`（视频采样帧毫秒时间点，可空）字段。
-7. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
+7. `asset_face_detection`：`assetId`、`mediaType`、`status`、`detectedAt`、`faceCount`、`error`（可空）、`updatedAt`，用于记录资产级人脸检测完成状态。
+8. `annotation_record`、`face_job_state`、`root`、`asset_fingerprint` 与任何 `*_tag_ext` 扩展表不再保留。
 
 ### 5.4 路径与查询语义
 
@@ -178,7 +179,12 @@
 12. `POST /v1/faces/ignore-faces`
 13. `POST /v1/faces/restore-ignored-faces`
 14. `POST /v1/faces/requeue-faces`
-15. `GET /v1/faces/crops/:faceId`
+15. `POST /v1/faces/detect-assets`
+16. `POST /v1/faces/detect-assets/jobs`
+17. `GET /v1/faces/detect-assets/jobs/:jobId`
+18. `POST /v1/faces/detect-assets/jobs/:jobId/cancel`
+19. `GET /v1/faces/detect-assets/jobs/:jobId/items`
+20. `GET /v1/faces/crops/:faceId`
 
 说明：
 
@@ -186,6 +192,9 @@
 - 前端业务侧应优先使用 Gateway 原生 HTTP 接口。
 - `list-people` 与人物上下文 `list-asset-faces` 必须支持显式 `scope: 'global' | 'root'`，不得仅通过是否携带 `rootPath` 推断查询作用域。
 - `detect-asset` 必须支持可选 `runCluster?: boolean`，用于检测写入后在同一次请求内串行补跑 `cluster-pending`；视频资产的即时聚类必须采用保守策略，避免陌生 face 单次触发大量创建人物。
+- `detect-assets` 必须支持工作区批量扫描：输入为 `rootPath + relativePaths[]`，目标由前端按“选中优先，否则当前可见”传入；Gateway 只处理未成功检测过的图片/视频资产，并在扫描前后执行保守聚类。
+- `detect-assets/jobs` 必须作为大量工作区扫描的任务入口，任务状态仅保存在 Gateway 内存中；查询接口必须返回进度与摘要，逐项结果通过 `items?offset&limit` 分页读取。
+- `detect-assets/jobs/:jobId/cancel` 必须支持批间取消：已排队任务立即取消，运行中任务在当前单文件推理完成后停止，取消任务不得执行最终 post-cluster。
 - 人脸相关公开结果必须支持 `mediaType: 'image' | 'video'` 与 `frameTsMs: number | null`。
 - `GET /v1/faces/crops/:faceId` 必须同时支持图片 face 与视频采样帧 face，不新增并行裁切路由。
 
@@ -201,7 +210,7 @@
 1. 不兼容旧数据：不读取、不导入旧 `faces.v1.sqlite`、旧 `.annotations.v1.json` 与旧 `<root>/.fauplay/faudb.v1.sqlite`。
 2. 若旧全局数据库 `${HOME}/.fauplay/faudb.global.sqlite` 存在且新路径 `${HOME}/.fauplay/global/faudb.sqlite` 缺失，系统必须先完成一次迁移，再打开新路径。
 3. 当检测到旧全局 schema 时，直接重建数据库（不备份）。
-4. 新版本仅认 `schemaVersion=5`。
+4. 新版本仅认 `schemaVersion=6`。
 
 ## 9. 功能需求 (FR)
 
@@ -241,6 +250,9 @@
 34. `FR-LDC-34` `face` 表必须支持同时持久化图片 face 与视频采样帧 face，并通过 `mediaType/frameTsMs` 区分来源。
 35. `FR-LDC-35` 对视频执行 `detect-asset` 时，系统必须支持把抽样后代表 faces 落到现有 `face/face_embedding` 模型，而不是引入并行视频人脸表。
 36. `FR-LDC-36` `GET /v1/faces/crops/:faceId` 必须可从视频文件按 `frameTsMs` 取帧后返回裁切图。
+37. `FR-LDC-37` 系统必须持久化资产级人脸检测完成状态，确保检测过但 0 张脸的资产也可被批量扫描跳过。
+38. `FR-LDC-38` 系统必须提供 `POST /v1/faces/detect-assets` 作为工作区批量扫描入口，并保持逐项成功/跳过/失败汇总。
+39. `FR-LDC-39` 系统必须提供 Gateway 内存任务形式的工作区人脸扫描入口，支持进度查询、批间取消与逐项结果分页读取，避免大量目标依赖单个长请求和超大响应体。
 
 ## 10. 验收标准 (AC)
 
@@ -271,6 +283,9 @@
 25. `AC-LDC-25` 对视频执行 `POST /v1/faces/detect-asset` 后，数据库中的 `face` 记录会写入 `mediaType='video'` 与非空 `frameTsMs`，并可继续参与既有人物聚类。
 26. `AC-LDC-26` 对视频执行 `POST /v1/faces/detect-asset` 且 `runCluster=true` 后，匹配已有人物或达到保守聚类证据要求的 face 可产生 `vision.face(person=...)` 标签投影；证据不足的陌生视频 face 保持待整理状态。
 27. `AC-LDC-27` 对视频来源 face 调用 `GET /v1/faces/crops/:faceId` 时，可返回裁切图而不是 404 或仅支持图片。
+28. `AC-LDC-28` 对 `POST /v1/faces/detect-assets` 提交混合目标时，非媒体、已成功检测和重复路径返回 skipped，未检测图片/视频会执行检测并记录资产级检测状态。
+29. `AC-LDC-29` 对已成功检测但 0 张脸的资产再次执行批量扫描时，该资产会被跳过而不是重复推理。
+30. `AC-LDC-30` 对大量图片/视频提交 `detect-assets/jobs` 后，任务状态查询可看到 `processed/total` 递增；取消运行中任务时当前文件完成后停止，且不会执行最终 post-cluster。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -283,7 +298,9 @@
 7. 新增重复文件查询接口：`POST /v1/files/duplicates/query`。
 8. 重复文件查询结果需支持覆盖率字段（如 `seedCount/indexedSeedCount/needsIndexingCount`）与分组结果（如 `groups[]`）。
 9. 人脸公开记录新增 `mediaType: 'image' | 'video'` 与 `frameTsMs: number | null`。
-10. 视频检测配置新增/收敛 `videoShortIntervalMs`、`videoShortMaxDurationMs`、`videoMaxFrames`、`videoMinScore`、`videoDedupeMaxDistance` 与 `videoMaxFacesPerAsset`，用于限制视频候选 face 数量。
+10. 新增资产级人脸检测状态表，用于区分“未检测”与“已检测但 0 张脸”。
+11. 视频检测配置新增/收敛 `videoShortIntervalMs`、`videoShortMaxDurationMs`、`videoMaxFrames`、`videoMinScore`、`videoDedupeMaxDistance` 与 `videoMaxFacesPerAsset`，用于限制视频候选 face 数量。
+12. 工作区大量人脸扫描新增内存任务接口；任务状态不持久化，不改变 SQLite schema。
 
 ## 12. 关联主题 (Related Specs)
 

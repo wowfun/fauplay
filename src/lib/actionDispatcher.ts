@@ -139,6 +139,13 @@ function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown
         timeoutMs: 120000,
       }
     }
+    if (operation === 'detectAssets') {
+      return {
+        endpointPath: '/v1/faces/detect-assets',
+        payload,
+        timeoutMs: 600000,
+      }
+    }
     if (operation === 'clusterPending') {
       return {
         endpointPath: '/v1/faces/cluster-pending',

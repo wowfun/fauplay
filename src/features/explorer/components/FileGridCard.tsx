@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import { buildGatewayFileThumbnailUrl } from '@/lib/gateway'
+import { GRID_SELECTABLE_ITEM_ATTR } from '@/hooks/useGridSelection'
 import {
   getExactCachedThumbnailFromPipeline,
   getLatestCachedThumbnailFromPipeline,
@@ -299,6 +300,7 @@ export function FileGridCard({
 
       <button
         type="button"
+        {...{ [GRID_SELECTABLE_ITEM_ATTR]: file.path }}
         data-grid-index={itemIndex}
         data-grid-selected={isSelected ? 'true' : 'false'}
         data-grid-checked={isChecked ? 'true' : 'false'}
@@ -320,6 +322,7 @@ export function FileGridCard({
             <img
               src={displayedThumbnailUrl}
               alt={file.name}
+              draggable={false}
               className="w-full h-full object-cover"
             />
           ) : thumbnailState === 'loading' ? (

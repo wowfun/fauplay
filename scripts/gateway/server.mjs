@@ -8,6 +8,11 @@ import {
   batchRebindPaths,
   ensureFileEntries,
   queryDuplicateFiles,
+  detectAssets,
+  createDetectAssetsJob,
+  getDetectAssetsJob,
+  cancelDetectAssetsJob,
+  listDetectAssetsJobItems,
   assignFaces,
   bindAnnotationTag,
   callVisionInference,
@@ -479,6 +484,26 @@ function createPrefixHttpGatewayRoute(method, prefix, handler) {
   }
 }
 
+function parseFaceScanJobPath(pathname) {
+  const prefix = '/v1/faces/detect-assets/jobs/'
+  if (!pathname.startsWith(prefix)) {
+    throwHttpGatewayRouteNotFound(pathname)
+  }
+  const suffix = pathname.slice(prefix.length)
+  const parts = suffix.split('/').filter(Boolean)
+  if (parts.length > 2) {
+    throwHttpGatewayRouteNotFound(pathname)
+  }
+  const jobId = parts.length > 0 ? decodeURIComponent(parts[0]) : ''
+  if (!jobId) {
+    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'jobId is required', 400)
+  }
+  return {
+    jobId,
+    action: parts[1] || '',
+  }
+}
+
 const httpGatewayRoutes = [
   createExactHttpGatewayRoute('POST', '/v1/data/tags/file', ({ payload }) => getFileTags(payload)),
   createExactHttpGatewayRoute('POST', '/v1/data/tags/options', ({ payload }) => listTagOptions(payload)),
@@ -521,6 +546,28 @@ const httpGatewayRoutes = [
       inferenceDetected: inferred.detected,
       ...(cluster ? { cluster } : {}),
     }
+  }),
+  createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets', ({ runtime, payload }) => detectAssets(runtime, payload)),
+  createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs', ({ runtime, payload }) => createDetectAssetsJob(runtime, payload)),
+  createPrefixHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/', ({ pathname, requestUrl }) => {
+    const { jobId, action } = parseFaceScanJobPath(pathname)
+    if (!action) {
+      return getDetectAssetsJob(jobId)
+    }
+    if (action === 'items') {
+      return listDetectAssetsJobItems(jobId, {
+        offset: requestUrl.searchParams.get('offset'),
+        limit: requestUrl.searchParams.get('limit'),
+      })
+    }
+    throwHttpGatewayRouteNotFound(pathname)
+  }),
+  createPrefixHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs/', ({ pathname }) => {
+    const { jobId, action } = parseFaceScanJobPath(pathname)
+    if (action === 'cancel') {
+      return cancelDetectAssetsJob(jobId)
+    }
+    throwHttpGatewayRouteNotFound(pathname)
   }),
   createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/list-people', ({ payload }) => listPeople(payload)),
@@ -568,7 +615,7 @@ function findHttpGatewayRoute(method, pathname) {
   return httpGatewayRoutes.find((route) => route.method === method && route.matches(pathname)) ?? null
 }
 
-async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
+async function handleHttpGatewayRoute(runtime, method, pathname, payload, requestUrl) {
   const route = findHttpGatewayRoute(method, pathname)
   if (!route) {
     throwHttpGatewayRouteNotFound(pathname)
@@ -577,6 +624,7 @@ async function handleHttpGatewayRoute(runtime, method, pathname, payload) {
     runtime,
     pathname,
     payload,
+    requestUrl,
   })
 }
 
@@ -870,7 +918,7 @@ export async function startGatewayServer(options = {}) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
 
-        const result = await handleHttpGatewayRoute(runtime, method, pathname, payload)
+        const result = await handleHttpGatewayRoute(runtime, method, pathname, payload, requestUrl)
         sendJson(res, 200, result ?? { ok: true })
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))

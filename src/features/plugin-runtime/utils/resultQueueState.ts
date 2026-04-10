@@ -1,5 +1,5 @@
 import { isUnlimited, toolResultQueueConfig } from '@/config/toolResultQueue'
-import type { PluginResultQueueItem, PluginResultQueueState, PluginResultTrigger } from '@/features/plugin-runtime/types'
+import type { PluginResultProgress, PluginResultQueueItem, PluginResultQueueState, PluginResultTrigger } from '@/features/plugin-runtime/types'
 import type { ResultProjection } from '@/types'
 
 const QUEUE_ID_RANDOM_MAX = 1_000_000
@@ -13,6 +13,7 @@ interface EnqueueLoadingResultParams {
   actionKey?: string
   requestSignature: string
   startedAt: number
+  progress?: PluginResultProgress
 }
 
 interface FinalizeQueueItemParams {
@@ -24,6 +25,12 @@ interface FinalizeQueueItemParams {
   projection?: ResultProjection
   error?: string
   errorCode?: string
+}
+
+interface UpdateQueueItemProgressParams {
+  contextKey: string
+  queueItemId: string
+  progress: PluginResultProgress
 }
 
 export function createQueueItemId(toolName: string): string {
@@ -95,6 +102,7 @@ export function enqueueLoadingResult(
       actionKey: params.actionKey,
       requestSignature: params.requestSignature,
       status: 'loading',
+      progress: params.progress,
       startedAt: params.startedAt,
       collapsed: false,
     },
@@ -128,6 +136,7 @@ export function finalizeQueueItem(
         projection: params.projection,
         error: undefined,
         errorCode: undefined,
+        progress: undefined,
         finishedAt: params.finishedAt,
       }
     }
@@ -139,7 +148,37 @@ export function finalizeQueueItem(
       projection: undefined,
       error: params.error,
       errorCode: params.errorCode,
+      progress: undefined,
       finishedAt: params.finishedAt,
+    }
+  })
+
+  if (!hasMatched) return state
+
+  return {
+    ...state,
+    byContextKey: {
+      ...state.byContextKey,
+      [params.contextKey]: nextQueue,
+    },
+  }
+}
+
+export function updateQueueItemProgress(
+  state: PluginResultQueueState,
+  params: UpdateQueueItemProgressParams
+): PluginResultQueueState {
+  const queue = state.byContextKey[params.contextKey] ?? []
+  let hasMatched = false
+  const nextQueue = queue.map((item) => {
+    if (item.id !== params.queueItemId) return item
+    hasMatched = true
+    return {
+      ...item,
+      progress: {
+        ...(item.progress ?? {}),
+        ...params.progress,
+      },
     }
   })
 

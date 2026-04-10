@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { RefreshCw, Users, X } from 'lucide-react'
 import {
   assignFaces,
@@ -16,6 +16,7 @@ import {
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { buildGatewayFaceCropUrl } from '@/lib/gateway'
 import { cn } from '@/lib/utils'
+import { GRID_SELECTABLE_ITEM_ATTR, useGridSelection } from '@/hooks/useGridSelection'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
@@ -28,6 +29,8 @@ interface PeoplePanelProps {
   rootId: string
   preferredPersonId?: string | null
   onClose: () => void
+  onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
+  onProjectFaceSources?: (faces: FaceRecord[]) => boolean | Promise<boolean>
 }
 
 function displayPersonName(person: Pick<PersonSummary, 'personId' | 'name'>): string {
@@ -40,14 +43,6 @@ function statusLabel(status: FaceRecord['status']): string {
   if (status === 'deferred') return '待聚类'
   if (status === 'ignored') return '已忽略'
   return '未归属'
-}
-
-function statusBadgeClass(status: FaceRecord['status']): string {
-  if (status === 'assigned') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-  if (status === 'manual_unassigned') return 'border-amber-500/40 bg-amber-500/10 text-amber-700'
-  if (status === 'deferred') return 'border-sky-500/40 bg-sky-500/10 text-sky-700'
-  if (status === 'ignored') return 'border-slate-500/40 bg-slate-500/10 text-slate-700'
-  return 'border-orange-500/40 bg-orange-500/10 text-orange-700'
 }
 
 function faceCountText(person: PersonSummary, scope: PersonScope): string {
@@ -90,10 +85,97 @@ function readResultMessage(result: FaceMutationResult): { tone: NoticeTone; mess
 interface FaceGridProps {
   faces: FaceRecord[]
   selectedFaceIds: Set<string>
-  onToggleFace: (faceId: string) => void
+  onSelectionChange: (faceIds: string[]) => void
+  onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
 }
 
-function FaceGrid({ faces, selectedFaceIds, onToggleFace }: FaceGridProps) {
+function getFaceSelectionId(face: FaceRecord): string {
+  return face.faceId
+}
+
+function FaceGrid({ faces, selectedFaceIds, onSelectionChange, onOpenFaceSource }: FaceGridProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const selectedFaceIdsRef = useRef<Set<string>>(selectedFaceIds)
+  const preClickSelectionRef = useRef<Set<string> | null>(null)
+  const singleClickTimeoutRef = useRef<number | null>(null)
+  const {
+    selectedIdSet,
+    marqueeRect,
+    replaceSelection,
+    toggleSelection,
+    setAnchorId,
+    selectRangeToId,
+    handleMarqueePointerDown,
+    shouldSuppressClick,
+  } = useGridSelection({
+    items: faces,
+    getId: getFaceSelectionId,
+    selectedIds: selectedFaceIds,
+    onSelectionChange,
+    containerRef,
+  })
+
+  useEffect(() => {
+    selectedFaceIdsRef.current = selectedFaceIds
+  }, [selectedFaceIds])
+
+  const clearPendingSingleClick = useCallback(() => {
+    if (singleClickTimeoutRef.current !== null) {
+      window.clearTimeout(singleClickTimeoutRef.current)
+      singleClickTimeoutRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => clearPendingSingleClick()
+  }, [clearPendingSingleClick])
+
+  const handleFaceClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>, faceId: string) => {
+    if (shouldSuppressClick()) {
+      clearPendingSingleClick()
+      return
+    }
+
+    if (event.detail > 1) {
+      clearPendingSingleClick()
+      return
+    }
+
+    const isRangeSelection = event.shiftKey
+    const isToggleSelection = event.ctrlKey || event.metaKey
+    preClickSelectionRef.current = new Set(selectedFaceIdsRef.current)
+    clearPendingSingleClick()
+    singleClickTimeoutRef.current = window.setTimeout(() => {
+      singleClickTimeoutRef.current = null
+      if (isRangeSelection) {
+        selectRangeToId(faceId)
+        return
+      }
+
+      setAnchorId(faceId)
+      if (isToggleSelection) {
+        toggleSelection(faceId)
+        return
+      }
+
+      replaceSelection([faceId])
+    }, 240)
+  }, [clearPendingSingleClick, replaceSelection, selectRangeToId, setAnchorId, shouldSuppressClick, toggleSelection])
+
+  const handleFaceDoubleClick = useCallback((face: FaceRecord) => {
+    if (shouldSuppressClick()) {
+      clearPendingSingleClick()
+      return
+    }
+
+    clearPendingSingleClick()
+    const previousSelection = preClickSelectionRef.current
+    if (previousSelection) {
+      replaceSelection(previousSelection)
+    }
+    void onOpenFaceSource?.(face)
+  }, [clearPendingSingleClick, onOpenFaceSource, replaceSelection, shouldSuppressClick])
+
   if (faces.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
@@ -103,40 +185,55 @@ function FaceGrid({ faces, selectedFaceIds, onToggleFace }: FaceGridProps) {
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+    <div
+      ref={containerRef}
+      className="relative grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3"
+      onPointerDown={handleMarqueePointerDown}
+    >
+      {marqueeRect && (
+        <div
+          className="pointer-events-none fixed z-[70] rounded-sm border border-primary bg-primary/15"
+          style={marqueeRect}
+        />
+      )}
       {faces.map((face) => {
-        const isSelected = selectedFaceIds.has(face.faceId)
+        const isSelected = selectedIdSet.has(face.faceId)
+        const frameTs = formatFrameTsMs(face.frameTsMs)
+        const sourcePath = face.assetPath || '未知路径'
+        const statusText = statusLabel(face.status)
+        const personText = face.personId && face.personName ? face.personName : '未归属'
         return (
           <button
             key={face.faceId}
             type="button"
+            {...{ [GRID_SELECTABLE_ITEM_ATTR]: face.faceId }}
+            title={`${statusText} · ${personText} · ${sourcePath}`}
+            aria-label={`人脸 ${sourcePath}，score ${face.score.toFixed(2)}，${statusText}`}
             className={cn(
-              'rounded-md border p-2 text-left transition-colors',
+              'rounded-md border p-2 text-left transition-colors select-none',
               isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/60'
             )}
-            onClick={() => onToggleFace(face.faceId)}
+            onClick={(event) => handleFaceClick(event, face.faceId)}
+            onDoubleClick={() => handleFaceDoubleClick(face)}
           >
             <img
               src={buildGatewayFaceCropUrl(face.faceId, { size: 160, padding: 0.35 })}
-              alt={face.faceId}
+              alt="人脸裁切"
+              draggable={false}
               className="h-36 w-full rounded-md border border-border object-cover"
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span className={cn('rounded-full border px-2 py-0.5 text-[11px]', statusBadgeClass(face.status))}>
-                {statusLabel(face.status)}
+              <span className="text-[11px] font-medium text-muted-foreground">
+                score {face.score.toFixed(2)}
               </span>
-              <div className="text-right text-[11px] text-muted-foreground">
-                {face.mediaType === 'video' && formatFrameTsMs(face.frameTsMs) && (
-                  <div>{formatFrameTsMs(face.frameTsMs)}</div>
-                )}
-                <div>{face.score.toFixed(2)}</div>
-              </div>
-            </div>
-            <div className="mt-2 truncate text-sm font-medium">
-              {face.personId && face.personName ? face.personName : '未归属'}
+              {face.mediaType === 'video' && frameTs && (
+                <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {frameTs}
+                </span>
+              )}
             </div>
             <div className="mt-1 truncate text-xs text-muted-foreground" title={face.assetPath || undefined}>
-              {face.assetPath || '未知路径'}
+              {sourcePath}
             </div>
           </button>
         )
@@ -151,6 +248,8 @@ export function PeoplePanel({
   rootId,
   preferredPersonId = null,
   onClose,
+  onOpenFaceSource,
+  onProjectFaceSources,
 }: PeoplePanelProps) {
   const peopleListRequestIdRef = useRef(0)
   const context = useMemo(() => ({
@@ -178,7 +277,13 @@ export function PeoplePanel({
   const [isSavingRename, setIsSavingRename] = useState(false)
   const [isMerging, setIsMerging] = useState(false)
   const [isMutatingFaces, setIsMutatingFaces] = useState(false)
+  const [isProjectingSources, setIsProjectingSources] = useState(false)
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null)
+  const previousFaceSelectionScopeKeyRef = useRef<string | null>(null)
+  const faceSelectionScopeKey = useMemo(
+    () => `${scope}:${view}:${selectedPersonId ?? ''}`,
+    [scope, selectedPersonId, view]
+  )
 
   const selectedPerson = useMemo(
     () => (
@@ -295,9 +400,8 @@ export function PeoplePanel({
 
   useEffect(() => {
     if (!open) return
-    clearSelection()
     setNotice(null)
-  }, [clearSelection, open])
+  }, [open])
 
   useEffect(() => {
     if (!open || view !== 'people') return
@@ -317,9 +421,15 @@ export function PeoplePanel({
 
   useEffect(() => {
     if (!open) return
-    clearSelection()
     void loadCurrentFaces()
-  }, [clearSelection, loadCurrentFaces, open])
+  }, [loadCurrentFaces, open])
+
+  useEffect(() => {
+    if (!open) return
+    if (previousFaceSelectionScopeKeyRef.current === faceSelectionScopeKey) return
+    previousFaceSelectionScopeKeyRef.current = faceSelectionScopeKey
+    clearSelection()
+  }, [clearSelection, faceSelectionScopeKey, open])
 
   useEffect(() => {
     setRenameDraft(selectedPerson?.name || '')
@@ -390,17 +500,66 @@ export function PeoplePanel({
     }
   }, [allPeople, context, open, scope, selectedPersonId, targetQuery])
 
-  const toggleFaceSelection = useCallback((faceId: string) => {
-    setSelectedFaceIds((previous) => {
-      const next = new Set(previous)
-      if (next.has(faceId)) {
-        next.delete(faceId)
-      } else {
-        next.add(faceId)
-      }
-      return next
-    })
+  const handleFaceSelectionChange = useCallback((faceIds: string[]) => {
+    setSelectedFaceIds(new Set(faceIds))
   }, [])
+
+  const handleOpenFaceSource = useCallback(async (face: FaceRecord) => {
+    if (!onOpenFaceSource) {
+      setNotice({
+        tone: 'error',
+        message: '当前上下文不支持打开来源文件',
+      })
+      return false
+    }
+
+    try {
+      const opened = await onOpenFaceSource(face)
+      if (!opened) {
+        setNotice({
+          tone: 'error',
+          message: '该人脸来源不在当前 Root 内，暂不支持跳转',
+        })
+      }
+      return opened
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : '来源文件打开失败',
+      })
+      return false
+    }
+  }, [onOpenFaceSource])
+
+  const handleProjectFaceSources = useCallback(async () => {
+    if (selectedFaces.length === 0) return
+    if (!onProjectFaceSources) {
+      setNotice({
+        tone: 'error',
+        message: '当前上下文不支持投射源文件',
+      })
+      return
+    }
+
+    setIsProjectingSources(true)
+    setNotice(null)
+    try {
+      const projected = await onProjectFaceSources(selectedFaces)
+      if (!projected) {
+        setNotice({
+          tone: 'error',
+          message: '没有可投射的源文件',
+        })
+      }
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : '源文件投射失败',
+      })
+    } finally {
+      setIsProjectingSources(false)
+    }
+  }, [onProjectFaceSources, selectedFaces])
 
   const handleSaveRename = useCallback(async () => {
     if (!selectedPerson) return
@@ -903,6 +1062,16 @@ export function PeoplePanel({
                     >
                       重新交给聚类
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isMutatingFaces || isProjectingSources || selectedIds.length === 0}
+                      onClick={() => {
+                        void handleProjectFaceSources()
+                      }}
+                    >
+                      投射源文件
+                    </Button>
                   </div>
                 </div>
 
@@ -912,7 +1081,8 @@ export function PeoplePanel({
                   <FaceGrid
                     faces={faces}
                     selectedFaceIds={selectedFaceIds}
-                    onToggleFace={toggleFaceSelection}
+                    onSelectionChange={handleFaceSelectionChange}
+                    onOpenFaceSource={handleOpenFaceSource}
                   />
                 )}
               </div>

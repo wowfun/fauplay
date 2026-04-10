@@ -1,6 +1,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
+import type { FaceRecord } from '@/features/faces/types'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requiredGridWidthForColumns } from '@/features/explorer/constants/gridLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -68,6 +69,7 @@ const LEGACY_TRASH_RELATIVE_PATH = '.trash'
 const DEFAULT_RESULT_PANEL_HEIGHT_PX = 280
 const MIN_RESULT_PANEL_HEIGHT_PX = 180
 const DELETE_UNDO_NOTICE_TIMEOUT_MS = 6000
+const FACE_SOURCE_PROJECTION_ID = 'people:selected-face-sources'
 
 let previewPanelModulesPreloaded = false
 
@@ -549,6 +551,48 @@ function clampResultPanelHeightPx(value: number): number {
 
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+function isAbsolutePathLike(path: string): boolean {
+  return path.startsWith('/') || path.startsWith('//') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
+function normalizeCurrentRootFaceSourcePath(assetPath: string | null | undefined): string | null {
+  const rawPath = assetPath?.trim()
+  if (!rawPath) return null
+
+  const slashPath = rawPath.replace(/\\/g, '/')
+  if (isAbsolutePathLike(slashPath)) {
+    return null
+  }
+
+  const pathParts = slashPath.split('/').filter(Boolean)
+  if (pathParts.length === 0 || pathParts.some((part) => part === '..')) {
+    return null
+  }
+  return pathParts.join('/')
+}
+
+function normalizeAbsoluteFaceSourcePath(assetPath: string | null | undefined): string | null {
+  const rawPath = assetPath?.trim()
+  if (!rawPath) return null
+
+  const slashPath = rawPath.replace(/\\/g, '/')
+  if (!isAbsolutePathLike(slashPath)) return null
+  return slashPath
+}
+
+function joinAbsolutePath(rootPath: string, relativePath: string): string {
+  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  return normalizedRoot ? `${normalizedRoot}/${relativePath}` : relativePath
+}
+
+function getRelativeParentPath(relativePath: string): string {
+  return relativePath.split('/').slice(0, -1).join('/')
+}
+
+function getRelativeFileName(relativePath: string): string {
+  return relativePath.split('/').pop() || relativePath
 }
 
 function resolveProjectionPreferredPath(projection: ResultProjection | null, preferredPath: string | null | undefined): string | null {
@@ -2154,6 +2198,118 @@ export function WorkspaceShell({
     setShowPeoplePanel(false)
   }, [])
 
+  const handleOpenFaceSource = useCallback(async (face: FaceRecord): Promise<boolean> => {
+    const sourcePath = normalizeCurrentRootFaceSourcePath(face.assetPath)
+    if (!sourcePath) return false
+
+    const sourceFile = (
+      activeSurfaceFiles.find((file) => (
+        file.kind === 'file' && normalizeRelativePath(file.path) === sourcePath
+      ))
+      ?? filteredFiles.find((file) => (
+        file.kind === 'file' && normalizeRelativePath(file.path) === sourcePath
+      ))
+      ?? {
+        name: getRelativeFileName(sourcePath),
+        path: sourcePath,
+        kind: 'file' as const,
+        sourceRootPath: getBoundRootPath(rootId) ?? undefined,
+        sourceRelativePath: sourcePath,
+      }
+    )
+
+    setActiveSurface({ kind: 'directory' })
+    setDirectoryFocusedPath(sourcePath)
+    preloadPreviewModules()
+    showFileInPane(sourceFile)
+
+    const parentPath = getRelativeParentPath(sourcePath)
+    if (normalizeRelativePath(currentPath) === parentPath) {
+      return true
+    }
+
+    alignPreviewToPath(sourcePath)
+    const navigated = await navigateToPath(parentPath, { resetFlattenView: true })
+    if (!navigated) return false
+    alignPreviewToPath(sourcePath)
+    return true
+  }, [activeSurfaceFiles, alignPreviewToPath, currentPath, filteredFiles, navigateToPath, rootId, showFileInPane])
+
+  const handleProjectFaceSources = useCallback((selectedFaces: FaceRecord[]): boolean => {
+    const boundRootPath = getBoundRootPath(rootId)
+    const existingFileByPath = new Map(
+      [...activeSurfaceFiles, ...filteredFiles]
+        .filter((file) => file.kind === 'file')
+        .map((file) => [normalizeRelativePath(file.path), file])
+    )
+    const fileByKey = new Map<string, FileItem>()
+
+    for (const face of selectedFaces) {
+      const relativePath = normalizeCurrentRootFaceSourcePath(face.assetPath)
+      if (relativePath) {
+        const existingFile = existingFileByPath.get(relativePath)
+        const absolutePath = boundRootPath ? joinAbsolutePath(boundRootPath, relativePath) : undefined
+        const nextFile: FileItem = existingFile
+          ? {
+            ...existingFile,
+            sourceRootPath: existingFile.sourceRootPath ?? boundRootPath ?? undefined,
+            sourceRelativePath: existingFile.sourceRelativePath ?? relativePath,
+            absolutePath: existingFile.absolutePath ?? absolutePath,
+          }
+          : {
+            name: getRelativeFileName(relativePath),
+            path: relativePath,
+            kind: 'file',
+            absolutePath,
+            displayPath: relativePath,
+            previewKind: getFilePreviewKind(relativePath),
+            sourceType: 'face_source',
+            sourceRootPath: boundRootPath ?? undefined,
+            sourceRelativePath: relativePath,
+          }
+
+        if (!fileByKey.has(`relative:${relativePath}`)) {
+          fileByKey.set(`relative:${relativePath}`, nextFile)
+        }
+        continue
+      }
+
+      const absolutePath = normalizeAbsoluteFaceSourcePath(face.assetPath)
+      if (!absolutePath) continue
+
+      if (!fileByKey.has(`absolute:${absolutePath}`)) {
+        fileByKey.set(`absolute:${absolutePath}`, {
+          name: getRelativeFileName(absolutePath),
+          path: absolutePath,
+          kind: 'file',
+          absolutePath,
+          displayPath: absolutePath,
+          previewKind: getFilePreviewKind(absolutePath),
+          sourceType: 'face_source',
+        })
+      }
+    }
+
+    const projectionFiles = [...fileByKey.values()]
+    if (projectionFiles.length === 0) {
+      return false
+    }
+
+    const projection: ResultProjection = {
+      id: FACE_SOURCE_PROJECTION_ID,
+      title: `人脸来源 ${projectionFiles.length} 个文件`,
+      entry: 'manual',
+      ordering: {
+        mode: 'listed',
+      },
+      files: projectionFiles,
+    }
+
+    handleActivateProjection(projection)
+    setShowPeoplePanel(false)
+    return true
+  }, [activeSurfaceFiles, filteredFiles, handleActivateProjection, rootId])
+
   useEffect(() => {
     if (!rootId) return
     setRecentPathHistory((previous) => upsertAddressPathHistory(previous, {
@@ -2636,6 +2792,8 @@ export function WorkspaceShell({
       showPeoplePanel={showPeoplePanel}
       peoplePanelPreferredPersonId={peoplePanelPreferredPersonId}
       onClosePeoplePanel={handleClosePeople}
+      onOpenFaceSource={handleOpenFaceSource}
+      onProjectFaceSources={handleProjectFaceSources}
       error={error}
       isLoading={isLoading}
       favoriteFolders={favoriteFolders}

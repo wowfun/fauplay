@@ -18,6 +18,7 @@ TOOL_DEFINITIONS = [
                     "type": "string",
                     "enum": [
                         "detectAsset",
+                        "detectAssets",
                         "clusterPending",
                         "listPeople",
                         "renamePerson",
@@ -26,7 +27,13 @@ TOOL_DEFINITIONS = [
                     ],
                 },
                 "relativePath": {"type": "string"},
+                "relativePaths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
                 "runCluster": {"type": "boolean"},
+                "onlyUndetected": {"type": "boolean"},
+                "preCluster": {"type": "boolean"},
                 "personId": {"type": "string"},
                 "name": {"type": "string"},
                 "sourcePersonIds": {

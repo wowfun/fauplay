@@ -500,9 +500,9 @@ export async function callGatewayTool<T = ToolCallResult>(
 
 export async function callGatewayHttp<T = ToolCallResult>(
   endpointPath: string,
-  body: Record<string, unknown>,
+  body: Record<string, unknown> = {},
   timeoutMs?: number,
-  method: 'POST' | 'PUT' | 'PATCH' = 'POST'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'POST'
 ): Promise<T> {
   const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
@@ -513,14 +513,18 @@ export async function callGatewayHttp<T = ToolCallResult>(
   const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
 
   try {
-    const response = await fetch(endpoint, {
+    const requestInit: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body),
       signal: controller.signal,
-    })
+    }
+    if (method !== 'GET') {
+      requestInit.body = JSON.stringify(body)
+    }
+
+    const response = await fetch(endpoint, requestInit)
 
     const payload = (await response.json().catch(() => ({}))) as GatewayHttpErrorPayload & T
 
