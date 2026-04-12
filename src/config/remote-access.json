@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "rootSource": "local-browser-sync",
+  "roots": []
+}

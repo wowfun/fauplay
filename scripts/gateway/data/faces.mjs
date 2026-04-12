@@ -1818,6 +1818,7 @@ export async function getFaceCrop(params) {
   if (!faceId) {
     throw new Error('faceId is required')
   }
+  const rootPath = resolveOptionalRootPath(params.rootPath)
 
   const size = Math.min(
     FACE_CROP_SIZE_MAX,
@@ -1829,6 +1830,8 @@ export async function getFaceCrop(params) {
   )
 
   return withDb(async (db) => {
+    const scopeClause = buildAssetScopeExistsClause('face.assetId', rootPath)
+    const scopedPathExpr = buildRepresentativeFilePathExpression('face.assetId', rootPath)
     const row = db.prepare(`
       SELECT
         face.id AS faceId,
@@ -1838,13 +1841,13 @@ export async function getFaceCrop(params) {
         face.y1 AS y1,
         face.x2 AS x2,
         face.y2 AS y2,
-        file_path.absolutePath AS absolutePath
+        ${scopedPathExpr.sql} AS absolutePath
       FROM face
       INNER JOIN asset ON asset.id = face.assetId
-      LEFT JOIN (${representativeFilePathSubquery()}) AS file_path ON file_path.assetId = face.assetId
       WHERE face.id = ?
         AND asset.deletedAt IS NULL
-    `).get(faceId)
+        AND ${scopeClause.sql}
+    `).get(...scopedPathExpr.params, faceId, ...scopeClause.params)
 
     if (!row || typeof row.absolutePath !== 'string' || !row.absolutePath) {
       throw createFaceError('FACE_NOT_FOUND', `face not found: ${faceId}`)
