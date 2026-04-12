@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:https:setup": "node scripts/dev/setup-https-dev.mjs",
+    "dev:https": "node scripts/dev/run-https-dev.mjs",
     "gateway": "node scripts/gateway/index.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

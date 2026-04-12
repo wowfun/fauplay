@@ -20,6 +20,14 @@ npm install
 npm run dev
 ```
 
+### 启动本地 HTTPS 联调环境
+
+```bash
+npm run dev:https:setup
+npm run gateway
+npm run dev:https
+```
+
 ### 构建生产版本
 
 ```bash
@@ -29,6 +37,8 @@ npm run build
 ## 常用脚本
 
 - `npm run dev`：启动前端开发服务（Vite）
+- `npm run dev:https:setup`：生成本地 HTTPS 开发证书（CA + 服务器证书）
+- `npm run dev:https`：以 HTTPS 启动前端开发服务，并为 dev-only 联调代理同源 `/v1/*`
 - `npm run gateway`：启动本地能力网关（可选）
 - `npm run build`：执行 TypeScript 构建检查并打包
 - `npm run typecheck`：执行 TypeScript 无输出类型检查
@@ -54,17 +64,21 @@ npm run build
 4. 使用快捷键提升浏览效率，快捷键清单见 [`docs/shortcuts.md`](docs/shortcuts.md)。
 5. 若需“在文件资源管理器中显示”，先启动 `npm run gateway`，再在预览面板触发对应动作。
 6. 网关自测与常见故障排查见 [`docs/troubleshooting.md`](docs/troubleshooting.md)。
+7. 若需从同一局域网的桌面浏览器或手机浏览器连接 Fauplay 远程只读服务，见 [`docs/remote-connection.md`](docs/remote-connection.md)。
+8. 若需在本机或手机上联调 `Secure` cookie 的远程只读链路，使用 [`docs/https-dev.md`](docs/https-dev.md) 中的本地 HTTPS 方案。
 
 ## 浏览器兼容性
 
 - Chrome / Edge / Opera（推荐，支持 `showDirectoryPicker`）
 - Firefox / Safari：兼容性受限，部分能力不可用
 
-> 注意：本项目依赖 File System Access API，移动端浏览器支持普遍较弱。
+> 注意：本地文件夹模式依赖 File System Access API，移动端浏览器支持普遍较弱；若使用远程只读模式，可通过同源 `HTTPS` 从手机浏览器访问 Fauplay 服务。
 
 ## 文档索引
 
 - 快捷键文档：[`docs/shortcuts.md`](docs/shortcuts.md)
+- 远程连接指引：[`docs/remote-connection.md`](docs/remote-connection.md)
+- 本地 HTTPS 联调：[`docs/https-dev.md`](docs/https-dev.md)
 - 排障与网关自测：[`docs/troubleshooting.md`](docs/troubleshooting.md)
 - 规范总索引：[`specs/README.md`](specs/README.md)
 - 基线规范：[`specs/000-foundation/spec.md`](specs/000-foundation/spec.md)

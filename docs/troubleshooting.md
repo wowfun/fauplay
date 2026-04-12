@@ -259,6 +259,83 @@ sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>
 - 仅在预览已打开（侧栏或全屏）时执行随机队列同步逻辑。
 - 当预览已完全关闭时，随机状态仅保留内存，不主动触发 UI 重开。
 
+## 7) Windows / WSL 下 `https://localhost` 正常，但局域网 IP 无法访问 HTTPS 开发站点
+
+### 现象
+
+- Windows 本机可以打开 `https://localhost:5173`
+- 手机访问 `https://<局域网IP>:5173` 超时或失败
+- `Test-NetConnection <局域网IP> -Port 5173` 失败
+
+### 排查顺序
+
+1. 先确认本地 `HTTPS` 联调链路本身是通的：
+
+```bash
+npm run gateway
+npm run dev:https
+```
+
+2. 先在 Windows 本机浏览器确认 `https://localhost:5173` 可正常打开，并且证书已受信任。
+3. 再用手机直接实测 `https://<局域网IP>:5173`，不要只依赖主机上的 `Test-NetConnection` 结果判断成败。
+
+### WSL mirrored networking 注意点
+
+如果你的 WSL 使用 mirrored networking，`wsl hostname -I` 可能会直接显示宿主机的局域网 IP。此时优先检查 WSL 的 Hyper-V 防火墙，不要先叠加 `portproxy`。
+
+检查当前 WSL VM 防火墙状态：
+
+```powershell
+$wslId = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+Get-NetFirewallHyperVVMSetting -PolicyStore ActiveStore -Name $wslId
+```
+
+如果需要为本地 HTTPS 开发站点开放 `5173`，优先增加显式端口规则：
+
+```powershell
+New-NetFirewallHyperVRule `
+  -Name FauplayHttps5173 `
+  -DisplayName "Fauplay HTTPS Dev 5173" `
+  -Direction Inbound `
+  -VMCreatorId $wslId `
+  -Protocol TCP `
+  -LocalPorts 5173
+```
+
+不建议在这种 mirrored networking 场景里把 `DefaultInboundAction` 长期改成 `Allow`，也不建议把 `netsh interface portproxy` 当成首选方案。
+
+### 何时需要 `hostAddressLoopback`
+
+如果手机已经能访问，就不必继续为了让 Windows 自己通过“自己的局域网 IP”访问成功而叠加更多代理层。
+
+只有当你明确需要 Windows 宿主机通过自身局域网 IP 回连 WSL 服务时，再考虑在 `%UserProfile%\\.wslconfig` 中启用：
+
+```ini
+[wsl2]
+networkingMode=mirrored
+hostAddressLoopback=true
+firewall=true
+```
+
+修改后执行：
+
+```powershell
+wsl --shutdown
+```
+
+然后重新启动 `npm run gateway` 与 `npm run dev:https`。
+
+### 清理临时规则
+
+如果你为了排查额外加过规则，且后续不再需要手机访问本地 HTTPS 开发站点，记得清理：
+
+```powershell
+Remove-NetFirewallHyperVRule -Name FauplayHttps5173
+netsh interface portproxy delete v4tov4 listenaddress=<局域网IP> listenport=5173
+```
+
+如果手机访问已经正常，不要继续为了让某条本机自测命令通过而保留多余的 `portproxy` 配置。
+
 ## 7) 目录中有图片但显示为空文件夹（前导空格文件名）
 
 ### 现象
