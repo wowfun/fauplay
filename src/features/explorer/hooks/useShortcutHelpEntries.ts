@@ -6,7 +6,11 @@ import {
   shortcutActionDisplayDescriptors,
   type ShortcutActionId,
 } from '@/config/shortcuts'
-import { resolveActiveDigitAssignment } from '@/features/plugin-runtime/utils/annotationSchema'
+import {
+  getAnnotationSchemaStoreVersion,
+  resolveActiveDigitAssignment,
+  subscribeAnnotationSchemaStore,
+} from '@/features/plugin-runtime/utils/annotationSchema'
 import {
   getAnnotationDisplayStoreVersion,
   getGlobalAnnotationTagOptions,
@@ -277,6 +281,11 @@ export function useShortcutHelpEntries({
     getAnnotationDisplayStoreVersion,
     getAnnotationDisplayStoreVersion
   )
+  const annotationSchemaStoreVersion = useSyncExternalStore(
+    subscribeAnnotationSchemaStore,
+    getAnnotationSchemaStoreVersion,
+    getAnnotationSchemaStoreVersion
+  )
 
   useEffect(() => {
     if (configuredPreviewTagShortcuts.length === 0) return
@@ -289,7 +298,10 @@ export function useShortcutHelpEntries({
     return new Set(getGlobalAnnotationTagOptions().map((option) => option.tagKey))
   }, [annotationDisplayStoreVersion])
 
-  const digitAssignment = useMemo(() => resolveActiveDigitAssignment(rootId), [rootId])
+  const digitAssignment = useMemo(() => {
+    void annotationSchemaStoreVersion
+    return resolveActiveDigitAssignment(rootId)
+  }, [annotationSchemaStoreVersion, rootId])
 
   return useMemo(() => {
     const previewBindingKeys = new Set<string>()

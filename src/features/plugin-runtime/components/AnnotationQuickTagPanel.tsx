@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
 import type { PluginSurfaceVariant } from '@/features/plugin-runtime/types'
 import type { AnnotationSchemaConfig, AnnotationSchemaSource } from '@/features/plugin-runtime/utils/annotationSchema'
 import {
+  getAnnotationSchemaStoreVersion,
   getActiveField,
   loadGlobalAnnotationSchema,
   loadRootAnnotationSchema,
@@ -12,6 +13,7 @@ import {
   resolveAnnotationSchema,
   saveGlobalAnnotationSchema,
   saveRootAnnotationSchema,
+  subscribeAnnotationSchemaStore,
   withDefaultActiveField,
 } from '@/features/plugin-runtime/utils/annotationSchema'
 
@@ -111,14 +113,22 @@ export function AnnotationQuickTagPanel({
   surfaceVariant,
   onSetValue,
 }: AnnotationQuickTagPanelProps) {
-  const [resolved, setResolved] = useState(() => resolveAnnotationSchema(rootId))
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editorScope, setEditorScope] = useState<AnnotationSchemaSource>('root')
   const [draftSchema, setDraftSchema] = useState<AnnotationSchemaConfig>(createEmptyDraftSchema)
+  const schemaStoreVersion = useSyncExternalStore(
+    subscribeAnnotationSchemaStore,
+    getAnnotationSchemaStoreVersion,
+    getAnnotationSchemaStoreVersion
+  )
+  const resolved = useMemo(() => {
+    void schemaStoreVersion
+    return resolveAnnotationSchema(rootId)
+  }, [rootId, schemaStoreVersion])
 
-  const reloadSchema = () => {
-    setResolved(resolveAnnotationSchema(rootId))
-  }
+  useEffect(() => {
+    setIsEditorOpen(false)
+  }, [rootId])
 
   const activeField = useMemo(() => getActiveField(resolved.schema), [resolved.schema])
   const valueButtons = useMemo(() => {
@@ -136,7 +146,7 @@ export function AnnotationQuickTagPanel({
   const mutedClassName = isLightbox ? 'text-white/70' : 'text-muted-foreground'
 
   const openEditor = () => {
-    const defaultScope: AnnotationSchemaSource = rootId ? 'root' : 'global'
+    const defaultScope: AnnotationSchemaSource = rootId ? resolved.source : 'global'
     setEditorScope(defaultScope)
     if (defaultScope === 'global') {
       setDraftSchema(cloneSchema(loadGlobalAnnotationSchema()))
@@ -150,29 +160,29 @@ export function AnnotationQuickTagPanel({
   const saveActiveFieldKey = (fieldKey: string) => {
     if (resolved.source === 'root' && rootId) {
       saveRootAnnotationSchema(rootId, withDefaultActiveField(resolved.schema, fieldKey))
-      reloadSchema()
       return
     }
     saveGlobalAnnotationSchema(withDefaultActiveField(resolved.schema, fieldKey))
-    reloadSchema()
   }
 
   const saveDraft = () => {
     const normalized = normalizeAnnotationSchemaForSave(draftSchema)
     if (editorScope === 'root' && rootId) {
-      saveRootAnnotationSchema(rootId, normalized)
+      if (normalized.fields.length === 0) {
+        removeRootAnnotationSchema(rootId)
+      } else {
+        saveRootAnnotationSchema(rootId, normalized)
+      }
     } else {
       saveGlobalAnnotationSchema(normalized)
     }
     setIsEditorOpen(false)
-    reloadSchema()
   }
 
   const resetRootScope = () => {
     if (!rootId) return
     removeRootAnnotationSchema(rootId)
     setIsEditorOpen(false)
-    reloadSchema()
   }
 
   return (
@@ -428,7 +438,7 @@ export function AnnotationQuickTagPanel({
           </div>
 
           <div className="flex items-center justify-end gap-2">
-            {editorScope === 'root' && rootId && (
+            {rootId && (editorScope === 'root' || resolved.source === 'root') && (
               <Button
                 size="sm"
                 variant="outline"

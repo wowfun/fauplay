@@ -19,8 +19,28 @@ export interface ResolvedAnnotationSchema {
 
 const GLOBAL_SCHEMA_STORAGE_KEY = 'fauplay:annotation-schema:global:v1'
 const ROOT_SCHEMA_STORAGE_KEY = 'fauplay:annotation-schema:roots:v1'
+const STORAGE_KEYS = new Set([GLOBAL_SCHEMA_STORAGE_KEY, ROOT_SCHEMA_STORAGE_KEY])
 
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
+const storeListeners = new Set<() => void>()
+let storeVersion = 0
+let storageBridgeInitialized = false
+
+function emitStoreChange() {
+  storeVersion += 1
+  for (const listener of storeListeners) {
+    listener()
+  }
+}
+
+function ensureStorageBridge() {
+  if (storageBridgeInitialized || typeof window === 'undefined') return
+  window.addEventListener('storage', (event) => {
+    if (event.key && !STORAGE_KEYS.has(event.key)) return
+    emitStoreChange()
+  })
+  storageBridgeInitialized = true
+}
 
 function createEmptySchema(): AnnotationSchemaConfig {
   return {
@@ -79,6 +99,10 @@ function normalizeSchema(input: unknown): AnnotationSchemaConfig {
   }
 }
 
+function isEmptySchema(schema: AnnotationSchemaConfig | null | undefined): boolean {
+  return !schema || schema.fields.length === 0
+}
+
 function parseJsonOrFallback<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback
   try {
@@ -109,11 +133,25 @@ function readRootSchemaMapUnsafe(): Record<string, AnnotationSchemaConfig> {
 function writeGlobalSchemaUnsafe(schema: AnnotationSchemaConfig) {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(GLOBAL_SCHEMA_STORAGE_KEY, JSON.stringify(normalizeSchema(schema)))
+  emitStoreChange()
 }
 
 function writeRootSchemaMapUnsafe(map: Record<string, AnnotationSchemaConfig>) {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(ROOT_SCHEMA_STORAGE_KEY, JSON.stringify(map))
+  emitStoreChange()
+}
+
+export function subscribeAnnotationSchemaStore(listener: () => void): () => void {
+  ensureStorageBridge()
+  storeListeners.add(listener)
+  return () => {
+    storeListeners.delete(listener)
+  }
+}
+
+export function getAnnotationSchemaStoreVersion(): number {
+  return storeVersion
 }
 
 export function loadGlobalAnnotationSchema(): AnnotationSchemaConfig {
@@ -148,7 +186,7 @@ export function removeRootAnnotationSchema(rootId: string) {
 export function resolveAnnotationSchema(rootId?: string | null): ResolvedAnnotationSchema {
   if (rootId) {
     const rootSchema = loadRootAnnotationSchema(rootId)
-    if (rootSchema) {
+    if (rootSchema && !isEmptySchema(rootSchema)) {
       return {
         schema: rootSchema,
         source: 'root',
