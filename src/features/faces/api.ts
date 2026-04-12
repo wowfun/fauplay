@@ -1,4 +1,6 @@
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
+import { fromRemoteUiRootId } from '@/lib/accessState'
+import { callRemoteGatewayHttp } from '@/lib/gateway'
 import type {
   FaceBoundingBox,
   FaceMediaType,
@@ -15,6 +17,17 @@ import type {
 interface FaceApiContext {
   rootHandle: FileSystemDirectoryHandle | null
   rootId: string
+}
+
+function getRemoteReadonlyRootId(context: FaceApiContext): string | null {
+  if (context.rootHandle) return null
+  return fromRemoteUiRootId(context.rootId)
+}
+
+function assertLocalWritableFaceContext(context: FaceApiContext): void {
+  if (getRemoteReadonlyRootId(context)) {
+    throw new Error('远程只读模式不支持人物写操作')
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,6 +77,7 @@ async function callVisionFace<T = unknown>(
   additionalArgs: Record<string, unknown>,
   timeoutMs?: number
 ): Promise<T> {
+  assertLocalWritableFaceContext(context)
   const result = await dispatchSystemTool({
     toolName: 'vision.face',
     rootHandle: context.rootHandle,
@@ -190,6 +204,19 @@ function readMutationResult(result: unknown): FaceMutationResult {
   }
 }
 
+async function callRemoteReadonlyFaces<T = unknown>(
+  context: FaceApiContext,
+  endpointPath: string,
+  body: Record<string, unknown> = {}
+): Promise<T | null> {
+  const rootId = getRemoteReadonlyRootId(context)
+  if (!rootId) return null
+  return callRemoteGatewayHttp<T>(endpointPath, {
+    rootId,
+    ...body,
+  })
+}
+
 export async function listPeople(
   context: FaceApiContext,
   options: {
@@ -199,6 +226,15 @@ export async function listPeople(
     size?: number
   }
 ): Promise<PersonSummary[]> {
+  const remoteResult = await callRemoteReadonlyFaces(context, '/v1/remote/faces/list-people', {
+    ...(options.query ? { query: options.query } : {}),
+    ...(typeof options.page === 'number' ? { page: options.page } : {}),
+    ...(typeof options.size === 'number' ? { size: options.size } : {}),
+  })
+  if (remoteResult) {
+    return readPeopleItems(remoteResult)
+  }
+
   const result = await callVisionFace(context, {
     operation: 'listPeople',
     scope: options.scope,
@@ -216,6 +252,13 @@ export async function listPersonFaces(
     scope: PersonScope
   }
 ): Promise<FaceRecord[]> {
+  const remoteResult = await callRemoteReadonlyFaces(context, '/v1/remote/faces/list-person-faces', {
+    personId: options.personId,
+  })
+  if (remoteResult) {
+    return readFaceItems(remoteResult)
+  }
+
   const result = await callVisionFace(context, {
     operation: 'listAssetFaces',
     personId: options.personId,
@@ -246,6 +289,10 @@ export async function listReviewFaces(
     size?: number
   }
 ): Promise<FaceRecord[]> {
+  if (getRemoteReadonlyRootId(context)) {
+    throw new Error('远程只读模式不支持未归属/忽略视图')
+  }
+
   const result = await callVisionFace(context, {
     operation: 'listReviewFaces',
     scope: options.scope,
@@ -278,6 +325,7 @@ export async function renamePerson(
     name: string
   }
 ): Promise<void> {
+  assertLocalWritableFaceContext(context)
   await callVisionFace(context, {
     operation: 'renamePerson',
     personId: options.personId,
@@ -292,6 +340,7 @@ export async function mergePeople(
     sourcePersonIds: string[]
   }
 ): Promise<void> {
+  assertLocalWritableFaceContext(context)
   await callVisionFace(context, {
     operation: 'mergePeople',
     targetPersonId: options.targetPersonId,
@@ -306,6 +355,7 @@ export async function assignFaces(
     targetPersonId: string
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'assignFaces',
     faceIds: options.faceIds,
@@ -321,6 +371,7 @@ export async function createPersonFromFaces(
     name?: string
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'createPersonFromFaces',
     faceIds: options.faceIds,
@@ -335,6 +386,7 @@ export async function unassignFaces(
     faceIds: string[]
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'unassignFaces',
     faceIds: options.faceIds,
@@ -348,6 +400,7 @@ export async function ignoreFaces(
     faceIds: string[]
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'ignoreFaces',
     faceIds: options.faceIds,
@@ -361,6 +414,7 @@ export async function restoreIgnoredFaces(
     faceIds: string[]
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'restoreIgnoredFaces',
     faceIds: options.faceIds,
@@ -374,6 +428,7 @@ export async function requeueFaces(
     faceIds: string[]
   }
 ): Promise<FaceMutationResult> {
+  assertLocalWritableFaceContext(context)
   const result = await callVisionFace(context, {
     operation: 'requeueFaces',
     faceIds: options.faceIds,

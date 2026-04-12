@@ -14,6 +14,7 @@ interface PreviewHeaderTagManagerProps {
   tags: PreviewHeaderAnnotationTag[]
   canManageTags: boolean
   manageUnavailableReason?: string | null
+  showUnavailableReasons?: boolean
   tagOptions: AnnotationFilterTagOption[]
   tagOptionsStatus: 'idle' | 'loading' | 'ready'
   tagOptionsError?: string | null
@@ -57,6 +58,7 @@ export function PreviewHeaderTagManager({
   tags,
   canManageTags,
   manageUnavailableReason,
+  showUnavailableReasons = true,
   tagOptions,
   tagOptionsStatus,
   tagOptionsError,
@@ -212,7 +214,7 @@ export function PreviewHeaderTagManager({
     <div
       ref={containerRef}
       className="relative max-w-[58%] shrink-0"
-      title={!canManageTags ? manageUnavailableReason ?? undefined : undefined}
+      title={showUnavailableReasons && !canManageTags ? manageUnavailableReason ?? undefined : undefined}
     >
       <div className="overflow-x-auto">
         <div className="flex items-center justify-end gap-1 pl-1">

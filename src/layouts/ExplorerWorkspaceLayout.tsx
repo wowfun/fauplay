@@ -9,6 +9,7 @@ import { ExplorerStatusBar } from '@/features/explorer/components/ExplorerStatus
 import { WorkspaceResultPanel } from '@/features/workspace/components/WorkspaceResultPanel'
 import type { DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
+import type { WorkspacePresentationProfile } from '@/features/workspace/types/presentation'
 import type { FaceRecord } from '@/features/faces/types'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -132,11 +133,14 @@ function writePersistedSameDurationScope(value: 'global' | 'root'): void {
 }
 
 interface ExplorerWorkspaceLayoutProps {
+  accessProvider: 'local-browser' | 'remote-readonly'
   filter: FilterState
   onFilterChange: (filter: FilterState) => void
   rootName: string
   currentPath: string
   rootId?: string | null
+  onSwitchWorkspace?: () => void
+  onForgetRemoteDevice?: () => void
   onNavigateToPath: (path: string) => Promise<boolean>
   onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
@@ -172,7 +176,7 @@ interface ExplorerWorkspaceLayoutProps {
   isLoading: boolean
   directoryFiles: FileItem[]
   activeSurfaceFiles: FileItem[]
-  rootHandle: FileSystemDirectoryHandle
+  rootHandle: FileSystemDirectoryHandle | null
   directoryFileGridRef: MutableRefObject<FileBrowserGridHandle | null>
   projectionFileGridRef: MutableRefObject<FileBrowserGridHandle | null>
   onDirectoryFileClick: (file: FileItem) => void
@@ -212,6 +216,8 @@ interface ExplorerWorkspaceLayoutProps {
   gridSelectedCount: number
   selectedGridMetaFile: FileItem | null
   pluginTools: GatewayToolDescriptor[]
+  previewHeaderTitleMode?: WorkspacePresentationProfile['previewHeaderTitleMode']
+  showPreviewUnavailableReasons?: WorkspacePresentationProfile['showPreviewUnavailableReasons']
   onClosePane: () => void
   onOpenFullscreenFromPane: () => void
   autoPlayEnabled: boolean
@@ -242,11 +248,14 @@ interface ExplorerWorkspaceLayoutProps {
 }
 
 export function ExplorerWorkspaceLayout({
+  accessProvider,
   filter,
   onFilterChange,
   rootName,
   currentPath,
   rootId,
+  onSwitchWorkspace,
+  onForgetRemoteDevice,
   onNavigateToPath,
   onNavigateHistoryEntry,
   onListChildDirectories,
@@ -322,6 +331,8 @@ export function ExplorerWorkspaceLayout({
   gridSelectedCount,
   selectedGridMetaFile,
   pluginTools,
+  previewHeaderTitleMode = 'actionable',
+  showPreviewUnavailableReasons = true,
   onClosePane,
   onOpenFullscreenFromPane,
   autoPlayEnabled,
@@ -422,11 +433,14 @@ export function ExplorerWorkspaceLayout({
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       <ExplorerToolbar
+        accessProvider={accessProvider}
         filter={filter}
         onFilterChange={onFilterChange}
         rootId={rootId}
         rootName={rootName}
         currentPath={currentPath}
+        onSwitchWorkspace={onSwitchWorkspace}
+        onForgetRemoteDevice={onForgetRemoteDevice}
         onNavigateToPath={onNavigateToPath}
         onNavigateHistoryEntry={onNavigateHistoryEntry}
         onListChildDirectories={onListChildDirectories}
@@ -572,6 +586,8 @@ export function ExplorerWorkspaceLayout({
                 previewActionTools={pluginTools}
                 onClose={onClosePane}
                 onOpenFullscreen={onOpenFullscreenFromPane}
+                titleMode={previewHeaderTitleMode}
+                showUnavailableReasons={showPreviewUnavailableReasons}
                 autoPlayEnabled={autoPlayEnabled}
                 autoPlayIntervalSec={autoPlayIntervalSec}
                 videoSeekStepSec={videoSeekStepSec}
@@ -661,6 +677,8 @@ export function ExplorerWorkspaceLayout({
             rootId={rootId}
             previewActionTools={pluginTools}
             onClose={onClosePreview}
+            titleMode={previewHeaderTitleMode}
+            showUnavailableReasons={showPreviewUnavailableReasons}
             autoPlayOnOpen={previewAutoPlayOnOpen}
             autoPlayEnabled={autoPlayEnabled}
             autoPlayIntervalSec={autoPlayIntervalSec}
@@ -705,6 +723,8 @@ export function ExplorerWorkspaceLayout({
             open={showPeoplePanel}
             rootHandle={rootHandle}
             rootId={rootId ?? ''}
+            layoutMode="wide"
+            readonly={accessProvider === 'remote-readonly'}
             preferredPersonId={peoplePanelPreferredPersonId}
             onClose={onClosePeoplePanel}
             onOpenFaceSource={onOpenFaceSource}

@@ -11,7 +11,7 @@ import {
   unassignFaces,
 } from '@/features/faces/api'
 import type { FaceMutationResult, PersonSuggestion, PersonSummary, PreviewFaceOverlayItem } from '@/features/faces/types'
-import { buildGatewayFaceCropUrl } from '@/lib/gateway'
+import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
@@ -240,8 +240,10 @@ export function PreviewFaceCorrectionPanel({
       </div>
 
       <div className="mt-3 flex gap-3">
-        <img
-          src={buildGatewayFaceCropUrl(face.faceId, { size: 112, padding: 0.35 })}
+        <GatewayFaceCropImage
+          faceId={face.faceId}
+          size={112}
+          padding={0.35}
           alt="face crop"
           className="h-24 w-24 rounded-md border border-border object-cover"
         />

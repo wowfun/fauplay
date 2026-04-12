@@ -304,6 +304,14 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     navigateMedia(previewFile, direction, { source: 'modal', wrap: WRAP_AT_BOUNDARY })
   }, [navigateMedia, previewFile])
 
+  const canNavigateMediaFromPane = useMemo(() => (
+    mediaFiles.length > 1 && getMediaIndex(selectedFile) >= 0
+  ), [getMediaIndex, mediaFiles.length, selectedFile])
+
+  const canNavigateMediaFromModal = useMemo(() => (
+    mediaFiles.length > 1 && getMediaIndex(previewFile) >= 0
+  ), [getMediaIndex, mediaFiles.length, previewFile])
+
   const hasOpenPreview = !!previewFile || showPreviewPane
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
   const activeMediaIndex = getMediaIndex(activeMediaFile)
@@ -705,6 +713,8 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     toggleFaceBboxVisible,
     navigateMediaFromPane,
     navigateMediaFromModal,
+    canNavigateMediaFromPane,
+    canNavigateMediaFromModal,
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,

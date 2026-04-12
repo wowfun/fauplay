@@ -8,6 +8,7 @@ export interface PreviewRenameResult {
 
 interface PreviewTitleRowProps {
   fileName: string
+  titleMode: 'actionable' | 'static'
   canRename: boolean
   renameInFlight: boolean
   renameUnavailableReason?: string | null
@@ -31,6 +32,7 @@ function splitFileName(fileName: string): { baseName: string; extension: string 
 
 export function PreviewTitleRow({
   fileName,
+  titleMode,
   canRename,
   renameInFlight,
   renameUnavailableReason,
@@ -54,6 +56,13 @@ export function PreviewTitleRow({
     inputRef.current?.focus()
     inputRef.current?.select()
   }, [isEditing])
+
+  useEffect(() => {
+    if (titleMode !== 'static') return
+    setIsEditing(false)
+    setDraftBaseName(baseName)
+    setRenameError(null)
+  }, [baseName, titleMode])
 
   const cancelEditing = () => {
     setIsEditing(false)
@@ -139,6 +148,10 @@ export function PreviewTitleRow({
             </p>
           )}
         </>
+      ) : titleMode === 'static' ? (
+        <p className="max-w-full truncate text-sm font-medium" title={fileName}>
+          {fileName}
+        </p>
       ) : (
         <button
           type="button"
@@ -156,7 +169,7 @@ export function PreviewTitleRow({
         </button>
       )}
 
-      {!canRename && renameUnavailableReason && !isEditing && (
+      {titleMode === 'actionable' && !canRename && renameUnavailableReason && !isEditing && (
         <p className="mt-1 text-xs text-muted-foreground" title={renameUnavailableReason}>
           {renameUnavailableReason}
         </p>

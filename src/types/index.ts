@@ -9,6 +9,7 @@ export interface FileItem {
   lastModified?: Date
   lastModifiedMs?: number
   mimeType?: string
+  remoteRootId?: string
   absolutePath?: string
   displayPath?: string
   previewKind?: FilePreviewKind

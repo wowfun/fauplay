@@ -16,7 +16,10 @@ export interface PreviewHeaderAnnotationTag {
 interface PreviewHeaderBarProps {
   fileName: string
   isFullscreen: boolean
+  titleMode?: 'actionable' | 'static'
+  showUnavailableReasons?: boolean
   showPlaybackControls: boolean
+  showNavigationButtons?: boolean
   isVideoPreview: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
@@ -31,6 +34,10 @@ interface PreviewHeaderBarProps {
   onAutoPlayIntervalChange: (sec: number) => void
   onVideoSeekStepChange: (sec: number) => void
   onVideoPlaybackRateChange: (rate: number) => void
+  canNavigatePrev?: boolean
+  canNavigateNext?: boolean
+  onNavigatePrev?: () => void
+  onNavigateNext?: () => void
   onClose: () => void
   canRenameFileName: boolean
   renameInFlight: boolean
@@ -53,7 +60,10 @@ interface PreviewHeaderBarProps {
 export function PreviewHeaderBar({
   fileName,
   isFullscreen,
+  titleMode = 'actionable',
+  showUnavailableReasons = true,
   showPlaybackControls,
+  showNavigationButtons = false,
   isVideoPreview,
   autoPlayEnabled,
   autoPlayIntervalSec,
@@ -68,6 +78,10 @@ export function PreviewHeaderBar({
   onAutoPlayIntervalChange,
   onVideoSeekStepChange,
   onVideoPlaybackRateChange,
+  canNavigatePrev,
+  canNavigateNext,
+  onNavigatePrev,
+  onNavigateNext,
   onClose,
   canRenameFileName,
   renameInFlight,
@@ -95,6 +109,7 @@ export function PreviewHeaderBar({
         <div className="min-w-0 flex-1">
           <PreviewTitleRow
             fileName={fileName}
+            titleMode={titleMode}
             canRename={canRenameFileName}
             renameInFlight={renameInFlight}
             renameUnavailableReason={renameUnavailableReason}
@@ -106,6 +121,7 @@ export function PreviewHeaderBar({
           tags={annotationTags}
           canManageTags={canManageAnnotationTags}
           manageUnavailableReason={annotationTagManageUnavailableReason}
+          showUnavailableReasons={showUnavailableReasons}
           tagOptions={annotationTagOptions}
           tagOptionsStatus={annotationTagOptionsStatus}
           tagOptionsError={annotationTagOptionsError}
@@ -120,6 +136,7 @@ export function PreviewHeaderBar({
       <PreviewControlGroup
         isFullscreen={isFullscreen}
         showPlaybackControls={showPlaybackControls}
+        showNavigationButtons={showNavigationButtons}
         isVideoPreview={isVideoPreview}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
@@ -134,6 +151,10 @@ export function PreviewHeaderBar({
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onVideoSeekStepChange={onVideoSeekStepChange}
         onVideoPlaybackRateChange={onVideoPlaybackRateChange}
+        canNavigatePrev={canNavigatePrev}
+        canNavigateNext={canNavigateNext}
+        onNavigatePrev={onNavigatePrev}
+        onNavigateNext={onNavigateNext}
         onClose={onClose}
       />
     </div>

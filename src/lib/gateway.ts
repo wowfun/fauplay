@@ -1,7 +1,16 @@
-const GATEWAY_BASE_URL = 'http://127.0.0.1:3210'
-const HEALTH_ENDPOINT = `${GATEWAY_BASE_URL}/v1/health`
-const MCP_ENDPOINT = `${GATEWAY_BASE_URL}/v1/mcp`
-const GLOBAL_SHORTCUTS_CONFIG_ENDPOINT = `${GATEWAY_BASE_URL}/v1/config/shortcuts`
+import {
+  clearRemoteSession,
+  fromRemoteUiRootId,
+  getActiveRemoteWorkspace,
+  getCurrentOrigin,
+  isRemoteReadonlyProviderActive,
+} from '@/lib/accessState'
+import type { FileItem, TextPreviewPayload } from '@/types'
+
+const LOCAL_GATEWAY_BASE_URL_CONFIG = (import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:3210'
+const HEALTH_ENDPOINT_PATH = '/v1/health'
+const MCP_ENDPOINT_PATH = '/v1/mcp'
+const GLOBAL_SHORTCUTS_CONFIG_ENDPOINT_PATH = '/v1/config/shortcuts'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_TOOL_TIMEOUT_MS = 5000
@@ -16,10 +25,49 @@ const MCP_CLIENT_INFO = {
 interface FaceCropUrlOptions {
   size?: number
   padding?: number
+  rootId?: string
 }
 
 interface AbsoluteFileUrlOptions {
   sizePreset?: string
+}
+
+interface RemoteFileUrlOptions {
+  sizePreset?: string
+}
+
+export interface RemoteRootEntry {
+  id: string
+  label: string
+}
+
+export interface RemoteFavoriteEntry {
+  rootId: string
+  path: string
+  favoritedAtMs: number
+}
+
+export interface LocalPublishedRootSyncEntry {
+  label: string
+  absolutePath: string
+  favoritePaths: string[]
+}
+
+export interface RemoteCapabilitiesSnapshot {
+  enabled: boolean
+  authMode: 'session-cookie'
+  loginMode: 'bearer-token-exchange'
+  readOnly: true
+}
+
+export interface RememberedDeviceAdminEntry {
+  id: string
+  label: string
+  autoLabel: string
+  userAgentSummary: string
+  createdAtMs: number
+  lastUsedAtMs: number
+  expiresAtMs: number
 }
 
 export interface GatewayToolDescriptor {
@@ -74,6 +122,22 @@ interface GatewayHttpErrorPayload {
   ok?: boolean
   error?: string
   code?: string
+}
+
+interface SameOriginRequestOptions {
+  clearSessionOnUnauthorized?: boolean
+  headers?: Record<string, string>
+}
+
+interface RemoteSessionCreateOptions {
+  rememberDevice?: boolean
+  rememberDeviceLabel?: string
+  timeoutMs?: number
+}
+
+interface RemoteSessionClearOptions {
+  forgetDevice?: boolean
+  timeoutMs?: number
 }
 
 interface JsonRpcErrorData {
@@ -152,6 +216,49 @@ class GatewayHttpError extends Error {
     this.code = code
     this.status = status
   }
+}
+
+function getSameOriginGatewayBaseUrl(): string {
+  return getCurrentOrigin()
+}
+
+function getLocalGatewayBaseUrl(): string {
+  if (LOCAL_GATEWAY_BASE_URL_CONFIG === '/' || LOCAL_GATEWAY_BASE_URL_CONFIG === 'same-origin') {
+    return getCurrentOrigin()
+  }
+  return LOCAL_GATEWAY_BASE_URL_CONFIG
+}
+
+function buildLocalGatewayUrl(endpointPath: string): string {
+  const normalizedPath = normalizeEndpointPath(endpointPath)
+  return new URL(normalizedPath, `${getLocalGatewayBaseUrl().replace(/\/+$/, '')}/`).toString()
+}
+
+function createRemoteUnauthorizedError(status?: number): GatewayHttpError {
+  return new GatewayHttpError('远程会话已失效，请重新连接', 'REMOTE_UNAUTHORIZED', status)
+}
+
+function clearRemoteSessionOnUnauthorized() {
+  clearRemoteSession({ emitInvalidatedEvent: true })
+}
+
+function buildRemoteLoginHeaders(token: string): Record<string, string> {
+  const normalizedToken = token.trim()
+  if (!normalizedToken) {
+    throw new GatewayHttpError('远程 token 不能为空', 'REMOTE_TOKEN_REQUIRED', 400)
+  }
+  return {
+    Authorization: `Bearer ${normalizedToken}`,
+  }
+}
+
+function normalizeEndpointPath(endpointPath: string): string {
+  return endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
+}
+
+function appendQueryString(baseUrl: string, query: URLSearchParams): string {
+  const serialized = query.toString()
+  return serialized ? `${baseUrl}?${serialized}` : baseUrl
 }
 
 let mcpInitialized = false
@@ -266,7 +373,7 @@ async function callGatewayMcpRequest<T>(
       headers[MCP_SESSION_HEADER] = mcpSessionId
     }
 
-    const response = await fetch(MCP_ENDPOINT, {
+    const response = await fetch(buildLocalGatewayUrl(MCP_ENDPOINT_PATH), {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -500,15 +607,15 @@ export async function callGatewayTool<T = ToolCallResult>(
 
 export async function callGatewayHttp<T = ToolCallResult>(
   endpointPath: string,
-  body: Record<string, unknown> = {},
+  body: unknown = {},
   timeoutMs?: number,
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'POST'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST'
 ): Promise<T> {
   const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
     : DEFAULT_TOOL_TIMEOUT_MS
   const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
-  const endpoint = `${GATEWAY_BASE_URL}${normalizedPath}`
+  const endpoint = buildLocalGatewayUrl(normalizedPath)
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
 
@@ -558,10 +665,113 @@ export async function callGatewayHttp<T = ToolCallResult>(
   }
 }
 
+function handleRemoteUnauthorizedResponse(
+  status: number,
+  { clearSessionOnUnauthorized = true }: SameOriginRequestOptions = {}
+): never {
+  if (clearSessionOnUnauthorized) {
+    clearRemoteSessionOnUnauthorized()
+  }
+  throw createRemoteUnauthorizedError(status)
+}
+
+async function callSameOriginRemoteHttp<T = ToolCallResult>(
+  endpointPath: string,
+  body: Record<string, unknown> = {},
+  timeoutMs?: number,
+  method: 'GET' | 'POST' = 'POST',
+  query?: URLSearchParams,
+  options: SameOriginRequestOptions = {},
+): Promise<T> {
+  const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_TOOL_TIMEOUT_MS
+  const normalizedPath = normalizeEndpointPath(endpointPath)
+  const baseUrl = `${getSameOriginGatewayBaseUrl()}${normalizedPath}`
+  const endpoint = query ? appendQueryString(baseUrl, query) : baseUrl
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
+
+  try {
+    const requestInit: RequestInit = {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        ...(method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers ?? {}),
+      },
+      signal: controller.signal,
+    }
+    if (method !== 'GET') {
+      requestInit.body = JSON.stringify(body)
+    }
+
+    const response = await fetch(endpoint, requestInit)
+    const payload = (await response.json().catch(() => ({}))) as GatewayHttpErrorPayload & T
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleRemoteUnauthorizedResponse(response.status, options)
+      }
+      const message = typeof payload?.error === 'string'
+        ? payload.error
+        : `Gateway request failed: ${response.status}`
+      const code = typeof payload?.code === 'string' ? payload.code : undefined
+      throw new GatewayHttpError(message, code, response.status)
+    }
+
+    if (
+      payload
+      && typeof payload === 'object'
+      && 'ok' in payload
+      && payload.ok === false
+    ) {
+      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
+      const code = typeof payload.code === 'string' ? payload.code : undefined
+      throw new GatewayHttpError(message, code, response.status)
+    }
+
+    return payload as T
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createClientTimeoutError(effectiveTimeoutMs)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+export async function callRemoteGatewayHttp<T = ToolCallResult>(
+  endpointPath: string,
+  body: Record<string, unknown> = {},
+  timeoutMs?: number,
+  method: 'GET' | 'POST' = 'POST',
+  query?: URLSearchParams
+): Promise<T> {
+  return callSameOriginRemoteHttp(endpointPath, body, timeoutMs, method, query)
+}
+
 function appendAbsolutePathQuery(endpointPath: string, absolutePath: string, options: AbsoluteFileUrlOptions = {}): string {
   const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
-  const endpoint = new URL(`${GATEWAY_BASE_URL}${normalizedPath}`)
+  const endpoint = new URL(buildLocalGatewayUrl(normalizedPath))
   endpoint.searchParams.set('absolutePath', absolutePath)
+  if (typeof options.sizePreset === 'string' && options.sizePreset.trim()) {
+    endpoint.searchParams.set('sizePreset', options.sizePreset.trim())
+  }
+  return endpoint.toString()
+}
+
+function appendRemoteFileQuery(
+  endpointPath: string,
+  rootId: string,
+  relativePath: string,
+  options: RemoteFileUrlOptions = {}
+): string {
+  const normalizedPath = normalizeEndpointPath(endpointPath)
+  const endpoint = new URL(`${getSameOriginGatewayBaseUrl()}${normalizedPath}`)
+  endpoint.searchParams.set('rootId', rootId)
+  endpoint.searchParams.set('relativePath', relativePath)
   if (typeof options.sizePreset === 'string' && options.sizePreset.trim()) {
     endpoint.searchParams.set('sizePreset', options.sizePreset.trim())
   }
@@ -576,29 +786,100 @@ export function buildGatewayFileThumbnailUrl(absolutePath: string, options: Abso
   return appendAbsolutePathQuery('/v1/files/thumbnail', absolutePath, options)
 }
 
+export function buildRemoteGatewayFileContentUrl(rootId: string, relativePath: string): string {
+  return appendRemoteFileQuery('/v1/remote/files/content', rootId, relativePath)
+}
+
+export function buildRemoteGatewayFileThumbnailUrl(
+  rootId: string,
+  relativePath: string,
+  options: RemoteFileUrlOptions = {}
+): string {
+  return appendRemoteFileQuery('/v1/remote/files/thumbnail', rootId, relativePath, options)
+}
+
 export async function loadGatewayTextPreview(
   absolutePath: string,
   sizeLimitBytes?: number
-): Promise<{
-  status: 'idle' | 'loading' | 'ready' | 'too_large' | 'binary' | 'error'
-  content: string | null
-  fileSizeBytes: number | null
-  sizeLimitBytes: number
-  error: string | null
-}> {
+): Promise<TextPreviewPayload> {
   return callGatewayHttp('/v1/files/text-preview', {
     absolutePath,
     ...(typeof sizeLimitBytes === 'number' ? { sizeLimitBytes } : {}),
   })
 }
 
+export async function loadRemoteGatewayTextPreview(
+  rootId: string,
+  relativePath: string,
+  sizeLimitBytes?: number
+): Promise<TextPreviewPayload> {
+  return callSameOriginRemoteHttp('/v1/remote/files/text-preview', {
+    rootId,
+    relativePath,
+    ...(typeof sizeLimitBytes === 'number' ? { sizeLimitBytes } : {}),
+  })
+}
+
+function getFileRemoteRootId(file: FileItem): string {
+  return typeof file.remoteRootId === 'string' ? file.remoteRootId.trim() : ''
+}
+
+export function buildGatewayFileContentUrlForItem(file: FileItem): string | null {
+  const remoteRootId = getFileRemoteRootId(file)
+  if (remoteRootId) {
+    return buildRemoteGatewayFileContentUrl(remoteRootId, file.path)
+  }
+  if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+    return buildGatewayFileContentUrl(file.absolutePath.trim())
+  }
+  return null
+}
+
+export function buildGatewayFileThumbnailUrlForItem(
+  file: FileItem,
+  options: AbsoluteFileUrlOptions = {}
+): string | null {
+  const remoteRootId = getFileRemoteRootId(file)
+  if (remoteRootId) {
+    return buildRemoteGatewayFileThumbnailUrl(remoteRootId, file.path, {
+      sizePreset: options.sizePreset,
+    })
+  }
+  if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+    return buildGatewayFileThumbnailUrl(file.absolutePath.trim(), options)
+  }
+  return null
+}
+
+export async function loadGatewayTextPreviewForItem(
+  file: FileItem,
+  sizeLimitBytes?: number
+): Promise<TextPreviewPayload> {
+  const remoteRootId = getFileRemoteRootId(file)
+  if (remoteRootId) {
+    return loadRemoteGatewayTextPreview(remoteRootId, file.path, sizeLimitBytes)
+  }
+  if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
+    return loadGatewayTextPreview(file.absolutePath.trim(), sizeLimitBytes)
+  }
+  throw new GatewayHttpError('File preview is unavailable', 'FILE_PREVIEW_UNAVAILABLE')
+}
+
 export function buildGatewayFaceCropUrl(faceId: string, options: FaceCropUrlOptions = {}): string {
   const normalizedFaceId = String(faceId || '').trim()
-  if (!normalizedFaceId) {
-    return `${GATEWAY_BASE_URL}/v1/faces/crops/invalid`
-  }
+  const remoteRootId = isRemoteReadonlyProviderActive()
+    ? (
+      (typeof options.rootId === 'string' && options.rootId.trim()
+        ? (fromRemoteUiRootId(options.rootId) ?? options.rootId.trim())
+        : getActiveRemoteWorkspace()?.configRootId)
+      || ''
+    )
+    : ''
 
   const params = new URLSearchParams()
+  if (remoteRootId) {
+    params.set('rootId', remoteRootId)
+  }
   if (typeof options.size === 'number' && Number.isFinite(options.size) && options.size > 0) {
     params.set('size', String(Math.trunc(options.size)))
   }
@@ -606,14 +887,25 @@ export function buildGatewayFaceCropUrl(faceId: string, options: FaceCropUrlOpti
     params.set('padding', String(options.padding))
   }
 
+  if (!normalizedFaceId) {
+    const baseUrl = isRemoteReadonlyProviderActive()
+      ? getSameOriginGatewayBaseUrl()
+      : getLocalGatewayBaseUrl()
+    const path = isRemoteReadonlyProviderActive() ? '/v1/remote/faces/crops/invalid' : '/v1/faces/crops/invalid'
+    const query = params.toString()
+    return query ? `${baseUrl}${path}?${query}` : `${baseUrl}${path}`
+  }
+
   const query = params.toString()
-  const endpoint = `${GATEWAY_BASE_URL}/v1/faces/crops/${encodeURIComponent(normalizedFaceId)}`
+  const endpoint = isRemoteReadonlyProviderActive()
+    ? `${getSameOriginGatewayBaseUrl()}/v1/remote/faces/crops/${encodeURIComponent(normalizedFaceId)}`
+    : buildLocalGatewayUrl(`/v1/faces/crops/${encodeURIComponent(normalizedFaceId)}`)
   return query ? `${endpoint}?${query}` : endpoint
 }
 
 export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise<GatewayCapabilitiesSnapshot> {
   try {
-    const health = (await fetchJsonWithTimeout(HEALTH_ENDPOINT, timeoutMs)) as GatewayHealthResponse
+    const health = (await fetchJsonWithTimeout(buildLocalGatewayUrl(HEALTH_ENDPOINT_PATH), timeoutMs)) as GatewayHealthResponse
     if (health?.status !== 'ok') {
       resetMcpInitialization()
       return { online: false, tools: [] }
@@ -627,9 +919,275 @@ export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise
   }
 }
 
+async function fetchSameOriginJsonWithTimeout(
+  endpointPath: string,
+  timeoutMs: number,
+  options: SameOriginRequestOptions = {}
+): Promise<unknown> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(`${getSameOriginGatewayBaseUrl()}${normalizeEndpointPath(endpointPath)}`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: options.headers,
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleRemoteUnauthorizedResponse(response.status, options)
+      }
+      throw new GatewayHttpError(`Gateway request failed: ${response.status}`, undefined, response.status)
+    }
+    return response.json()
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createClientTimeoutError(timeoutMs)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+export async function loadRemoteGatewayCapabilities(
+  timeoutMs: number = 2000,
+): Promise<RemoteCapabilitiesSnapshot> {
+  const payload = (await fetchSameOriginJsonWithTimeout(
+    '/v1/remote/capabilities',
+    timeoutMs,
+  )) as Partial<RemoteCapabilitiesSnapshot>
+  return {
+    enabled: payload.enabled === true,
+    authMode: 'session-cookie',
+    loginMode: 'bearer-token-exchange',
+    readOnly: true,
+  }
+}
+
+export async function createRemoteGatewaySession(
+  token: string,
+  options: RemoteSessionCreateOptions = {},
+): Promise<void> {
+  const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 2000
+  const rememberDeviceLabel = typeof options.rememberDeviceLabel === 'string'
+    ? options.rememberDeviceLabel.trim()
+    : ''
+  await callSameOriginRemoteHttp(
+    '/v1/remote/session/login',
+    {
+      rememberDevice: options.rememberDevice === true,
+      ...(options.rememberDevice === true && rememberDeviceLabel ? { rememberDeviceLabel } : {}),
+    },
+    timeoutMs,
+    'POST',
+    undefined,
+    {
+      headers: buildRemoteLoginHeaders(token),
+      clearSessionOnUnauthorized: false,
+    },
+  )
+}
+
+export async function clearRemoteGatewaySession(
+  options: RemoteSessionClearOptions = {},
+): Promise<void> {
+  const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 2000
+  await callSameOriginRemoteHttp(
+    '/v1/remote/session/logout',
+    {
+      ...(options.forgetDevice === true ? { forgetDevice: true } : {}),
+    },
+    timeoutMs,
+    'POST',
+    undefined,
+    {
+      clearSessionOnUnauthorized: false,
+    },
+  )
+}
+
+export async function loadRemoteGatewayRoots(
+  timeoutMs: number = 2000,
+  options: SameOriginRequestOptions = {},
+): Promise<RemoteRootEntry[]> {
+  const payload = (await fetchSameOriginJsonWithTimeout(
+    '/v1/remote/roots',
+    timeoutMs,
+    options,
+  )) as { items?: Array<Partial<RemoteRootEntry>> }
+  const items = Array.isArray(payload.items) ? payload.items : []
+  return items.flatMap((item) => {
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    if (!id || !label) return []
+    return [{ id, label }]
+  })
+}
+
+export async function loadRemoteGatewayFavorites(
+  timeoutMs: number = 2000,
+): Promise<RemoteFavoriteEntry[]> {
+  const payload = (await fetchSameOriginJsonWithTimeout(
+    '/v1/remote/favorites',
+    timeoutMs,
+  )) as { items?: Array<Partial<RemoteFavoriteEntry>> }
+  const items = Array.isArray(payload.items) ? payload.items : []
+  return items.flatMap((item) => {
+    const rootId = typeof item.rootId === 'string' ? item.rootId.trim() : ''
+    const path = typeof item.path === 'string' ? item.path : ''
+    const favoritedAtMs = Number(item.favoritedAtMs)
+    if (!rootId || !Number.isFinite(favoritedAtMs)) {
+      return []
+    }
+    return [{
+      rootId,
+      path,
+      favoritedAtMs,
+    }]
+  })
+}
+
+export async function upsertRemoteGatewayFavorite(
+  rootId: string,
+  path: string,
+  timeoutMs: number = 2000,
+): Promise<void> {
+  const normalizedRootId = rootId.trim()
+  if (!normalizedRootId) {
+    throw new GatewayHttpError('rootId 不能为空', 'REMOTE_ROOT_ID_REQUIRED', 400)
+  }
+  await callSameOriginRemoteHttp(
+    '/v1/remote/favorites/upsert',
+    {
+      rootId: normalizedRootId,
+      path,
+    },
+    timeoutMs,
+    'POST',
+  )
+}
+
+export async function removeRemoteGatewayFavorite(
+  rootId: string,
+  path: string,
+  timeoutMs: number = 2000,
+): Promise<void> {
+  const normalizedRootId = rootId.trim()
+  if (!normalizedRootId) {
+    throw new GatewayHttpError('rootId 不能为空', 'REMOTE_ROOT_ID_REQUIRED', 400)
+  }
+  await callSameOriginRemoteHttp(
+    '/v1/remote/favorites/remove',
+    {
+      rootId: normalizedRootId,
+      path,
+    },
+    timeoutMs,
+    'POST',
+  )
+}
+
+export async function syncRemotePublishedRootsFromLocalBrowser(
+  items: LocalPublishedRootSyncEntry[],
+  timeoutMs: number = 2000,
+): Promise<void> {
+  const payload = Array.isArray(items)
+    ? items.map((item) => ({
+      label: item.label,
+      absolutePath: item.absolutePath,
+      favoritePaths: Array.isArray(item.favoritePaths) ? item.favoritePaths : [],
+    }))
+    : []
+  await callGatewayHttp(
+    '/v1/admin/remote-published-roots/sync-from-local-browser',
+    payload,
+    timeoutMs,
+    'POST',
+  )
+}
+
+export async function loadRememberedDevicesAdmin(
+  timeoutMs: number = 2000,
+): Promise<RememberedDeviceAdminEntry[]> {
+  const payload = await callGatewayHttp<{ items?: Array<Partial<RememberedDeviceAdminEntry>> }>(
+    '/v1/admin/remembered-devices',
+    {},
+    timeoutMs,
+    'GET',
+  )
+  const items = Array.isArray(payload.items) ? payload.items : []
+  return items.flatMap((item) => {
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const label = typeof item.label === 'string' ? item.label : ''
+    const autoLabel = typeof item.autoLabel === 'string' ? item.autoLabel : ''
+    const userAgentSummary = typeof item.userAgentSummary === 'string' ? item.userAgentSummary : ''
+    const createdAtMs = Number(item.createdAtMs)
+    const lastUsedAtMs = Number(item.lastUsedAtMs)
+    const expiresAtMs = Number(item.expiresAtMs)
+    if (
+      !id
+      || !autoLabel
+      || !Number.isFinite(createdAtMs)
+      || !Number.isFinite(lastUsedAtMs)
+      || !Number.isFinite(expiresAtMs)
+    ) {
+      return []
+    }
+    return [{
+      id,
+      label,
+      autoLabel,
+      userAgentSummary,
+      createdAtMs,
+      lastUsedAtMs,
+      expiresAtMs,
+    }]
+  })
+}
+
+export async function renameRememberedDeviceAdmin(
+  deviceId: string,
+  label: string,
+  timeoutMs: number = 2000,
+): Promise<void> {
+  const normalizedDeviceId = deviceId.trim()
+  if (!normalizedDeviceId) {
+    throw new GatewayHttpError('设备 ID 不能为空', 'REMEMBERED_DEVICE_ID_REQUIRED', 400)
+  }
+  await callGatewayHttp(
+    `/v1/admin/remembered-devices/${encodeURIComponent(normalizedDeviceId)}`,
+    { label },
+    timeoutMs,
+    'PATCH',
+  )
+}
+
+export async function revokeRememberedDeviceAdmin(
+  deviceId: string,
+  timeoutMs: number = 2000,
+): Promise<void> {
+  const normalizedDeviceId = deviceId.trim()
+  if (!normalizedDeviceId) {
+    throw new GatewayHttpError('设备 ID 不能为空', 'REMEMBERED_DEVICE_ID_REQUIRED', 400)
+  }
+  await callGatewayHttp(
+    `/v1/admin/remembered-devices/${encodeURIComponent(normalizedDeviceId)}`,
+    {},
+    timeoutMs,
+    'DELETE',
+  )
+}
+
+export async function revokeAllRememberedDevicesAdmin(
+  timeoutMs: number = 2000,
+): Promise<void> {
+  await callGatewayHttp('/v1/admin/remembered-devices/revoke-all', {}, timeoutMs, 'POST')
+}
+
 export async function loadGlobalShortcutConfig(timeoutMs: number = 2000): Promise<GlobalShortcutConfigSnapshot> {
   const payload = (await fetchJsonWithTimeout(
-    GLOBAL_SHORTCUTS_CONFIG_ENDPOINT,
+    buildLocalGatewayUrl(GLOBAL_SHORTCUTS_CONFIG_ENDPOINT_PATH),
     timeoutMs
   )) as GatewayGlobalShortcutConfigResponse
 

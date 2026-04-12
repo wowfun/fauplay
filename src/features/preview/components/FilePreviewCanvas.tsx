@@ -20,7 +20,10 @@ interface FilePreviewCanvasProps {
   fileLastModifiedMs: number | null
   isLoading: boolean
   error: string | null
+  enableImageSwipe?: boolean
   onOpenFullscreen?: () => void
+  onNavigatePrev?: () => void
+  onNavigateNext?: () => void
   autoPlayVideo?: boolean
   videoPlaybackRate: number
   isFullscreen?: boolean
@@ -66,7 +69,10 @@ export function FilePreviewCanvas({
   fileLastModifiedMs,
   isLoading,
   error,
+  enableImageSwipe = false,
   onOpenFullscreen,
+  onNavigatePrev,
+  onNavigateNext,
   autoPlayVideo = false,
   videoPlaybackRate,
   isFullscreen = false,
@@ -155,9 +161,12 @@ export function FilePreviewCanvas({
         fileLastModifiedMs={fileLastModifiedMs}
         isLoading={isLoading}
         error={error}
+        enableImageSwipe={enableImageSwipe}
         emptyTextClass={emptyTextClass}
         errorTextClass={errorTextClass}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
+        onNavigatePrev={onNavigatePrev}
+        onNavigateNext={onNavigateNext}
         autoPlayVideo={autoPlayVideo}
         videoPlaybackRate={videoPlaybackRate}
         onVideoEnded={onVideoEnded}

@@ -13,6 +13,14 @@ interface FileLightboxModalProps {
   rootId?: string | null
   previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
+  titleMode?: 'actionable' | 'static'
+  showUnavailableReasons?: boolean
+  showNavigationButtons?: boolean
+  enableImageSwipe?: boolean
+  canNavigatePrev?: boolean
+  canNavigateNext?: boolean
+  onNavigatePrev?: () => void
+  onNavigateNext?: () => void
   autoPlayOnOpen?: boolean
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
@@ -51,6 +59,14 @@ export function FileLightboxModal({
   rootId,
   previewActionTools,
   onClose,
+  titleMode = 'actionable',
+  showUnavailableReasons = true,
+  showNavigationButtons = false,
+  enableImageSwipe = false,
+  canNavigatePrev = false,
+  canNavigateNext = false,
+  onNavigatePrev,
+  onNavigateNext,
   autoPlayOnOpen = false,
   autoPlayEnabled,
   autoPlayIntervalSec,
@@ -93,6 +109,14 @@ export function FileLightboxModal({
         rootId={rootId}
         previewActionTools={previewActionTools}
         onClose={onClose}
+        titleMode={titleMode}
+        showUnavailableReasons={showUnavailableReasons}
+        showNavigationButtons={showNavigationButtons}
+        enableImageSwipe={enableImageSwipe}
+        canNavigatePrev={canNavigatePrev}
+        canNavigateNext={canNavigateNext}
+        onNavigatePrev={onNavigatePrev}
+        onNavigateNext={onNavigateNext}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
         videoSeekStepSec={videoSeekStepSec}

@@ -7,7 +7,11 @@ import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversa
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
-import { ExplorerWorkspaceLayout } from '@/layouts/ExplorerWorkspaceLayout'
+import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWorkspaceShell'
+import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
+import { useInputMode } from '@/features/workspace/hooks/useInputMode'
+import { useViewportMode } from '@/features/workspace/hooks/useViewportMode'
+import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useWorkspacePresentationProfile'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import {
   buildDuplicateSelectionForGroup,
@@ -42,7 +46,18 @@ import {
   preloadAnnotationDisplaySnapshot,
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
+import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
+import {
+  areWorkspaceBrowserHistorySnapshotsEqual,
+  buildWorkspaceBrowserHistoryUrl,
+  createWorkspaceBrowserHistoryState,
+  normalizeWorkspaceBrowserHistorySnapshot,
+  parseWorkspaceBrowserHistorySnapshotFromState,
+  parseWorkspaceBrowserHistorySnapshotFromUrl,
+  serializeWorkspaceBrowserHistorySnapshot,
+  type WorkspaceBrowserHistorySnapshot,
+} from '@/features/workspace/lib/browserHistory'
 import {
   ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AddressPathHistoryEntry,
@@ -60,8 +75,8 @@ const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
 const DEFAULT_PANE_WIDTH_RATIO = 0.375
 const PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY = 'fauplay:preview-pane-width-ratio'
-const ADDRESS_PATH_HISTORY_STORAGE_KEY = 'fauplay:address-path-history'
-const WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY = 'fauplay:workspace-filter-state:roots:v1'
+const ADDRESS_PATH_HISTORY_STORAGE_KEY_PREFIX = 'fauplay:address-path-history'
+const WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY_PREFIX = 'fauplay:workspace-filter-state:roots:v1'
 const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
 const TRASH_ROUTE_PATH = '@trash'
@@ -78,8 +93,11 @@ type WorkspaceActiveSurface =
   | { kind: 'projection'; tabId: string }
 
 interface WorkspaceShellProps {
-  rootHandle: FileSystemDirectoryHandle
+  accessProvider: 'local-browser' | 'remote-readonly'
+  rootHandle: FileSystemDirectoryHandle | null
   rootId: string
+  rootName: string
+  storageNamespace: string
   favoriteFolders: FavoriteFolderEntry[]
   isCurrentPathFavorited: boolean
   files: FileItem[]
@@ -101,6 +119,8 @@ interface WorkspaceShellProps {
   listChildDirectories: (targetPath: string) => Promise<string[]>
   setFlattenView: (flattenView: boolean) => Promise<void>
   filterFiles: (files: FileItem[], filter: FilterState) => FileItem[]
+  onSwitchWorkspace?: () => void
+  onForgetRemoteDevice?: () => void
 }
 
 type DeleteUndoNoticeTone = 'default' | 'error'
@@ -362,11 +382,22 @@ function serializePersistedWorkspaceFilterState(filter: FilterState): PersistedW
   }
 }
 
-function savePersistedWorkspaceFilterStateByRoot(states: PersistedWorkspaceFilterStateByRoot): void {
+function toAddressHistoryStorageKey(storageNamespace: string): string {
+  return `${ADDRESS_PATH_HISTORY_STORAGE_KEY_PREFIX}:${storageNamespace}`
+}
+
+function toWorkspaceFilterStorageKey(storageNamespace: string): string {
+  return `${WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY_PREFIX}:${storageNamespace}`
+}
+
+function savePersistedWorkspaceFilterStateByRoot(
+  storageNamespace: string,
+  states: PersistedWorkspaceFilterStateByRoot
+): void {
   if (typeof window === 'undefined') return
 
   try {
-    window.localStorage.setItem(WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY, JSON.stringify(states))
+    window.localStorage.setItem(toWorkspaceFilterStorageKey(storageNamespace), JSON.stringify(states))
   } catch {
     // Ignore storage write failures and keep runtime state available.
   }
@@ -417,15 +448,15 @@ function parsePersistedWorkspaceFilterStateByRoot(raw: string | null): {
   }
 }
 
-function loadPersistedWorkspaceFilterStateByRoot(): PersistedWorkspaceFilterStateByRoot {
+function loadPersistedWorkspaceFilterStateByRoot(storageNamespace: string): PersistedWorkspaceFilterStateByRoot {
   if (typeof window === 'undefined') return {}
 
   try {
     const parsed = parsePersistedWorkspaceFilterStateByRoot(
-      window.localStorage.getItem(WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY)
+      window.localStorage.getItem(toWorkspaceFilterStorageKey(storageNamespace))
     )
     if (parsed.shouldRewrite) {
-      savePersistedWorkspaceFilterStateByRoot(parsed.states)
+      savePersistedWorkspaceFilterStateByRoot(storageNamespace, parsed.states)
     }
     return parsed.states
   } catch {
@@ -770,18 +801,18 @@ function parseAddressPathHistory(raw: string | null): ParsedAddressPathHistory {
   }
 }
 
-function loadAddressPathHistory(): AddressPathHistoryEntry[] {
+function loadAddressPathHistory(storageNamespace: string): AddressPathHistoryEntry[] {
   if (typeof window === 'undefined') return []
-  const parsed = parseAddressPathHistory(window.localStorage.getItem(ADDRESS_PATH_HISTORY_STORAGE_KEY))
+  const parsed = parseAddressPathHistory(window.localStorage.getItem(toAddressHistoryStorageKey(storageNamespace)))
   if (parsed.shouldRewrite) {
-    saveAddressPathHistory(parsed.entries)
+    saveAddressPathHistory(storageNamespace, parsed.entries)
   }
   return parsed.entries
 }
 
-function saveAddressPathHistory(history: AddressPathHistoryEntry[]): void {
+function saveAddressPathHistory(storageNamespace: string, history: AddressPathHistoryEntry[]): void {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(ADDRESS_PATH_HISTORY_STORAGE_KEY, JSON.stringify(history))
+  window.localStorage.setItem(toAddressHistoryStorageKey(storageNamespace), JSON.stringify(history))
 }
 
 function upsertAddressPathHistory(
@@ -819,8 +850,11 @@ function preloadPreviewModules(): void {
 }
 
 export function WorkspaceShell({
+  accessProvider,
   rootHandle,
   rootId,
+  rootName,
+  storageNamespace,
   favoriteFolders,
   isCurrentPathFavorited,
   files,
@@ -839,15 +873,24 @@ export function WorkspaceShell({
   listChildDirectories,
   setFlattenView,
   filterFiles,
+  onSwitchWorkspace,
+  onForgetRemoteDevice,
 }: WorkspaceShellProps) {
   const keyboardShortcuts = useKeyboardShortcuts()
+  const viewportMode = useViewportMode()
+  const inputMode = useInputMode()
+  const presentationProfile = useWorkspacePresentationProfile({
+    accessProvider,
+    viewportMode,
+    inputMode,
+  })
   const annotationDisplayStoreVersion = useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
     getAnnotationDisplayStoreVersion
   )
   const persistedWorkspaceFilterStateByRootRef = useRef<PersistedWorkspaceFilterStateByRoot>(
-    loadPersistedWorkspaceFilterStateByRoot()
+    loadPersistedWorkspaceFilterStateByRoot(storageNamespace)
   )
   const hydratedFilterRootIdRef = useRef<string | null>(rootId)
   const skipNextFilterPersistRef = useRef(true)
@@ -858,7 +901,9 @@ export function WorkspaceShell({
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
   const [paneWidthRatio, setPaneWidthRatio] = useState(initialPreviewPaneWidthStateRef.current.ratio)
   const [directorySelectedPaths, setDirectorySelectedPaths] = useState<string[]>([])
-  const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => loadAddressPathHistory())
+  const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => (
+    loadAddressPathHistory(storageNamespace)
+  ))
   const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
   const [projectionTabs, setProjectionTabs] = useState<ResultProjection[]>([])
   const [activeProjectionTabId, setActiveProjectionTabId] = useState<string | null>(null)
@@ -874,6 +919,7 @@ export function WorkspaceShell({
   const [isUndoingDelete, setIsUndoingDelete] = useState(false)
   const [deleteUndoNotice, setDeleteUndoNotice] = useState<DeleteUndoNoticeState | null>(null)
   const [pendingDeleteUndoRestore, setPendingDeleteUndoRestore] = useState<PendingDeleteUndoRestoreState | null>(null)
+  const [pendingBrowserHistoryRestore, setPendingBrowserHistoryRestore] = useState<WorkspaceBrowserHistorySnapshot | null>(null)
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
@@ -884,6 +930,9 @@ export function WorkspaceShell({
   const lastNormalResultPanelHeightRef = useRef(DEFAULT_RESULT_PANEL_HEIGHT_PX)
   const lastProjectionTabIdRef = useRef<string | null>(null)
   const deletedProjectionAbsolutePathSetRef = useRef<Set<string>>(new Set())
+  const previousShellKindRef = useRef(presentationProfile.shellKind)
+  const hasInitializedBrowserHistoryRef = useRef(false)
+  const lastBrowserHistoryKeyRef = useRef<string | null>(null)
   const handleFilterChange = useCallback((nextFilter: FilterState) => {
     setDirectorySelectedPaths([])
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
@@ -929,8 +978,8 @@ export function WorkspaceShell({
       ...persistedWorkspaceFilterStateByRootRef.current,
       [rootId]: nextState,
     }
-    savePersistedWorkspaceFilterStateByRoot(persistedWorkspaceFilterStateByRootRef.current)
-  }, [filter, rootId])
+    savePersistedWorkspaceFilterStateByRoot(storageNamespace, persistedWorkspaceFilterStateByRootRef.current)
+  }, [filter, rootId, storageNamespace])
 
   const filteredFiles = useMemo(() => {
     // Depend on external store version so file filtering reflects latest gateway tag snapshot.
@@ -1027,6 +1076,8 @@ export function WorkspaceShell({
     toggleFaceBboxVisible,
     navigateMediaFromPane,
     navigateMediaFromModal,
+    canNavigateMediaFromPane,
+    canNavigateMediaFromModal,
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
@@ -1055,6 +1106,22 @@ export function WorkspaceShell({
     && activePreviewFileForTagShortcuts.sourceType !== 'global_recycle'
     && pluginTools.some((tool) => tool.name === 'fs.softDelete' && tool.scopes.includes('file'))
   ), [activePreviewFileForTagShortcuts, pluginTools])
+  const canNavigatePreviewBackward = previewFile ? canNavigateMediaFromModal : canNavigateMediaFromPane
+  const canNavigatePreviewForward = previewFile ? canNavigateMediaFromModal : canNavigateMediaFromPane
+  const handleNavigatePreviewBackward = useCallback(() => {
+    if (previewFile) {
+      navigateMediaFromModal('prev')
+      return
+    }
+    navigateMediaFromPane('prev')
+  }, [navigateMediaFromModal, navigateMediaFromPane, previewFile])
+  const handleNavigatePreviewForward = useCallback(() => {
+    if (previewFile) {
+      navigateMediaFromModal('next')
+      return
+    }
+    navigateMediaFromPane('next')
+  }, [navigateMediaFromModal, navigateMediaFromPane, previewFile])
   const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
     rootId,
     relativePath: activePreviewFileForTagShortcuts?.kind === 'file' ? activePreviewFileForTagShortcuts.path : null,
@@ -1075,6 +1142,23 @@ export function WorkspaceShell({
     canManagePreviewTags: canRunPreviewTagShortcuts,
     canSoftDeletePreview: canSoftDeleteActivePreview,
   })
+  const browserHistorySnapshot = useMemo<WorkspaceBrowserHistorySnapshot>(() => (
+    normalizeWorkspaceBrowserHistorySnapshot({
+      accessProvider,
+      rootId,
+      path: currentPath,
+      previewPath: previewFile?.kind === 'file'
+        ? previewFile.path
+        : (showPreviewPane && selectedFile?.kind === 'file' ? selectedFile.path : null),
+      previewSurface: previewFile?.kind === 'file'
+        ? 'lightbox'
+        : (showPreviewPane && selectedFile?.kind === 'file' ? 'pane' : null),
+    })!
+  ), [accessProvider, currentPath, previewFile, rootId, selectedFile, showPreviewPane])
+  const browserHistoryKey = useMemo(
+    () => serializeWorkspaceBrowserHistorySnapshot(browserHistorySnapshot),
+    [browserHistorySnapshot],
+  )
 
   const getActivePreviewVideoElement = useCallback((): HTMLVideoElement | null => {
     const preferredSurface = previewFile ? 'lightbox' : 'panel'
@@ -1128,6 +1212,251 @@ export function WorkspaceShell({
     return true
   }, [getActivePreviewVideoElement, videoSeekStepSec])
 
+  const openFileInPrimaryTarget = useCallback((file: FileItem) => {
+    if (file.kind !== 'file') return
+
+    preloadPreviewModules()
+    if (presentationProfile.primaryFileOpenTarget === 'fullscreen') {
+      closePreviewPane()
+      openFileInModal(file)
+      return
+    }
+
+    showFileInPane(file)
+  }, [
+    closePreviewPane,
+    openFileInModal,
+    presentationProfile.primaryFileOpenTarget,
+    showFileInPane,
+  ])
+
+  const openFileInSecondaryTarget = useCallback((file: FileItem) => {
+    if (file.kind !== 'file') return
+
+    preloadPreviewModules()
+    if (presentationProfile.supportsPersistentPreviewPane && presentationProfile.primaryFileOpenTarget === 'pane') {
+      openFileInModal(file)
+      return
+    }
+
+    closePreviewPane()
+    openFileInModal(file)
+  }, [
+    closePreviewPane,
+    openFileInModal,
+    presentationProfile.primaryFileOpenTarget,
+    presentationProfile.supportsPersistentPreviewPane,
+  ])
+
+  const openFileInPaneOrFullscreenFallback = useCallback((file: FileItem) => {
+    if (file.kind !== 'file') return
+
+    preloadPreviewModules()
+    if (presentationProfile.supportsPersistentPreviewPane) {
+      showFileInPane(file)
+      return
+    }
+
+    closePreviewPane()
+    openFileInModal(file)
+  }, [
+    closePreviewPane,
+    openFileInModal,
+    presentationProfile.supportsPersistentPreviewPane,
+    showFileInPane,
+  ])
+
+  const normalizeBrowserHistoryRestoreSnapshot = useCallback((snapshot: WorkspaceBrowserHistorySnapshot) => {
+    if (
+      snapshot.previewPath
+      && snapshot.previewSurface === 'pane'
+      && !presentationProfile.supportsPersistentPreviewPane
+    ) {
+      return {
+        ...snapshot,
+        previewSurface: 'lightbox' as const,
+      }
+    }
+    return snapshot
+  }, [presentationProfile.supportsPersistentPreviewPane])
+
+  const commitBrowserHistorySnapshot = useCallback((snapshot: WorkspaceBrowserHistorySnapshot) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.history.replaceState(
+      createWorkspaceBrowserHistoryState(snapshot),
+      '',
+      buildWorkspaceBrowserHistoryUrl(window.location.href, snapshot),
+    )
+    lastBrowserHistoryKeyRef.current = serializeWorkspaceBrowserHistorySnapshot(snapshot)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    if (hasInitializedBrowserHistoryRef.current) {
+      return
+    }
+
+    hasInitializedBrowserHistoryRef.current = true
+    const initialSnapshot = parseWorkspaceBrowserHistorySnapshotFromState(window.history.state)
+      ?? parseWorkspaceBrowserHistorySnapshotFromUrl(window.location.search)
+
+    if (
+      initialSnapshot
+      && initialSnapshot.accessProvider === accessProvider
+      && initialSnapshot.rootId === rootId
+    ) {
+      const normalizedInitialSnapshot = normalizeBrowserHistoryRestoreSnapshot(initialSnapshot)
+      if (!areWorkspaceBrowserHistorySnapshotsEqual(normalizedInitialSnapshot, browserHistorySnapshot)) {
+        setPendingBrowserHistoryRestore(normalizedInitialSnapshot)
+        return
+      }
+    }
+
+    commitBrowserHistorySnapshot(browserHistorySnapshot)
+  }, [
+    accessProvider,
+    browserHistorySnapshot,
+    commitBrowserHistorySnapshot,
+    normalizeBrowserHistoryRestoreSnapshot,
+    rootId,
+  ])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const requestedSnapshot = parseWorkspaceBrowserHistorySnapshotFromState(event.state)
+        ?? parseWorkspaceBrowserHistorySnapshotFromUrl(window.location.search)
+      if (
+        !requestedSnapshot
+        || requestedSnapshot.accessProvider !== accessProvider
+        || requestedSnapshot.rootId !== rootId
+      ) {
+        return
+      }
+
+      setPendingBrowserHistoryRestore(normalizeBrowserHistoryRestoreSnapshot(requestedSnapshot))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [accessProvider, normalizeBrowserHistoryRestoreSnapshot, rootId])
+
+  useEffect(() => {
+    if (!pendingBrowserHistoryRestore) {
+      return
+    }
+    if (areWorkspaceBrowserHistorySnapshotsEqual(browserHistorySnapshot, pendingBrowserHistoryRestore)) {
+      commitBrowserHistorySnapshot(browserHistorySnapshot)
+      setPendingBrowserHistoryRestore(null)
+      return
+    }
+
+    let cancelled = false
+    const applyRestore = async () => {
+      if (normalizeRelativePath(currentPath) !== pendingBrowserHistoryRestore.path) {
+        const navigated = await navigateToPath(pendingBrowserHistoryRestore.path)
+        if (!cancelled && !navigated) {
+          commitBrowserHistorySnapshot(browserHistorySnapshot)
+          setPendingBrowserHistoryRestore(null)
+        }
+        return
+      }
+
+      if (!pendingBrowserHistoryRestore.previewPath) {
+        closePreviewModal()
+        closePreviewPane()
+        return
+      }
+
+      const targetPreviewFile = filteredFiles.find(
+        (item): item is FileItem => item.kind === 'file' && item.path === pendingBrowserHistoryRestore.previewPath,
+      ) ?? null
+
+      if (!targetPreviewFile) {
+        closePreviewModal()
+        closePreviewPane()
+        if (!cancelled) {
+          commitBrowserHistorySnapshot(browserHistorySnapshot)
+          setPendingBrowserHistoryRestore(null)
+        }
+        return
+      }
+
+      if (pendingBrowserHistoryRestore.previewSurface === 'lightbox') {
+        closePreviewPane()
+        openFileInModal(targetPreviewFile)
+        return
+      }
+
+      closePreviewModal()
+      openFileInPaneOrFullscreenFallback(targetPreviewFile)
+    }
+
+    void applyRestore()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    browserHistorySnapshot,
+    closePreviewModal,
+    closePreviewPane,
+    commitBrowserHistorySnapshot,
+    currentPath,
+    filteredFiles,
+    navigateToPath,
+    openFileInModal,
+    openFileInPaneOrFullscreenFallback,
+    pendingBrowserHistoryRestore,
+  ])
+
+  useEffect(() => {
+    if (!hasInitializedBrowserHistoryRef.current || pendingBrowserHistoryRestore) {
+      return
+    }
+    if (browserHistoryKey === lastBrowserHistoryKeyRef.current) {
+      return
+    }
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.history.pushState(
+      createWorkspaceBrowserHistoryState(browserHistorySnapshot),
+      '',
+      buildWorkspaceBrowserHistoryUrl(window.location.href, browserHistorySnapshot),
+    )
+    lastBrowserHistoryKeyRef.current = browserHistoryKey
+  }, [browserHistoryKey, browserHistorySnapshot, pendingBrowserHistoryRestore])
+
+  useEffect(() => {
+    const previousShellKind = previousShellKindRef.current
+    previousShellKindRef.current = presentationProfile.shellKind
+
+    if (previousShellKind === presentationProfile.shellKind) return
+    if (presentationProfile.supportsPersistentPreviewPane) return
+    if (!showPreviewPane || selectedFile?.kind !== 'file') return
+
+    closePreviewPane()
+    if (!previewFile) {
+      openFileInModal(selectedFile)
+    }
+  }, [
+    closePreviewPane,
+    openFileInModal,
+    presentationProfile.shellKind,
+    presentationProfile.supportsPersistentPreviewPane,
+    previewFile,
+    selectedFile,
+    showPreviewPane,
+  ])
+
   const handleDirectoryClick = useCallback((dirName: string) => {
     setActiveSurface({ kind: 'directory' })
     void navigateToDirectory(dirName)
@@ -1139,18 +1468,17 @@ export function WorkspaceShell({
       void navigateToDirectory(file.name)
     } else {
       setDirectoryFocusedPath(file.path)
-      preloadPreviewModules()
-      showFileInPane(file)
+      openFileInPrimaryTarget(file)
     }
-  }, [navigateToDirectory, showFileInPane])
+  }, [navigateToDirectory, openFileInPrimaryTarget])
 
   const handleDirectoryFileDoubleClick = useCallback((file: FileItem) => {
     if (file.kind === 'file') {
       setActiveSurface({ kind: 'directory' })
       setDirectoryFocusedPath(file.path)
-      openFileInModal(file)
+      openFileInSecondaryTarget(file)
     }
-  }, [openFileInModal])
+  }, [openFileInSecondaryTarget])
 
   const handleProjectionFileClick = useCallback((file: FileItem) => {
     const tabId = activeProjectionTab?.id
@@ -1169,9 +1497,8 @@ export function WorkspaceShell({
           [tabId]: file.path,
         }
     ))
-    preloadPreviewModules()
-    showFileInPane(file)
-  }, [activeProjectionTab?.id, showFileInPane])
+    openFileInPrimaryTarget(file)
+  }, [activeProjectionTab?.id, openFileInPrimaryTarget])
 
   const handleProjectionFileDoubleClick = useCallback((file: FileItem) => {
     const tabId = activeProjectionTab?.id
@@ -1187,8 +1514,8 @@ export function WorkspaceShell({
           [tabId]: file.path,
         }
     ))
-    openFileInModal(file)
-  }, [activeProjectionTab?.id, openFileInModal])
+    openFileInSecondaryTarget(file)
+  }, [activeProjectionTab?.id, openFileInSecondaryTarget])
 
   const handleNavigateToPath = useCallback((path: string) => {
     return navigateToPath(path, { resetFlattenView: true })
@@ -1202,9 +1529,10 @@ export function WorkspaceShell({
     await preloadAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: rootName,
       force: true,
     })
-  }, [rootHandle, rootId])
+  }, [rootHandle, rootId, rootName])
 
   const handleOpenAnnotationFilterPanel = useCallback(() => {
     void refreshAnnotationSnapshot()
@@ -1236,7 +1564,7 @@ export function WorkspaceShell({
     return {
       historyEntry: {
         rootId,
-        rootName: rootHandle.name || '根目录',
+        rootName: rootName || '根目录',
         path: currentPath,
         visitedAt: Date.now(),
       },
@@ -1276,7 +1604,7 @@ export function WorkspaceShell({
     projectionTabs,
     resultPanelDisplayMode,
     resultPanelHeightPx,
-    rootHandle.name,
+    rootName,
     rootId,
   ])
 
@@ -1455,7 +1783,7 @@ export function WorkspaceShell({
 
   const restoreDeleteUndoPreviewSnapshot = useCallback((previewSnapshot: DeleteUndoPreviewSnapshot) => {
     if (previewSnapshot.showPreviewPane && previewSnapshot.selectedFile?.kind === 'file') {
-      showFileInPane(previewSnapshot.selectedFile)
+      openFileInPaneOrFullscreenFallback(previewSnapshot.selectedFile)
     } else {
       closePreviewPane()
     }
@@ -1465,7 +1793,12 @@ export function WorkspaceShell({
     } else {
       closePreviewModal()
     }
-  }, [closePreviewModal, closePreviewPane, openFileInModal, showFileInPane])
+  }, [
+    closePreviewModal,
+    closePreviewPane,
+    openFileInModal,
+    openFileInPaneOrFullscreenFallback,
+  ])
 
   const applyDeleteUndoSnapshot = useCallback(async (snapshot: DeleteUndoSnapshot) => {
     setFilter(cloneFilterState(snapshot.filter))
@@ -2030,7 +2363,11 @@ export function WorkspaceShell({
         } else {
           const nextFile = resolveNextFileAfterDelete(deletedRelativePath)
           if (nextFile) {
-            showFileInPane(nextFile)
+            if (previewFile) {
+              openFileInModal(nextFile)
+            } else {
+              openFileInPrimaryTarget(nextFile)
+            }
           }
         }
       }
@@ -2053,7 +2390,8 @@ export function WorkspaceShell({
     refreshAnnotationSnapshot,
     resolveNextFileAfterDelete,
     selectedFile,
-    showFileInPane,
+    openFileInPrimaryTarget,
+    openFileInModal,
   ])
 
   const handleUndoDelete = useCallback(async () => {
@@ -2179,8 +2517,14 @@ export function WorkspaceShell({
   }, [hasTrashEntries, navigateToPath])
 
   const canOpenPeople = useMemo(() => (
-    pluginTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('workspace'))
-  ), [pluginTools])
+    accessProvider === 'remote-readonly'
+      ? true
+      : pluginTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('workspace'))
+  ), [accessProvider, pluginTools])
+  const remoteConfigRootId = useMemo(
+    () => (accessProvider === 'remote-readonly' ? fromRemoteUiRootId(rootId) : null),
+    [accessProvider, rootId],
+  )
 
   const handleOpenPeople = useCallback(() => {
     if (!canOpenPeople) return
@@ -2213,6 +2557,7 @@ export function WorkspaceShell({
         name: getRelativeFileName(sourcePath),
         path: sourcePath,
         kind: 'file' as const,
+        remoteRootId: remoteConfigRootId ?? undefined,
         sourceRootPath: getBoundRootPath(rootId) ?? undefined,
         sourceRelativePath: sourcePath,
       }
@@ -2220,8 +2565,7 @@ export function WorkspaceShell({
 
     setActiveSurface({ kind: 'directory' })
     setDirectoryFocusedPath(sourcePath)
-    preloadPreviewModules()
-    showFileInPane(sourceFile)
+    openFileInPrimaryTarget(sourceFile)
 
     const parentPath = getRelativeParentPath(sourcePath)
     if (normalizeRelativePath(currentPath) === parentPath) {
@@ -2233,7 +2577,16 @@ export function WorkspaceShell({
     if (!navigated) return false
     alignPreviewToPath(sourcePath)
     return true
-  }, [activeSurfaceFiles, alignPreviewToPath, currentPath, filteredFiles, navigateToPath, rootId, showFileInPane])
+  }, [
+    activeSurfaceFiles,
+    alignPreviewToPath,
+    currentPath,
+    filteredFiles,
+    navigateToPath,
+    openFileInPrimaryTarget,
+    remoteConfigRootId,
+    rootId,
+  ])
 
   const handleProjectFaceSources = useCallback((selectedFaces: FaceRecord[]): boolean => {
     const boundRootPath = getBoundRootPath(rootId)
@@ -2252,6 +2605,7 @@ export function WorkspaceShell({
         const nextFile: FileItem = existingFile
           ? {
             ...existingFile,
+            remoteRootId: existingFile.remoteRootId ?? remoteConfigRootId ?? undefined,
             sourceRootPath: existingFile.sourceRootPath ?? boundRootPath ?? undefined,
             sourceRelativePath: existingFile.sourceRelativePath ?? relativePath,
             absolutePath: existingFile.absolutePath ?? absolutePath,
@@ -2263,6 +2617,7 @@ export function WorkspaceShell({
             absolutePath,
             displayPath: relativePath,
             previewKind: getFilePreviewKind(relativePath),
+            remoteRootId: remoteConfigRootId ?? undefined,
             sourceType: 'face_source',
             sourceRootPath: boundRootPath ?? undefined,
             sourceRelativePath: relativePath,
@@ -2308,20 +2663,20 @@ export function WorkspaceShell({
     handleActivateProjection(projection)
     setShowPeoplePanel(false)
     return true
-  }, [activeSurfaceFiles, filteredFiles, handleActivateProjection, rootId])
+  }, [activeSurfaceFiles, filteredFiles, handleActivateProjection, remoteConfigRootId, rootId])
 
   useEffect(() => {
     if (!rootId) return
     setRecentPathHistory((previous) => upsertAddressPathHistory(previous, {
       rootId,
-      rootName: rootHandle.name || '根目录',
+      rootName: rootName || '根目录',
       path: currentPath,
     }))
-  }, [currentPath, rootId, rootHandle.name])
+  }, [currentPath, rootId, rootName])
 
   useEffect(() => {
-    saveAddressPathHistory(recentPathHistory)
-  }, [recentPathHistory])
+    saveAddressPathHistory(storageNamespace, recentPathHistory)
+  }, [recentPathHistory, storageNamespace])
 
   useEffect(() => {
     if (!deleteUndoNotice) {
@@ -2447,6 +2802,11 @@ export function WorkspaceShell({
   }, [activeSurface, alignPreviewToPath, directoryFocusedPath, projectionTabs])
 
   useEffect(() => {
+    if (accessProvider === 'remote-readonly' || !rootHandle) {
+      setHasTrashEntries(false)
+      return
+    }
+
     let disposed = false
 
     const refreshTrashAvailability = async () => {
@@ -2478,14 +2838,15 @@ export function WorkspaceShell({
     return () => {
       disposed = true
     }
-  }, [files, rootHandle])
+  }, [accessProvider, files, rootHandle])
 
   useEffect(() => {
     void preloadAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: rootName,
     })
-  }, [rootHandle, rootId])
+  }, [rootHandle, rootId, rootName])
 
   useEffect(() => {
     if (!isAnnotationFilterGateResolved || showAnnotationFilterControls) return
@@ -2505,6 +2866,11 @@ export function WorkspaceShell({
     let disposed = false
     let refreshTimerId: number | null = null
     let loadSnapshot: (() => Promise<GatewayCapabilitiesSnapshot>) | null = null
+
+    if (accessProvider === 'remote-readonly') {
+      setPluginTools([])
+      return () => {}
+    }
 
     const refreshCapabilities = async () => {
       try {
@@ -2533,7 +2899,7 @@ export function WorkspaceShell({
         window.clearInterval(refreshTimerId)
       }
     }
-  }, [])
+  }, [accessProvider])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -2759,119 +3125,140 @@ export function WorkspaceShell({
     document.addEventListener('mouseup', handleMouseUp)
   }, [paneWidthRatio])
 
-  return (
-    <ExplorerWorkspaceLayout
-      filter={filter}
-      onFilterChange={handleFilterChange}
-      rootName={rootHandle.name}
-      currentPath={currentPath}
-      rootId={rootId}
-      onNavigateToPath={handleNavigateToPath}
-      onNavigateHistoryEntry={handleNavigateHistoryEntry}
-      onListChildDirectories={listChildDirectories}
-      recentPathHistory={recentPathHistory}
-      onNavigateUp={navigateUp}
-      isFlattenView={isFlattenView}
-      onToggleFlattenView={() => {
+  const commonShellProps = {
+      filter,
+      onFilterChange: handleFilterChange,
+      accessProvider,
+      rootName,
+      currentPath,
+      rootId,
+      onSwitchWorkspace,
+      onForgetRemoteDevice,
+      onNavigateToPath: handleNavigateToPath,
+      onNavigateHistoryEntry: handleNavigateHistoryEntry,
+      onListChildDirectories: listChildDirectories,
+      recentPathHistory,
+      onNavigateUp: navigateUp,
+      isFlattenView,
+      onToggleFlattenView: () => {
         void setFlattenView(!isFlattenView)
-      }}
-      totalCount={totalCount}
-      imageCount={imageCount}
-      videoCount={videoCount}
-      showAnnotationFilterControls={showAnnotationFilterControls}
-      annotationFilterTagOptions={annotationFilterTagOptions}
-      onOpenAnnotationFilterPanel={handleOpenAnnotationFilterPanel}
-      thumbnailSizePreset={thumbnailSizePreset}
-      onThumbnailSizePresetChange={setThumbnailSizePreset}
-      canOpenTrash={hasTrashEntries}
-      onOpenTrash={handleOpenTrash}
-      canOpenPeople={canOpenPeople}
-      onOpenPeople={handleOpenPeople}
-      shortcutHelpEntries={shortcutHelpEntries}
-      onOpenPeopleForPerson={handleOpenPeopleForPerson}
-      showPeoplePanel={showPeoplePanel}
-      peoplePanelPreferredPersonId={peoplePanelPreferredPersonId}
-      onClosePeoplePanel={handleClosePeople}
-      onOpenFaceSource={handleOpenFaceSource}
-      onProjectFaceSources={handleProjectFaceSources}
-      error={error}
-      isLoading={isLoading}
-      favoriteFolders={favoriteFolders}
-      isCurrentPathFavorited={isCurrentPathFavorited}
-      onOpenFavoriteFolder={openFavoriteFolder}
-      onRemoveFavoriteFolder={removeFavoriteFolder}
-      onToggleCurrentPathFavorite={toggleCurrentFolderFavorite}
-      directoryFiles={filteredFiles}
-      activeSurfaceFiles={activeSurfaceFiles}
-      rootHandle={rootHandle}
-      directoryFileGridRef={directoryFileGridRef}
-      projectionFileGridRef={projectionFileGridRef}
-      onDirectoryFileClick={handleDirectoryFileClick}
-      onDirectoryFileDoubleClick={handleDirectoryFileDoubleClick}
-      onProjectionFileClick={handleProjectionFileClick}
-      onProjectionFileDoubleClick={handleProjectionFileDoubleClick}
-      onDirectoryClick={handleDirectoryClick}
-      onDirectoryGridSelectionChange={setDirectorySelectedPaths}
-      directoryGridSelectedPaths={directorySelectedPaths}
-      projectionTabs={projectionTabs}
-      activeProjectionTabId={activeProjectionTab?.id ?? null}
-      onProjectionGridSelectionChange={handleProjectionGridSelectionChange}
-      projectionGridSelectedPaths={projectionGridSelectedPaths}
-      activeDuplicateSelectionRule={activeDuplicateSelectionRule}
-      onApplyDuplicateSelectionRule={handleApplyDuplicateSelectionRule}
-      onClearDuplicateSelection={handleClearDuplicateSelection}
-      onReapplyDuplicateGroup={handleReapplyDuplicateGroup}
-      onClearDuplicateGroup={handleClearDuplicateGroup}
-      isDirectorySurfaceActive={isDirectorySurfaceActive}
-      isResultPanelOpen={isResultPanelOpen}
-      resultPanelDisplayMode={resultPanelDisplayMode}
-      resultPanelHeightPx={resultPanelHeightPx}
-      onOpenResultPanel={handleOpenResultPanel}
-      onCloseResultPanel={handleCloseResultPanel}
-      onToggleResultPanelMaximized={handleToggleResultPanelMaximized}
-      onResultPanelResizeStart={handleResultPanelResizeStart}
-      onActivateProjectionTab={handleActivateProjectionTab}
-      onCloseProjectionTab={handleCloseProjectionTab}
-      onWorkspaceMutationCommitted={handleWorkspaceMutationCommitted}
-      onPreviewMutationCommitted={handlePreviewMutationCommitted}
-      showPreviewPane={showPreviewPane}
-      hasOpenPreview={hasOpenPreview}
-      contentRef={contentRef}
-      paneWidthRatio={paneWidthRatio}
-      onPreviewPaneResizeStart={handlePreviewPaneResizeStart}
-      selectedFile={selectedFile}
-      gridSelectedCount={selectedGridItems.length}
-      selectedGridMetaFile={selectedGridMetaFile}
-      pluginTools={pluginTools}
-      onClosePane={closePreviewPane}
-      onOpenFullscreenFromPane={openFullscreenFromPane}
-      autoPlayEnabled={autoPlayEnabled}
-      autoPlayIntervalSec={autoPlayIntervalSec}
-      videoSeekStepSec={videoSeekStepSec}
-      videoPlaybackRate={videoPlaybackRate}
-      faceBboxVisible={faceBboxVisible}
-      onToggleAutoPlay={toggleAutoPlay}
-      playbackOrder={playbackOrder}
-      onTogglePlaybackOrder={togglePlaybackOrder}
-      onToggleFaceBboxVisible={toggleFaceBboxVisible}
-      onAutoPlayIntervalChange={setAutoPlayInterval}
-      onVideoSeekStepChange={setVideoSeekStep}
-      onVideoPlaybackRateChange={setVideoPlaybackRate}
-      onVideoEnded={handleAutoPlayVideoEnded}
-      onVideoPlaybackError={handleAutoPlayVideoPlaybackError}
-      previewFile={previewFile}
-      previewAutoPlayOnOpen={previewAutoPlayOnOpen}
-      onClosePreview={closePreviewModal}
-      activeProjection={activeSurfaceProjection}
-      onActivateProjection={handleActivateProjection}
-      onDismissProjectionTool={handleDismissProjectionTool}
-      deleteUndoNoticeMessage={deleteUndoNotice?.message ?? null}
-      deleteUndoNoticeTone={deleteUndoNotice?.tone ?? 'default'}
-      canUndoDelete={deleteUndoBatches.length > 0}
-      isUndoingDelete={isUndoingDelete}
-      onUndoDelete={() => {
+      },
+      totalCount,
+      imageCount,
+      videoCount,
+      showAnnotationFilterControls,
+      annotationFilterTagOptions,
+      onOpenAnnotationFilterPanel: handleOpenAnnotationFilterPanel,
+      thumbnailSizePreset,
+      onThumbnailSizePresetChange: setThumbnailSizePreset,
+      canOpenTrash: hasTrashEntries,
+      onOpenTrash: handleOpenTrash,
+      canOpenPeople,
+      onOpenPeople: handleOpenPeople,
+      shortcutHelpEntries,
+      onOpenPeopleForPerson: handleOpenPeopleForPerson,
+      showPeoplePanel,
+      peoplePanelPreferredPersonId,
+      onClosePeoplePanel: handleClosePeople,
+      onOpenFaceSource: handleOpenFaceSource,
+      onProjectFaceSources: handleProjectFaceSources,
+      error,
+      isLoading,
+      favoriteFolders,
+      isCurrentPathFavorited,
+      onOpenFavoriteFolder: openFavoriteFolder,
+      onRemoveFavoriteFolder: removeFavoriteFolder,
+      onToggleCurrentPathFavorite: toggleCurrentFolderFavorite,
+      directoryFiles: filteredFiles,
+      activeSurfaceFiles,
+      rootHandle,
+      directoryFileGridRef,
+      projectionFileGridRef,
+      onDirectoryFileClick: handleDirectoryFileClick,
+      onDirectoryFileDoubleClick: handleDirectoryFileDoubleClick,
+      onProjectionFileClick: handleProjectionFileClick,
+      onProjectionFileDoubleClick: handleProjectionFileDoubleClick,
+      onDirectoryClick: handleDirectoryClick,
+      onDirectoryGridSelectionChange: setDirectorySelectedPaths,
+      directoryGridSelectedPaths: directorySelectedPaths,
+      projectionTabs,
+      activeProjectionTabId: activeProjectionTab?.id ?? null,
+      onProjectionGridSelectionChange: handleProjectionGridSelectionChange,
+      projectionGridSelectedPaths,
+      activeDuplicateSelectionRule,
+      onApplyDuplicateSelectionRule: handleApplyDuplicateSelectionRule,
+      onClearDuplicateSelection: handleClearDuplicateSelection,
+      onReapplyDuplicateGroup: handleReapplyDuplicateGroup,
+      onClearDuplicateGroup: handleClearDuplicateGroup,
+      isDirectorySurfaceActive,
+      isResultPanelOpen,
+      resultPanelDisplayMode,
+      resultPanelHeightPx,
+      onOpenResultPanel: handleOpenResultPanel,
+      onCloseResultPanel: handleCloseResultPanel,
+      onToggleResultPanelMaximized: handleToggleResultPanelMaximized,
+      onResultPanelResizeStart: handleResultPanelResizeStart,
+      onActivateProjectionTab: handleActivateProjectionTab,
+      onCloseProjectionTab: handleCloseProjectionTab,
+      onWorkspaceMutationCommitted: handleWorkspaceMutationCommitted,
+      onPreviewMutationCommitted: handlePreviewMutationCommitted,
+      showPreviewPane,
+      hasOpenPreview,
+      contentRef,
+      paneWidthRatio,
+      onPreviewPaneResizeStart: handlePreviewPaneResizeStart,
+      selectedFile,
+      gridSelectedCount: selectedGridItems.length,
+      selectedGridMetaFile,
+      pluginTools,
+      onClosePane: closePreviewPane,
+      onOpenFullscreenFromPane: openFullscreenFromPane,
+      autoPlayEnabled,
+      autoPlayIntervalSec,
+      videoSeekStepSec,
+      videoPlaybackRate,
+      faceBboxVisible,
+      onToggleAutoPlay: toggleAutoPlay,
+      playbackOrder,
+      onTogglePlaybackOrder: togglePlaybackOrder,
+      onToggleFaceBboxVisible: toggleFaceBboxVisible,
+      onAutoPlayIntervalChange: setAutoPlayInterval,
+      onVideoSeekStepChange: setVideoSeekStep,
+      onVideoPlaybackRateChange: setVideoPlaybackRate,
+      onVideoEnded: handleAutoPlayVideoEnded,
+      onVideoPlaybackError: handleAutoPlayVideoPlaybackError,
+      previewFile,
+      previewAutoPlayOnOpen,
+      onClosePreview: closePreviewModal,
+      activeProjection: activeSurfaceProjection,
+      onActivateProjection: handleActivateProjection,
+      onDismissProjectionTool: handleDismissProjectionTool,
+      deleteUndoNoticeMessage: deleteUndoNotice?.message ?? null,
+      deleteUndoNoticeTone: deleteUndoNotice?.tone ?? 'default',
+      canUndoDelete: deleteUndoBatches.length > 0,
+      isUndoingDelete,
+      onUndoDelete: () => {
         void handleUndoDelete()
-      }}
+      },
+  }
+
+  if (presentationProfile.shellKind === 'compact') {
+    return (
+      <CompactWorkspaceShell
+        {...commonShellProps}
+        presentationProfile={presentationProfile}
+        canNavigatePreviewBackward={canNavigatePreviewBackward}
+        canNavigatePreviewForward={canNavigatePreviewForward}
+        onNavigatePreviewBackward={handleNavigatePreviewBackward}
+        onNavigatePreviewForward={handleNavigatePreviewForward}
+      />
+    )
+  }
+
+  return (
+    <WideWorkspaceShell
+      {...commonShellProps}
+      presentationProfile={presentationProfile}
     />
   )
 }

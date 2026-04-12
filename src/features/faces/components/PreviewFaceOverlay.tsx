@@ -104,6 +104,7 @@ export function PreviewFaceOverlay({
             <button
               key={item.faceId}
               type="button"
+              data-preview-face-overlay-interactive="true"
               className={`pointer-events-auto absolute rounded border-2 ${boxClassName}`}
               style={{
                 left: `${rect.left}%`,

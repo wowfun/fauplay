@@ -1,4 +1,5 @@
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
+const ROOT_PATH_MAP_UPDATED_EVENT = 'fauplay:root-path-map-updated'
 
 interface RootPathMapV3 {
   version: 3
@@ -96,6 +97,9 @@ function getRootPathMap(): RootPathMapV3 {
 
 function setRootPathMap(pathMap: RootPathMapV3): void {
   localStorage.setItem(ROOT_PATH_STORAGE_KEY, JSON.stringify(pathMap))
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(ROOT_PATH_MAP_UPDATED_EVENT))
+  }
 }
 
 function askRootPath(rootLabel: string, existing: string): string | null {
@@ -147,4 +151,8 @@ export function getBoundRootPath(rootId: string): string | null {
   if (!rootId) return null
   const pathMap = getRootPathMap()
   return pathMap.byRootId[rootId] || null
+}
+
+export function getRootPathMapUpdatedEventName(): string {
+  return ROOT_PATH_MAP_UPDATED_EVENT
 }

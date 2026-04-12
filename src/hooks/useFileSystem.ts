@@ -16,7 +16,7 @@ import {
   removeCachedRoot,
   upsertCachedRootHandle,
 } from '@/lib/rootHandleCache'
-import { ensureRootPath, getBoundRootPath } from '@/lib/reveal'
+import { ensureRootPath, getBoundRootPath, getRootPathMapUpdatedEventName } from '@/lib/reveal'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -207,6 +207,7 @@ export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [rootId, setRootId] = useState<string | null>(null)
   const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
+  const [isCachedRootsReady, setIsCachedRootsReady] = useState(false)
   const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => loadFavoriteFolders())
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState<string>('')
@@ -220,10 +221,29 @@ export function useFileSystem() {
       ...entry,
       boundRootPath: getBoundRootPath(entry.rootId) ?? undefined,
     })))
+    setIsCachedRootsReady(true)
   }, [])
 
   useEffect(() => {
     void refreshCachedRoots()
+  }, [refreshCachedRoots])
+
+  useEffect(() => {
+    const eventName = getRootPathMapUpdatedEventName()
+    const handleRootPathMapUpdated = () => {
+      void refreshCachedRoots()
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== 'fauplay:host-root-path-map') return
+      void refreshCachedRoots()
+    }
+
+    window.addEventListener(eventName, handleRootPathMapUpdated)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener(eventName, handleRootPathMapUpdated)
+      window.removeEventListener('storage', handleStorage)
+    }
   }, [refreshCachedRoots])
 
   useEffect(() => {
@@ -690,6 +710,7 @@ export function useFileSystem() {
     rootHandle,
     rootId,
     cachedRoots,
+    isCachedRootsReady,
     favoriteFolders,
     isCurrentPathFavorited,
     files,

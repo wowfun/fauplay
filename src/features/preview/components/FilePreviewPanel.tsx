@@ -3,7 +3,11 @@ import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
-import { buildGatewayFileContentUrl, loadGatewayTextPreview, type GatewayToolDescriptor } from '@/lib/gateway'
+import {
+  buildGatewayFileContentUrlForItem,
+  loadGatewayTextPreviewForItem,
+  type GatewayToolDescriptor,
+} from '@/lib/gateway'
 import { getBoundRootPath } from '@/lib/reveal'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -35,6 +39,14 @@ interface FilePreviewPanelProps {
   previewActionTools: GatewayToolDescriptor[]
   onClose: () => void
   onOpenFullscreen?: () => void
+  titleMode?: 'actionable' | 'static'
+  showUnavailableReasons?: boolean
+  showNavigationButtons?: boolean
+  enableImageSwipe?: boolean
+  canNavigatePrev?: boolean
+  canNavigateNext?: boolean
+  onNavigatePrev?: () => void
+  onNavigateNext?: () => void
   autoPlayEnabled: boolean
   autoPlayIntervalSec: number
   videoSeekStepSec: number
@@ -180,6 +192,14 @@ export function FilePreviewPanel({
   previewActionTools,
   onClose,
   onOpenFullscreen,
+  titleMode = 'actionable',
+  showUnavailableReasons = true,
+  showNavigationButtons = false,
+  enableImageSwipe = false,
+  canNavigatePrev = false,
+  canNavigateNext = false,
+  onNavigatePrev,
+  onNavigateNext,
   autoPlayEnabled,
   autoPlayIntervalSec,
   videoSeekStepSec,
@@ -230,28 +250,37 @@ export function FilePreviewPanel({
     () => (rootId ? getBoundRootPath(rootId) : null),
     [rootId]
   )
+  const hasRemoteFileLocator = Boolean(file && typeof file.remoteRootId === 'string' && file.remoteRootId.trim())
   const canAccessThroughCurrentRoot = useMemo(() => {
-    if (!file || file.kind !== 'file' || !rootHandle) return false
+    if (!file || file.kind !== 'file') return false
+    if (hasRemoteFileLocator) return true
+    if (!rootHandle) return false
     if (!file.path || isAbsolutePathLike(file.path)) return false
     if (file.sourceRootPath && file.sourceRootPath !== boundRootPath) {
       return false
     }
     return true
-  }, [boundRootPath, file, rootHandle])
-  const shouldUseAbsolutePathFetch = useMemo(() => (
-    Boolean(file && file.kind === 'file' && file.absolutePath && !canAccessThroughCurrentRoot)
-  ), [canAccessThroughCurrentRoot, file])
+  }, [boundRootPath, file, hasRemoteFileLocator, rootHandle])
+  const shouldUseGatewayFileAccess = useMemo(() => (
+    Boolean(
+      file
+      && file.kind === 'file'
+      && (
+        hasRemoteFileLocator
+        || (file.absolutePath && !canAccessThroughCurrentRoot)
+      )
+    )
+  ), [canAccessThroughCurrentRoot, file, hasRemoteFileLocator])
   const canUseAnnotationContext = useMemo(() => (
     Boolean(
       file
       && file.kind === 'file'
       && rootId
-      && rootHandle
       && canAccessThroughCurrentRoot
       && file.sourceType !== 'root_trash'
       && file.sourceType !== 'global_recycle'
     )
-  ), [canAccessThroughCurrentRoot, file, rootHandle, rootId])
+  ), [canAccessThroughCurrentRoot, file, rootId])
   useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
@@ -310,20 +339,26 @@ export function FilePreviewPanel({
     return null
   }, [canUseAnnotationContext, file, hasLocalDataTool, rootHandle, rootId])
   const canManageAnnotationTags = annotationTagManageUnavailableReason === null
+  const displayRenameUnavailableReason = showUnavailableReasons ? renameUnavailableReason : null
+  const displayAnnotationTagManageUnavailableReason = showUnavailableReasons
+    ? annotationTagManageUnavailableReason
+    : null
 
   useEffect(() => {
-    if (!rootId || !rootHandle || !canUseAnnotationContext) return
+    if (!rootId || !canUseAnnotationContext) return
     void preloadAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: null,
     })
   }, [canUseAnnotationContext, rootHandle, rootId])
 
   useEffect(() => {
-    if (!rootId || !rootHandle || !file || file.kind !== 'file' || !canUseAnnotationContext) return
+    if (!rootId || !file || file.kind !== 'file' || !canUseAnnotationContext) return
     void preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: null,
       relativePath: file.path,
       force: true,
     })
@@ -349,10 +384,11 @@ export function FilePreviewPanel({
       .join('|')
   }, [currentFileQueue, file])
   const refreshCurrentPreviewFileTags = useCallback(async () => {
-    if (!file || file.kind !== 'file' || !rootId || !rootHandle || !canUseAnnotationContext) return
+    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) return
     await preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: null,
       relativePath: file.path,
       force: true,
     })
@@ -528,14 +564,14 @@ export function FilePreviewPanel({
       )
 
       try {
-        if (shouldUseAbsolutePathFetch && file.absolutePath) {
+        if (shouldUseGatewayFileAccess) {
           setFileMimeType(file.mimeType || getMimeType(file.name))
           setFileSizeBytes(file.size ?? null)
           setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
 
           if (previewKind === 'text') {
             replacePreviewUrl(null)
-            const textResult = await loadGatewayTextPreview(file.absolutePath, TEXT_PREVIEW_MAX_BYTES)
+            const textResult = await loadGatewayTextPreviewForItem(file, TEXT_PREVIEW_MAX_BYTES)
             if (cancelled) return
             setTextPreview({
               status: textResult.status,
@@ -549,7 +585,7 @@ export function FilePreviewPanel({
 
           setTextPreview(INITIAL_TEXT_PREVIEW)
           if (previewKind === 'image' || previewKind === 'video') {
-            replacePreviewUrl(buildGatewayFileContentUrl(file.absolutePath))
+            replacePreviewUrl(buildGatewayFileContentUrlForItem(file))
             return
           }
           replacePreviewUrl(null)
@@ -646,7 +682,7 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true
     }
-  }, [file, replacePreviewUrl, rootHandle, shouldUseAbsolutePathFetch])
+  }, [file, replacePreviewUrl, rootHandle, shouldUseGatewayFileAccess])
 
   useEffect(() => {
     return () => {
@@ -771,10 +807,10 @@ export function FilePreviewPanel({
       return
     }
 
-    if (!rootHandle || file.kind !== 'file') return
     void preloadFileAnnotationDisplaySnapshot({
       rootId,
       rootHandle,
+      rootLabel: null,
       relativePath: file.path,
       force: true,
     })
@@ -831,7 +867,10 @@ export function FilePreviewPanel({
       <PreviewHeaderBar
         fileName={file.name}
         isFullscreen={isFullscreen}
+        titleMode={titleMode}
+        showUnavailableReasons={showUnavailableReasons}
         showPlaybackControls={isMediaPreview}
+        showNavigationButtons={showNavigationButtons && isMediaPreview}
         isVideoPreview={isVideoPreview}
         autoPlayEnabled={autoPlayEnabled}
         autoPlayIntervalSec={autoPlayIntervalSec}
@@ -846,14 +885,18 @@ export function FilePreviewPanel({
         onAutoPlayIntervalChange={onAutoPlayIntervalChange}
         onVideoSeekStepChange={onVideoSeekStepChange}
         onVideoPlaybackRateChange={onVideoPlaybackRateChange}
+        canNavigatePrev={canNavigatePrev}
+        canNavigateNext={canNavigateNext}
+        onNavigatePrev={onNavigatePrev}
+        onNavigateNext={onNavigateNext}
         onClose={onClose}
         canRenameFileName={canRenameFileName}
         renameInFlight={isRenaming}
-        renameUnavailableReason={renameUnavailableReason}
+        renameUnavailableReason={displayRenameUnavailableReason}
         onSubmitFileNameRename={handleSubmitFileNameRename}
         annotationTags={annotationTags}
         canManageAnnotationTags={canManageAnnotationTags}
-        annotationTagManageUnavailableReason={annotationTagManageUnavailableReason}
+        annotationTagManageUnavailableReason={displayAnnotationTagManageUnavailableReason}
         annotationTagOptions={annotationTagOptions}
         annotationTagOptionsStatus={annotationTagOptionsState.status}
         annotationTagOptionsError={annotationTagOptionsState.error}
@@ -886,7 +929,10 @@ export function FilePreviewPanel({
         fileLastModifiedMs={fileLastModifiedMs}
         isLoading={isLoading}
         error={error}
+        enableImageSwipe={enableImageSwipe && isFullscreen && previewKind === 'image'}
         onOpenFullscreen={isFullscreen ? undefined : onOpenFullscreen}
+        onNavigatePrev={onNavigatePrev}
+        onNavigateNext={onNavigateNext}
         autoPlayVideo={isMediaPreview && (autoPlayEnabled || forceAutoPlayOnOpen)}
         videoPlaybackRate={videoPlaybackRate}
         isFullscreen={isFullscreen}

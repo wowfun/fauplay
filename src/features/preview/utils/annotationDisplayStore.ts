@@ -1,5 +1,6 @@
 import type { AnnotationFilterTagOption } from '@/types'
-import { callGatewayHttp } from '@/lib/gateway'
+import { getActiveRemoteWorkspace, isRemoteReadonlyProviderActive } from '@/lib/accessState'
+import { callGatewayHttp, callRemoteGatewayHttp } from '@/lib/gateway'
 import { ensureRootPath } from '@/lib/reveal'
 
 const TAG_QUERY_PAGE_SIZE = 1000
@@ -48,12 +49,14 @@ interface GlobalAnnotationTagOptionsSnapshot {
 interface PreloadAnnotationDisplaySnapshotParams {
   rootId?: string | null
   rootHandle: FileSystemDirectoryHandle | null
+  rootLabel?: string | null
   force?: boolean
 }
 
 interface PreloadFileAnnotationDisplaySnapshotParams {
   rootId?: string | null
   rootHandle: FileSystemDirectoryHandle | null
+  rootLabel?: string | null
   relativePath: string
   force?: boolean
 }
@@ -442,20 +445,61 @@ function readTagOptionsFromResult(rawResult: unknown): GatewayTagOptionRecord[] 
   return []
 }
 
-async function loadAllTagViews(rootPath: string): Promise<GatewayFileTagView[]> {
+interface ResolvedAnnotationTarget {
+  remoteRootId: string | null
+  rootPath: string | null
+}
+
+function resolveAnnotationTarget(
+  rootId: string,
+  rootHandle: FileSystemDirectoryHandle | null,
+  rootLabel?: string | null
+): ResolvedAnnotationTarget {
+  if (isRemoteReadonlyProviderActive()) {
+    const remoteWorkspace = getActiveRemoteWorkspace()
+    if (remoteWorkspace?.uiRootId === rootId) {
+      return {
+        remoteRootId: remoteWorkspace.configRootId,
+        rootPath: null,
+      }
+    }
+  }
+
+  const resolvedRootPath = ensureRootPath({
+    rootLabel: rootLabel || rootHandle?.name || 'current-folder',
+    rootId,
+    promptIfMissing: false,
+  })
+
+  return {
+    remoteRootId: null,
+    rootPath: resolvedRootPath,
+  }
+}
+
+async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<GatewayFileTagView[]> {
   let page = 1
   let total = Number.POSITIVE_INFINITY
   const items: GatewayFileTagView[] = []
 
   while (items.length < total) {
-    const result = await callGatewayHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
-      rootPath,
-      page,
-      size: TAG_QUERY_PAGE_SIZE,
-      includeTagKeys: [],
-      excludeTagKeys: [],
-      includeMatchMode: 'or',
-    })
+    const result = target.remoteRootId
+      ? await callRemoteGatewayHttp<GatewayTagQueryResult>('/v1/remote/tags/query', {
+        rootId: target.remoteRootId,
+        page,
+        size: TAG_QUERY_PAGE_SIZE,
+        includeTagKeys: [],
+        excludeTagKeys: [],
+        includeMatchMode: 'or',
+      })
+      : await callGatewayHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
+        rootPath: target.rootPath,
+        page,
+        size: TAG_QUERY_PAGE_SIZE,
+        includeTagKeys: [],
+        excludeTagKeys: [],
+        includeMatchMode: 'or',
+      })
 
     const batch = readTagViewsFromResult(result)
     items.push(...batch)
@@ -603,9 +647,10 @@ function createPathRollback(snapshot: RootAnnotationDisplaySnapshot, relativePat
 export async function preloadAnnotationDisplaySnapshot({
   rootId,
   rootHandle,
+  rootLabel,
   force = false,
 }: PreloadAnnotationDisplaySnapshotParams): Promise<void> {
-  if (!rootId || !rootHandle) return
+  if (!rootId) return
 
   const snapshot = ensureRootSnapshot(rootId)
   if (!force && snapshot.status === 'ready') return
@@ -618,14 +663,10 @@ export async function preloadAnnotationDisplaySnapshot({
   emitStoreUpdate()
 
   const loadTask = (async () => {
-    const rootPath = ensureRootPath({
-      rootLabel: rootHandle.name || 'current-folder',
-      rootId,
-      promptIfMissing: false,
-    })
+    const targetDescriptor = resolveAnnotationTarget(rootId, rootHandle, rootLabel)
     const target = ensureRootSnapshot(rootId)
 
-    if (!rootPath) {
+    if (!targetDescriptor.rootPath && !targetDescriptor.remoteRootId) {
       resetSnapshot(target)
       target.hasSidecarDir = false
       target.hasSidecarFile = false
@@ -635,7 +676,7 @@ export async function preloadAnnotationDisplaySnapshot({
     }
 
     try {
-      const views = await loadAllTagViews(rootPath)
+      const views = await loadAllTagViews(targetDescriptor)
       const derived = buildPathSnapshotFromTagViews(views)
       target.rawTagsByPath = derived.rawTagsByPath
       target.byPathUpdatedAt = derived.byPathUpdatedAt
@@ -665,10 +706,11 @@ export async function preloadAnnotationDisplaySnapshot({
 export async function preloadFileAnnotationDisplaySnapshot({
   rootId,
   rootHandle,
+  rootLabel,
   relativePath,
   force = false,
 }: PreloadFileAnnotationDisplaySnapshotParams): Promise<void> {
-  if (!rootId || !rootHandle) return
+  if (!rootId) return
 
   const normalizedPath = normalizeRelativePath(relativePath)
   if (!normalizedPath) return
@@ -678,12 +720,8 @@ export async function preloadFileAnnotationDisplaySnapshot({
     return
   }
 
-  const rootPath = ensureRootPath({
-    rootLabel: rootHandle.name || 'current-folder',
-    rootId,
-    promptIfMissing: false,
-  })
-  if (!rootPath) return
+  const targetDescriptor = resolveAnnotationTarget(rootId, rootHandle, rootLabel)
+  if (!targetDescriptor.rootPath && !targetDescriptor.remoteRootId) return
 
   const loadKey = createFileLoadKey(rootId, normalizedPath)
   if (!force) {
@@ -695,10 +733,15 @@ export async function preloadFileAnnotationDisplaySnapshot({
   }
 
   const loadTask = (async () => {
-    const result = await callGatewayHttp<GatewayFileTagResult>('/v1/data/tags/file', {
-      rootPath,
-      relativePath: normalizedPath,
-    })
+    const result = targetDescriptor.remoteRootId
+      ? await callRemoteGatewayHttp<GatewayFileTagResult>('/v1/remote/tags/file', {
+        rootId: targetDescriptor.remoteRootId,
+        relativePath: normalizedPath,
+      })
+      : await callGatewayHttp<GatewayFileTagResult>('/v1/data/tags/file', {
+        rootPath: targetDescriptor.rootPath,
+        relativePath: normalizedPath,
+      })
     const fileView = isRecord(result.file) ? result.file : null
     const tags = fileView && Array.isArray(fileView.tags) ? fileView.tags : []
     const state = buildPathStateFromTags(tags)
@@ -740,7 +783,11 @@ export async function preloadGlobalAnnotationTagOptions({
 
   const loadTask = (async () => {
     try {
-      const result = await callGatewayHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})
+      const result = isRemoteReadonlyProviderActive() && getActiveRemoteWorkspace()
+        ? await callRemoteGatewayHttp<GatewayTagOptionsResult>('/v1/remote/tags/options', {
+          rootId: getActiveRemoteWorkspace()!.configRootId,
+        })
+        : await callGatewayHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})
       const rawOptions = readTagOptionsFromResult(result)
       globalTagOptionsSnapshot.options = buildGlobalTagOptions(rawOptions)
       globalTagOptionsSnapshot.error = null

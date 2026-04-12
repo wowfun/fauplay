@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+} from 'react'
 import { File, Image as ImageIcon, Loader2, Video as VideoIcon } from 'lucide-react'
 import type { FileItem, FilePreviewKind, TextPreviewPayload } from '@/types'
 import { PreviewFaceOverlay } from '@/features/faces/components/PreviewFaceOverlay'
@@ -17,9 +24,12 @@ interface FilePreviewViewportProps {
   fileLastModifiedMs: number | null
   isLoading: boolean
   error: string | null
+  enableImageSwipe?: boolean
   emptyTextClass: string
   errorTextClass: string
   onOpenFullscreen?: () => void
+  onNavigatePrev?: () => void
+  onNavigateNext?: () => void
   autoPlayVideo: boolean
   videoPlaybackRate: number
   onVideoEnded?: () => void
@@ -73,9 +83,12 @@ export function FilePreviewViewport({
   fileLastModifiedMs,
   isLoading,
   error,
+  enableImageSwipe = false,
   emptyTextClass,
   errorTextClass,
   onOpenFullscreen,
+  onNavigatePrev,
+  onNavigateNext,
   autoPlayVideo,
   videoPlaybackRate,
   onVideoEnded,
@@ -91,6 +104,8 @@ export function FilePreviewViewport({
   const isVideo = previewKind === 'video'
   const isText = previewKind === 'text'
   const videoRef = useRef<HTMLVideoElement>(null)
+  const swipeStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const touchSwipeStartRef = useRef<{ x: number; y: number } | null>(null)
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number | null; height: number | null }>({
     width: null,
     height: null,
@@ -111,6 +126,80 @@ export function FilePreviewViewport({
     videoElement.playbackRate = videoPlaybackRate
   }, [isVideo, videoPlaybackRate, previewUrl])
 
+  const clearSwipeStart = () => {
+    swipeStartRef.current = null
+  }
+
+  const clearTouchSwipeStart = () => {
+    touchSwipeStartRef.current = null
+  }
+
+  const applySwipeNavigation = (deltaX: number, deltaY: number) => {
+    if (Math.abs(deltaX) < 64) return
+    if (Math.abs(deltaX) < Math.abs(deltaY) * 1.5) return
+
+    if (deltaX < 0) {
+      onNavigateNext?.()
+      return
+    }
+
+    onNavigatePrev?.()
+  }
+
+  const handleImagePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!enableImageSwipe || !onNavigatePrev || !onNavigateNext) return
+    if (event.pointerType === 'mouse') return
+    if (event.target instanceof HTMLElement && event.target.closest('[data-preview-face-overlay-interactive="true"]')) {
+      return
+    }
+
+    swipeStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    }
+  }
+
+  const handleImagePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const swipeStart = swipeStartRef.current
+    clearSwipeStart()
+    if (!swipeStart || swipeStart.pointerId !== event.pointerId) return
+
+    applySwipeNavigation(
+      event.clientX - swipeStart.x,
+      event.clientY - swipeStart.y,
+    )
+  }
+
+  const handleImageTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    if (!enableImageSwipe || !onNavigatePrev || !onNavigateNext) return
+    if (event.target instanceof HTMLElement && event.target.closest('[data-preview-face-overlay-interactive="true"]')) {
+      return
+    }
+
+    const touch = event.touches[0]
+    if (!touch) return
+
+    touchSwipeStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+    }
+  }
+
+  const handleImageTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const swipeStart = touchSwipeStartRef.current
+    clearTouchSwipeStart()
+    if (!swipeStart) return
+
+    const touch = event.changedTouches[0]
+    if (!touch) return
+
+    applySwipeNavigation(
+      touch.clientX - swipeStart.x,
+      touch.clientY - swipeStart.y,
+    )
+  }
+
   return (
     <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden" data-preview-subzone="FilePreviewViewport">
       {isLoading ? (
@@ -125,12 +214,22 @@ export function FilePreviewViewport({
           </div>
         </div>
       ) : previewUrl && isImage ? (
-        <div className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
+        <div
+          className="w-full h-full p-4 min-h-0 min-w-0 flex items-center justify-center overflow-hidden"
+          style={{ touchAction: enableImageSwipe ? 'pan-y' : undefined }}
+          onPointerDown={handleImagePointerDown}
+          onPointerUp={handleImagePointerEnd}
+          onPointerCancel={clearSwipeStart}
+          onTouchStart={handleImageTouchStart}
+          onTouchEnd={handleImageTouchEnd}
+          onTouchCancel={clearTouchSwipeStart}
+        >
           <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
             <img
               src={previewUrl}
               alt={file.name}
               className={PREVIEW_MEDIA_CONTENT_CLASS}
+              draggable={false}
               onLoad={(event) => {
                 const target = event.currentTarget
                 setImageNaturalSize({

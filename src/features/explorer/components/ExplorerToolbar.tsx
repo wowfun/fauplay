@@ -9,6 +9,7 @@ import {
   Files,
   Image,
   Info,
+  LogOut,
   Rows3,
   Search,
   Star,
@@ -47,11 +48,15 @@ interface SegmentDropdownState {
 }
 
 interface ExplorerToolbarProps {
+  accessProvider: 'local-browser' | 'remote-readonly'
+  toolbarKind?: 'wide' | 'compact'
   filter: FilterState
   onFilterChange: (filter: FilterState) => void
   rootId?: string | null
   rootName: string
   currentPath: string
+  onSwitchWorkspace?: () => void
+  onForgetRemoteDevice?: () => void
   onNavigateToPath: (path: string) => Promise<boolean>
   onNavigateHistoryEntry: (entry: AddressPathHistoryEntry) => Promise<boolean>
   onListChildDirectories: (path: string) => Promise<string[]>
@@ -254,11 +259,15 @@ type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
 const MAX_ADDRESS_SUGGESTION_ITEMS = 12
 
 export function ExplorerToolbar({
+  accessProvider,
+  toolbarKind = 'wide',
   filter,
   onFilterChange,
   rootId,
   rootName,
   currentPath,
+  onSwitchWorkspace,
+  onForgetRemoteDevice,
   onNavigateToPath,
   onNavigateHistoryEntry,
   onListChildDirectories,
@@ -999,7 +1008,10 @@ export function ExplorerToolbar({
   )
 
   return (
-    <div className="flex items-center gap-4 p-4 border-b border-border">
+    <div className={toolbarKind === 'compact'
+      ? 'flex flex-wrap items-start gap-2 border-b border-border p-3'
+      : 'flex items-center gap-4 border-b border-border p-4'}
+    >
       {currentPath && (
         <Button
           onClick={onNavigateUp}
@@ -1012,7 +1024,10 @@ export function ExplorerToolbar({
         </Button>
       )}
 
-      <div ref={addressBarRef} className="relative min-w-0 flex-1">
+      <div
+        ref={addressBarRef}
+        className={toolbarKind === 'compact' ? 'relative min-w-0 basis-full' : 'relative min-w-0 flex-1'}
+      >
         <div className="flex min-h-9 min-w-0 items-center gap-1 rounded-md border border-border bg-background px-2">
           {addressBarMode === 'edit' ? (
             <form className="flex w-full min-w-0 items-center gap-2" onSubmit={handleSubmitEdit}>
@@ -1280,7 +1295,31 @@ export function ExplorerToolbar({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className={toolbarKind === 'compact' ? 'flex flex-wrap items-center gap-2' : 'flex items-center gap-2'}>
+        {onSwitchWorkspace && (
+          <Button
+            onClick={onSwitchWorkspace}
+            variant="outline"
+            size="md"
+            className="flex items-center gap-1"
+            title={accessProvider === 'remote-readonly' ? '断开远程并返回启动页，不忘记此设备' : '切换工作区'}
+          >
+            <LogOut className="w-4 h-4" />
+            <span>{accessProvider === 'remote-readonly' ? '断开/切换' : '切换'}</span>
+          </Button>
+        )}
+        {accessProvider === 'remote-readonly' && onForgetRemoteDevice && (
+          <Button
+            onClick={onForgetRemoteDevice}
+            variant="ghost"
+            size="md"
+            className="flex items-center gap-1"
+            title="撤销当前浏览器上的持久登录态"
+          >
+            <X className="w-4 h-4" />
+            <span>忘记设备</span>
+          </Button>
+        )}
         <Button
           onClick={onOpenPeople}
           variant="ghost"
@@ -1322,19 +1361,19 @@ export function ExplorerToolbar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative">
+      <div className={toolbarKind === 'compact' ? 'flex w-full items-center gap-2' : 'flex items-center gap-2'}>
+        <div className={toolbarKind === 'compact' ? 'relative min-w-0 flex-1' : 'relative'}>
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="搜索文件..."
             value={filter.search}
             onChange={(e) => onFilterChange({ ...filter, search: e.target.value })}
-            className="h-8 pl-9 pr-4"
+            className={toolbarKind === 'compact' ? 'h-8 w-full pl-9 pr-4' : 'h-8 pl-9 pr-4'}
           />
         </div>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className={toolbarKind === 'compact' ? 'flex w-full flex-wrap items-center gap-1' : 'flex items-center gap-1'}>
         <Button
           onClick={() => onFilterChange({ ...filter, type: 'all' })}
           variant={filter.type === 'all' ? 'default' : 'ghost'}
@@ -1374,7 +1413,12 @@ export function ExplorerToolbar({
       </div>
 
       {showAnnotationFilterControls && (
-        <div ref={annotationFilterRef} className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
+        <div
+          ref={annotationFilterRef}
+          className={toolbarKind === 'compact'
+            ? 'flex w-full flex-wrap items-center gap-1 rounded-md border border-border bg-background p-1'
+            : 'flex items-center gap-1 rounded-md border border-border bg-background p-1'}
+        >
           <Select
             value={filter.annotationIncludeMatchMode}
             onChange={(event) => {
@@ -1471,7 +1515,7 @@ export function ExplorerToolbar({
       <Select
         value={filter.sortBy}
         onChange={(e) => onFilterChange({ ...filter, sortBy: e.target.value as FilterState['sortBy'] })}
-        className="h-8"
+        className={toolbarKind === 'compact' ? 'h-8 min-w-[92px]' : 'h-8'}
       >
         <option value="name">名称</option>
         <option value="date">日期</option>
@@ -1482,7 +1526,7 @@ export function ExplorerToolbar({
       <Select
         value={thumbnailSizePreset}
         onChange={(e) => onThumbnailSizePresetChange(e.target.value as ThumbnailSizePreset)}
-        className="h-8"
+        className={toolbarKind === 'compact' ? 'h-8 min-w-[120px]' : 'h-8'}
         title="缩略图尺寸"
       >
         <option value="auto">缩略图：默认</option>
