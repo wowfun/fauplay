@@ -8,6 +8,11 @@
 
 - 信息架构（Information Architecture, IA）
 - 功能分区（Functional Zones）
+- 视口模式（Viewport Mode）
+- 输入模式（Input Mode）
+- 访问模式（Access Mode）
+- 完全访问（`full-access`）
+- 远程只读（`remote-readonly`）
 - 工作区插件（Workspace Plugin）
 - 预览插件（Preview Plugin）
 - 插件运行实例（Plugin Runtime Instance）
@@ -29,15 +34,52 @@
 1. 页面分区与职责边界。
 2. 文件浏览与预览交互行为。
 3. 预览面板与全屏预览关系约束。
-4. 键盘快捷键规则与输入焦点保护。
-5. 网关能力的 UI 降级行为。
-6. 可访问性与反馈可见性最低要求。
+4. 键盘、触控与兼具输入下的交互入口规则。
+5. 完全访问与远程只读两种访问模式的 UI / 交互差异。
+6. 网关能力的 UI 降级行为。
+7. 可访问性与反馈可见性最低要求。
+8. 启动页在本机 `full-access` 场景下的本机管理入口与全屏管理面板表现约束。
 
 范围外：
 
 1. MCP 报文结构与错误码定义（归属 `002-contracts`）。
 2. 网关与插件运行机制（归属 `001-architecture`）。
-3. 品牌视觉系统与像素级视觉稿。
+3. 远程鉴权、会话与发布安全边界（归属 `001-architecture`、`002-contracts`、`005-local-data-contracts`、`006-security` 与相关连接文档）。
+4. 品牌视觉系统与像素级视觉稿。
+
+## 三轴组织契约 (Three-axis Organization Contract)
+
+1. `003-ui-ux` 的正式组织方式固定为三条主轴：
+   - 视口模式：[`viewport-modes.md`](./viewport-modes.md)
+   - 输入模式：[`input-modes.md`](./input-modes.md)
+   - 访问模式：[`access-modes.md`](./access-modes.md)
+2. 默认基线组合固定为：`wide + keyboard + full-access`。
+3. 非基线组合视为对该基线的表现层或能力层增量约束，不得隐式创建新的业务域。
+4. 三轴可组合，但各轴文档只定义本轴差异：
+   - 视口模式只定义布局、主视图与面板表现态差异
+   - 输入模式只定义交互入口、守卫与冲突规避差异
+   - 访问模式只定义 UI 能力可见性、命名与模式回退差异
+5. 具体功能细则以下挂文档承接，不作为第四条主轴：
+   - 功能区职责：[`areas.md`](./areas.md)
+   - 顶部标签过滤：[`top-toolbar-tag-filter.md`](./top-toolbar-tag-filter.md)
+   - 触摸手势：[`touch-interactions.md`](./touch-interactions.md)
+6. 若需要定义某个具体三轴组合（例如 `compact + touch-first + remote-readonly`），应在 `100+` 集成专题中承接；`003-ui-ux` 不再新增按场景拆分的主入口文档。
+
+## 运行时实现分层契约 (Runtime Presentation Layer Contract)
+
+1. 工作区运行时必须先把三轴输入收敛为单一表现层真源（Presentation Profile），再驱动具体壳层与面板表现。
+2. 三轴组合判断不得散落在 `WorkspaceShell`、工具栏、预览组件与面板组件中各自重复计算。
+3. 表现层真源至少必须产出：
+   - 当前视口壳类型（`wide | compact`）
+   - 文件主点击打开目标（侧栏预览或全屏预览）
+   - 是否支持常驻预览面板
+   - 顶部工具区表现态
+   - 人物面板、结果面板与插件区的容器表现态
+   - 预览导航按钮与触摸手势是否启用
+4. `compact` 下的次级 overlay 不得继续复用桌面 split-pane 作为内部布局基线；若某面板在 `wide` 下依赖左侧列表 + 右侧详情并列布局，`compact` 下必须允许转译为 staged list/detail flow、抽屉或等价的单列全宽表现态。
+5. `WorkspaceShell` 负责工作区状态、业务门控与共享状态机装配，不得继续承担所有三轴表现差异的直接渲染。
+6. 视口主壳必须按 `wide` / `compact` 拆分；输入模式与访问模式差异应作为壳内行为 profile 的增量约束，而不是继续衍生新的场景壳。
+7. 侧栏预览与全屏预览必须继续共享同一套预览状态机；三轴组合只允许改变打开入口、容器形态和可见控件，不得分叉出移动专用或远程专用状态机。
 
 ## 功能分区契约 (Functional Zone Contract)
 
@@ -58,6 +100,10 @@
 8. 底部结果面板必须支持显式打开/关闭、垂直高度调整，以及最大化覆盖整个文件网格区后的恢复。
 9. 工作区插件与预览插件必须复用同一套插件运行内核；两者差异仅体现在资源上下文与表现层。
 10. 顶部工具区必须允许承载只读帮助入口；其首批职责至少包含“查看当前快捷键”。
+11. 视口差异导致的主视图、面板与 overlay 转译统一归属 [`viewport-modes.md`](./viewport-modes.md)。
+12. 键盘、触控与兼具输入导致的交互入口差异统一归属 [`input-modes.md`](./input-modes.md) 与 [`touch-interactions.md`](./touch-interactions.md)。
+13. 完全访问与远程只读导致的 UI 可见性与回退差异统一归属 [`access-modes.md`](./access-modes.md)。
+14. 启动页上的本机 remembered-device 管理入口属于 `full-access` 启动态的本机管理能力，不得并入 `remote-readonly` 工作区主链路。
 
 ## 预览面板与全屏关系契约 (Panel-Fullscreen Relation Contract)
 
@@ -68,6 +114,7 @@
 5. 任一表现态新增预览交互能力时，另一表现态必须同步支持；如需临时例外，必须先在对应 Delta 记录与回补计划。
 6. 插件运行时状态共享、折叠策略与三段式细则统一归属 [`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)。
 7. 全屏预览覆盖层不得遮挡底部状态区（Status Bar Zone）；状态栏在侧栏与全屏预览两种表现态下都必须持续可见。
+8. 三轴差异只允许改变预览的入口、容器或可触发动作，不得分叉出独立预览状态机。
 
 ## 插件运行时引用契约 (Plugin Runtime Reference Contract)
 
@@ -93,6 +140,10 @@
 11. 网格区应支持范围选择（`Shift + 单击`、`Shift + 方向键`），默认覆盖当前勾选集合。
 12. `Ctrl/Cmd + 单击` 网格项应仅切换勾选态，不触发目录进入或预览打开。
 13. 底部状态区必须持续展示当前活动表面的 `可见 / 已选` 统计，并在存在明确目标文件时补充 `大小 / 修改时间 / 父目录路径` 元信息。
+14. 上述交互描述默认口径为 `wide + keyboard + full-access` 基线；其他组合的差异统一由三轴文档增量定义。
+15. 三轴差异可以新增触摸入口、抽屉或回退动作，但不得无上游记录地改写浏览、预览与遍历语义。
+16. 工作区中会改变用户可见上下文的导航状态至少包含：`currentPath` 与当前可见预览态（`pane | lightbox` + 当前文件）；运行时必须将这些状态接入浏览器 History API，使浏览器 `后退 / 前进` 优先在工作区内部回放，而不是直接离开当前站点。
+17. 上述浏览器历史接入不要求引入独立前端路由系统，但地址栏 URL 必须随工作区导航状态变化而更新，且不得把仅属当前工作区的临时态泄漏为新的业务域路由。
 
 ## 布局默认值契约 (Layout Default Contract)
 
@@ -120,6 +171,7 @@
 6. 快捷键运行时读取入口必须统一；组件不得各自维护独立的快捷键真源或解析逻辑。
 7. 顶部工具栏帮助面板展示的快捷键列表必须来自运行时合并结果，而不是静态默认配置快照。
 8. 快捷键帮助状态不得将输入焦点、`event.repeat` 或 `defaultPrevented` 直接展示为“当前不可用”。
+9. 快捷键在 `touch` 输入模式下属于加速入口而非唯一入口；核心操作不得仅依赖快捷键暴露。
 
 ## 能力与降级契约 (Capability & Degradation Contract)
 
@@ -138,6 +190,7 @@
 13. 用户点击顶部标签过滤的“包含标签”或“排除标签”按钮并打开候选面板时，前端必须立即强制刷新当前 root 的标签快照，从数据库读取最新标签信息；面板内容可先展示缓存并在刷新完成后无感更新，但不得继续停留在仅首次进入 root 时的旧快照。
 14. 顶部工具栏中会影响文件结果集的过滤状态必须按 `rootId` 持久化到本地，并在同一 root 刷新或重进后恢复；范围固定为搜索、类型、隐藏空文件夹、排序以及标签 include/exclude 与 `OR/AND`。
 15. 上述过滤状态持久化不得包含面板级临时态与非过滤项，包括 `source` / `key` 分面、浮层开关、帮助/收藏/历史/地址栏展开态、缩略图尺寸与平铺视图。
+16. 三轴差异引入的抽屉、overlay、bottom sheet 或模式切换入口，不得隐式改变对应业务域的核心语义与状态归属。
 
 ## 可访问性基线 (Accessibility Baseline)
 
@@ -161,6 +214,12 @@
 - 上游基线：`000-foundation`
 - 架构边界：`001-architecture`
 - 协议契约：`002-contracts`
+- 视口模式细则：[`./viewport-modes.md`](./viewport-modes.md)
+- 输入模式细则：[`./input-modes.md`](./input-modes.md)
+- 访问模式细则：[`./access-modes.md`](./access-modes.md)
+- 功能区细则：[`./areas.md`](./areas.md)
+- 顶部标签过滤细则：[`./top-toolbar-tag-filter.md`](./top-toolbar-tag-filter.md)
+- 触摸交互细则：[`./touch-interactions.md`](./touch-interactions.md)
 - 插件运行时交互：`105-plugin-runtime-interaction`
-- 功能专题：`100+`
-- 网格多选：`103-grid-multi-selection`
+- 本地文件浏览器：`111-local-file-browser`
+- 触控优先紧凑远程只读工作区：`126-touch-first-compact-remote-readonly-workspace`

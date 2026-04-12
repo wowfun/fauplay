@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 2026-04-12
+### Added
+- 新增 `specs/006-security/spec.md`：定义跨专题安全基线，统一 Threat Model、Trust Boundary、Session、Allowlist、最小暴露面、Secret/日志/浏览器本地持久化最小化等上游约束。
+
+### Changed
+- 更新 `specs/005-local-data-contracts/spec.md`、`specs/005-local-data-contracts/runtime-config-reference.md`、`specs/110-folder-favorites/spec.md`、`specs/002-contracts/spec.md`、`specs/006-security/spec.md`、[`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md) 与 [`docs/remote-connection.md`](../docs/remote-connection.md)：将“本机 roots 自动发布 + 远程共享收藏”融合到现有专题中，新增 `remote-access.rootSource`、loopback-only roots 同步入口、Gateway 私有状态文件 `remote-published-roots.v1.json / remote-shared-favorites.v1.json`，并将 `remote-readonly` 收藏真源收敛为服务端共享状态。
+- 更新 `specs/002-contracts/spec.md`、`specs/003-ui-ux/spec.md`、`specs/003-ui-ux/access-modes.md`、`specs/005-local-data-contracts/spec.md`、`specs/006-security/spec.md` 与 [`docs/remote-connection.md`](../docs/remote-connection.md)：为 remembered-device 增补本机 loopback-only 管理基线，新增 `/v1/admin/remembered-devices*` 管理接口约束、设备标签 + 自动命名双层模型、持久化元数据 schema 升级、本机启动页管理入口以及管理面与 LAN 远程公开面的分离要求。
+- 更新 `specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/006-security/spec.md`、`specs/003-ui-ux/access-modes.md`、[`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md) 与 [`docs/remote-connection.md`](../docs/remote-connection.md)：为远程只读登录链路补充 remember-device 基线，明确 `rememberDevice` 登录交换、服务端持久化状态文件 `~/.fauplay/global/remote-remembered-devices.v1.json`、自动补发 session、`断开/切换` 与“忘记此设备”的语义分离，以及 Bearer token 不进入浏览器持久化状态。
+- 更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/viewport-modes.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：补充窄屏人物面板约束，要求人物相关 overlay 不再复用桌面 split-pane，而是转为单列 staged list/detail flow，并在紧凑远程只读组合中提供显式返回人物列表入口。
+- 更新 `specs/003-ui-ux/access-modes.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：补充 `remote-readonly` 预览头部静音规则，要求文件名改为静态只读展示，并隐藏仅用于解释 `full-access` 工具不可用的 unavailable reason 文案、禁用按钮痕迹与标签管理 tooltip。
+- 更新 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：补充远程运行态会话默认生命周期口径，绝对过期从 `8h` 调整为 `12h`，空闲过期维持 `30min`。
+- 更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/viewport-modes.md`、`specs/003-ui-ux/input-modes.md`、`specs/003-ui-ux/access-modes.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：补充工作区三轴运行时实现分层，明确前端需引入统一 `presentation profile`、按 `wide | compact` 拆出主壳，并将 `126` 收敛为首个完整验收该组合底座的集成专题。
+- 将 `specs/126-lan-readonly-remote-access/` 重命名并重写为 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：`126` 不再作为远程接入总规范，而是收敛为 `compact + touch-first + remote-readonly` 的组合工作区专题；同时同步更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/access-modes.md`、`specs/001-architecture/spec.md`、`specs/002-contracts/spec.md`、`specs/005-local-data-contracts/spec.md`、`specs/006-security/spec.md`、`specs/README.md` 与连接文档的引用口径。
+- 更新 `specs/000-foundation/spec.md`、`specs/001-architecture/spec.md` 与 `specs/002-contracts/spec.md`：将安全相关职责收敛为“foundation 保留高层原则、architecture 保留分层与发布职责、contracts 保留协议层约束”，其余跨专题安全规则统一上收到 `006-security`。
+- 更新 `specs/README.md`：新增 `006-security` 活动基础主题入口。
+- 更新 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md) 与 `specs/002-contracts/spec.md`：为远程只读链路补充安全加固条款，新增会话生命周期、登录防暴力尝试、高成本入口滥用防护与“公开 origin 不得暴露 legacy 面”的显式验收要求，并收紧 `GET /v1/remote/faces/crops/:faceId` 为必须携带 `rootId` 且受 root 授权校验。
+- 更新 `specs/003-ui-ux/spec.md`、新增 `specs/003-ui-ux/narrow-screen-workspace.md` 与 `specs/003-ui-ux/touch-interactions.md`，并同步更新 `specs/003-ui-ux/areas.md`、`specs/100-preview-playback/spec.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：将窄屏工作区与触摸交互细则并入 `003`，明确窄屏按视口宽度触发、媒体点击可直达全屏，以及全屏图片横滑仅作为既有 `prev/next` 的触摸入口。
+- 更新 `specs/003-ui-ux/spec.md` 并新增 `specs/003-ui-ux/touch-only-desktop.md`：补充“无键盘触屏桌面壳”细则，明确该问题属于输入能力适配而非平板专用 IA，并要求核心路径、hover-only 控件、多选与预览关闭在 touch-only 环境下都有显式触摸入口。
+- 重构 `specs/003-ui-ux/` 为三轴组织模型：新增 `viewport-modes.md`、`input-modes.md` 与 `access-modes.md`，将旧的 `narrow-screen-workspace.md` 与 `touch-only-desktop.md` 退役删除，并把 `touch-interactions.md` 重定位为输入模式轴下的叶子细则；同步更新 `specs/003-ui-ux/spec.md`、`specs/003-ui-ux/areas.md`、`specs/100-preview-playback/spec.md`、`specs/111-local-file-browser/spec.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)，收敛 `wide|narrow`、`keyboard|touch|hybrid` 与 `full-access|remote-readonly` 的统一引用口径。
+- 更新 `specs/003-ui-ux/spec.md`、`specs/111-local-file-browser/spec.md` 与 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：新增“工作区内部浏览器历史”约束，要求目录导航与可见预览态同步到地址栏 URL / History API，使浏览器 `后退 / 前进` 优先回放工作区内部状态，并明确本地 `full-access` 的 URL 状态不是文件系统权限恢复凭据。
+
+## 2026-04-11
+### Added
+- 新增 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md) 的前身专题：定义同源 `HTTPS` 远程只读访问链路，固定 `remote-access` 配置域、`/v1/remote/*` 只读数据面、启动页双入口，以及复用桌面壳但裁剪写操作 UI 的边界。
+
+### Changed
+- 更新 `specs/001-architecture/spec.md` 与 `specs/002-contracts/spec.md`：补充“前端 + 同源远程只读 API + 反向代理终止 HTTPS”的发布形态，明确 LAN 仅公开 `/` 与 `/v1/remote/*`，不暴露现有 loopback MCP / legacy 文件接口。
+- 更新 `specs/005-local-data-contracts/spec.md` 与 `specs/005-local-data-contracts/runtime-config-reference.md`：新增 app-owned `src/config/remote-access.json -> ~/.fauplay/global/remote-access.json` 运行时配置链，约束 `enabled/roots` 结构固定，且鉴权 token 仅从 `~/.fauplay/global/.env` 的 `FAUPLAY_REMOTE_ACCESS_TOKEN` 读取。
+- 更新 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)、`specs/002-contracts/spec.md` 与 `specs/005-local-data-contracts/spec.md`：将远程鉴权模型从“每次请求 Bearer”收敛为“Bearer Token 登录交换 session cookie”，同时明确 `GET /v1/remote/capabilities` 可匿名探测，运行态 roots/files/tags/faces 统一走同源 cookie。
+- 更新 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)、`specs/001-architecture/spec.md` 与 `specs/005-local-data-contracts/spec.md`：把 `126` 扩展到移动浏览器媒体体验，新增远程图片/视频/缩略图/face crop 原生加载、`GET /v1/remote/files/content` 的 `Range/206` 约束，以及服务端缩略图缓存语义。
+- 更新 [`specs/126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)：新增 dev-only 本地 HTTPS 联调模式，要求仓库可生成本地开发证书，并通过 HTTPS 前端 + 同源 Gateway 代理验证 `Secure` session cookie 与手机浏览器远程媒体链路，同时不改变生产 LAN 发布边界。
+
 ## 2026-04-08
 ### Changed
 - 更新 `specs/119-person-management-face-correction/spec.md`：人物工作台新增“投射源文件”契约，要求将已选 faces 的源图片/视频按源文件去重后投射到底部结果面板，并让预览遍历跟随该投射标签。

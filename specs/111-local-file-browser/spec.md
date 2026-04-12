@@ -114,6 +114,9 @@
 28. 若删除前右侧预览或全屏预览指向某个已删文件，撤销成功后系统必须恢复该预览状态，并对齐到该文件的实际恢复路径。
 29. 工作区顶部工具栏中会影响结果集的过滤状态必须按 `rootId` 持久化，并在同一 root 刷新或重进后恢复。
 30. 上述持久化范围固定为 `search/type/hideEmptyFolders/sortBy/sortOrder/annotationIncludeMatchMode/annotationIncludeTagKeys/annotationExcludeTagKeys`；不得包含缩略图尺寸、平铺视图或任何面板级临时态。
+31. 目录导航与预览打开/关闭必须把当前工作区导航态同步到浏览器 URL 与历史记录；最小同步范围固定为当前工作区 `rootId`、`currentPath` 与可见预览态（当前文件 + `pane | lightbox`）。
+32. 浏览器 `后退 / 前进` 在仍处于同一工作区时，必须优先恢复上一个目录或预览状态，而不是立即离开应用。
+33. 本地 `full-access` 下的 URL / History 只作为当前标签页内的工作区导航辅助，不得被解释为文件系统权限的持久授予；若刷新后当前 root 无法恢复，系统允许回退到既有目录选择或缓存 root 恢复流程。
 
 ## 6. 投射 payload 契约 (Projection Payload Contract)
 
@@ -219,6 +222,9 @@
 34. `FR-LFB-34` 删除撤销成功后，若删除前存在侧栏预览或全屏预览，系统必须恢复该预览状态并重新对齐到实际恢复路径。
 35. `FR-LFB-35` 系统必须按 `rootId` 持久化顶部结果过滤状态，并在同一 root 刷新或重进后恢复。
 36. `FR-LFB-36` 过滤状态持久化范围固定为 `search/type/hideEmptyFolders/sortBy/sortOrder/annotationIncludeMatchMode/annotationIncludeTagKeys/annotationExcludeTagKeys`；不得包含平铺视图、缩略图尺寸与任意面板级临时态。
+37. `FR-LFB-37` 系统必须将当前工作区的 `rootId/currentPath/可见预览态` 同步到浏览器 URL 与 History API，而不引入独立前端路由域。
+38. `FR-LFB-38` 浏览器 `后退 / 前进` 在同一工作区内必须优先恢复先前的目录与预览状态。
+39. `FR-LFB-39` 本地 `full-access` 下的工作区 URL 状态不得被视为文件系统权限恢复机制；当对应 root 无法在刷新后恢复时，系统必须按既有目录选择 / 缓存 root 语义降级，而不是伪造权限恢复成功。
 
 ## 9. 验收标准 (AC)
 
@@ -256,6 +262,9 @@
 32. `AC-LFB-32` Root A 与 Root B 可分别保存不同顶部过滤状态；切换 root 后恢复各自最近一次保存值，不会串写。
 33. `AC-LFB-33` 新 root 没有历史过滤记录时，顶部工具栏回到默认过滤状态。
 34. `AC-LFB-34` 当持久化恢复的某个标签过滤 `tagKey` 已不在当前候选列表中时，系统仍保留该过滤条件，不会在恢复阶段自动裁剪。
+35. `AC-LFB-35` 用户在同一工作区内进入子目录、返回父目录、打开侧栏预览或全屏预览时，地址栏 URL 会同步变化；连续点击浏览器 `后退` 可按时间顺序回到先前目录 / 预览状态，而不会立即跳出应用。
+36. `AC-LFB-36` 在同一工作区内通过浏览器 `前进` 恢复到后续目录或预览状态时，文件列表与可见预览态与先前访问时保持一致。
+37. `AC-LFB-37` 对本地 `full-access` 工作区，刷新页面后若当前 URL 指向的 root 无法通过既有缓存 / 权限链恢复，系统会按现有目录选择 / 缓存 root 恢复流程回退，而不会把 URL 误当作权限凭据直接恢复成功。
 
 ## 10. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -300,11 +309,13 @@
 7. 投射标签不要求跨会话持久化；刷新页面后可不恢复。
 8. 本专题不新增快捷键。
 9. 顶部结果过滤状态按 `rootId` 持久化；刷新页面后仅恢复当前 root 最近一次保存值。
+10. 本地工作区默认访问模式固定为 `full-access`；该 UI profile 的显隐与交互入口差异统一归属 [`../003-ui-ux/access-modes.md`](../003-ui-ux/access-modes.md)，本专题只定义该 profile 下的本地数据面与浏览语义。
 
 ## 13. 关联主题 (Related Specs)
 
 - 上游基线：[`../000-foundation/spec.md`](../000-foundation/spec.md)
 - 交互基线：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
+- 访问模式细则：[`../003-ui-ux/access-modes.md`](../003-ui-ux/access-modes.md)
 - 协议契约：[`../002-contracts/spec.md`](../002-contracts/spec.md)
 - 插件运行时交互：[`../105-plugin-runtime-interaction/spec.md`](../105-plugin-runtime-interaction/spec.md)
 - 预览播放：[`../100-preview-playback/spec.md`](../100-preview-playback/spec.md)

@@ -114,6 +114,14 @@
 | `FilePreviewViewport` | 全屏文件视口 | MUST |
 | `PreviewFeedbackOverlay` | 全屏反馈层 | MUST |
 
+## 视口模式转译摘要 (Viewport Translation Summary)
+
+1. B1 文件网格区在 `wide` 与 `narrow` 下都保持为工作区主承载区；`narrow` 下其优先级更高。
+2. B2 预览面板区在 `wide` 下可常驻；在 `narrow` 下可转为“点击媒体后进入 D 全屏预览区”的主路径入口。
+3. B3 底部结果面板区在 `narrow` 下可转为 overlay、抽屉或其他临时覆盖式表现，但其“工作区结果投射文件视图”语义保持不变。
+4. 人物、筛选、收藏、历史等次级能力在 `narrow` 下可从桌面常驻面板转为临时面板，不额外创造新的业务域。
+5. 更完整的 `wide | narrow` 规则见 [`./viewport-modes.md`](./viewport-modes.md)；具体触摸手势见 [`./touch-interactions.md`](./touch-interactions.md)。
+
 ## 插件作用域与入口映射 (Plugin Scope-to-Zone Mapping)
 
 | 工具作用域 (`scopes`) | 入口分区 | 典型入口形态 | 主要作用对象 |

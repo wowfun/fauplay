@@ -65,6 +65,18 @@
 11. 项目目录下的 `.fauplay/` 仅表示“以项目目录为 root 的本地数据与配置目录”，不再承载 repo 发布的默认配置。
 12. `*.local.json` 不再属于运行时兼容路径；旧文件允许遗留，但系统不得继续读取。
 13. `shortcuts` 属于 root-scoped 的 app-owned 配置域；默认值位于 `src/config/shortcuts.json`，并允许 `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 覆盖。
+14. `remote-access` 属于 default + global 两层的 app-owned 配置域；默认值位于 `src/config/remote-access.json`，并仅允许 `~/.fauplay/global/remote-access.json` 覆盖，Gateway 启动时不得读取 `<root>/.fauplay/remote-access.json`。
+15. `remote-access` 的 token 不属于 JSON 配置字段；Gateway 必须从 `~/.fauplay/global/.env` 中读取 `FAUPLAY_REMOTE_ACCESS_TOKEN`。
+16. 远程 remember-device 的服务端持久化状态不属于 JSON 配置链；默认文件路径固定为 `~/.fauplay/global/remote-remembered-devices.v1.json`。
+17. `remote-remembered-devices.v1.json` 仅允许 Gateway 读写，用于保存 remembered device 的服务端最小元数据；浏览器不得直接读写或通过配置覆盖该文件。
+18. `remote-remembered-devices.v1.json` 的当前记录 schema 必须至少包含：`id`、`tokenHash`、`label`、`autoLabel`、`userAgentSummary`、`createdAtMs`、`lastUsedAtMs`、`expiresAtMs`。
+19. `tokenHash` 必须保持为不可逆摘要；文件中不得保存可直接复用的 remembered-device cookie 原值。
+20. 旧版 v1 记录在首次加载时必须升级补齐新字段，并以保守默认值回写；缺失字段的默认口径至少包括：`label=''`、`autoLabel='旧版已记住设备'`、`userAgentSummary=''`。
+21. remembered-device 服务端状态与远程 session 的绑定关系属于 Gateway 内部运行时状态，不进入浏览器持久化与公开 JSON 配置链。
+22. `remote-access` JSON 配置必须新增 `rootSource: 'manual' | 'local-browser-sync'`；缺省值固定为 `manual`。
+23. 当 `remote-access.rootSource='manual'` 时，Gateway 继续以 `remote-access.roots[]` 作为远程 roots 真源。
+24. 当 `remote-access.rootSource='local-browser-sync'` 时，远程 roots 真源必须切换为 Gateway 私有持久化文件 `~/.fauplay/global/remote-published-roots.v1.json`；浏览器 `IndexedDB` 缓存与 `localStorage` 绑定只允许作为 loopback-only 同步输入，不得直接成为远程公开真源。
+25. 远程共享收藏必须固定由 Gateway 管理在 `~/.fauplay/global/remote-shared-favorites.v1.json`；该文件不属于 JSON 配置链，且浏览器不得直接读写。
 
 ### 4.2 Gateway WSL `drvfs` 恢复
 
@@ -198,6 +210,49 @@
 - 人脸相关公开结果必须支持 `mediaType: 'image' | 'video'` 与 `frameTsMs: number | null`。
 - `GET /v1/faces/crops/:faceId` 必须同时支持图片 face 与视频采样帧 face，不新增并行裁切路由。
 
+### 6.4 局域网远程只读入口
+
+1. `GET /v1/remote/capabilities`
+2. `POST /v1/remote/session/login`
+3. `POST /v1/remote/session/logout`
+4. `GET /v1/remote/roots`
+5. `POST /v1/remote/files/list`
+6. `POST /v1/remote/files/text-preview`
+7. `GET /v1/remote/files/content`
+8. `GET /v1/remote/files/thumbnail`
+9. `POST /v1/remote/tags/options`
+10. `POST /v1/remote/tags/query`
+11. `POST /v1/remote/tags/file`
+12. `POST /v1/remote/faces/list-people`
+13. `POST /v1/remote/faces/list-person-faces`
+14. `GET /v1/remote/faces/crops/:faceId`
+15. `GET /v1/remote/favorites`
+16. `POST /v1/remote/favorites/upsert`
+17. `POST /v1/remote/favorites/remove`
+
+说明：
+
+- 远程只读入口必须通过 `rootId + relativePath` 定位目标，不得接收 `absolutePath` 作为公开输入。
+- 远程只读入口内部可复用现有 SQLite / 标签 / 人脸 / 文件读取数据层，但响应不得泄露服务器绝对路径。
+- 远程只读文件列表返回的 `items[]` 仅允许暴露只读文件元信息子集，不得把 mutation 所需内部字段直接外露到 LAN。
+- `GET /v1/remote/capabilities` 必须允许未登录访问；远程会话必须由 `POST /v1/remote/session/login` 完成一次性 Bearer 登录交换；除能力探测与登录接口外的远程入口改由同源 session cookie 鉴权。
+- `GET /v1/remote/files/content` 必须支持浏览器原生媒体所需的 `Range` / `206 Partial Content` / `Accept-Ranges: bytes`。
+- `GET /v1/remote/files/thumbnail` 必须返回服务端缩略图派生资源，而不是要求浏览器每次直接回源原文件生成缩略图。
+- 远程共享收藏必须以服务端状态为真源；浏览器本地收藏只能作为 loopback-only 播种输入，不得作为 `remote-readonly` 的权威数据面。
+- 远程共享收藏公开 DTO 固定只暴露 `rootId + path + favoritedAtMs`，不得暴露服务器绝对路径或浏览器本地 `rootId`。
+
+### 6.5 Loopback-only Remote State Sync
+
+1. `POST /v1/admin/remote-published-roots/sync-from-local-browser`
+
+说明：
+
+- 该接口固定为 loopback-only admin 面，不属于 `/v1/remote/*`。
+- 请求体必须为全量快照：`Array<{ label: string; absolutePath: string; favoritePaths: string[] }>`。
+- `absolutePath` 仅允许在该 loopback-only 同步入口出现；Gateway 必须把它转换为服务端稳定 `rootId` 后再进入远程公开数据面。
+- 全量快照替换远程已发布 roots 时，缺席 root 必须被下线；其下属远程共享收藏也必须同步清理。
+- `favoritePaths` 只负责对服务端远程共享收藏执行增量播种，不得因本地未收藏而删除已存在的远程共享收藏。
+
 ## 7. 插件职责约束 (Plugin Responsibility)
 
 1. `vision-face` 插件仅保留推理能力（检测框与 embedding），不负责持久化。
@@ -238,21 +293,36 @@
 22. `FR-LDC-22` Gateway 必须在启动前读取可选的 `~/.fauplay/global/.env` 作为 app-owned 进程环境层，且同名环境变量优先级固定为 `servers.<name>.env` > `~/.fauplay/global/.env` > shell env。
 23. `FR-LDC-23` `/mnt/<drive>/...` 上的 `No such device` 恢复必须由 Gateway 统一承担；tool-owned 插件不得再把该恢复逻辑作为私有配置契约对外承诺。
 24. `FR-LDC-24` `shortcuts` 配置域必须按 `src/config/shortcuts.json -> ~/.fauplay/global/shortcuts.json -> <root>/.fauplay/shortcuts.json` 解析，且仅 `shortcuts` 这类显式 root-scoped 域允许读取 root 层文件。
-25. `FR-LDC-25` face correction 相关写请求必须直接修改 `person_face` 与 `face.status`，不得把 `vision.face` 标签当作人物归属真源。
-26. `FR-LDC-26` `person_face.assignedBy` 必须支持 `auto | manual | merge`。
-27. `FR-LDC-27` `face.status` 必须支持 `assigned | unassigned | deferred | manual_unassigned | ignored`。
-28. `FR-LDC-28` 自动聚类默认仅处理 `unassigned | deferred`；`manual_unassigned` 与 `ignored` 不得被后台自动改写。
-29. `FR-LDC-29` 人脸 mutation 接口必须允许部分成功，并返回逐项结果与稳定错误码。
-30. `FR-LDC-30` 系统必须提供 `POST /v1/files/indexes` 作为显式补建 `file/asset` 记录的统一入口。
-31. `FR-LDC-31` 显式补建接口必须只处理 `missing | stale` 文件；`fresh` 文件不得重复建档。
-32. `FR-LDC-32` 系统必须提供 `POST /v1/files/duplicates/query` 作为按 `assetId` 查重的统一查询入口。
-33. `FR-LDC-33` 工作区查重对 `stale` 种子必须执行当前特征二次校验后再保留结果。
-34. `FR-LDC-34` `face` 表必须支持同时持久化图片 face 与视频采样帧 face，并通过 `mediaType/frameTsMs` 区分来源。
-35. `FR-LDC-35` 对视频执行 `detect-asset` 时，系统必须支持把抽样后代表 faces 落到现有 `face/face_embedding` 模型，而不是引入并行视频人脸表。
-36. `FR-LDC-36` `GET /v1/faces/crops/:faceId` 必须可从视频文件按 `frameTsMs` 取帧后返回裁切图。
-37. `FR-LDC-37` 系统必须持久化资产级人脸检测完成状态，确保检测过但 0 张脸的资产也可被批量扫描跳过。
-38. `FR-LDC-38` 系统必须提供 `POST /v1/faces/detect-assets` 作为工作区批量扫描入口，并保持逐项成功/跳过/失败汇总。
-39. `FR-LDC-39` 系统必须提供 Gateway 内存任务形式的工作区人脸扫描入口，支持进度查询、批间取消与逐项结果分页读取，避免大量目标依赖单个长请求和超大响应体。
+25. `FR-LDC-25` `remote-access` 配置域必须按 `src/config/remote-access.json -> ~/.fauplay/global/remote-access.json` 解析，且不得读取 root 级 `remote-access.json`。
+26. `FR-LDC-26` Gateway 必须从 `~/.fauplay/global/.env` 读取 `FAUPLAY_REMOTE_ACCESS_TOKEN` 作为远程只读入口 token，不得从 JSON 配置读取该 secret。
+27. `FR-LDC-27` 系统必须提供 `/v1/remote/*` 只读入口，并通过 `rootId + relativePath` 访问受 allowlist 保护的远程文件、标签与人物数据。
+28. `FR-LDC-28` `/v1/remote/*` 响应不得返回服务器绝对路径。
+29. `FR-LDC-29` face correction 相关写请求必须直接修改 `person_face` 与 `face.status`，不得把 `vision.face` 标签当作人物归属真源。
+30. `FR-LDC-30` `person_face.assignedBy` 必须支持 `auto | manual | merge`。
+31. `FR-LDC-31` `face.status` 必须支持 `assigned | unassigned | deferred | manual_unassigned | ignored`。
+32. `FR-LDC-32` 自动聚类默认仅处理 `unassigned | deferred`；`manual_unassigned` 与 `ignored` 不得被后台自动改写。
+33. `FR-LDC-33` 远程 remember-device 的服务端持久化状态必须固定由 Gateway 管理在 `~/.fauplay/global/remote-remembered-devices.v1.json`，且不得进入公开 JSON 配置链或浏览器持久化状态。
+33. `FR-LDC-33` 人脸 mutation 接口必须允许部分成功，并返回逐项结果与稳定错误码。
+34. `FR-LDC-34` 系统必须提供 `POST /v1/files/indexes` 作为显式补建 `file/asset` 记录的统一入口。
+35. `FR-LDC-35` 显式补建接口必须只处理 `missing | stale` 文件；`fresh` 文件不得重复建档。
+36. `FR-LDC-36` 系统必须提供 `POST /v1/files/duplicates/query` 作为按 `assetId` 查重的统一查询入口。
+37. `FR-LDC-37` 工作区查重对 `stale` 种子必须执行当前特征二次校验后再保留结果。
+38. `FR-LDC-38` `face` 表必须支持同时持久化图片 face 与视频采样帧 face，并通过 `mediaType/frameTsMs` 区分来源。
+39. `FR-LDC-39` 对视频执行 `detect-asset` 时，系统必须支持把抽样后代表 faces 落到现有 `face/face_embedding` 模型，而不是引入并行视频人脸表。
+40. `FR-LDC-40` `GET /v1/faces/crops/:faceId` 必须可从视频文件按 `frameTsMs` 取帧后返回裁切图。
+41. `FR-LDC-41` 系统必须持久化资产级人脸检测完成状态，确保检测过但 0 张脸的资产也可被批量扫描跳过。
+42. `FR-LDC-42` 系统必须提供 `POST /v1/faces/detect-assets` 作为工作区批量扫描入口，并保持逐项成功/跳过/失败汇总。
+43. `FR-LDC-43` 系统必须提供 Gateway 内存任务形式的工作区人脸扫描入口，支持进度查询、批间取消与逐项结果分页读取，避免大量目标依赖单个长请求和超大响应体。
+44. `FR-LDC-44` `remote-access` 配置域必须支持 `rootSource: 'manual' | 'local-browser-sync'`，缺省值固定为 `manual`。
+45. `FR-LDC-45` 当 `rootSource='local-browser-sync'` 时，远程 roots 真源必须固定为 `~/.fauplay/global/remote-published-roots.v1.json`，而不是浏览器本地缓存。
+46. `FR-LDC-46` Gateway 必须提供 loopback-only 的本机 roots 自动发布同步入口，并接受全量快照 `Array<{ label, absolutePath, favoritePaths[] }>`。
+47. `FR-LDC-47` Gateway 必须把自动发布 roots 持久化到 `~/.fauplay/global/remote-published-roots.v1.json`，其记录 schema 至少包含 `id`、`label`、`absolutePath`、`createdAtMs`、`lastSyncedAtMs`。
+48. `FR-LDC-48` 自动发布 root 的 `id` 必须由规范化后的 `absolutePath` 稳定派生，不得直接复用浏览器本地 `rootId`。
+49. `FR-LDC-49` Gateway 必须把远程共享收藏持久化到 `~/.fauplay/global/remote-shared-favorites.v1.json`，并以服务端 `rootId + normalizedPath` 作为唯一收藏键。
+50. `FR-LDC-50` `GET /v1/remote/favorites`、`POST /v1/remote/favorites/upsert` 与 `POST /v1/remote/favorites/remove` 必须以服务端远程共享收藏为真源，并且只接受 `rootId + path`。
+51. `FR-LDC-51` 浏览器本地 `full-access` 收藏只允许在 loopback-only 自动同步时向远程共享收藏做增量播种，不得与服务端远程共享收藏形成双向镜像真源。
+52. `FR-LDC-52` 当自动发布 roots 的全量快照移除某个 root 时，Gateway 必须同步删除该 `rootId` 下的远程共享收藏，避免 orphan favorites。
+53. `FR-LDC-53` 当远程根目录集合变化导致某个共享收藏不再命中现有 root 时，`GET /v1/remote/favorites` 不得返回该失效收藏。
 
 ## 10. 验收标准 (AC)
 
@@ -275,17 +345,27 @@
 17. `AC-LDC-17` `~/.fauplay/global/.env` 缺失时 Gateway 仍可正常启动；当其与 shell 中同名环境变量冲突时，以 `.env` 值为准，但 `servers.<name>.env` 仍可继续覆盖。
 18. `AC-LDC-18` Gateway 自身文件访问或经 Gateway 发起的路径型工具调用在 `/mnt/<drive>/...` 命中 `No such device` 时，可自动重挂载后单次重试成功；失败时返回可读错误且不升级为前端 `MCP_CLIENT_TIMEOUT`。
 19. `AC-LDC-19` `~/.fauplay/global/shortcuts.json` 与 `<root>/.fauplay/shortcuts.json` 缺失时，系统继续使用 `src/config/shortcuts.json` 默认值；当其存在时，仅覆盖已声明的快捷键动作。
-20. `AC-LDC-20` 对 face 执行 assign/create-person/unassign/ignore/restore/requeue 后，`person_face`、`face.status`、人物列表计数与 `vision.face` 资产标签结果保持一致。
-21. `AC-LDC-21` 对 `POST /v1/files/indexes` 提交一组混合 `fresh/missing/stale` 文件时，仅 `missing/stale` 项会被实际建档，`fresh` 项返回 `skipped`。
-22. `AC-LDC-22` 对 `POST /v1/files/duplicates/query` 发起预览单文件查重时，当前文件无索引或索引过期可先被隐式补建，再返回重复结果。
-23. `AC-LDC-23` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`missing` 种子会出现在覆盖率统计中而不是被静默忽略。
-24. `AC-LDC-24` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`stale` 种子的旧命中若经当前特征二次校验失效，则不会出现在最终结果中。
-25. `AC-LDC-25` 对视频执行 `POST /v1/faces/detect-asset` 后，数据库中的 `face` 记录会写入 `mediaType='video'` 与非空 `frameTsMs`，并可继续参与既有人物聚类。
-26. `AC-LDC-26` 对视频执行 `POST /v1/faces/detect-asset` 且 `runCluster=true` 后，匹配已有人物或达到保守聚类证据要求的 face 可产生 `vision.face(person=...)` 标签投影；证据不足的陌生视频 face 保持待整理状态。
-27. `AC-LDC-27` 对视频来源 face 调用 `GET /v1/faces/crops/:faceId` 时，可返回裁切图而不是 404 或仅支持图片。
-28. `AC-LDC-28` 对 `POST /v1/faces/detect-assets` 提交混合目标时，非媒体、已成功检测和重复路径返回 skipped，未检测图片/视频会执行检测并记录资产级检测状态。
-29. `AC-LDC-29` 对已成功检测但 0 张脸的资产再次执行批量扫描时，该资产会被跳过而不是重复推理。
-30. `AC-LDC-30` 对大量图片/视频提交 `detect-assets/jobs` 后，任务状态查询可看到 `processed/total` 递增；取消运行中任务时当前文件完成后停止，且不会执行最终 post-cluster。
+20. `AC-LDC-20` `remote-access` 仅读取 `src/config/remote-access.json` 与 `~/.fauplay/global/remote-access.json`；即使 `<root>/.fauplay/remote-access.json` 存在，系统也不会读取。
+21. `AC-LDC-21` `FAUPLAY_REMOTE_ACCESS_TOKEN` 仅从 `~/.fauplay/global/.env` 注入；`remote-access.json` 中不存在 token 字段也不影响远程鉴权契约。
+22. `AC-LDC-22` 对 `/v1/remote/files/content`、`/v1/remote/files/thumbnail` 与 `/v1/remote/files/text-preview` 提交绝对路径、`..` 或未知 `rootId` 时，服务端统一拒绝访问。
+23. `AC-LDC-23` 对 face 执行 assign/create-person/unassign/ignore/restore/requeue 后，`person_face`、`face.status`、人物列表计数与 `vision.face` 资产标签结果保持一致。
+24. `AC-LDC-24` 对 `POST /v1/files/indexes` 提交一组混合 `fresh/missing/stale` 文件时，仅 `missing/stale` 项会被实际建档，`fresh` 项返回 `skipped`。
+25. `AC-LDC-25` 对 `POST /v1/files/duplicates/query` 发起预览单文件查重时，当前文件无索引或索引过期可先被隐式补建，再返回重复结果。
+26. `AC-LDC-26` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`missing` 种子会出现在覆盖率统计中而不是被静默忽略。
+27. `AC-LDC-27` 对 `POST /v1/files/duplicates/query` 发起工作区查重时，`stale` 种子的旧命中若经当前特征二次校验失效，则不会出现在最终结果中。
+28. `AC-LDC-28` 对视频执行 `POST /v1/faces/detect-asset` 后，数据库中的 `face` 记录会写入 `mediaType='video'` 与非空 `frameTsMs`，并可继续参与既有人物聚类。
+29. `AC-LDC-29` 对视频执行 `POST /v1/faces/detect-asset` 且 `runCluster=true` 后，匹配已有人物或达到保守聚类证据要求的 face 可产生 `vision.face(person=...)` 标签投影；证据不足的陌生视频 face 保持待整理状态。
+30. `AC-LDC-30` 对视频来源 face 调用 `GET /v1/faces/crops/:faceId` 时，可返回裁切图而不是 404 或仅支持图片。
+31. `AC-LDC-31` 对 `POST /v1/faces/detect-assets` 提交混合目标时，非媒体、已成功检测和重复路径返回 skipped，未检测图片/视频会执行检测并记录资产级检测状态。
+32. `AC-LDC-32` 对已成功检测但 0 张脸的资产再次执行批量扫描时，该资产会被跳过而不是重复推理。
+33. `AC-LDC-33` 对大量图片/视频提交 `detect-assets/jobs` 后，任务状态查询可看到 `processed/total` 递增；取消运行中任务时当前文件完成后停止，且不会执行最终 post-cluster。
+34. `AC-LDC-34` `remote-access.rootSource` 缺失时，系统按 `manual` 解释；`remote-access.roots[]` 的现有远程行为保持不变。
+35. `AC-LDC-35` 当 `rootSource='local-browser-sync'` 时，只有“已在 cached roots 中且已有 `rootPath` 绑定”的根目录会出现在 `GET /v1/remote/roots`；未绑定项不会被远程发布。
+36. `AC-LDC-36` 同一绝对路径即使浏览器本地 `rootId` 变化，自动发布后的远程 `rootId` 仍保持稳定；不同绝对路径即使同名，也不会合并。
+37. `AC-LDC-37` 对 `POST /v1/admin/remote-published-roots/sync-from-local-browser` 提交新快照后，缺席的已发布 roots 会被下线，且其下属远程共享收藏被同步清理。
+38. `AC-LDC-38` 本机 `full-access` 收藏在自动同步后可播种到服务端远程共享收藏；本地随后取消收藏时，不会自动删除已存在的远程共享收藏。
+39. `AC-LDC-39` 远程设备 A 对共享收藏执行新增后，设备 B 重新读取 `GET /v1/remote/favorites` 可见同一结果；任一设备移除后其他设备刷新也同步消失。
+40. `AC-LDC-40` 当某个共享收藏对应的 `rootId` 不再属于当前远程 roots 集合时，`GET /v1/remote/favorites` 不会再返回该收藏。
 
 ## 11. 公共接口与类型影响 (Public Interfaces & Types)
 
@@ -301,6 +381,12 @@
 10. 新增资产级人脸检测状态表，用于区分“未检测”与“已检测但 0 张脸”。
 11. 视频检测配置新增/收敛 `videoShortIntervalMs`、`videoShortMaxDurationMs`、`videoMaxFrames`、`videoMinScore`、`videoDedupeMaxDistance` 与 `videoMaxFacesPerAsset`，用于限制视频候选 face 数量。
 12. 工作区大量人脸扫描新增内存任务接口；任务状态不持久化，不改变 SQLite schema。
+13. 新增 app-owned 运行时配置类型：`RemoteAccessConfig` 与 `RemoteAccessRootEntry`。
+14. 新增远程只读文件 DTO：以 `rootId + path` 表示公开路径，不包含服务器绝对路径字段。
+15. `RemoteAccessConfig` 必须新增 `rootSource: 'manual' | 'local-browser-sync'`。
+16. 新增 loopback-only roots 自动发布同步接口：`POST /v1/admin/remote-published-roots/sync-from-local-browser`。
+17. 新增远程共享收藏接口：`GET /v1/remote/favorites`、`POST /v1/remote/favorites/upsert`、`POST /v1/remote/favorites/remove`。
+18. 新增 Gateway 私有状态文件：`remote-published-roots.v1.json` 与 `remote-shared-favorites.v1.json`。
 
 ## 12. 关联主题 (Related Specs)
 
@@ -310,3 +396,4 @@
 - 图像分类：[`../104-timm-classification-mcp/spec.md`](../104-timm-classification-mcp/spec.md)
 - 预览头部逻辑标签管理：[`../117-preview-header-tag-management/spec.md`](../117-preview-header-tag-management/spec.md)
 - 资产级重复文件检测：[`../120-asset-duplicate-detection/spec.md`](../120-asset-duplicate-detection/spec.md)
+- 触控优先紧凑远程只读工作区：[`../126-touch-first-compact-remote-readonly-workspace/spec.md`](../126-touch-first-compact-remote-readonly-workspace/spec.md)

@@ -39,6 +39,7 @@
 
 ## 当前专题入口（示例）
 
+- 安全基线规范：[`006-security/spec.md`](./006-security/spec.md)
 - 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)
 - 收藏夹目录专题：[`110-folder-favorites/spec.md`](./110-folder-favorites/spec.md)
 - 本地文件浏览器专题（含底部结果面板）：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)
@@ -48,3 +49,4 @@
 - 预览头部逻辑标签管理专题：[`117-preview-header-tag-management/spec.md`](./117-preview-header-tag-management/spec.md)
 - 资产级重复文件检测专题：[`120-asset-duplicate-detection/spec.md`](./120-asset-duplicate-detection/spec.md)
 - 统一回收站虚拟路由专题：[`122-unified-trash-route/spec.md`](./122-unified-trash-route/spec.md)
+- 触控优先紧凑远程只读工作区专题：[`126-touch-first-compact-remote-readonly-workspace/spec.md`](./126-touch-first-compact-remote-readonly-workspace/spec.md)

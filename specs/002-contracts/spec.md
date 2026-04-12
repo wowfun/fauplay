@@ -19,6 +19,7 @@
 
 - MCP 生命周期方法与顺序约束。
 - `POST /v1/mcp` 的 JSON-RPC 请求/响应契约。
+- `/v1/remote/*` 只读 HTTP 请求/响应入口约束。
 - `tools/list`、`tools/call` 的标准结果结构。
 - `tools/call` 可选结果投射扩展结构。
 - 错误响应结构与扩展错误码承载方式。
@@ -53,6 +54,60 @@
 ### 健康检查（非 MCP）
 
 - `GET /v1/health` 仅用于诊断网关在线状态，不属于 MCP 核心协议。
+
+### 本机管理 HTTP 入口（Loopback-only Admin HTTP Entry）
+
+- `GET /v1/admin/remembered-devices`
+- `PATCH /v1/admin/remembered-devices/:deviceId`
+- `DELETE /v1/admin/remembered-devices/:deviceId`
+- `POST /v1/admin/remembered-devices/revoke-all`
+- `POST /v1/admin/remote-published-roots/sync-from-local-browser`
+
+约束：
+
+1. `/v1/admin/*` 固定属于 loopback-only 本机管理面，不属于 `/v1/remote/*` 远程公开数据面。
+2. `/v1/admin/*` 不得被 LAN 发布面代理出去，也不得作为 same-origin 远程 helper 对外暴露。
+3. `/v1/admin/*` 只返回管理页所需的最小 DTO，不得返回 cookie 原值、token 原值、完整 `User-Agent` 原文或其他非必要敏感字段。
+4. remembered-device 管理接口的撤销语义必须同步失效被撤销设备关联的活动 session。
+5. `POST /v1/admin/remote-published-roots/sync-from-local-browser` 固定为 loopback-only 本机同步入口；它可接收 `absolutePath`，但该能力不得复用到 `/v1/remote/*`。
+6. roots 自动发布同步接口的请求体必须是全量快照 `Array<{ label: string; absolutePath: string; favoritePaths: string[] }>`；缺席 root 表示下线，不是增量保留。
+
+### 只读远程 HTTP 入口（Read-only Remote HTTP Entry）
+
+- `GET /v1/remote/capabilities`
+- `POST /v1/remote/session/login`
+- `POST /v1/remote/session/logout`
+- `GET /v1/remote/roots`
+- `POST /v1/remote/files/list`
+- `POST /v1/remote/files/text-preview`
+- `GET /v1/remote/files/content`
+- `GET /v1/remote/files/thumbnail`
+- `POST /v1/remote/tags/options`
+- `POST /v1/remote/tags/query`
+- `POST /v1/remote/tags/file`
+- `POST /v1/remote/faces/list-people`
+- `POST /v1/remote/faces/list-person-faces`
+- `GET /v1/remote/faces/crops/:faceId`
+- `GET /v1/remote/favorites`
+- `POST /v1/remote/favorites/upsert`
+- `POST /v1/remote/favorites/remove`
+
+约束：
+
+1. `/v1/remote/*` 不属于 MCP / JSON-RPC 入口，必须返回普通 HTTP JSON 或二进制响应。
+2. `GET /v1/remote/capabilities` 必须允许未登录访问，用于探测远程只读能力与运行态鉴权模式。
+3. `POST /v1/remote/session/login` 必须要求 `Authorization: Bearer <token>`，并可接受可选 JSON 请求体 `{ rememberDevice?: boolean, rememberDeviceLabel?: string }`；成功后由服务端设置同源 session cookie。
+4. 当登录请求显式启用 `rememberDevice=true` 时，服务端可以额外设置同源 remember-device cookie；浏览器不得因此长期持久化原始 Bearer token。
+5. 除 `GET /v1/remote/capabilities` 与登录接口外，`/v1/remote/*` 必须基于 session cookie 鉴权；当 session 缺失或过期但 remember-device cookie 仍有效时，服务端可透明补发新的 session cookie 并继续处理请求。
+6. `POST /v1/remote/session/logout` 可接受可选 JSON 请求体 `{ forgetDevice?: boolean }`；默认仅清除当前 session，`forgetDevice=true` 时还必须同时撤销当前 remembered device 并清除对应 cookie。
+7. 远程文件访问输入固定使用 `rootId + relativePath`；远程公开契约不得接受 `absolutePath`。
+8. `/v1/remote/*` 的公开响应不得泄露服务器绝对路径。
+9. 远程只读 HTTP 入口必须保持 same-origin 发布语义，供桌面壳或后续窄屏壳统一消费。
+10. `GET /v1/remote/files/content` 必须支持 `Range` / `206 Partial Content` / `Accept-Ranges: bytes`，可被浏览器原生媒体元素直接消费。
+11. `GET /v1/remote/faces/crops/:faceId` 必须要求 `rootId` 查询参数，并验证该 `faceId` 对应资源仍属于所请求 root 的授权范围。
+12. `rememberDeviceLabel` 只允许作为 remembered device 的用户可读标签元数据，不得改变鉴权语义；留空时必须由服务端回退到自动生成的人类可读设备名。
+13. 远程共享收藏接口固定只接受 `rootId + path`；`path` 允许为空字符串表示根目录收藏，但不得接受 `absolutePath`。
+14. `GET /v1/remote/favorites` 的公开响应固定为最小 DTO `Array<{ rootId, path, favoritedAtMs }>`，不得返回服务器绝对路径、本机缓存 `rootId` 或其他内部定位字段。
 
 ### Server 注册配置（Host Registration）
 
@@ -302,16 +357,21 @@
 1. 工具名与参数必须做基础合法性校验。
 2. 路径相关参数必须做路径归一化（Path Normalization）防止越界访问。
 3. 文件变更类工具应预留 `confirm` 语义用于 dry-run/commit 区分（功能专题细化）。
+4. `/v1/remote/*` 必须把鉴权、allowlist root 与路径越界校验视为入口层强约束，而不是依赖前端自觉传参。
+5. 协议层必须为鉴权失败、会话缺失或非法会话提供统一且最小化的错误语义；更高层的安全治理、信任边界、暴露面与 session 生命周期规则由 [`../006-security/spec.md`](../006-security/spec.md) 定义。
 
 ## 非目标
 
 1. 不定义 UI 组件与交互设计。
 2. 不定义网关内部扩展实现细节（如插件加载机制）。
 3. 不定义任务拆解、排期和里程碑。
+4. 不要求把现有 legacy `/v1/files/*`、`/v1/faces/*` 或 `/v1/mcp` 自动升级为 LAN 安全入口。
 
 ## 关联主题
 
 - 上游基线：`000-foundation`
+- 安全基线：`006-security`
 - 架构边界：`001-architecture`
 - 交互规范：`003-ui-ux`
 - 插件运行时交互：`105-plugin-runtime-interaction`
+- 触控优先紧凑远程只读工作区：`126-touch-first-compact-remote-readonly-workspace`

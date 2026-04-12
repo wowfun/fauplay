@@ -77,6 +77,7 @@
 1. 网关能力默认可关闭，关闭后核心浏览与预览能力必须可用。
 2. 文件变更类能力（File Mutation Capability）应具备显式确认与错误可见反馈；系统集成能力（System Integration Capability）默认不强制确认。
 3. 任何可选增强能力不可破坏“无网关可用”的基本路径。
+4. 跨专题安全基线、信任边界、Secret/Session/暴露面与路径授权规则由 [`../006-security/spec.md`](../006-security/spec.md) 统一定义；本规范仅保留产品级高层原则。
 
 ## 文档源头契约 (Documentation Source-of-Truth Contract)
 
@@ -94,5 +95,5 @@
 ## 主题依赖关系
 
 1. `000-foundation` 是上游基线主题。
-2. `001-architecture`、`002-contracts`、`003-ui-ux` 必须与本规范保持一致。
+2. `001-architecture`、`002-contracts`、`003-ui-ux` 与 `006-security` 必须与本规范保持一致。
 3. 功能专题（`100+`）若与本规范冲突，应先更新本规范再推进实现。

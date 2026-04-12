@@ -2,7 +2,7 @@
 
 ## 1. 目的 (Purpose)
 
-定义 Fauplay 收藏夹目录（Folder Favorites）能力契约，统一“收藏当前目录、收藏列表回访、跨根目录恢复、失败降级与容量上限配置”语义，作为实现与回归验收依据。
+定义 Fauplay 收藏夹目录（Folder Favorites）能力契约，统一本机 `full-access` 收藏与 `remote-readonly` 远程共享收藏的语义边界，覆盖“收藏当前目录、收藏列表回访、跨根目录恢复、失败降级、容量上限配置与远程共享真源”。
 
 ## 2. 关键术语 (Terminology)
 
@@ -11,12 +11,16 @@
 - 收藏列表（Favorites List）
 - 跨根回访（Cross-root Favorite Open）
 - 收藏容量上限（Favorites Capacity Limit）
+- 远程共享收藏（Remote Shared Favorites）
+- 收藏播种（Favorite Seeding）
 
 术语值映射：
 
 1. 收藏键：`rootId + relativePath`。
 2. 存储键：`localStorage.fauplay:favorite-folders`。
 3. 配置键：`src/config/app.json -> favorites.maxItems`。
+4. `full-access` 收藏真源：浏览器 `localStorage.fauplay:favorite-folders`。
+5. `remote-readonly` 收藏真源：Gateway 私有状态 `~/.fauplay/global/remote-shared-favorites.v1.json`。
 
 ## 3. 范围与非目标 (In Scope / Out of Scope)
 
@@ -27,12 +31,15 @@
 3. 收藏项跨根目录回访（自动切根后跳转）。
 4. 收藏数据本地持久化、去重与容量截断。
 5. 收藏容量上限配置化（默认 `100`）。
+6. 远程共享收藏的展示、打开、移除与跨远程设备可见性。
+7. 本地收藏向远程共享收藏的单向播种边界。
 
 范围外：
 
 1. 收藏别名编辑。
 2. 收藏项手动拖拽排序。
 3. 收藏相关全局快捷键设计。
+4. 本地收藏与远程共享收藏的双向镜像。
 
 ## 4. 用户可见行为契约 (User-visible Contract)
 
@@ -43,6 +50,7 @@
 5. 收藏目标失效（缓存缺失、权限失效、路径不存在）时，系统必须给出可见错误提示，且收藏项默认保留。
 6. 收藏项显示文案默认为 `<rootName>` 或 `<rootName>/<relativePath>`。
 7. 页面刷新后收藏列表必须可恢复（localStorage 生效）。
+8. `remote-readonly` 下的收藏列表必须以服务端共享收藏为真源；同一远程服务上的多个浏览器设备应看到一致结果。
 
 ## 5. 跨组件共享语义定义 (Shared Semantics)
 
@@ -60,6 +68,12 @@
 5. 配置降级
    - `favorites.maxItems` 非法（非整数、`<=0`、`NaN`）时必须回退默认值 `100`。
    - 配置读取失败时不得阻断核心浏览能力。
+6. 访问模式差异
+   - `full-access` 收藏继续使用浏览器本地持久化与本地根目录 `rootId`。
+   - `remote-readonly` 收藏必须使用服务端远程 `rootId` 与服务端共享收藏状态。
+7. 收藏播种
+   - 本机 `full-access` 收藏可在 loopback-only 自动同步时，对远程共享收藏执行增量播种。
+   - 远程共享收藏的新增/移除不得反向回写本地 `full-access` 收藏。
 
 ## 6. 功能需求 (FR)
 
@@ -72,6 +86,10 @@
 7. `FR-FF-07` 收藏打开必须支持跨根目录自动切换后导航。
 8. `FR-FF-08` 收藏目标不可访问时，系统必须提供可见错误并保留收藏项。
 9. `FR-FF-09` 本专题不得新增全局快捷键契约，`src/config/shortcuts.ts` 与 `docs/shortcuts.md` 保持不变。
+10. `FR-FF-10` `remote-readonly` 收藏必须以 Gateway 服务端共享状态为真源，不得再以浏览器 localStorage 作为权威数据面。
+11. `FR-FF-11` 远程共享收藏必须按 `rootId + normalizedPath` 去重，根目录收藏允许 `path=''`。
+12. `FR-FF-12` 同一远程服务上的多个设备对共享收藏的新增与移除必须彼此可见。
+13. `FR-FF-13` 本地 `full-access` 收藏只允许对远程共享收藏做单向播种；远程共享收藏的修改不得回写本地收藏。
 
 ## 7. 验收标准 (AC)
 
@@ -85,18 +103,23 @@
 8. `AC-FF-08` `favorites.maxItems=100` 时，收藏数超过上限后仅保留最近 `100` 条。
 9. `AC-FF-09` 页面刷新后收藏项可恢复。
 10. `AC-FF-10` 本专题交付后 `src/config/shortcuts.ts` 与 `docs/shortcuts.md` 无新增条目。
+11. `AC-FF-11` 在 `remote-readonly` 下刷新页面后，收藏列表仍可从服务端共享状态恢复，而不是依赖浏览器本地缓存。
+12. `AC-FF-12` 远程设备 A 新增共享收藏后，设备 B 重新进入同一远程服务时可看到该收藏；任一设备移除后另一设备刷新也同步消失。
+13. `AC-FF-13` 本机 `full-access` 收藏经 loopback-only 自动同步后，可在 `remote-readonly` 收藏列表中出现；本地随后取消收藏时，不会自动删除已存在的远程共享收藏。
 
 ## 8. 失败与降级行为 (Failure & Degradation)
 
 1. localStorage 不可用或读写失败时，系统应降级为会话内收藏状态，不影响核心浏览流程。
 2. 收藏打开时若根目录缓存缺失或权限失效，系统应提示错误并引导用户重新选择目录。
 3. 配置文件字段缺失、类型非法或值越界时，系统必须使用默认值并继续运行。
+4. 远程共享收藏接口短暂失败时，系统应保留当前浏览路径并允许稍后重试，不得阻断远程文件浏览主链路。
 
 ## 9. 公共接口与类型影响 (Public Interfaces & Types)
 
 1. 必须新增收藏模型类型：`FavoriteFolderEntry`。
 2. 必须新增收藏操作能力入口（例如 `toggleCurrentFolderFavorite`、`openFavoriteFolder`、`removeFavoriteFolder`）。
 3. 收藏上限配置必须通过应用配置对象暴露（例如 `appConfig.favorites.maxItems`）。
+4. `remote-readonly` 必须新增服务端共享收藏读取与写入入口。
 
 ## 10. 默认值与一致性约束 (Defaults & Consistency)
 
@@ -104,9 +127,11 @@
 2. 收藏容量默认值固定为 `100`。
 3. 收藏容量推荐安全范围：`1..1000`。
 4. 收藏显示名称默认使用 `<rootName>/<relativePath>`（根目录仅 `<rootName>`）。
+5. `remote-readonly` 收藏显示可继续复用 `FavoriteFolderEntry`，但其数据源必须来自服务端共享收藏 DTO 与当前远程 roots 表。
 
 ## 11. 关联主题 (Related Specs)
 
 - 上游基线：[`../000-foundation/spec.md`](../000-foundation/spec.md)
 - 交互基线：[`../003-ui-ux/spec.md`](../003-ui-ux/spec.md)
+- 本地数据契约：[`../005-local-data-contracts/spec.md`](../005-local-data-contracts/spec.md)
 - 地址栏导航：[`../102-address-bar-navigation/spec.md`](../102-address-bar-navigation/spec.md)
