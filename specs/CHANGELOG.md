@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-04-13
+### Changed
+- 更新 `specs/115-facial-recognition/spec.md`：补充预览区自动检测后的补聚类约束，要求聚类锚定当前 asset，而不是调用受全局 pending backlog 影响的 `cluster-pending(limit=...)`；自动聚类口径保持单阈值 `maxDistance + minFaces`。
+
 ## 2026-04-12
 ### Added
 - 新增 `specs/006-security/spec.md`：定义跨专题安全基线，统一 Threat Model、Trust Boundary、Session、Allowlist、最小暴露面、Secret/日志/浏览器本地持久化最小化等上游约束。

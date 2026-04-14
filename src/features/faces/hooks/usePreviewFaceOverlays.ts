@@ -24,6 +24,14 @@ interface UsePreviewFaceOverlaysResult {
   reload: () => void
 }
 
+function readDetectedAssetId(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null
+  }
+  const assetId = (result as { assetId?: unknown }).assetId
+  return typeof assetId === 'string' && assetId.trim() ? assetId.trim() : null
+}
+
 export function usePreviewFaceOverlays({
   file,
   rootHandle,
@@ -92,17 +100,21 @@ export function usePreviewFaceOverlays({
         ) {
           let hasFaceMutation = false
           autoDetectedPathSetRef.current.add(file.path)
-          await invokeVisionFace({
+          const detectResult = await invokeVisionFace({
             operation: 'detectAsset',
             relativePath: file.path,
           }, FACE_DETECT_TIMEOUT_MS)
           hasFaceMutation = true
+          const detectedAssetId = readDetectedAssetId(detectResult)
           try {
-            await invokeVisionFace({
-            operation: 'clusterPending',
-            limit: 200,
-          }, FACE_CLUSTER_TIMEOUT_MS)
-            hasFaceMutation = true
+            if (detectedAssetId) {
+              await invokeVisionFace({
+                operation: 'clusterPending',
+                assetId: detectedAssetId,
+                limit: 200,
+              }, FACE_CLUSTER_TIMEOUT_MS)
+              hasFaceMutation = true
+            }
           } catch {
             // Cluster failures should not block overlay rendering.
           }
