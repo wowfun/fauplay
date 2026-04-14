@@ -14,7 +14,7 @@ import type {
   PersonSummary,
 } from '@/features/faces/types'
 
-interface FaceApiContext {
+export interface FaceApiContext {
   rootHandle: FileSystemDirectoryHandle | null
   rootId: string
 }

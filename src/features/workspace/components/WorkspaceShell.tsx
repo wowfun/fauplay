@@ -920,6 +920,7 @@ export function WorkspaceShell({
   const [deleteUndoNotice, setDeleteUndoNotice] = useState<DeleteUndoNoticeState | null>(null)
   const [pendingDeleteUndoRestore, setPendingDeleteUndoRestore] = useState<PendingDeleteUndoRestoreState | null>(null)
   const [pendingBrowserHistoryRestore, setPendingBrowserHistoryRestore] = useState<WorkspaceBrowserHistorySnapshot | null>(null)
+  const [pendingFaceSourcePath, setPendingFaceSourcePath] = useState<string | null>(null)
   const [hasTrashEntries, setHasTrashEntries] = useState(false)
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
@@ -2546,46 +2547,47 @@ export function WorkspaceShell({
     const sourcePath = normalizeCurrentRootFaceSourcePath(face.assetPath)
     if (!sourcePath) return false
 
-    const sourceFile = (
-      activeSurfaceFiles.find((file) => (
-        file.kind === 'file' && normalizeRelativePath(file.path) === sourcePath
-      ))
-      ?? filteredFiles.find((file) => (
-        file.kind === 'file' && normalizeRelativePath(file.path) === sourcePath
-      ))
-      ?? {
-        name: getRelativeFileName(sourcePath),
-        path: sourcePath,
-        kind: 'file' as const,
-        remoteRootId: remoteConfigRootId ?? undefined,
-        sourceRootPath: getBoundRootPath(rootId) ?? undefined,
-        sourceRelativePath: sourcePath,
-      }
-    )
-
-    setActiveSurface({ kind: 'directory' })
-    setDirectoryFocusedPath(sourcePath)
-    openFileInPrimaryTarget(sourceFile)
+    setPendingFaceSourcePath(sourcePath)
 
     const parentPath = getRelativeParentPath(sourcePath)
     if (normalizeRelativePath(currentPath) === parentPath) {
+      setActiveSurface({ kind: 'directory' })
+      setDirectoryFocusedPath(sourcePath)
       return true
     }
 
-    alignPreviewToPath(sourcePath)
     const navigated = await navigateToPath(parentPath, { resetFlattenView: true })
-    if (!navigated) return false
-    alignPreviewToPath(sourcePath)
+    if (!navigated) {
+      setPendingFaceSourcePath((previous) => (previous === sourcePath ? null : previous))
+      return false
+    }
+    setActiveSurface({ kind: 'directory' })
+    setDirectoryFocusedPath(sourcePath)
     return true
   }, [
-    activeSurfaceFiles,
-    alignPreviewToPath,
     currentPath,
-    filteredFiles,
     navigateToPath,
+  ])
+
+  useEffect(() => {
+    if (activeSurface.kind !== 'directory') return
+    if (!pendingFaceSourcePath) return
+
+    const normalizedSourcePath = normalizeRelativePath(pendingFaceSourcePath)
+    // Wait until the directory surface has the real source file item before opening it.
+    const sourceFile = filteredFiles.find((file) => (
+      file.kind === 'file' && normalizeRelativePath(file.path) === normalizedSourcePath
+    )) ?? null
+
+    if (!sourceFile) return
+
+    openFileInPrimaryTarget(sourceFile)
+    setPendingFaceSourcePath((previous) => (previous === normalizedSourcePath ? null : previous))
+  }, [
+    activeSurface,
+    filteredFiles,
     openFileInPrimaryTarget,
-    remoteConfigRootId,
-    rootId,
+    pendingFaceSourcePath,
   ])
 
   const handleProjectFaceSources = useCallback((selectedFaces: FaceRecord[]): boolean => {

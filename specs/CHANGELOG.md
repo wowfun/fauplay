@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-04-14
+### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md`：将预览单脸纠错与人物工作台批量整理中的“归属已有 + 新建人物”收敛为统一人物归属输入框，固定为实时人物补全、精确重名隐藏新建动作、无精确重名时显示“新建并归入”，同时保留人物列表搜索、重命名与合并目标搜索为独立输入。
+- 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物详情双击来源跳转语义，要求文件网格与右侧预览必须同时定位到同一个来源图片/视频，不得因目录切换或预览遍历回退到随机文件或目录首项。
+
 ## 2026-04-13
 ### Changed
 - 更新 `specs/115-facial-recognition/spec.md`：补充预览区自动检测后的补聚类约束，要求聚类锚定当前 asset，而不是调用受全局 pending backlog 影响的 `cluster-pending(limit=...)`；自动聚类口径保持单阈值 `maxDistance + minFaces`。

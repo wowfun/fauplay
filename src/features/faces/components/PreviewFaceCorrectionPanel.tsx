@@ -1,19 +1,18 @@
-import { useEffect, useState } from 'react'
-import { Search, UserPlus, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import {
   assignFaces,
   createPersonFromFaces,
   ignoreFaces,
-  listPeople,
   requeueFaces,
   restoreIgnoredFaces,
   suggestPeople,
   unassignFaces,
 } from '@/features/faces/api'
-import type { FaceMutationResult, PersonSuggestion, PersonSummary, PreviewFaceOverlayItem } from '@/features/faces/types'
+import type { FaceMutationResult, PersonSuggestion, PreviewFaceOverlayItem } from '@/features/faces/types'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
 import { Button } from '@/ui/Button'
-import { Input } from '@/ui/Input'
 
 interface PreviewFaceCorrectionPanelProps {
   face: PreviewFaceOverlayItem | null
@@ -32,7 +31,7 @@ function statusLabel(status: PreviewFaceOverlayItem['status']): string {
   return '未归属'
 }
 
-function displayPersonName(person: Pick<PersonSummary, 'personId' | 'name'> | Pick<PersonSuggestion, 'personId' | 'name'>): string {
+function displayPersonName(person: Pick<PersonSuggestion, 'personId' | 'name'>): string {
   return person.name.trim() || `人物 ${person.personId.slice(0, 8)}`
 }
 
@@ -45,18 +44,15 @@ export function PreviewFaceCorrectionPanel({
   onOpenPersonDetail,
 }: PreviewFaceCorrectionPanelProps) {
   const [suggestions, setSuggestions] = useState<PersonSuggestion[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<PersonSummary[]>([])
-  const [newPersonName, setNewPersonName] = useState('')
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
-  const [isLoadingSearch, setIsLoadingSearch] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const context = useMemo(() => ({
+    rootHandle,
+    rootId,
+  }), [rootHandle, rootId])
 
   useEffect(() => {
-    setSearchQuery('')
-    setSearchResults([])
-    setNewPersonName('')
     setErrorMessage(null)
   }, [face?.faceId])
 
@@ -102,57 +98,7 @@ export function PreviewFaceCorrectionPanel({
     }
   }, [face, rootHandle, rootId])
 
-  useEffect(() => {
-    if (!face || !rootId || !searchQuery.trim()) {
-      setSearchResults([])
-      setIsLoadingSearch(false)
-      return
-    }
-
-    let cancelled = false
-    const timeoutId = window.setTimeout(() => {
-      void (async () => {
-        setIsLoadingSearch(true)
-        try {
-          const items = await listPeople(
-            {
-              rootHandle,
-              rootId,
-            },
-            {
-              scope: 'global',
-              query: searchQuery.trim(),
-              size: 20,
-            }
-          )
-          if (!cancelled) {
-            setSearchResults(items.filter((item) => item.personId !== face.personId))
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setSearchResults([])
-            setErrorMessage(error instanceof Error ? error.message : '人物搜索失败')
-          }
-        } finally {
-          if (!cancelled) {
-            setIsLoadingSearch(false)
-          }
-        }
-      })()
-    }, 180)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeoutId)
-    }
-  }, [face, rootHandle, rootId, searchQuery])
-
   if (!face) return null
-
-  const context = {
-    rootHandle,
-    rootId,
-  }
 
   const runMutation = async (task: () => Promise<FaceMutationResult>) => {
     setIsSaving(true)
@@ -164,15 +110,17 @@ export function PreviewFaceCorrectionPanel({
       }
       await onMutationCommitted?.()
       onClose()
+      return true
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '人物纠错失败')
+      return false
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleAssign = async (personId: string) => {
-    await runMutation(async () => {
+    return runMutation(async () => {
       return assignFaces(context, {
         faceIds: [face.faceId],
         targetPersonId: personId,
@@ -180,11 +128,11 @@ export function PreviewFaceCorrectionPanel({
     })
   }
 
-  const handleCreatePerson = async () => {
-    await runMutation(async () => {
+  const handleCreatePerson = async (name: string) => {
+    return runMutation(async () => {
       return createPersonFromFaces(context, {
         faceIds: [face.faceId],
-        name: newPersonName,
+        name,
       })
     })
   }
@@ -311,66 +259,16 @@ export function PreviewFaceCorrectionPanel({
       </div>
 
       <div className="mt-4">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <Search className="h-3.5 w-3.5" />
-          搜索人物
-        </div>
-        <Input
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="输入人物名"
+        <div className="mb-2 text-xs font-medium text-muted-foreground">归属到人物</div>
+        <PersonAssignmentInput
+          key={face.faceId}
+          context={context}
+          scope="global"
           disabled={isSaving}
+          excludedPersonIds={face.personId ? [face.personId] : []}
+          onAssign={handleAssign}
+          onCreate={handleCreatePerson}
         />
-        {searchQuery.trim() && (
-          <div className="mt-2 max-h-40 overflow-auto rounded-md border border-border">
-            {isLoadingSearch && (
-              <div className="px-3 py-2 text-xs text-muted-foreground">搜索中...</div>
-            )}
-            {!isLoadingSearch && searchResults.length === 0 && (
-              <div className="px-3 py-2 text-xs text-muted-foreground">未找到匹配人物</div>
-            )}
-            {!isLoadingSearch && searchResults.map((item) => (
-              <button
-                key={item.personId}
-                type="button"
-                className="flex w-full items-center justify-between border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-accent"
-                disabled={isSaving}
-                onClick={() => {
-                  void handleAssign(item.personId)
-                }}
-              >
-                <span className="truncate text-sm">{displayPersonName(item)}</span>
-                <span className="ml-3 text-xs text-muted-foreground">{item.globalFaceCount}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-4">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <UserPlus className="h-3.5 w-3.5" />
-          新建人物
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={newPersonName}
-            onChange={(event) => setNewPersonName(event.target.value)}
-            placeholder="可留空"
-            disabled={isSaving}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            disabled={isSaving}
-            onClick={() => {
-              void handleCreatePerson()
-            }}
-          >
-            新建并归入
-          </Button>
-        </div>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">

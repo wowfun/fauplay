@@ -15,6 +15,7 @@ import {
 } from '@/features/faces/api'
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
 import { cn } from '@/lib/utils'
 import { GRID_SELECTABLE_ITEM_ATTR, useGridSelection } from '@/hooks/useGridSelection'
 import { Button } from '@/ui/Button'
@@ -285,16 +286,11 @@ export function PeoplePanel({
   const [faces, setFaces] = useState<FaceRecord[]>([])
   const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set())
   const [peopleQuery, setPeopleQuery] = useState('')
-  const [targetQuery, setTargetQuery] = useState('')
-  const [targetResults, setTargetResults] = useState<PersonSummary[]>([])
-  const [selectedTargetPersonId, setSelectedTargetPersonId] = useState('')
-  const [newPersonName, setNewPersonName] = useState('')
   const [renameDraft, setRenameDraft] = useState('')
   const [mergeTargetQuery, setMergeTargetQuery] = useState('')
   const [mergeTargetPersonId, setMergeTargetPersonId] = useState('')
   const [isLoadingPeople, setIsLoadingPeople] = useState(false)
   const [isLoadingFaces, setIsLoadingFaces] = useState(false)
-  const [isLoadingTargets, setIsLoadingTargets] = useState(false)
   const [isSavingRename, setIsSavingRename] = useState(false)
   const [isMerging, setIsMerging] = useState(false)
   const [isMutatingFaces, setIsMutatingFaces] = useState(false)
@@ -502,54 +498,6 @@ export function PeoplePanel({
     }
   }, [onClose, open])
 
-  useEffect(() => {
-    if (readonly) {
-      setTargetResults([])
-      setIsLoadingTargets(false)
-      return
-    }
-    if (!open) return
-    if (!targetQuery.trim()) {
-      setTargetResults(allPeople.filter((person) => person.personId !== selectedPersonId).slice(0, 40))
-      setIsLoadingTargets(false)
-      return
-    }
-
-    let cancelled = false
-    const timeoutId = window.setTimeout(() => {
-      void (async () => {
-        setIsLoadingTargets(true)
-        try {
-          const items = await listPeople(context, {
-            scope,
-            query: targetQuery.trim(),
-            size: 40,
-          })
-          if (!cancelled) {
-            setTargetResults(items.filter((person) => person.personId !== selectedPersonId))
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setTargetResults([])
-            setNotice({
-              tone: 'error',
-              message: error instanceof Error ? error.message : '目标人物搜索失败',
-            })
-          }
-        } finally {
-          if (!cancelled) {
-            setIsLoadingTargets(false)
-          }
-        }
-      })()
-    }, 180)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeoutId)
-    }
-  }, [allPeople, context, open, readonly, scope, selectedPersonId, targetQuery])
-
   const handleFaceSelectionChange = useCallback((faceIds: string[]) => {
     setSelectedFaceIds(new Set(faceIds))
   }, [])
@@ -713,28 +661,49 @@ export function PeoplePanel({
   }, [context, loadAllPeople, loadPeopleList, mergeTargetPersonId, scope, selectedPerson])
 
   const runFaceMutation = useCallback(async (task: () => Promise<FaceMutationResult>) => {
-    if (selectedFaceIds.size === 0) return
+    if (selectedFaceIds.size === 0) return false
     setIsMutatingFaces(true)
     setNotice(null)
     try {
       const result = await task()
       setNotice(readResultMessage(result))
       clearSelection()
-      setSelectedTargetPersonId('')
-      setTargetQuery('')
-      setNewPersonName('')
       await refreshAll()
+      return true
     } catch (error) {
       setNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : '人脸纠错失败',
       })
+      return false
     } finally {
       setIsMutatingFaces(false)
     }
   }, [clearSelection, refreshAll, selectedFaceIds.size])
 
   const selectedIds = useMemo(() => [...selectedFaceIds], [selectedFaceIds])
+  const assignmentExcludedPersonIds = useMemo(
+    () => (view === 'people' && selectedPersonId ? [selectedPersonId] : []),
+    [selectedPersonId, view]
+  )
+  const assignmentInputKey = useMemo(
+    () => `${scope}:${view}:${selectedPersonId ?? ''}`,
+    [scope, selectedPersonId, view]
+  )
+  const handleAssignSelectedFaces = useCallback(async (personId: string) => {
+    if (selectedIds.length === 0) return false
+    return runFaceMutation(() => assignFaces(context, {
+      faceIds: selectedIds,
+      targetPersonId: personId,
+    }))
+  }, [context, runFaceMutation, selectedIds])
+  const handleCreatePersonForSelectedFaces = useCallback(async (name: string) => {
+    if (selectedIds.length === 0) return false
+    return runFaceMutation(() => createPersonFromFaces(context, {
+      faceIds: selectedIds,
+      name,
+    }))
+  }, [context, runFaceMutation, selectedIds])
   const showCompactPeopleList = isCompact && view === 'people' && compactPeopleStage === 'list'
   const showCompactPeopleDetail = isCompact && view === 'people' && compactPeopleStage === 'detail'
 
@@ -1078,62 +1047,21 @@ export function PeoplePanel({
 
                       {!readonly && (
                         <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                          <Input
-                            value={targetQuery}
-                            onChange={(event) => setTargetQuery(event.target.value)}
-                            placeholder="搜索目标人物"
-                            disabled={isMutatingFaces}
-                          />
-                          <select
-                            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-                            value={selectedTargetPersonId}
-                            onChange={(event) => setSelectedTargetPersonId(event.target.value)}
-                            disabled={isMutatingFaces}
-                          >
-                            <option value="">
-                              {isLoadingTargets ? '人物搜索中...' : '选择目标人物'}
-                            </option>
-                            {targetResults.map((person) => (
-                              <option key={person.personId} value={person.personId}>
-                                {displayPersonName(person)}
-                              </option>
-                            ))}
-                          </select>
-                          <Input
-                            value={newPersonName}
-                            onChange={(event) => setNewPersonName(event.target.value)}
-                            placeholder="新人物名称，可留空"
-                            disabled={isMutatingFaces}
-                          />
-                          <div className="grid grid-cols-1 gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || selectedIds.length === 0 || !selectedTargetPersonId}
-                              onClick={() => {
-                                void runFaceMutation(() => assignFaces(context, {
-                                  faceIds: selectedIds,
-                                  targetPersonId: selectedTargetPersonId,
-                                }))
-                              }}
-                            >
-                              移到该人物
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
+                            <PersonAssignmentInput
+                              key={`compact-detail:${assignmentInputKey}`}
+                              context={context}
+                              scope={scope}
+                              querySize={40}
+                              emptyQuerySize={40}
                               disabled={isMutatingFaces || selectedIds.length === 0}
-                              onClick={() => {
-                                void runFaceMutation(() => createPersonFromFaces(context, {
-                                  faceIds: selectedIds,
-                                  name: newPersonName,
-                                }))
-                              }}
-                            >
-                              新建人物并移入
-                            </Button>
+                              excludedPersonIds={assignmentExcludedPersonIds}
+                              onAssign={handleAssignSelectedFaces}
+                              onCreate={handleCreatePersonForSelectedFaces}
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 gap-2">
                             <Button
                               variant="outline"
                               size="sm"
@@ -1235,62 +1163,21 @@ export function PeoplePanel({
                     </div>
 
                     <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                      <Input
-                        value={targetQuery}
-                        onChange={(event) => setTargetQuery(event.target.value)}
-                        placeholder="搜索目标人物"
-                        disabled={isMutatingFaces}
-                      />
-                      <select
-                        className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-                        value={selectedTargetPersonId}
-                        onChange={(event) => setSelectedTargetPersonId(event.target.value)}
-                        disabled={isMutatingFaces}
-                      >
-                        <option value="">
-                          {isLoadingTargets ? '人物搜索中...' : '选择目标人物'}
-                        </option>
-                        {targetResults.map((person) => (
-                          <option key={person.personId} value={person.personId}>
-                            {displayPersonName(person)}
-                          </option>
-                        ))}
-                      </select>
-                      <Input
-                        value={newPersonName}
-                        onChange={(event) => setNewPersonName(event.target.value)}
-                        placeholder="新人物名称，可留空"
-                        disabled={isMutatingFaces}
-                      />
-                      <div className="grid grid-cols-1 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || selectedIds.length === 0 || !selectedTargetPersonId}
-                          onClick={() => {
-                            void runFaceMutation(() => assignFaces(context, {
-                              faceIds: selectedIds,
-                              targetPersonId: selectedTargetPersonId,
-                            }))
-                          }}
-                        >
-                          移到该人物
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
+                        <PersonAssignmentInput
+                          key={`compact-review:${assignmentInputKey}`}
+                          context={context}
+                          scope={scope}
+                          querySize={40}
+                          emptyQuerySize={40}
                           disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => createPersonFromFaces(context, {
-                              faceIds: selectedIds,
-                              name: newPersonName,
-                            }))
-                          }}
-                        >
-                          新建人物并移入
-                        </Button>
+                          excludedPersonIds={assignmentExcludedPersonIds}
+                          onAssign={handleAssignSelectedFaces}
+                          onCreate={handleCreatePersonForSelectedFaces}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1594,65 +1481,23 @@ export function PeoplePanel({
 
                   {!readonly && (
                     <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Input
-                          value={targetQuery}
-                          onChange={(event) => setTargetQuery(event.target.value)}
-                          placeholder="搜索目标人物"
-                          className="min-w-[220px] flex-1"
-                          disabled={isMutatingFaces}
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
+                        <PersonAssignmentInput
+                          key={`wide:${assignmentInputKey}`}
+                          context={context}
+                          scope={scope}
+                          querySize={40}
+                          emptyQuerySize={40}
+                          className="max-w-[560px]"
+                          disabled={isMutatingFaces || selectedIds.length === 0}
+                          excludedPersonIds={assignmentExcludedPersonIds}
+                          onAssign={handleAssignSelectedFaces}
+                          onCreate={handleCreatePersonForSelectedFaces}
                         />
-                        <select
-                          className="h-9 min-w-[220px] rounded-md border border-border bg-background px-2 text-sm"
-                          value={selectedTargetPersonId}
-                          onChange={(event) => setSelectedTargetPersonId(event.target.value)}
-                          disabled={isMutatingFaces}
-                        >
-                          <option value="">
-                            {isLoadingTargets ? '人物搜索中...' : '选择目标人物'}
-                          </option>
-                          {targetResults.map((person) => (
-                            <option key={person.personId} value={person.personId}>
-                              {displayPersonName(person)}
-                            </option>
-                          ))}
-                        </select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedIds.length === 0 || !selectedTargetPersonId}
-                          onClick={() => {
-                            void runFaceMutation(() => assignFaces(context, {
-                              faceIds: selectedIds,
-                              targetPersonId: selectedTargetPersonId,
-                            }))
-                          }}
-                        >
-                          移到该人物
-                        </Button>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
-                        <Input
-                          value={newPersonName}
-                          onChange={(event) => setNewPersonName(event.target.value)}
-                          placeholder="新人物名称，可留空"
-                          className="min-w-[220px] flex-1"
-                          disabled={isMutatingFaces}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => createPersonFromFaces(context, {
-                              faceIds: selectedIds,
-                              name: newPersonName,
-                            }))
-                          }}
-                        >
-                          新建人物并移入
-                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
