@@ -1,6 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { listPeople, type FaceApiContext } from '@/features/faces/api'
 import type { PersonScope, PersonSummary } from '@/features/faces/types'
+import {
+  getPersonDisplayName,
+  matchesNormalizedPersonAlias,
+} from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { Input } from '@/ui/Input'
 
@@ -20,10 +24,6 @@ interface PersonAssignmentInputProps {
 type AssignmentOption =
   | { kind: 'person'; person: PersonSummary }
   | { kind: 'create'; name: string }
-
-function displayPersonName(person: Pick<PersonSummary, 'personId' | 'name'>): string {
-  return person.name.trim() || `人物 ${person.personId.slice(0, 8)}`
-}
 
 function normalizePersonName(name: string): string {
   return name.trim().toLowerCase()
@@ -69,7 +69,7 @@ export function PersonAssignmentInput({
     const exactMatches: PersonSummary[] = []
     const fuzzyMatches: PersonSummary[] = []
     for (const person of filtered) {
-      if (normalizePersonName(person.name) === normalizedQuery) {
+      if (matchesNormalizedPersonAlias(person, normalizedQuery)) {
         exactMatches.push(person)
       } else {
         fuzzyMatches.push(person)
@@ -80,7 +80,7 @@ export function PersonAssignmentInput({
 
   const hasExactMatch = useMemo(() => (
     normalizedQuery.length > 0
-      && results.some((person) => normalizePersonName(person.name) === normalizedQuery)
+      && results.some((person) => matchesNormalizedPersonAlias(person, normalizedQuery))
   ), [normalizedQuery, results])
 
   const options = useMemo<AssignmentOption[]>(() => {
@@ -292,7 +292,7 @@ export function PersonAssignmentInput({
                   }}
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-sm">{displayPersonName(option.person)}</div>
+                    <div className="truncate text-sm">{getPersonDisplayName(option.person)}</div>
                     <div className="text-xs text-muted-foreground">
                       {faceCountLabel(option.person, scope)}
                     </div>

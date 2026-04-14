@@ -46,6 +46,14 @@ import {
   preloadAnnotationDisplaySnapshot,
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
+import {
+  getFileReviewFilterTagKeys,
+  getReviewFilterTagStoreVersion,
+  getRootReviewFilterTagOptions,
+  isReviewFilterTagSnapshotReady,
+  preloadReviewFilterTagSnapshot,
+  subscribeReviewFilterTagStore,
+} from '@/features/faces/utils/reviewFilterTagStore'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
 import {
@@ -59,6 +67,8 @@ import {
   type WorkspaceBrowserHistorySnapshot,
 } from '@/features/workspace/lib/browserHistory'
 import {
+  ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY,
+  ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY,
   ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AddressPathHistoryEntry,
   type AnnotationFilterTagOption,
@@ -178,6 +188,11 @@ const defaultFilter: FilterState = {
 interface PersistedPreviewPaneWidthState {
   ratio: number
   isManual: boolean
+}
+
+interface FileAnnotationFilterTags {
+  annotationTagKeys: string[]
+  virtualTagKeys: string[]
 }
 
 function clampPaneWidthRatio(value: number): number {
@@ -662,30 +677,41 @@ function withSyncedAnnotationFilterMode(filter: FilterState): FilterState {
   }
 }
 
-function fileMatchesAnnotationTag(tagSet: Set<string>, tagKey: string): boolean {
+function fileMatchesAnnotationTag(
+  annotationTagSet: Set<string>,
+  virtualTagSet: Set<string>,
+  tagKey: string
+): boolean {
   if (tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
-    return tagSet.size === 0
+    return annotationTagSet.size === 0
   }
-  return tagSet.has(tagKey)
+  if (
+    tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY
+    || tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY
+  ) {
+    return virtualTagSet.has(tagKey)
+  }
+  return annotationTagSet.has(tagKey)
 }
 
-function matchesBooleanAnnotationFilter(filter: FilterState, fileTagKeys: string[]): boolean {
+function matchesBooleanAnnotationFilter(filter: FilterState, fileTags: FileAnnotationFilterTags): boolean {
   const includeTagKeys = filter.annotationIncludeTagKeys
   const excludeTagKeys = filter.annotationExcludeTagKeys
   if (includeTagKeys.length === 0 && excludeTagKeys.length === 0) {
     return true
   }
 
-  const tagSet = new Set(fileTagKeys)
+  const annotationTagSet = new Set(fileTags.annotationTagKeys)
+  const virtualTagSet = new Set(fileTags.virtualTagKeys)
   const includeMatched = includeTagKeys.length === 0
     ? true
     : filter.annotationIncludeMatchMode === 'and'
-      ? includeTagKeys.every((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
-      : includeTagKeys.some((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
+      ? includeTagKeys.every((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
+      : includeTagKeys.some((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
 
   if (!includeMatched) return false
 
-  return !excludeTagKeys.some((tagKey) => fileMatchesAnnotationTag(tagSet, tagKey))
+  return !excludeTagKeys.some((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
 }
 
 function compareByNameWithSortOrder(left: FileItem, right: FileItem, sortOrder: FilterState['sortOrder']): number {
@@ -889,6 +915,11 @@ export function WorkspaceShell({
     getAnnotationDisplayStoreVersion,
     getAnnotationDisplayStoreVersion
   )
+  const reviewFilterTagStoreVersion = useSyncExternalStore(
+    subscribeReviewFilterTagStore,
+    getReviewFilterTagStoreVersion,
+    getReviewFilterTagStoreVersion
+  )
   const persistedWorkspaceFilterStateByRootRef = useRef<PersistedWorkspaceFilterStateByRoot>(
     loadPersistedWorkspaceFilterStateByRoot(storageNamespace)
   )
@@ -939,24 +970,43 @@ export function WorkspaceShell({
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
   }, [])
   const isAnnotationFilterGateResolved = isAnnotationFilterUiGateResolved(rootId)
-  const showAnnotationFilterControls = isAnnotationFilterUiVisible(rootId)
+  const isReviewFilterGateResolved = isReviewFilterTagSnapshotReady(rootId)
+  const annotationTagFilterVisible = isAnnotationFilterUiVisible(rootId)
+  const reviewFilterTagOptions = useMemo<AnnotationFilterTagOption[]>(() => {
+    void reviewFilterTagStoreVersion
+    return getRootReviewFilterTagOptions(rootId)
+  }, [reviewFilterTagStoreVersion, rootId])
+  const showAnnotationFilterControls = annotationTagFilterVisible || reviewFilterTagOptions.length > 0
   const annotationFilterTagOptions = useMemo<AnnotationFilterTagOption[]>(() => {
     // Depend on external store version so tag options refresh with latest gateway tag snapshot.
     void annotationDisplayStoreVersion
+    void reviewFilterTagStoreVersion
     if (!showAnnotationFilterControls) return []
     const rootTagOptions = getRootAnnotationFilterTagOptions(rootId)
-    return [
-      {
+    const specialOptions: AnnotationFilterTagOption[] = []
+    if (annotationTagFilterVisible) {
+      specialOptions.push({
         tagKey: ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
         key: '',
         value: '未标注',
         sources: [],
         hasMetaAnnotation: false,
         representativeSource: '',
-      },
+      })
+    }
+    return [
+      ...specialOptions,
+      ...reviewFilterTagOptions,
       ...rootTagOptions,
     ]
-  }, [annotationDisplayStoreVersion, rootId, showAnnotationFilterControls])
+  }, [
+    annotationDisplayStoreVersion,
+    annotationTagFilterVisible,
+    reviewFilterTagOptions,
+    reviewFilterTagStoreVersion,
+    rootId,
+    showAnnotationFilterControls,
+  ])
 
   useEffect(() => {
     if (hydratedFilterRootIdRef.current === rootId) return
@@ -985,12 +1035,15 @@ export function WorkspaceShell({
   const filteredFiles = useMemo(() => {
     // Depend on external store version so file filtering reflects latest gateway tag snapshot.
     void annotationDisplayStoreVersion
+    void reviewFilterTagStoreVersion
     let nextFilteredFiles = filterFiles(files, filter)
     if (isAnnotationBooleanFilterActive(filter)) {
       nextFilteredFiles = nextFilteredFiles.filter((file) => {
         if (file.kind !== 'file') return true
-        const fileTagKeys = getFileAnnotationTagKeys(rootId, file.path)
-        return matchesBooleanAnnotationFilter(filter, fileTagKeys)
+        return matchesBooleanAnnotationFilter(filter, {
+          annotationTagKeys: getFileAnnotationTagKeys(rootId, file.path),
+          virtualTagKeys: getFileReviewFilterTagKeys(rootId, file.path),
+        })
       })
     }
 
@@ -999,7 +1052,7 @@ export function WorkspaceShell({
     }
 
     return nextFilteredFiles
-  }, [annotationDisplayStoreVersion, files, filter, filterFiles, rootId])
+  }, [annotationDisplayStoreVersion, files, filter, filterFiles, reviewFilterTagStoreVersion, rootId])
   const activeProjectionTab = useMemo(
     () => projectionTabs.find((projection) => projection.id === activeProjectionTabId) ?? projectionTabs[0] ?? null,
     [activeProjectionTabId, projectionTabs]
@@ -1525,19 +1578,26 @@ export function WorkspaceShell({
     return openHistoryEntry(entry)
   }, [openHistoryEntry])
 
-  const refreshAnnotationSnapshot = useCallback(async () => {
+  const refreshFilterTagSnapshots = useCallback(async () => {
     if (!rootId) return
-    await preloadAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: rootName,
-      force: true,
-    })
+    await Promise.all([
+      preloadAnnotationDisplaySnapshot({
+        rootId,
+        rootHandle,
+        rootLabel: rootName,
+        force: true,
+      }),
+      preloadReviewFilterTagSnapshot({
+        rootId,
+        rootHandle,
+        force: true,
+      }),
+    ])
   }, [rootHandle, rootId, rootName])
 
   const handleOpenAnnotationFilterPanel = useCallback(() => {
-    void refreshAnnotationSnapshot()
-  }, [refreshAnnotationSnapshot])
+    void refreshFilterTagSnapshots()
+  }, [refreshFilterTagSnapshots])
 
   const alignPreviewToProjection = useCallback((projection: ResultProjection | null, preferredPath?: string | null) => {
     alignPreviewToPath(resolveProjectionPreferredPath(projection, preferredPath))
@@ -1827,10 +1887,10 @@ export function WorkspaceShell({
     )
 
     restoreDeleteUndoPreviewSnapshot(snapshot.preview)
-    await refreshAnnotationSnapshot()
+    await refreshFilterTagSnapshots()
   }, [
     isFlattenView,
-    refreshAnnotationSnapshot,
+    refreshFilterTagSnapshots,
     restoreDeleteUndoPreviewSnapshot,
     setFlattenView,
   ])
@@ -2276,7 +2336,7 @@ export function WorkspaceShell({
       })
     }
     await navigateToPath(currentPath)
-    await refreshAnnotationSnapshot()
+    await refreshFilterTagSnapshots()
     pushDeleteUndoBatch(deleteUndoBatch)
   }, [
     createDeleteUndoBatchFromParams,
@@ -2284,7 +2344,7 @@ export function WorkspaceShell({
     navigateToPath,
     pruneDeletedFilesFromProjectionTabs,
     pushDeleteUndoBatch,
-    refreshAnnotationSnapshot,
+    refreshFilterTagSnapshots,
   ])
 
   const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
@@ -2309,7 +2369,7 @@ export function WorkspaceShell({
     if (preferredPreviewPath) {
       alignPreviewToPath(preferredPreviewPath)
       await navigateToPath(currentPath)
-      await refreshAnnotationSnapshot()
+      await refreshFilterTagSnapshots()
       pushDeleteUndoBatch(deleteUndoBatch)
       return
     }
@@ -2375,7 +2435,7 @@ export function WorkspaceShell({
     }
 
     await navigateToPath(currentPath)
-    await refreshAnnotationSnapshot()
+    await refreshFilterTagSnapshots()
     pushDeleteUndoBatch(deleteUndoBatch)
   }, [
     activeSurface,
@@ -2388,7 +2448,7 @@ export function WorkspaceShell({
     previewFile,
     pushDeleteUndoBatch,
     pruneDeletedFilesFromProjectionTabs,
-    refreshAnnotationSnapshot,
+    refreshFilterTagSnapshots,
     resolveNextFileAfterDelete,
     selectedFile,
     openFileInPrimaryTarget,
@@ -2843,15 +2903,21 @@ export function WorkspaceShell({
   }, [accessProvider, files, rootHandle])
 
   useEffect(() => {
-    void preloadAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: rootName,
-    })
+    void Promise.all([
+      preloadAnnotationDisplaySnapshot({
+        rootId,
+        rootHandle,
+        rootLabel: rootName,
+      }),
+      preloadReviewFilterTagSnapshot({
+        rootId,
+        rootHandle,
+      }),
+    ])
   }, [rootHandle, rootId, rootName])
 
   useEffect(() => {
-    if (!isAnnotationFilterGateResolved || showAnnotationFilterControls) return
+    if (!isAnnotationFilterGateResolved || !isReviewFilterGateResolved || showAnnotationFilterControls) return
     setFilter((previous) => {
       if (isAnnotationFilterAtDefault(previous)) return previous
       return {
@@ -2862,7 +2928,7 @@ export function WorkspaceShell({
         annotationExcludeTagKeys: [],
       }
     })
-  }, [isAnnotationFilterGateResolved, showAnnotationFilterControls])
+  }, [isAnnotationFilterGateResolved, isReviewFilterGateResolved, showAnnotationFilterControls])
 
   useEffect(() => {
     let disposed = false

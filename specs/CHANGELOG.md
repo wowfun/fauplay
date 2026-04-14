@@ -1,7 +1,12 @@
 # CHANGELOG
 
+## 2026-04-15
+### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md`：收紧空名人物的显示与搜索语义，要求人物功能链路统一显示 `未命名 <personId前8位>`，并要求人物列表搜索与统一人物归属输入框同时匹配真实 `person.name` 和该占位显示名。
+
 ## 2026-04-14
 ### Changed
+- 更新 `specs/119-person-management-face-correction/spec.md` 与 `specs/003-ui-ux/top-toolbar-tag-filter.md`：将人物管理中的 `未归属`、`误检/忽略` 收敛为顶部工具栏标签过滤可选的虚拟候选项，按文件级 face review bucket 匹配结果集，并明确其不参与真实 annotation 来源/键分面，也不写回 sidecar 或 `vision.face`。
 - 更新 `specs/119-person-management-face-correction/spec.md`：将预览单脸纠错与人物工作台批量整理中的“归属已有 + 新建人物”收敛为统一人物归属输入框，固定为实时人物补全、精确重名隐藏新建动作、无精确重名时显示“新建并归入”，同时保留人物列表搜索、重命名与合并目标搜索为独立输入。
 - 更新 `specs/119-person-management-face-correction/spec.md`：收紧人物详情双击来源跳转语义，要求文件网格与右侧预览必须同时定位到同一个来源图片/视频，不得因目录切换或预览遍历回退到随机文件或目录首项。
 

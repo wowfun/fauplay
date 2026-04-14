@@ -16,6 +16,7 @@ import {
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
 import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
+import { getLegacyAwarePersonDisplayName, getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { GRID_SELECTABLE_ITEM_ATTR, useGridSelection } from '@/hooks/useGridSelection'
 import { Button } from '@/ui/Button'
@@ -34,10 +35,6 @@ interface PeoplePanelProps {
   onClose: () => void
   onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
   onProjectFaceSources?: (faces: FaceRecord[]) => boolean | Promise<boolean>
-}
-
-function displayPersonName(person: Pick<PersonSummary, 'personId' | 'name'>): string {
-  return person.name.trim() || `(未命名 ${person.personId.slice(0, 8)})`
 }
 
 function statusLabel(status: FaceRecord['status']): string {
@@ -216,7 +213,12 @@ function FaceGrid({
         const frameTs = formatFrameTsMs(face.frameTsMs)
         const sourcePath = face.assetPath || '未知路径'
         const statusText = statusLabel(face.status)
-        const personText = face.personId && face.personName ? face.personName : '未归属'
+        const personText = face.personId
+          ? getLegacyAwarePersonDisplayName({
+            personId: face.personId,
+            name: face.personName,
+          })
+          : '未归属'
         return (
           <button
             key={face.faceId}
@@ -324,7 +326,7 @@ export function PeoplePanel({
           if (person.personId === selectedPersonId) return false
           if (!query) return true
           return (
-            displayPersonName(person).toLowerCase().includes(query)
+            getPersonDisplayName(person).toLowerCase().includes(query)
             || person.personId.toLowerCase().includes(query)
             || (person.featureAssetPath ?? '').toLowerCase().includes(query)
           )
@@ -864,7 +866,7 @@ export function PeoplePanel({
                                 faceId={person.featureFaceId}
                                 size={72}
                                 padding={0.35}
-                                alt={displayPersonName(person)}
+                                alt={getPersonDisplayName(person)}
                                 className="h-[72px] w-[72px] shrink-0 rounded-lg border border-border object-cover"
                               />
                             ) : (
@@ -873,7 +875,7 @@ export function PeoplePanel({
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium">{displayPersonName(person)}</div>
+                              <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
                               <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
                               {person.featureAssetPath && (
                                 <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
@@ -908,7 +910,7 @@ export function PeoplePanel({
                               faceId={selectedPerson.featureFaceId}
                               size={88}
                               padding={0.35}
-                              alt={displayPersonName(selectedPerson)}
+                              alt={getPersonDisplayName(selectedPerson)}
                               className="h-[88px] w-[88px] shrink-0 rounded-lg border border-border object-cover"
                             />
                           ) : (
@@ -917,7 +919,7 @@ export function PeoplePanel({
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-base font-semibold">{displayPersonName(selectedPerson)}</div>
+                            <div className="truncate text-base font-semibold">{getPersonDisplayName(selectedPerson)}</div>
                             <div className="mt-1 text-sm text-muted-foreground">{faceCountText(selectedPerson, scope)}</div>
                             {selectedPerson.featureAssetPath && (
                               <div className="mt-2 truncate text-xs text-muted-foreground" title={selectedPerson.featureAssetPath}>
@@ -992,7 +994,7 @@ export function PeoplePanel({
                                           faceId={person.featureFaceId}
                                           size={64}
                                           padding={0.35}
-                                          alt={displayPersonName(person)}
+                                          alt={getPersonDisplayName(person)}
                                           className="h-14 w-14 shrink-0 rounded-md border border-border object-cover"
                                         />
                                       ) : (
@@ -1001,7 +1003,7 @@ export function PeoplePanel({
                                         </div>
                                       )}
                                       <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium">{displayPersonName(person)}</div>
+                                        <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
                                         <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
                                         {person.featureAssetPath && (
                                           <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
@@ -1327,7 +1329,7 @@ export function PeoplePanel({
                             )}
                             onClick={() => handleSelectPerson(person.personId)}
                           >
-                            <div className="truncate text-sm font-medium">{displayPersonName(person)}</div>
+                            <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
                             <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
                             {person.featureAssetPath && (
                               <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
@@ -1347,7 +1349,7 @@ export function PeoplePanel({
                   <div className="mb-4 space-y-4 rounded-md border border-border p-4">
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="text-lg font-semibold">{displayPersonName(selectedPerson)}</div>
+                        <div className="text-lg font-semibold">{getPersonDisplayName(selectedPerson)}</div>
                         <div className="text-sm text-muted-foreground">{faceCountText(selectedPerson, scope)}</div>
                       </div>
                       {selectedPerson.featureFaceId && (
@@ -1355,7 +1357,7 @@ export function PeoplePanel({
                           faceId={selectedPerson.featureFaceId}
                           size={112}
                           padding={0.35}
-                          alt={selectedPerson.personId}
+                          alt={getPersonDisplayName(selectedPerson)}
                           className="h-20 w-20 rounded-md border border-border object-cover"
                         />
                       )}
@@ -1420,7 +1422,7 @@ export function PeoplePanel({
                                         faceId={person.featureFaceId}
                                         size={80}
                                         padding={0.35}
-                                        alt={displayPersonName(person)}
+                                        alt={getPersonDisplayName(person)}
                                         className="h-14 w-14 shrink-0 rounded-md border border-border object-cover"
                                       />
                                     ) : (
@@ -1429,7 +1431,7 @@ export function PeoplePanel({
                                       </div>
                                     )}
                                     <div className="min-w-0 flex-1">
-                                      <div className="truncate text-sm font-medium">{displayPersonName(person)}</div>
+                                      <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
                                       <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
                                       {person.featureAssetPath && (
                                         <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>

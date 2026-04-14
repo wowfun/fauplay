@@ -48,6 +48,8 @@ export type ThumbnailSizePreset = 'auto' | '256' | '512'
 export type AnnotationFilterMode = 'all' | 'boolean'
 export type AnnotationIncludeMatchMode = 'or' | 'and'
 export const ANNOTATION_FILTER_UNANNOTATED_TAG_KEY = '__ANNOTATION_UNANNOTATED__'
+export const ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY = '__PEOPLE_REVIEW_UNASSIGNED__'
+export const ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY = '__PEOPLE_REVIEW_IGNORED__'
 
 export interface AnnotationFilterTagOption {
   tagKey: string

@@ -12,6 +12,7 @@ import {
 import type { FaceMutationResult, PersonSuggestion, PreviewFaceOverlayItem } from '@/features/faces/types'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
 import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
+import { getLegacyAwarePersonDisplayName, getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { Button } from '@/ui/Button'
 
 interface PreviewFaceCorrectionPanelProps {
@@ -29,10 +30,6 @@ function statusLabel(status: PreviewFaceOverlayItem['status']): string {
   if (status === 'deferred') return '待自动聚类'
   if (status === 'ignored') return '误检/忽略'
   return '未归属'
-}
-
-function displayPersonName(person: Pick<PersonSuggestion, 'personId' | 'name'>): string {
-  return person.name.trim() || `人物 ${person.personId.slice(0, 8)}`
 }
 
 export function PreviewFaceCorrectionPanel({
@@ -197,7 +194,12 @@ export function PreviewFaceCorrectionPanel({
         />
         <div className="min-w-0 flex-1 space-y-1 text-xs">
           <div className="truncate text-foreground">
-            当前人物：{face.personId && face.personName ? face.personName : '未归属'}
+            当前人物：{face.personId
+              ? getLegacyAwarePersonDisplayName({
+                personId: face.personId,
+                name: face.personName,
+              })
+              : '未归属'}
           </div>
           <div className="truncate text-muted-foreground">
             路径：{face.assetPath || '未知路径'}
@@ -247,7 +249,7 @@ export function PreviewFaceCorrectionPanel({
               }}
             >
               <div className="min-w-0">
-                <div className="truncate text-sm">{displayPersonName(item)}</div>
+                <div className="truncate text-sm">{getPersonDisplayName(item)}</div>
                 <div className="text-xs text-muted-foreground">
                   相似度 {item.score.toFixed(2)}
                 </div>

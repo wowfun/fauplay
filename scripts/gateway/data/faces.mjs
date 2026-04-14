@@ -162,6 +162,31 @@ function toDisplayPersonName(personId, name) {
   return `人物 ${String(personId || '').slice(0, 8)}`
 }
 
+function toUnnamedPersonSearchLabel(personId) {
+  return `未命名 ${String(personId || '').slice(0, 8)}`
+}
+
+function toLegacyBracketUnnamedPersonSearchLabel(personId) {
+  return `(${toUnnamedPersonSearchLabel(personId)})`
+}
+
+function personMatchesPeopleQuery(personId, name, query) {
+  if (!query) return true
+
+  const normalizedName = typeof name === 'string' ? name.trim().toLowerCase() : ''
+  if (normalizedName && normalizedName.includes(query)) {
+    return true
+  }
+
+  const unnamedAliases = [
+    toUnnamedPersonSearchLabel(personId),
+    toDisplayPersonName(personId, ''),
+    toLegacyBracketUnnamedPersonSearchLabel(personId),
+  ].map((item) => item.toLowerCase())
+
+  return unnamedAliases.some((item) => item.includes(query))
+}
+
 function normalizeFaceMediaType(value) {
   return value === 'video' ? 'video' : 'image'
 }
@@ -1135,7 +1160,7 @@ export async function listPeople(params) {
       }
 
       const name = typeof row.name === 'string' ? row.name : ''
-      if (query && !name.toLowerCase().includes(query)) {
+      if (!personMatchesPeopleQuery(row.id, name, query)) {
         return []
       }
 

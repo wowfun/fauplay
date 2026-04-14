@@ -20,6 +20,8 @@ import {
   X,
 } from 'lucide-react'
 import {
+  ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY,
+  ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY,
   ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AddressPathHistoryEntry,
   type AnnotationFilterTagOption,
@@ -110,11 +112,19 @@ function annotationTagDisplayLabel(option: AnnotationFilterTagOption): string {
   if (option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
     return '未标注'
   }
+  if (option.tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY) {
+    return '人物管理: 未归属'
+  }
+  if (option.tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY) {
+    return '人物管理: 误检/忽略'
+  }
   return `${option.key}: ${option.value}`
 }
 
-function isUnannotatedAnnotationTagOption(option: AnnotationFilterTagOption): boolean {
+function isSpecialAnnotationTagOption(option: AnnotationFilterTagOption): boolean {
   return option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY
+    || option.tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY
+    || option.tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY
 }
 
 function compareAnnotationSource(left: string, right: string): number {
@@ -133,7 +143,7 @@ function buildAnnotationSourceFacetOptions(
 ): string[] {
   const sourceSet = new Set<string>()
   for (const option of options) {
-    if (isUnannotatedAnnotationTagOption(option)) continue
+    if (isSpecialAnnotationTagOption(option)) continue
     if (selectedKeyFacet && option.key !== selectedKeyFacet) continue
     option.sources.forEach((source) => sourceSet.add(source))
   }
@@ -146,7 +156,7 @@ function buildAnnotationKeyFacetOptions(
 ): string[] {
   const keySet = new Set<string>()
   for (const option of options) {
-    if (isUnannotatedAnnotationTagOption(option)) continue
+    if (isSpecialAnnotationTagOption(option)) continue
     if (selectedSourceFacet && !option.sources.includes(selectedSourceFacet)) continue
     keySet.add(option.key)
   }
@@ -158,7 +168,7 @@ function matchesAnnotationTagFacets(
   selectedSourceFacet: string,
   selectedKeyFacet: string
 ): boolean {
-  if (isUnannotatedAnnotationTagOption(option)) {
+  if (isSpecialAnnotationTagOption(option)) {
     return !selectedSourceFacet && !selectedKeyFacet
   }
   if (selectedSourceFacet && !option.sources.includes(selectedSourceFacet)) {

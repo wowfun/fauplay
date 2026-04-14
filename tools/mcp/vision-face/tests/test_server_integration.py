@@ -335,6 +335,70 @@ class VisionFaceServerTests(unittest.TestCase):
                     )
                     self.assertGreater(int(people_result.get("total", 0)), 0)
 
+    def test_gateway_list_people_matches_unnamed_person_aliases(self):
+        with temp_config_copy({"videoMinScore": 0.7}) as config_path:
+            image_path, _ = self.select_detectable_image(config_path)
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_root = Path(tmp_dir)
+                home_dir = tmp_root / "home"
+                home_dir.mkdir(parents=True, exist_ok=True)
+
+                relative_path = image_path.relative_to(TEST_ROOT).as_posix()
+                with gateway_process(home_dir, config_path) as base_url:
+                    detect_result = json_request(
+                        "POST",
+                        f"{base_url}/v1/faces/detect-asset",
+                        {
+                            "rootPath": str(TEST_ROOT.resolve()),
+                            "relativePath": relative_path,
+                            "runCluster": True,
+                        },
+                    )
+                    self.assertGreater(int(detect_result.get("cluster", {}).get("assigned", 0)), 0, detect_result)
+
+                    people_result = json_request(
+                        "POST",
+                        f"{base_url}/v1/faces/list-people",
+                        {
+                            "page": 1,
+                            "size": 50,
+                        },
+                    )
+                    person = people_result["items"][0]
+                    person_id = str(person["personId"])
+                    person_id_prefix = person_id[:8]
+
+                    json_request(
+                        "POST",
+                        f"{base_url}/v1/faces/rename-person",
+                        {
+                            "personId": person_id,
+                            "name": "",
+                        },
+                    )
+
+                    for query in (
+                        "未命名",
+                        f"未命名 {person_id_prefix}",
+                        f"人物 {person_id_prefix}",
+                        f"(未命名 {person_id_prefix})",
+                    ):
+                        filtered_result = json_request(
+                            "POST",
+                            f"{base_url}/v1/faces/list-people",
+                            {
+                                "page": 1,
+                                "size": 50,
+                                "query": query,
+                            },
+                        )
+                        self.assertGreater(int(filtered_result.get("total", 0)), 0, filtered_result)
+                        self.assertTrue(
+                            any(item.get("personId") == person_id for item in filtered_result["items"]),
+                            filtered_result,
+                        )
+
     def test_gateway_single_unknown_video_run_cluster_defers(self):
         with temp_config_copy({"videoMinScore": 0.7}) as config_path:
             image_path, _ = self.select_detectable_image(config_path)
