@@ -28,7 +28,7 @@ function resolveDevHttpsOptions() {
         'FAUPLAY_DEV_HTTPS is enabled but the local HTTPS certificate files are missing.',
         `Expected cert: ${certPath}`,
         `Expected key: ${keyPath}`,
-        'Run `npm run dev:https:setup` first, then retry `npm run dev:https`.',
+        'Run `pnpm run dev:https:setup` first, then retry `pnpm run dev:https`.',
       ].join('\n')
     )
   }

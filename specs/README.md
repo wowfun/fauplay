@@ -40,6 +40,7 @@
 ## 当前专题入口（示例）
 
 - 安全基线规范：[`006-security/spec.md`](./006-security/spec.md)
+- 包管理规范：[`007-package-management/spec.md`](./007-package-management/spec.md)
 - 地址栏导航专题：[`102-address-bar-navigation/spec.md`](./102-address-bar-navigation/spec.md)
 - 收藏夹目录专题：[`110-folder-favorites/spec.md`](./110-folder-favorites/spec.md)
 - 本地文件浏览器专题（含底部结果面板）：[`111-local-file-browser/spec.md`](./111-local-file-browser/spec.md)

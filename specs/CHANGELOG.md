@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-06-20
+### Added
+- 新增 `specs/007-package-management/spec.md`：定义 Fauplay JavaScript 包管理器真源为 `pnpm`，锁文件真源为 `pnpm-lock.yaml`，并固定开发者脚本入口与安装期 build script 审批口径。
+
+### Changed
+- 更新 `specs/README.md` 与 `specs/004-performance-governance/spec.md`：补充包管理规范入口，并将开发冷启动命令口径切换为 `pnpm run dev`。
+
 ## 2026-04-15
 ### Changed
 - 更新 `specs/119-person-management-face-correction/spec.md`：收紧空名人物的显示与搜索语义，要求人物功能链路统一显示 `未命名 <personId前8位>`，并要求人物列表搜索与统一人物归属输入框同时匹配真实 `person.name` 和该占位显示名。

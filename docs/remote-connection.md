@@ -87,7 +87,7 @@ FAUPLAY_REMOTE_MAX_RANGE_BYTES=16777216
 ### 2.3 启动 Gateway
 
 ```bash
-npm run gateway
+pnpm run gateway
 ```
 
 如果 `remote-access.enabled=false`、roots 配置非法，或 `FAUPLAY_REMOTE_ACCESS_TOKEN` 缺失，远程入口会处于不可用状态。

@@ -23,16 +23,16 @@
 方式 A（先开 Inspector，再在界面配置连接）：
 
 ```bash
-npx @modelcontextprotocol/inspector
+pnpm dlx @modelcontextprotocol/inspector
 ```
 
 方式 B（命令行直接附带 server 启动命令）：
 
 ```bash
-npx @modelcontextprotocol/inspector <command> <arg1> <arg2> ...
+pnpm dlx @modelcontextprotocol/inspector <command> <arg1> <arg2> ...
 ```
 
-说明：若网络较慢，`npx` 首次拉取依赖可能耗时较长。
+说明：若网络较慢，`pnpm dlx` 首次拉取依赖可能耗时较长。
 
 ## 4. Stdio 连接参数填写规则
 

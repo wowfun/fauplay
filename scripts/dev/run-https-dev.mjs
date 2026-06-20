@@ -12,12 +12,12 @@ const VITE_BIN_PATH = path.resolve(PROJECT_ROOT, 'node_modules', 'vite', 'bin', 
 function main() {
   if (!fs.existsSync(SERVER_KEY_PATH) || !fs.existsSync(SERVER_CERT_PATH)) {
     console.error('[dev:https] Missing local HTTPS certificate files.')
-    console.error('[dev:https] Run `npm run dev:https:setup` first.')
+    console.error('[dev:https] Run `pnpm run dev:https:setup` first.')
     process.exit(1)
   }
 
   if (!fs.existsSync(VITE_BIN_PATH)) {
-    console.error('[dev:https] Vite is not installed. Run `npm install` first.')
+    console.error('[dev:https] Vite is not installed. Run `pnpm install` first.')
     process.exit(1)
   }
 

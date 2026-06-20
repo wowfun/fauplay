@@ -41,14 +41,14 @@ explorer.exe .
 4. 重新启动网关：
 
 ```bash
-npm run gateway
+pnpm run gateway
 ```
 
 ## 1.1) 网关端口被占用（`EADDRINUSE`）
 
 ### 现象
 
-- 启动 `npm run gateway` 时报错：`listen EADDRINUSE: address already in use 127.0.0.1:3210`
+- 启动 `pnpm run gateway` 时报错：`listen EADDRINUSE: address already in use 127.0.0.1:3210`
 - 或 `curl /v1/health` 返回非网关响应（例如旧 helper 返回 `Not found`）
 - 或 `POST /v1/mcp` 的 `tools/list` 返回 `-32600`（说明未完成 MCP 初始化生命周期）
 - 或 `POST /v1/mcp` 的 `tools/list` 返回 404/非 JSON-RPC 响应（说明你连到的是旧服务）
@@ -69,7 +69,7 @@ ss -ltnp | rg 3210
 
 ```bash
 kill <PID>
-npm run gateway
+pnpm run gateway
 ```
 
 3. 验证 MCP 路由（按生命周期顺序）：
@@ -272,8 +272,8 @@ sudo -S mount -t drvfs <DRIVE>: /mnt/<drive>
 1. 先确认本地 `HTTPS` 联调链路本身是通的：
 
 ```bash
-npm run gateway
-npm run dev:https
+pnpm run gateway
+pnpm run dev:https
 ```
 
 2. 先在 Windows 本机浏览器确认 `https://localhost:5173` 可正常打开，并且证书已受信任。
@@ -323,7 +323,7 @@ firewall=true
 wsl --shutdown
 ```
 
-然后重新启动 `npm run gateway` 与 `npm run dev:https`。
+然后重新启动 `pnpm run gateway` 与 `pnpm run dev:https`。
 
 ### 清理临时规则
 

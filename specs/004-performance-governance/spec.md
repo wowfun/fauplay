@@ -15,7 +15,7 @@
 
 术语口径：
 
-1. `Dev Cold Start`：从执行 `npm run dev` 到本地开发页面可首次成功访问的时间。
+1. `Dev Cold Start`：从执行 `pnpm run dev` 到本地开发页面可首次成功访问的时间。
 2. `Start Page Visible Time`：浏览器发起页面刷新到开始页（目录选择界面）出现可见主标题的时间。
 3. `Interaction Latency`：用户触发交互动作到对应 UI 可见反馈出现的时间。
 4. `P50/P95`：样本集合的 50/95 分位值，用于表达典型体验与尾部体验。

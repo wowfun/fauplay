@@ -58,7 +58,7 @@ Fauplay 默认 MCP 注册会使用项目内的 `.venv/bin/python` 启动 `timm-c
 ## 4. 启动网关
 
 ```bash
-npm run gateway
+pnpm run gateway
 ```
 
 ## 5. MCP 验证

@@ -22,10 +22,10 @@
 
 ## 方案概览
 
-- `npm run dev:https:setup`
+- `pnpm run dev:https:setup`
   - 生成本地开发用 CA 与服务器证书
   - 默认输出到 `.cache/dev-https/`
-- `npm run dev:https`
+- `pnpm run dev:https`
   - 以 `HTTPS` 启动 Vite
   - 默认监听 `0.0.0.0`
   - dev-only 地将同源 `/v1/*` 代理到本机 loopback Gateway
@@ -40,25 +40,25 @@
 1. 安装依赖。
 
 ```bash
-npm install
+pnpm install
 ```
 
 2. 生成本地 CA 与服务器证书。
 
 ```bash
-npm run dev:https:setup
+pnpm run dev:https:setup
 ```
 
 3. 如果脚本未自动识别到你的局域网 IP，可手工补充。
 
 ```bash
-npm run dev:https:setup -- --ip=192.168.1.23
+pnpm run dev:https:setup -- --ip=192.168.1.23
 ```
 
 也可以同时补充额外主机名：
 
 ```bash
-npm run dev:https:setup -- --ip=192.168.1.23 --dns=fauplay-dev.local
+pnpm run dev:https:setup -- --ip=192.168.1.23 --dns=fauplay-dev.local
 ```
 
 ## 启动方式
@@ -66,19 +66,19 @@ npm run dev:https:setup -- --ip=192.168.1.23 --dns=fauplay-dev.local
 先启动 Gateway：
 
 ```bash
-npm run gateway
+pnpm run gateway
 ```
 
 再启动 HTTPS 前端：
 
 ```bash
-npm run dev:https
+pnpm run dev:https
 ```
 
 如需自定义端口或 host，可把参数继续传给 Vite：
 
 ```bash
-npm run dev:https -- --host 0.0.0.0 --port 5174
+pnpm run dev:https -- --host 0.0.0.0 --port 5174
 ```
 
 补充说明：
@@ -108,7 +108,7 @@ https://<你的局域网IP>:5173
 ## 注意事项
 
 - 如果手机仍然提示证书不受信任，优先检查是否导入并信任了 `ca-cert.crt`，以及服务器证书是否覆盖了当前访问 IP。
-- 重新换网、换 IP 或增加新的访问地址后，建议重新执行一次 `npm run dev:https:setup`。
+- 重新换网、换 IP 或增加新的访问地址后，建议重新执行一次 `pnpm run dev:https:setup`。
 - 如果文件列表正常但人物 face crop 失败，优先确认当前仍在正确的 remote root 下；远程 `face crop` 当前要求带上 `rootId` 并通过 root 作用域校验。
 - 如果 `flattenView`、缩略图或超大视频拖动请求被拒绝，先检查是否命中了服务端预算上界；这通常是受控失败，不是前端随机异常。
 - 若只想验证远程只读链路，不需要在手机端开放本地浏览器的 File System Access 能力。
