@@ -4,6 +4,7 @@ node_modules/
 .pnp.js
 
 # Dev
+.local/
 .references/
 
 # Build
@@ -42,7 +43,5 @@ __pycache__/
 
 # Local
 .fauplay/
-.codex
 tools/mcp-local/
-_local
 .cache/
