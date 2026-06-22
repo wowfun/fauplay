@@ -1,5 +1,10 @@
 import { ensureRootPath } from '@/lib/reveal'
 import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
+import {
+  moveRuntimePathToRootTrash,
+  restoreRuntimePathFromRootTrash,
+  type RuntimeRootTrashResponse,
+} from '@/lib/runtimeApi'
 
 export type SystemToolName = string
 
@@ -26,6 +31,8 @@ interface DispatchHttpRoute {
   payload: Record<string, unknown>
   timeoutMs?: number
 }
+
+type RuntimeRootTrashOperation = 'move' | 'restore'
 
 function toToolError(error: unknown): { message: string; code?: string } {
   if (error instanceof Error) {
@@ -65,6 +72,206 @@ function isStringArray(value: unknown): value is string[] {
 
 function isObjectArray(value: unknown): value is Record<string, unknown>[] {
   return Array.isArray(value) && value.every((item) => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+}
+
+function normalizeRootRelativePath(value: string): string {
+  return value.replace(/\\/g, '/').split('/').filter(Boolean).join('/')
+}
+
+function normalizeAbsolutePath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, '/')
+  if (!normalized) return ''
+  if (normalized === '/' || /^[a-zA-Z]:\/$/.test(normalized)) {
+    return normalized
+  }
+  return normalized.replace(/\/+$/, '')
+}
+
+function toRelativePathWithinRoot(rootPath: string, absolutePath: string): string | null {
+  const normalizedRootPath = normalizeAbsolutePath(rootPath)
+  const normalizedAbsolutePath = normalizeAbsolutePath(absolutePath)
+  if (!normalizedRootPath || !normalizedAbsolutePath) {
+    return null
+  }
+  if (normalizedAbsolutePath === normalizedRootPath) {
+    return ''
+  }
+  const prefix = `${normalizedRootPath}/`
+  if (!normalizedAbsolutePath.startsWith(prefix)) {
+    return null
+  }
+  return normalizeRootRelativePath(normalizedAbsolutePath.slice(prefix.length))
+}
+
+function compactRootRelativePaths(paths: string[]): string[] {
+  let compacted: string[] = []
+
+  for (const pathItem of paths) {
+    if (compacted.includes(pathItem)) continue
+    if (compacted.some((existing) => pathItem === existing || pathItem.startsWith(`${existing}/`))) continue
+
+    compacted = compacted.filter((existing) => !(existing === pathItem || existing.startsWith(`${pathItem}/`)))
+    compacted.push(pathItem)
+  }
+
+  return compacted
+}
+
+function readRootRelativePaths(args: Record<string, unknown>): string[] | null {
+  const hasRelativePath = Object.prototype.hasOwnProperty.call(args, 'relativePath')
+  const hasRelativePaths = Object.prototype.hasOwnProperty.call(args, 'relativePaths')
+  if (hasRelativePath && hasRelativePaths) {
+    return null
+  }
+
+  if (hasRelativePath && typeof args.relativePath === 'string') {
+    const normalized = normalizeRootRelativePath(args.relativePath)
+    return normalized ? [normalized] : null
+  }
+
+  if (hasRelativePaths && isStringArray(args.relativePaths)) {
+    const normalizedPaths = args.relativePaths
+      .map((item) => normalizeRootRelativePath(item))
+      .filter((item) => item)
+    return normalizedPaths.length > 0 ? compactRootRelativePaths(normalizedPaths) : null
+  }
+
+  return null
+}
+
+function readMoveRootRelativePaths(args: Record<string, unknown>, rootPath: string): string[] | null {
+  const relativePaths = readRootRelativePaths(args)
+  if (relativePaths) {
+    return relativePaths
+  }
+
+  if (!isStringArray(args.absolutePaths)) {
+    return null
+  }
+
+  const paths = args.absolutePaths
+    .map((absolutePath) => toRelativePathWithinRoot(rootPath, absolutePath))
+    .filter((item): item is string => Boolean(item))
+  if (paths.length !== args.absolutePaths.length) {
+    return null
+  }
+
+  return compactRootRelativePaths(paths)
+}
+
+function readRestoreRootRelativePaths(args: Record<string, unknown>, rootPath: string): string[] | null {
+  const relativePaths = readRootRelativePaths(args)
+  if (relativePaths) {
+    return relativePaths
+  }
+
+  if (!isObjectArray(args.items)) {
+    return null
+  }
+
+  const paths: string[] = []
+  for (const item of args.items) {
+    if (item.sourceType !== 'root_trash') {
+      return null
+    }
+    const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
+    if (!absolutePath) {
+      return null
+    }
+    const relativePath = toRelativePathWithinRoot(rootPath, absolutePath)
+    if (!relativePath || !relativePath.startsWith('.trash/')) {
+      return null
+    }
+    paths.push(relativePath)
+  }
+
+  return paths.length > 0 ? compactRootRelativePaths(paths) : null
+}
+
+function mapRuntimeFailureReason(operation: RuntimeRootTrashOperation, reason: string | null): string | undefined {
+  if (!reason) return undefined
+
+  if (operation === 'restore') {
+    if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
+    if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
+    if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
+    if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
+    return 'RESTORE_FAILED'
+  }
+
+  if (reason === 'invalid_source') return 'SOFT_DELETE_INVALID_SOURCE'
+  if (reason === 'source_not_found') return 'SOFT_DELETE_SOURCE_NOT_FOUND'
+  if (reason === 'unsupported_kind') return 'SOFT_DELETE_UNSUPPORTED_KIND'
+  if (reason === 'target_exists') return 'SOFT_DELETE_TARGET_EXISTS'
+  return 'SOFT_DELETE_FAILED'
+}
+
+function toRuntimeRootTrashToolResult(
+  response: RuntimeRootTrashResponse,
+  operation: RuntimeRootTrashOperation,
+): ToolCallResult {
+  const items = response.items.map((item) => ({
+    sourceType: 'root_trash',
+    relativePath: item.rootRelativePath,
+    nextRelativePath: item.nextRootRelativePath ?? undefined,
+    absolutePath: item.absolutePath,
+    nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+    ok: item.ok,
+    skipped: false,
+    reasonCode: mapRuntimeFailureReason(operation, item.reason),
+    error: item.error ?? undefined,
+  }))
+  const movedOrRestored = items.filter((item) => item.ok === true && item.skipped !== true).length
+  const failed = items.filter((item) => item.ok !== true && item.skipped !== true).length
+
+  return {
+    ok: true,
+    dryRun: response.dryRun,
+    total: items.length,
+    ...(operation === 'restore' ? { restored: movedOrRestored } : { moved: movedOrRestored }),
+    skipped: 0,
+    failed,
+    items,
+  }
+}
+
+async function dispatchRuntimeRootTrash(
+  toolName: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<ToolCallResult | null> {
+  const rootPath = typeof args.rootPath === 'string' ? args.rootPath.trim() : ''
+  if (!rootPath) {
+    return null
+  }
+
+  if (toolName === 'fs.softDelete') {
+    const rootRelativePaths = readMoveRootRelativePaths(args, rootPath)
+    if (!rootRelativePaths) {
+      return null
+    }
+    const response = await moveRuntimePathToRootTrash({
+      rootPath,
+      rootRelativePath: rootRelativePaths,
+      dryRun: args.confirm === false,
+    }, timeoutMs)
+    return toRuntimeRootTrashToolResult(response, 'move')
+  }
+
+  if (toolName === 'fs.restore') {
+    const rootRelativePaths = readRestoreRootRelativePaths(args, rootPath)
+    if (!rootRelativePaths) {
+      return null
+    }
+    const response = await restoreRuntimePathFromRootTrash({
+      rootPath,
+      rootRelativePath: rootRelativePaths,
+      dryRun: args.confirm === false,
+    }, timeoutMs)
+    return toRuntimeRootTrashToolResult(response, 'restore')
+  }
+
+  return null
 }
 
 function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown>): DispatchHttpRoute | null {
@@ -315,7 +522,8 @@ export async function dispatchSystemTool({
       rootPath,
       ...(additionalArgs ?? {}),
     }
-    const httpRoute = resolveDispatchHttpRoute(toolName, argsPayload)
+    const runtimeRootTrashResult = await dispatchRuntimeRootTrash(toolName, argsPayload, timeoutMs)
+    const httpRoute = runtimeRootTrashResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
     if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''
       return {
@@ -328,14 +536,15 @@ export async function dispatchSystemTool({
       }
     }
 
-    const result = httpRoute
-      ? await callGatewayHttp(
-        httpRoute.endpointPath,
-        httpRoute.payload,
-        typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs,
-        httpRoute.method
-      )
-      : await callGatewayTool(toolName, argsPayload, timeoutMs)
+    const result = runtimeRootTrashResult
+      ?? (httpRoute
+        ? await callGatewayHttp(
+          httpRoute.endpointPath,
+          httpRoute.payload,
+          typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs,
+          httpRoute.method
+        )
+        : await callGatewayTool(toolName, argsPayload, timeoutMs))
 
     return {
       toolName,

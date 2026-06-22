@@ -12,6 +12,12 @@ export interface RuntimeHealthSnapshot {
   runtime: string
 }
 
+export interface RuntimeGlobalShortcutConfigSnapshot {
+  loaded: boolean
+  path: string
+  config: unknown | null
+}
+
 export interface RuntimeDirectoryEntry {
   name: string
   rootRelativePath: string
@@ -70,6 +76,32 @@ export interface RuntimeRootTrashEntry {
 
 export interface RuntimeRootTrashListResponse {
   entries: RuntimeRootTrashEntry[]
+  isTruncated: boolean
+  nextOffset: number | null
+}
+
+export interface RuntimeGlobalTrashListRequest {
+  limit?: number
+  offset?: number
+}
+
+export interface RuntimeGlobalTrashEntry {
+  name: string
+  path: string
+  absolutePath: string
+  size: number
+  mimeType: string
+  previewKind: NonNullable<FileItem['previewKind']>
+  displayPath: string
+  deletedAt: number
+  sourceType: 'global_recycle'
+  recycleId: string
+  originalAbsolutePath: string
+  lastModifiedMs?: number
+}
+
+export interface RuntimeGlobalTrashListResponse {
+  entries: RuntimeGlobalTrashEntry[]
   isTruncated: boolean
   nextOffset: number | null
 }
@@ -185,6 +217,23 @@ function parseRuntimeHealthSnapshot(payload: unknown): RuntimeHealthSnapshot {
   }
 }
 
+function parseRuntimeGlobalShortcutConfigSnapshot(payload: unknown): RuntimeGlobalShortcutConfigSnapshot {
+  if (!isObject(payload)) {
+    throw new RuntimeApiError('Fauplay Runtime global shortcuts response was invalid')
+  }
+
+  const loaded = payload.loaded === true
+  const path = typeof payload.path === 'string' && payload.path.trim()
+    ? payload.path
+    : 'Fauplay Runtime global shortcuts'
+
+  return {
+    loaded,
+    path,
+    config: loaded ? (payload.config ?? null) : null,
+  }
+}
+
 function parseRuntimeDirectoryEntry(value: unknown): RuntimeDirectoryEntry | null {
   if (!isObject(value)) return null
   const name = typeof value.name === 'string' ? value.name.trim() : ''
@@ -237,6 +286,13 @@ function normalizeRootRelativePath(path: string): string {
 export async function loadRuntimeHealth(timeoutMs?: number): Promise<RuntimeHealthSnapshot> {
   const payload = await callRuntimeJson('/v1/health', timeoutMs)
   return parseRuntimeHealthSnapshot(payload)
+}
+
+export async function loadRuntimeGlobalShortcutConfig(
+  timeoutMs?: number,
+): Promise<RuntimeGlobalShortcutConfigSnapshot> {
+  const payload = await callRuntimeJson('/v1/config/shortcuts', timeoutMs)
+  return parseRuntimeGlobalShortcutConfigSnapshot(payload)
 }
 
 export async function listRuntimeLocalDirectory(
@@ -312,6 +368,26 @@ export async function listRuntimeRootTrash(
 
   const payload = await callRuntimeJson(`/v1/root-trash?${query.toString()}`, timeoutMs)
   return parseRuntimeRootTrashListResponse(payload)
+}
+
+export async function listRuntimeGlobalTrash(
+  request: RuntimeGlobalTrashListRequest = {},
+  timeoutMs?: number,
+): Promise<RuntimeGlobalTrashListResponse> {
+  const query = new URLSearchParams()
+  if (typeof request.limit === 'number' && Number.isFinite(request.limit) && request.limit > 0) {
+    query.set('limit', String(Math.trunc(request.limit)))
+  }
+  if (typeof request.offset === 'number' && Number.isFinite(request.offset) && request.offset > 0) {
+    query.set('offset', String(Math.trunc(request.offset)))
+  }
+
+  const queryString = query.toString()
+  const payload = await callRuntimeJson(
+    queryString ? `/v1/global-trash?${queryString}` : '/v1/global-trash',
+    timeoutMs,
+  )
+  return parseRuntimeGlobalTrashListResponse(payload)
 }
 
 export async function moveRuntimePathToRootTrash(
@@ -406,6 +482,68 @@ function parseRuntimeRootTrashListResponse(payload: unknown): RuntimeRootTrashLi
       ? payload.nextOffset
       : null,
   }
+}
+
+function parseRuntimeGlobalTrashListResponse(payload: unknown): RuntimeGlobalTrashListResponse {
+  if (!isObject(payload)) {
+    return {
+      entries: [],
+      isTruncated: false,
+      nextOffset: null,
+    }
+  }
+
+  return {
+    entries: Array.isArray(payload.entries)
+      ? payload.entries
+        .map((entry) => parseRuntimeGlobalTrashEntry(entry))
+        .filter((entry): entry is RuntimeGlobalTrashEntry => entry !== null)
+      : [],
+    isTruncated: payload.isTruncated === true,
+    nextOffset: typeof payload.nextOffset === 'number' && Number.isFinite(payload.nextOffset)
+      ? payload.nextOffset
+      : null,
+  }
+}
+
+function parseRuntimeGlobalTrashEntry(value: unknown): RuntimeGlobalTrashEntry | null {
+  if (!isObject(value)) return null
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  const absolutePath = typeof value.absolutePath === 'string' ? value.absolutePath.trim() : ''
+  const path = typeof value.path === 'string' && value.path.trim()
+    ? value.path.trim()
+    : absolutePath
+  if (!name || !absolutePath || !path) return null
+
+  return {
+    name,
+    path,
+    absolutePath,
+    size: Math.max(0, Math.trunc(toFiniteNumber(value.size) ?? 0)),
+    mimeType: typeof value.mimeType === 'string' && value.mimeType.trim()
+      ? value.mimeType
+      : getMimeType(name),
+    previewKind: parseRuntimePreviewKind(value.previewKind),
+    displayPath: typeof value.displayPath === 'string' && value.displayPath.trim()
+      ? value.displayPath
+      : absolutePath,
+    deletedAt: Math.max(0, Math.trunc(toFiniteNumber(value.deletedAt) ?? 0)),
+    sourceType: 'global_recycle',
+    recycleId: typeof value.recycleId === 'string' ? value.recycleId : '',
+    originalAbsolutePath: typeof value.originalAbsolutePath === 'string'
+      ? value.originalAbsolutePath
+      : '',
+    lastModifiedMs: toFiniteNumber(value.lastModifiedMs),
+  }
+}
+
+function parseRuntimePreviewKind(value: unknown): NonNullable<FileItem['previewKind']> {
+  return (
+    value === 'image'
+    || value === 'video'
+    || value === 'text'
+    || value === 'unsupported'
+  ) ? value : 'unsupported'
 }
 
 function parseRuntimeRootTrashEntry(value: unknown): RuntimeRootTrashEntry | null {
@@ -535,6 +673,34 @@ export function toRuntimeRootTrashFileItems(
       sourceRootPath: rootPath,
       sourceRelativePath: entry.rootRelativePath,
       originalAbsolutePath: entry.originalAbsolutePath,
+      lastModifiedMs,
+      lastModified,
+    }
+  })
+}
+
+export function toRuntimeGlobalTrashFileItems(entries: RuntimeGlobalTrashEntry[]): FileItem[] {
+  return entries.map((entry) => {
+    const lastModifiedMs = typeof entry.lastModifiedMs === 'number'
+      ? entry.lastModifiedMs
+      : entry.deletedAt
+    const lastModified = typeof lastModifiedMs === 'number'
+      ? new Date(lastModifiedMs)
+      : undefined
+
+    return {
+      name: entry.name,
+      path: entry.path,
+      kind: 'file',
+      absolutePath: entry.absolutePath,
+      size: entry.size,
+      mimeType: entry.mimeType,
+      previewKind: entry.previewKind,
+      displayPath: entry.displayPath,
+      deletedAt: entry.deletedAt,
+      sourceType: entry.sourceType,
+      recycleId: entry.recycleId || undefined,
+      originalAbsolutePath: entry.originalAbsolutePath || undefined,
       lastModifiedMs,
       lastModified,
     }

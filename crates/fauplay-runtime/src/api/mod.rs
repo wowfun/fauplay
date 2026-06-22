@@ -87,6 +87,40 @@ pub struct FileContentResponse {
     pub range: Option<FileContentRange>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalShortcutConfigResponse {
+    pub loaded: bool,
+    pub path: PathBuf,
+    pub config_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashListRequest {
+    pub entry_limit: Option<usize>,
+    pub entry_offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashListResponse {
+    pub entries: Vec<GlobalTrashEntry>,
+    pub is_truncated: bool,
+    pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashEntry {
+    pub name: String,
+    pub absolute_path: PathBuf,
+    pub original_absolute_path: PathBuf,
+    pub recycle_id: String,
+    pub size: u64,
+    pub mime_type: String,
+    pub preview_kind: String,
+    pub display_path: String,
+    pub last_modified_ms: Option<u64>,
+    pub deleted_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileContentRangeRequest {
     Exact { start: u64, end_inclusive: u64 },
@@ -317,6 +351,21 @@ impl RuntimeError {
     pub(crate) fn read_file(path: &Path, source: io::Error) -> Self {
         Self {
             message: format!("failed to read file {}: {source}", path.display()),
+        }
+    }
+
+    pub(crate) fn invalid_config(path: &Path, message: &str) -> Self {
+        Self {
+            message: format!(
+                "invalid global shortcut config {}: {message}",
+                path.display()
+            ),
+        }
+    }
+
+    pub(crate) fn invalid_runtime_home_file(path: &Path, message: &str) -> Self {
+        Self {
+            message: format!("invalid Runtime Home file {}: {message}", path.display()),
         }
     }
 

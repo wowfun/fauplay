@@ -11,7 +11,7 @@ import {
   type KeyboardShortcuts,
   type ParsedShortcutConfigLayer,
 } from '@/config/shortcuts'
-import { loadGlobalShortcutConfig } from '@/lib/gateway'
+import { loadRuntimeGlobalShortcutConfig } from '@/lib/runtimeApi'
 
 const ROOT_SHORTCUTS_DIRECTORY = '.fauplay'
 const ROOT_SHORTCUTS_FILENAME = 'shortcuts.json'
@@ -135,7 +135,7 @@ async function ensureGlobalShortcutLayerLoaded() {
   globalLoadState = 'loading'
   globalLoadPromise = (async () => {
     try {
-      const result = await loadGlobalShortcutConfig()
+      const result = await loadRuntimeGlobalShortcutConfig()
       if (!result.loaded || result.config === null) {
         globalShortcutLayer = null
       } else {
@@ -147,7 +147,7 @@ async function ensureGlobalShortcutLayerLoaded() {
     } catch (error) {
       globalLoadState = 'error'
       globalShortcutLayer = null
-      emitWarnings([`~/.fauplay/global/shortcuts.json: ${toErrorMessage(error)}`])
+      emitWarnings([`Fauplay Runtime global shortcuts: ${toErrorMessage(error)}`])
     } finally {
       globalLoadPromise = null
       rebuildShortcutSnapshot()

@@ -85,6 +85,116 @@ fn runtime_api_reports_health() {
 }
 
 #[test]
+fn runtime_api_loads_global_shortcut_config() {
+    let fixture = Fixture::new("runtime_api_loads_global_shortcut_config");
+    fixture.write_file(
+        "global/shortcuts.json",
+        r#"{"version":1,"keybinds":{"preview_next":["n"]}}"#,
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root.clone();
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_shortcut_config_request(&address.to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"loaded\":true"),
+        "response should report loaded config: {response}"
+    );
+    assert!(
+        response.contains("\"config\":{\"version\":1,\"keybinds\":{\"preview_next\":[\"n\"]}}"),
+        "response should include the shortcut config object: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_rejects_invalid_global_shortcut_config() {
+    let fixture = Fixture::new("runtime_api_rejects_invalid_global_shortcut_config");
+    fixture.write_file("global/shortcuts.json", r#"{"version":1,"keybinds":"#);
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_shortcut_config_request(&address.to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"),
+        "response should reject invalid config: {response}"
+    );
+    assert!(
+        response.contains("invalid global shortcut config"),
+        "response should explain the invalid config: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_lists_global_trash_entries() {
+    let fixture = Fixture::new("runtime_api_lists_global_trash_entries");
+    fixture.write_file("global/recycle/files/item-1.jpg", "image");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.jpg");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/photos/original.jpg","name":"original.jpg","size":123,"mimeType":"image/jpeg","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_request(&address.to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"sourceType\":\"global_recycle\""),
+        "response should mark entries as legacy-compatible global recycle items: {response}"
+    );
+    assert!(
+        response.contains("\"recycleId\":\"item-1\""),
+        "response should include the recycle id: {response}"
+    );
+    assert!(
+        response.contains("\"displayPath\":\"/photos/original.jpg\""),
+        "response should include the original display path: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_decodes_query_values_before_listing() {
     let fixture = Fixture::new("runtime api decodes query values");
     fixture.create_dir("albums/2024 photos");
@@ -1056,6 +1166,40 @@ fn send_root_trash_list_request(address: &str, root_path: &str) -> String {
         .read_to_string(&mut response)
         .expect("response should be readable");
     response
+}
+
+fn send_global_shortcut_config_request(address: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/config/shortcuts HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_request(address: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/global-trash HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn json_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "\\\\")
 }
 
 fn read_listen_address(stdout: &mut impl BufRead) -> String {

@@ -10,7 +10,6 @@ import type { FileItem, TextPreviewPayload } from '@/types'
 const LOCAL_GATEWAY_BASE_URL_CONFIG = (import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:3210'
 const HEALTH_ENDPOINT_PATH = '/v1/health'
 const MCP_ENDPOINT_PATH = '/v1/mcp'
-const GLOBAL_SHORTCUTS_CONFIG_ENDPOINT_PATH = '/v1/config/shortcuts'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
 const DEFAULT_TOOL_TIMEOUT_MS = 5000
@@ -111,13 +110,6 @@ interface GatewayHealthResponse {
   status?: string
 }
 
-interface GatewayGlobalShortcutConfigResponse {
-  ok?: boolean
-  loaded?: boolean
-  path?: string
-  config?: unknown
-}
-
 interface GatewayHttpErrorPayload {
   ok?: boolean
   error?: string
@@ -186,12 +178,6 @@ interface GatewayRawToolDescriptor {
 export interface GatewayCapabilitiesSnapshot {
   online: boolean
   tools: GatewayToolDescriptor[]
-}
-
-export interface GlobalShortcutConfigSnapshot {
-  loaded: boolean
-  path: string
-  config: unknown | null
 }
 
 export type ToolCallResult = Record<string, unknown> | unknown[] | string | number | boolean | null
@@ -1183,25 +1169,4 @@ export async function revokeAllRememberedDevicesAdmin(
   timeoutMs: number = 2000,
 ): Promise<void> {
   await callGatewayHttp('/v1/admin/remembered-devices/revoke-all', {}, timeoutMs, 'POST')
-}
-
-export async function loadGlobalShortcutConfig(timeoutMs: number = 2000): Promise<GlobalShortcutConfigSnapshot> {
-  const payload = (await fetchJsonWithTimeout(
-    buildLocalGatewayUrl(GLOBAL_SHORTCUTS_CONFIG_ENDPOINT_PATH),
-    timeoutMs
-  )) as GatewayGlobalShortcutConfigResponse
-
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Invalid global shortcuts config response')
-  }
-
-  const path = typeof payload.path === 'string' && payload.path.trim()
-    ? payload.path
-    : '~/.fauplay/global/shortcuts.json'
-
-  return {
-    loaded: payload.loaded === true,
-    path,
-    config: payload.loaded === true ? (payload.config ?? null) : null,
-  }
 }

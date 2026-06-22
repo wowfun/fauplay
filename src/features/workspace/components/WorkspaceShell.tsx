@@ -23,7 +23,7 @@ import {
 } from '@/features/workspace/lib/duplicateSelection'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
-import { getDirectoryItemCount, isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { toToolScopedProjectionId } from '@/lib/projection'
 import {
@@ -35,6 +35,7 @@ import {
   normalizeRelativePath as normalizeUndoRelativePath,
   remapFileItemAfterRestore,
   remapPathForRoot,
+  toRelativePathWithinRoot,
 } from '@/features/workspace/lib/deleteUndo'
 import {
   getAnnotationDisplayStoreVersion,
@@ -56,7 +57,12 @@ import {
 } from '@/features/faces/utils/reviewFilterTagStore'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
-import { listRuntimeRootTrash } from '@/lib/runtimeApi'
+import {
+  listRuntimeGlobalTrash,
+  listRuntimeRootTrash,
+  restoreRuntimePathFromRootTrash,
+  type RuntimeRootTrashResponse,
+} from '@/lib/runtimeApi'
 import {
   areWorkspaceBrowserHistorySnapshotsEqual,
   buildWorkspaceBrowserHistoryUrl,
@@ -93,7 +99,6 @@ const WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY_PREFIX = 'fauplay:workspace-fil
 const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
 const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
 const TRASH_ROUTE_PATH = '@trash'
-const LEGACY_TRASH_RELATIVE_PATH = '.trash'
 const DEFAULT_RESULT_PANEL_HEIGHT_PX = 280
 const MIN_RESULT_PANEL_HEIGHT_PX = 180
 const DELETE_UNDO_NOTICE_TIMEOUT_MS = 6000
@@ -525,6 +530,57 @@ function cloneDuplicateSelectionRuleRecord(
 
 function countDeleteUndoItems(items: DeleteUndoRestoreItem[]): number {
   return items.length
+}
+
+function resolveRootTrashRestorePaths(
+  items: DeleteUndoRestoreItem[],
+  rootPath: string | null,
+): string[] | null {
+  if (!rootPath || items.length === 0) {
+    return null
+  }
+
+  const rootRelativePaths: string[] = []
+  for (const item of items) {
+    if (item.sourceType !== 'root_trash') {
+      return null
+    }
+    const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
+    if (!absolutePath) {
+      return null
+    }
+    const rootRelativePath = toRelativePathWithinRoot(rootPath, absolutePath)
+    if (!rootRelativePath || !rootRelativePath.startsWith('.trash/')) {
+      return null
+    }
+    rootRelativePaths.push(rootRelativePath)
+  }
+
+  return rootRelativePaths
+}
+
+function mapRuntimeRestoreReasonCode(reason: string | null): string | undefined {
+  if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
+  if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
+  if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
+  if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
+  if (reason === 'mutation_failed') return 'RESTORE_FAILED'
+  return reason ? 'RESTORE_FAILED' : undefined
+}
+
+function toRestoreRecycleResponseFromRuntime(response: RuntimeRootTrashResponse): RestoreRecycleResponse {
+  return {
+    ok: true,
+    total: response.total,
+    restored: response.completed,
+    failed: response.failed,
+    items: response.items.map((item) => ({
+      ok: item.ok,
+      nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+      reasonCode: mapRuntimeRestoreReasonCode(item.reason),
+      error: item.error ?? undefined,
+    })),
+  }
 }
 
 function createDeleteUndoId(prefix: string): string {
@@ -2490,9 +2546,20 @@ export function WorkspaceShell({
     setIsUndoingDelete(true)
 
     try {
-      const response = await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
-        items: batch.restoreItems,
-      }, 120000)
+      const rootTrashRestorePaths = resolveRootTrashRestorePaths(
+        batch.restoreItems,
+        batch.snapshot.rootPath,
+      )
+      const response = rootTrashRestorePaths && batch.snapshot.rootPath
+        ? toRestoreRecycleResponseFromRuntime(
+          await restoreRuntimePathFromRootTrash({
+            rootPath: batch.snapshot.rootPath,
+            rootRelativePath: rootTrashRestorePaths,
+          }, 120000)
+        )
+        : await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
+          items: batch.restoreItems,
+        }, 120000)
       const responseItems = Array.isArray(response.items) ? response.items : []
       const restoredAbsolutePathByOriginalAbsolutePath = new Map<string, string>()
       const failedRestoreItems: DeleteUndoRestoreItem[] = []
@@ -2909,23 +2976,10 @@ export function WorkspaceShell({
         }
       }
 
-      if (!hasRootTrashEntries) {
-        try {
-          const itemCount = await getDirectoryItemCount(rootHandle, LEGACY_TRASH_RELATIVE_PATH, 1)
-          hasRootTrashEntries = itemCount > 0
-        } catch {
-          hasRootTrashEntries = false
-        }
-      }
-
       try {
-        const result = await callGatewayHttp<{ items?: unknown[] }>('/v1/recycle/items/list', {
-          includeRootTrash: false,
-          includeGlobalRecycle: true,
-        }, 120000)
+        const listing = await listRuntimeGlobalTrash({ limit: 1 }, 120000)
         if (!disposed) {
-          const globalRecycleCount = Array.isArray(result.items) ? result.items.length : 0
-          setHasTrashEntries(hasRootTrashEntries || globalRecycleCount > 0)
+          setHasTrashEntries(hasRootTrashEntries || listing.entries.length > 0)
         }
       } catch {
         if (!disposed) {

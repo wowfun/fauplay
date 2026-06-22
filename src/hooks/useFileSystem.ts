@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { appConfig } from '@/config/appConfig'
-import { callGatewayHttp } from '@/lib/gateway'
 import type {
   AddressPathHistoryEntry,
   CachedRootEntry,
@@ -12,9 +11,11 @@ import type {
 } from '@/types'
 import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import {
+  listRuntimeGlobalTrash,
   listRuntimeLocalDirectory,
   listRuntimeRootTrash,
   toRuntimeFileItems,
+  toRuntimeGlobalTrashFileItems,
   toRuntimeRootTrashFileItems,
 } from '@/lib/runtimeApi'
 import {
@@ -47,23 +48,6 @@ interface RuntimeListingPageCursor {
   flattened: boolean
   query: ListingQueryState
   nextOffset: number
-}
-
-interface RecycleListItem {
-  path?: string
-  absolutePath?: string
-  name?: string
-  size?: number
-  mimeType?: string
-  previewKind?: string
-  displayPath?: string
-  deletedAt?: number
-  sourceType?: string
-  sourceRootPath?: string
-  sourceRelativePath?: string
-  recycleId?: string
-  originalAbsolutePath?: string
-  lastModifiedMs?: number
 }
 
 function withBasePath(items: FileItem[], basePath: string): FileItem[] {
@@ -124,44 +108,6 @@ function isSameRuntimeListingPageCursor(
     && isSameListingQuery(left.query, right.query)
     && left.nextOffset === right.nextOffset
   )
-}
-
-function toTrashFileItem(item: RecycleListItem): FileItem | null {
-  const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
-  const name = typeof item.name === 'string' ? item.name.trim() : ''
-  if (!absolutePath || !name) {
-    return null
-  }
-
-  const filePath = typeof item.path === 'string' && item.path.trim()
-    ? item.path.trim()
-    : absolutePath
-  const lastModifiedMs = Number.isFinite(Number(item.lastModifiedMs))
-    ? Number(item.lastModifiedMs)
-    : (Number.isFinite(Number(item.deletedAt)) ? Number(item.deletedAt) : undefined)
-
-  return {
-    name,
-    path: filePath,
-    kind: 'file',
-    absolutePath,
-    size: Number.isFinite(Number(item.size)) ? Number(item.size) : undefined,
-    mimeType: typeof item.mimeType === 'string' ? item.mimeType : undefined,
-    previewKind: (
-      item.previewKind === 'image'
-      || item.previewKind === 'video'
-      || item.previewKind === 'text'
-    ) ? item.previewKind : 'unsupported',
-    displayPath: typeof item.displayPath === 'string' ? item.displayPath : absolutePath,
-    deletedAt: Number.isFinite(Number(item.deletedAt)) ? Number(item.deletedAt) : undefined,
-    sourceType: typeof item.sourceType === 'string' ? item.sourceType : undefined,
-    sourceRootPath: typeof item.sourceRootPath === 'string' ? item.sourceRootPath : undefined,
-    sourceRelativePath: typeof item.sourceRelativePath === 'string' ? item.sourceRelativePath : undefined,
-    recycleId: typeof item.recycleId === 'string' ? item.recycleId : undefined,
-    originalAbsolutePath: typeof item.originalAbsolutePath === 'string' ? item.originalAbsolutePath : undefined,
-    lastModifiedMs,
-    lastModified: typeof lastModifiedMs === 'number' ? new Date(lastModifiedMs) : undefined,
-  }
 }
 
 function sortTrashFileItems(items: FileItem[]): FileItem[] {
@@ -445,29 +391,15 @@ export function useFileSystem() {
   const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
     const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
     let rootTrashFiles: FileItem[] = []
-    let shouldLoadRootTrashFromGateway = true
 
     if (boundRootPath) {
-      try {
-        const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
-        rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
-        shouldLoadRootTrashFromGateway = false
-      } catch {
-        // Fall back to the gateway Root Trash listing while the runtime-backed trash view is being adopted.
-      }
+      const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
+      rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
     }
 
-    const response = await callGatewayHttp<{ items?: RecycleListItem[] }>('/v1/recycle/items/list', {
-      ...(boundRootPath ? { rootPath: boundRootPath } : {}),
-      includeRootTrash: shouldLoadRootTrashFromGateway,
-      includeGlobalRecycle: true,
-    }, 120000)
-    const gatewayFiles = Array.isArray(response.items)
-      ? response.items
-        .map((item) => toTrashFileItem(item))
-        .filter((item): item is FileItem => item !== null)
-      : []
-    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...gatewayFiles])
+    const globalTrash = await listRuntimeGlobalTrash({}, 120000)
+    const globalTrashFiles = toRuntimeGlobalTrashFileItems(globalTrash.entries)
+    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...globalTrashFiles])
 
     setFiles(nextFiles)
     setRuntimeListingPageCursor(null)

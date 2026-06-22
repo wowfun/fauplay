@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use crate::{
     DirectoryEntryKind, FauplayRuntime, FileContentRangeRequest, FileContentRequest,
-    FileContentResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder, ListingQuery,
+    FileContentResponse, GlobalShortcutConfigResponse, GlobalTrashListRequest,
+    GlobalTrashListResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder, ListingQuery,
     ListingSortDirection, ListingSortKey, RootRelativePath, RootTrashFailureReason,
     RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest,
     RuntimeError, TextPreviewRequest, TextPreviewStatus,
@@ -74,8 +75,18 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             "OK",
             "{\"status\":\"ok\",\"runtime\":\"fauplay-runtime\"}",
         ),
+        Some(("GET", "/v1/config/shortcuts")) => handle_global_shortcut_config(runtime),
         Some(("OPTIONS", target)) if is_preflight_target(target) => {
             http_response(204, "No Content", "")
+        }
+        Some(("GET", target))
+            if target == "/v1/global-trash" || target.starts_with("/v1/global-trash?") =>
+        {
+            let query = target
+                .strip_prefix("/v1/global-trash?")
+                .map(parse_query_string)
+                .unwrap_or_default();
+            handle_list_global_trash(runtime, &query)
         }
         Some(("GET", target)) if target.starts_with("/v1/local-directory?") => {
             let query = parse_query_string(&target["/v1/local-directory?".len()..]);
@@ -109,12 +120,42 @@ fn is_preflight_target(target: &str) -> bool {
     matches!(
         target,
         "/v1/local-directory"
+            | "/v1/config/shortcuts"
+            | "/v1/global-trash"
             | "/v1/text-preview"
             | "/v1/file-content"
             | "/v1/root-trash"
             | "/v1/root-trash/move"
             | "/v1/root-trash/restore"
     )
+}
+
+fn handle_global_shortcut_config(runtime: &FauplayRuntime) -> HttpResponse {
+    match runtime.load_global_shortcut_config() {
+        Ok(response) => http_response(200, "OK", &global_shortcut_config_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_list_global_trash(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    match runtime.list_global_trash(GlobalTrashListRequest {
+        entry_limit: parse_entry_limit(query.get("limit").map(String::as_str)),
+        entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
+    }) {
+        Ok(response) => http_response(200, "OK", &global_trash_list_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
 }
 
 fn handle_list_local_directory(
@@ -562,6 +603,61 @@ fn root_trash_list_response_json(response: RootTrashListResponse) -> String {
         response.is_truncated,
         optional_usize_json(response.next_offset)
     )
+}
+
+fn global_trash_list_response_json(response: GlobalTrashListResponse) -> String {
+    let entries = response
+        .entries
+        .into_iter()
+        .map(|entry| {
+            let absolute_path = entry.absolute_path.display().to_string();
+            let original_absolute_path = entry.original_absolute_path.display().to_string();
+            let mut json = format!(
+                "{{\"path\":\"{}\",\"absolutePath\":\"{}\",\"name\":\"{}\",\"kind\":\"file\",\"size\":{},\"mimeType\":\"{}\",\"previewKind\":\"{}\",\"displayPath\":\"{}\",\"deletedAt\":{},\"sourceType\":\"global_recycle\",\"recycleId\":\"{}\",\"originalAbsolutePath\":\"{}\"",
+                escape_json_string(&absolute_path),
+                escape_json_string(&absolute_path),
+                escape_json_string(&entry.name),
+                entry.size,
+                escape_json_string(&entry.mime_type),
+                escape_json_string(&entry.preview_kind),
+                escape_json_string(&entry.display_path),
+                entry.deleted_at_ms,
+                escape_json_string(&entry.recycle_id),
+                escape_json_string(&original_absolute_path),
+            );
+            if let Some(last_modified_ms) = entry.last_modified_ms {
+                json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
+            }
+            json.push('}');
+            json
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{{\"entries\":[{entries}],\"isTruncated\":{},\"nextOffset\":{}}}",
+        response.is_truncated,
+        optional_usize_json(response.next_offset)
+    )
+}
+
+fn global_shortcut_config_response_json(response: GlobalShortcutConfigResponse) -> String {
+    let mut json = format!(
+        "{{\"ok\":true,\"loaded\":{},\"path\":\"{}\"",
+        response.loaded,
+        escape_json_string(&response.path.display().to_string()),
+    );
+    if response.loaded {
+        let config_json = response
+            .config_json
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("null");
+        json.push_str(&format!(",\"config\":{config_json}"));
+    }
+    json.push('}');
+    json
 }
 
 fn optional_root_relative_path_json(value: Option<&RootRelativePath>) -> String {

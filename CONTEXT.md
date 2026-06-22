@@ -16,6 +16,10 @@ _Avoid_: frontend client, browser app
 A user-selected folder that Fauplay can browse as a file workspace. All displayed relative paths are interpreted within a Local Root unless a capability states otherwise.
 _Avoid_: root folder, mounted folder, source directory
 
+**Runtime Home**:
+A user-scoped folder where Fauplay stores configuration and runtime state outside any Local Root.
+_Avoid_: home directory, global config dir
+
 **Root-relative Path**:
 A path interpreted inside a Local Root. A Root-relative Path must stay within its Local Root and have one stable display form.
 _Avoid_: relative path, file path
@@ -51,6 +55,14 @@ _Avoid_: recycle bin, deleted folder, soft-delete plugin storage
 **Root Trash Entry**:
 A file currently stored in Root Trash, identified by its current Root-relative Path and the original Root-relative Path it would restore to.
 _Avoid_: recycle item, deleted item
+
+**Global Trash**:
+User-scoped trash storage for files that are tracked outside a specific Local Root.
+_Avoid_: global recycle, recycle bin
+
+**Global Trash Entry**:
+A file currently stored in Global Trash, identified by its stored location and the original absolute path it would restore to.
+_Avoid_: global recycle item, deleted item
 
 **Runtime Capability**:
 A capability owned by the Fauplay Runtime because it depends on privileged local access, shared runtime state, or long-running task coordination.
