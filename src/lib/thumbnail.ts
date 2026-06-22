@@ -15,6 +15,9 @@ const THUMBNAIL_SIZE_BY_PRESET: Record<ThumbnailSizePreset, number> = {
 interface GenerateThumbnailOptions {
   filePath?: string
   sizePreset?: ThumbnailSizePreset
+  fileSize?: number
+  fileLastModifiedMs?: number
+  crossOrigin?: boolean
 }
 
 function resolveThumbnailSize(sizePreset: ThumbnailSizePreset): number {
@@ -25,10 +28,26 @@ function buildCacheKey(
   filePath: string,
   sizePreset: ThumbnailSizePreset,
   size: number,
-  file: File
+  fileVersion: string
 ): string {
-  const fileVersion = `${file.lastModified}:${file.size}`
   return `${filePath}::${fileVersion}::${sizePreset}::${size}`
+}
+
+function buildFileVersion(options: GenerateThumbnailOptions, file?: File): string | null {
+  if (file) {
+    return `${file.lastModified}:${file.size}`
+  }
+
+  if (
+    typeof options.fileLastModifiedMs === 'number'
+    && Number.isFinite(options.fileLastModifiedMs)
+    && typeof options.fileSize === 'number'
+    && Number.isFinite(options.fileSize)
+  ) {
+    return `${options.fileLastModifiedMs}:${options.fileSize}`
+  }
+
+  return null
 }
 
 export function isMediaFile(name: string): boolean {
@@ -42,8 +61,9 @@ export async function generateThumbnail(
 ): Promise<string> {
   const sizePreset = options.sizePreset ?? 'auto'
   const maxSize = resolveThumbnailSize(sizePreset)
-  const cacheKey = options.filePath
-    ? buildCacheKey(options.filePath, sizePreset, maxSize, file)
+  const fileVersion = buildFileVersion(options, file)
+  const cacheKey = options.filePath && fileVersion
+    ? buildCacheKey(options.filePath, sizePreset, maxSize, fileVersion)
     : null
 
   if (cacheKey) {
@@ -53,7 +73,7 @@ export async function generateThumbnail(
 
   let url: string
   if (type === 'video') {
-    url = await generateVideoThumbnail(file, maxSize)
+    url = await generateVideoThumbnailFromObjectUrl(file, maxSize)
   } else {
     url = await generateImageThumbnail(file, maxSize)
   }
@@ -65,13 +85,62 @@ export async function generateThumbnail(
   return url
 }
 
+export async function generateThumbnailFromUrl(
+  sourceUrl: string,
+  type: 'image' | 'video',
+  options: GenerateThumbnailOptions = {}
+): Promise<string> {
+  const sizePreset = options.sizePreset ?? 'auto'
+  const maxSize = resolveThumbnailSize(sizePreset)
+  const fileVersion = buildFileVersion(options)
+  const cacheKey = options.filePath && fileVersion
+    ? buildCacheKey(options.filePath, sizePreset, maxSize, fileVersion)
+    : null
+
+  if (cacheKey) {
+    const cached = thumbnailCache.get(cacheKey)
+    if (cached) return cached
+  }
+
+  const url = type === 'video'
+    ? await generateVideoThumbnailFromUrl(sourceUrl, maxSize, {
+      crossOrigin: options.crossOrigin === true,
+      revokeSourceUrl: false,
+    })
+    : await generateImageThumbnailFromUrl(sourceUrl, maxSize, {
+      crossOrigin: options.crossOrigin === true,
+      revokeSourceUrl: false,
+    })
+
+  if (cacheKey) {
+    thumbnailCache.set(cacheKey, url)
+  }
+
+  return url
+}
+
 async function generateImageThumbnail(file: File, maxSize: number): Promise<string> {
+  const url = URL.createObjectURL(file)
+  return generateImageThumbnailFromUrl(url, maxSize, {
+    revokeSourceUrl: true,
+  })
+}
+
+async function generateImageThumbnailFromUrl(
+  sourceUrl: string,
+  maxSize: number,
+  options: { crossOrigin?: boolean; revokeSourceUrl?: boolean } = {}
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    const url = URL.createObjectURL(file)
+    if (options.crossOrigin === true) {
+      img.crossOrigin = 'anonymous'
+    }
 
     img.onload = () => {
-      URL.revokeObjectURL(url)
+      if (options.revokeSourceUrl === true) {
+        URL.revokeObjectURL(sourceUrl)
+      }
 
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
@@ -103,23 +172,37 @@ async function generateImageThumbnail(file: File, maxSize: number): Promise<stri
     }
 
     img.onerror = () => {
-      URL.revokeObjectURL(url)
+      if (options.revokeSourceUrl === true) {
+        URL.revokeObjectURL(sourceUrl)
+      }
       reject(new Error('Failed to load image'))
     }
 
-    img.src = url
+    img.src = sourceUrl
   })
 }
 
-async function generateVideoThumbnail(file: File, maxSize: number): Promise<string> {
+async function generateVideoThumbnailFromObjectUrl(file: File, maxSize: number): Promise<string> {
+  const url = URL.createObjectURL(file)
+  return generateVideoThumbnailFromUrl(url, maxSize, {
+    revokeSourceUrl: true,
+  })
+}
+
+async function generateVideoThumbnailFromUrl(
+  sourceUrl: string,
+  maxSize: number,
+  options: { crossOrigin?: boolean; revokeSourceUrl?: boolean } = {}
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video')
-    const url = URL.createObjectURL(file)
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
 
     if (!ctx) {
-      URL.revokeObjectURL(url)
+      if (options.revokeSourceUrl === true) {
+        URL.revokeObjectURL(sourceUrl)
+      }
       reject(new Error('Failed to get canvas context'))
       return
     }
@@ -137,7 +220,9 @@ async function generateVideoThumbnail(file: File, maxSize: number): Promise<stri
       video.pause()
       video.removeAttribute('src')
       video.load()
-      URL.revokeObjectURL(url)
+      if (options.revokeSourceUrl === true) {
+        URL.revokeObjectURL(sourceUrl)
+      }
     }
 
     const settleWithError = (error: Error) => {
@@ -204,7 +289,10 @@ async function generateVideoThumbnail(file: File, maxSize: number): Promise<stri
     video.preload = 'metadata'
     video.muted = true
     video.playsInline = true
-    video.src = url
+    if (options.crossOrigin === true) {
+      video.crossOrigin = 'anonymous'
+    }
+    video.src = sourceUrl
   })
 }
 

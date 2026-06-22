@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { EXPLORER_STATUS_BAR_HEIGHT_PX } from '@/features/explorer/constants/statusBar'
 import { getFileFromPath } from '@/lib/fileSystem'
 import { getBoundRootPath } from '@/lib/reveal'
+import { loadRuntimeFileMetadata } from '@/lib/runtimeApi'
 import type { FileItem } from '@/types'
 
 interface ExplorerStatusBarProps {
@@ -134,14 +135,22 @@ export function ExplorerStatusBar({
       }
     }
 
+    const boundRootPath = rootId ? getBoundRootPath(rootId) : null
+    const canReadThroughRuntime = Boolean(
+      boundRootPath
+      && metaTarget.path
+      && !isAbsolutePathLike(metaTarget.path)
+      && (!metaTarget.sourceRootPath || metaTarget.sourceRootPath === boundRootPath)
+    )
     const shouldReadThroughCurrentRoot = Boolean(
       rootHandle
       && metaTarget.path
       && !isAbsolutePathLike(metaTarget.path)
-      && (!metaTarget.sourceRootPath || metaTarget.sourceRootPath === (rootId ? getBoundRootPath(rootId) : null))
+      && (!metaTarget.sourceRootPath || metaTarget.sourceRootPath === boundRootPath)
     )
+    const fallbackRootHandle = shouldReadThroughCurrentRoot ? rootHandle : null
 
-    if (!shouldReadThroughCurrentRoot || !rootHandle) {
+    if (!canReadThroughRuntime && !fallbackRootHandle) {
       setResolvedMeta(nextResolvedMeta)
       return () => {
         cancelled = true
@@ -151,8 +160,34 @@ export function ExplorerStatusBar({
     setResolvedMeta(nextResolvedMeta)
 
     void (async () => {
+      if (canReadThroughRuntime && boundRootPath) {
+        try {
+          const metadata = await loadRuntimeFileMetadata({
+            rootPath: boundRootPath,
+            rootRelativePath: metaTarget.sourceRelativePath || metaTarget.path,
+          })
+          if (cancelled) return
+          setResolvedMeta({
+            size: metadata.size,
+            lastModifiedMs: metadata.lastModifiedMs,
+          })
+          return
+        } catch {
+          if (!fallbackRootHandle) {
+            if (cancelled) return
+            setResolvedMeta(nextResolvedMeta)
+            return
+          }
+        }
+      }
+
+      if (!fallbackRootHandle) {
+        setResolvedMeta(nextResolvedMeta)
+        return
+      }
+
       try {
-        const file = await getFileFromPath(rootHandle, metaTarget.path)
+        const file = await getFileFromPath(fallbackRootHandle, metaTarget.path)
         if (cancelled) return
         setResolvedMeta({
           size: file.size,

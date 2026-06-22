@@ -1,16 +1,33 @@
-import { generateThumbnail } from '@/lib/thumbnail'
+import { generateThumbnail, generateThumbnailFromUrl } from '@/lib/thumbnail'
 import type { ThumbnailSizePreset } from '@/types'
 
 export type ThumbnailTaskPriority = 'visible' | 'nearby'
 
-interface ThumbnailRequest {
-  file: File
+interface BaseThumbnailRequest {
   filePath: string
   mediaType: 'image' | 'video'
   sizePreset: ThumbnailSizePreset
   priority: ThumbnailTaskPriority
   signal?: AbortSignal
 }
+
+interface FileThumbnailRequest extends BaseThumbnailRequest {
+  file: File
+  sourceUrl?: never
+  fileSize?: never
+  fileLastModifiedMs?: never
+  crossOrigin?: never
+}
+
+interface UrlThumbnailRequest extends BaseThumbnailRequest {
+  sourceUrl: string
+  file?: never
+  fileSize?: number
+  fileLastModifiedMs?: number
+  crossOrigin?: boolean
+}
+
+type ThumbnailRequest = FileThumbnailRequest | UrlThumbnailRequest
 
 interface ThumbnailCacheLookup {
   filePath: string
@@ -50,8 +67,23 @@ function createAbortError(): Error {
   return new DOMException('Thumbnail task aborted', 'AbortError')
 }
 
+function buildRequestFileVersion(options: ThumbnailRequest): string {
+  if ('file' in options && options.file) {
+    return `${options.file.lastModified}:${options.file.size}`
+  }
+
+  if (
+    typeof options.fileLastModifiedMs === 'number' &&
+    typeof options.fileSize === 'number'
+  ) {
+    return `${options.fileLastModifiedMs}:${options.fileSize}`
+  }
+
+  return options.sourceUrl
+}
+
 function buildPipelineKey(options: ThumbnailRequest): string {
-  const fileVersion = `${options.file.lastModified}:${options.file.size}`
+  const fileVersion = buildRequestFileVersion(options)
   return [
     options.filePath,
     fileVersion,
@@ -154,6 +186,23 @@ function processQueue() {
   }
 }
 
+function runThumbnailRequest(options: ThumbnailRequest): Promise<string> {
+  if ('file' in options && options.file) {
+    return generateThumbnail(options.file, options.mediaType, {
+      filePath: options.filePath,
+      sizePreset: options.sizePreset,
+    })
+  }
+
+  return generateThumbnailFromUrl(options.sourceUrl, options.mediaType, {
+    filePath: options.filePath,
+    sizePreset: options.sizePreset,
+    fileSize: options.fileSize,
+    fileLastModifiedMs: options.fileLastModifiedMs,
+    crossOrigin: options.crossOrigin,
+  })
+}
+
 export function configureThumbnailPipeline(options: { maxConcurrency?: number }) {
   if (typeof options.maxConcurrency === 'number') {
     maxConcurrent = Math.max(1, Math.floor(options.maxConcurrency))
@@ -192,11 +241,7 @@ export function requestThumbnailFromPipeline(options: ThumbnailRequest): Promise
     baseKey,
     priorityWeight: PRIORITY_WEIGHT[options.priority],
     sequence: sequence++,
-    run: () =>
-      generateThumbnail(options.file, options.mediaType, {
-        filePath: options.filePath,
-        sizePreset: options.sizePreset,
-      }),
+    run: () => runThumbnailRequest(options),
     resolve: resolvePromise,
     reject: rejectPromise,
   }

@@ -411,6 +411,34 @@ fn runtime_api_exposes_directory_emptiness_metadata() {
 }
 
 #[test]
+fn runtime_api_exposes_directory_entry_count_metadata() {
+    let fixture = Fixture::new("runtime_api_exposes_directory_entry_count_metadata");
+    fixture.create_dir("album/.trash");
+    fixture.create_dir("album/nested");
+    fixture.write_file("album/photo.jpg", "image");
+    fixture.write_file("album/.trash/deleted.jpg", "deleted");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request(&address.to_string(), &fixture.root);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"album\",\"kind\":\"directory\",\"isEmpty\":false,\"entryCount\":2"),
+        "response should include Directory Entry Count metadata: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_lists_flattened_descendant_files() {
     let fixture = Fixture::new("runtime_api_lists_flattened_descendant_files");
     fixture.write_file("cover.jpg", "cover");
@@ -797,6 +825,43 @@ fn runtime_api_returns_file_content_byte_range() {
         response.ends_with(b"2345"),
         "response body should include requested bytes: {}",
         String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_returns_file_metadata() {
+    let fixture = Fixture::new("runtime_api_returns_file_metadata");
+    fixture.write_file("albums/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_file_metadata_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "albums/photo.jpg",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"albums/photo.jpg\""),
+        "response should include the Root-relative Path: {response}"
+    );
+    assert!(
+        response.contains("\"size\":5"),
+        "response should include file size metadata: {response}"
+    );
+    assert!(
+        response.contains("\"lastModifiedMs\":"),
+        "response should include file modification metadata: {response}"
     );
 }
 
@@ -1199,6 +1264,21 @@ fn send_file_content_request_with_headers(
     let mut response = Vec::new();
     stream
         .read_to_end(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_file_metadata_request(address: &str, root_path: &str, root_relative_path: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/file-metadata?rootPath={root_path}&rootRelativePath={root_relative_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
         .expect("response should be readable");
     response
 }

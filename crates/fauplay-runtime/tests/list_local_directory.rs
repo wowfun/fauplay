@@ -126,6 +126,36 @@ fn includes_directory_metadata_for_frontend_filtering() {
 }
 
 #[test]
+fn includes_directory_entry_count_for_listing_badges() {
+    let fixture = Fixture::new("includes_directory_entry_count_for_listing_badges");
+    fixture.create_dir("album/.trash");
+    fixture.create_dir("album/nested");
+    fixture.write_file("album/photo.jpg", "image");
+    fixture.write_file("album/.trash/deleted.jpg", "deleted");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
+            query: ListingQuery::default(),
+        })
+        .expect("Listing should include Directory Entry Count metadata");
+
+    let album = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "album")
+        .expect("directory should be listed");
+
+    assert_eq!(album.kind, DirectoryEntryKind::Directory);
+    assert_eq!(album.entry_count, Some(2));
+}
+
+#[test]
 fn lists_flattened_descendant_files_under_a_root_relative_path() {
     let fixture = Fixture::new("lists_flattened_descendant_files_under_a_root_relative_path");
     fixture.write_file("cover.jpg", "cover");

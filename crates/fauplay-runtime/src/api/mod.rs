@@ -88,6 +88,19 @@ pub struct FileContentResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMetadataRequest {
+    pub root_path: PathBuf,
+    pub root_relative_path: RootRelativePath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMetadataResponse {
+    pub root_relative_path: RootRelativePath,
+    pub size: u64,
+    pub last_modified_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalShortcutConfigResponse {
     pub loaded: bool,
     pub path: PathBuf,
@@ -279,6 +292,7 @@ pub struct DirectoryEntry {
     pub root_relative_path: RootRelativePath,
     pub kind: DirectoryEntryKind,
     pub is_empty: Option<bool>,
+    pub entry_count: Option<usize>,
     pub size: Option<u64>,
     pub last_modified_ms: Option<u64>,
 }

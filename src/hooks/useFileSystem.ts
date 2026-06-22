@@ -314,7 +314,7 @@ export function useFileSystem() {
           limit: RUNTIME_LISTING_PAGE_SIZE,
           ...toRuntimeListingQueryRequest(activeListingQuery),
         })
-        setFiles(toRuntimeFileItems(runtimeListing.entries))
+        setFiles(toRuntimeFileItems(runtimeListing.entries, boundRootPath))
         setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
           ? {
               rootPath: boundRootPath,
@@ -368,7 +368,7 @@ export function useFileSystem() {
         return
       }
 
-      const nextItems = toRuntimeFileItems(runtimeListing.entries)
+      const nextItems = toRuntimeFileItems(runtimeListing.entries, cursor.rootPath)
       setFiles((previous) => {
         const existingPaths = new Set(previous.map((item) => item.path))
         const appendedItems = nextItems.filter((item) => !existingPaths.has(item.path))

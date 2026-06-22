@@ -5,6 +5,7 @@ export interface FileItem {
   path: string
   kind: 'file' | 'directory'
   isEmpty?: boolean
+  entryCount?: number
   size?: number
   lastModified?: Date
   lastModifiedMs?: number

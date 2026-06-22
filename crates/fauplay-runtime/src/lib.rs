@@ -8,14 +8,15 @@ mod tasks;
 
 pub use api::{
     DirectoryEntry, DirectoryEntryKind, FileContentRange, FileContentRangeRequest,
-    FileContentRequest, FileContentResponse, GlobalShortcutConfigResponse, GlobalTrashEntry,
-    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem,
-    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreItem,
-    GlobalTrashRestoreRequest, GlobalTrashRestoreResponse, ListDirectoryRequest,
-    ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
-    ListingSortKey, RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
-    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
-    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    FileContentRequest, FileContentResponse, FileMetadataRequest, FileMetadataResponse,
+    GlobalShortcutConfigResponse, GlobalTrashEntry, GlobalTrashFailureReason,
+    GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem, GlobalTrashMoveRequest,
+    GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
+    GlobalTrashRestoreResponse, ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter,
+    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath,
+    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
+    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -86,6 +87,13 @@ impl FauplayRuntime {
         request: FileContentRequest,
     ) -> Result<FileContentResponse, RuntimeError> {
         media::read_file_content(request)
+    }
+
+    pub fn read_file_metadata(
+        &self,
+        request: FileMetadataRequest,
+    ) -> Result<FileMetadataResponse, RuntimeError> {
+        fs::read_file_metadata(request)
     }
 
     pub fn move_to_root_trash(

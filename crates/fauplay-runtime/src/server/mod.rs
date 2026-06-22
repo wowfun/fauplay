@@ -5,13 +5,13 @@ use std::path::PathBuf;
 
 use crate::{
     DirectoryEntryKind, FauplayRuntime, FileContentRangeRequest, FileContentRequest,
-    FileContentResponse, GlobalShortcutConfigResponse, GlobalTrashFailureReason,
-    GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveRequest,
-    GlobalTrashMoveResponse, GlobalTrashRestoreRequest, GlobalTrashRestoreResponse,
-    ListDirectoryRequest, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
-    ListingSortKey, RootRelativePath, RootTrashFailureReason, RootTrashListRequest,
-    RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewStatus,
+    FileContentResponse, FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
+    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
+    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
+    GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
+    ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest,
+    RuntimeError, TextPreviewRequest, TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -122,6 +122,10 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             let query = parse_query_string(&target["/v1/file-content?".len()..]);
             handle_file_content(runtime, &query, parse_header_value(request, "range"))
         }
+        Some(("GET", target)) if target.starts_with("/v1/file-metadata?") => {
+            let query = parse_query_string(&target["/v1/file-metadata?".len()..]);
+            handle_file_metadata(runtime, &query)
+        }
         Some(("GET", target)) if target.starts_with("/v1/root-trash?") => {
             let query = parse_query_string(&target["/v1/root-trash?".len()..]);
             handle_list_root_trash(runtime, &query)
@@ -148,6 +152,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/global-trash/restore"
             | "/v1/text-preview"
             | "/v1/file-content"
+            | "/v1/file-metadata"
             | "/v1/root-trash"
             | "/v1/root-trash/move"
             | "/v1/root-trash/restore"
@@ -386,6 +391,33 @@ fn handle_file_content(
     }
 }
 
+fn handle_file_metadata(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> HttpResponse {
+    let Some(root_path) = query.get("rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_path = query
+        .get("rootRelativePath")
+        .map(String::as_str)
+        .unwrap_or("");
+
+    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+
+    match runtime.read_file_metadata(FileMetadataRequest {
+        root_path: PathBuf::from(root_path),
+        root_relative_path,
+    }) {
+        Ok(response) => http_response(200, "OK", &file_metadata_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
 fn handle_list_root_trash(
     runtime: &FauplayRuntime,
     query: &HashMap<String, String>,
@@ -588,6 +620,9 @@ fn list_directory_response_json(response: crate::ListDirectoryResponse) -> Strin
             if let Some(is_empty) = entry.is_empty {
                 json.push_str(&format!(",\"isEmpty\":{is_empty}"));
             }
+            if let Some(entry_count) = entry.entry_count {
+                json.push_str(&format!(",\"entryCount\":{entry_count}"));
+            }
             if let Some(size) = entry.size {
                 json.push_str(&format!(",\"size\":{size}"));
             }
@@ -623,6 +658,19 @@ fn text_preview_response_json(response: crate::TextPreviewResponse) -> String {
         response.size_limit_bytes,
         optional_string_json(response.error.as_deref()),
     )
+}
+
+fn file_metadata_response_json(response: FileMetadataResponse) -> String {
+    let mut json = format!(
+        "{{\"rootRelativePath\":\"{}\",\"size\":{}",
+        escape_json_string(&response.root_relative_path.to_string()),
+        response.size,
+    );
+    if let Some(last_modified_ms) = response.last_modified_ms {
+        json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
+    }
+    json.push('}');
+    json
 }
 
 fn root_trash_response_json(response: RootTrashMutationResponse) -> String {

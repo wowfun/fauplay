@@ -6,14 +6,16 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::{
-    DirectoryEntry, DirectoryEntryKind, ListDirectoryRequest, ListDirectoryResponse,
-    ListingEntryFilter, ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    DirectoryEntry, DirectoryEntryKind, FileMetadataRequest, FileMetadataResponse,
+    ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter, ListingQuery,
+    ListingSortDirection, ListingSortKey, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
+    RootTrashRequest, RuntimeError,
 };
 
 const ROOT_TRASH_FOLDER_NAME: &str = ".trash";
 const RESERVED_FOLDER_NAMES: &[&str] = &[ROOT_TRASH_FOLDER_NAME];
+const DIRECTORY_ENTRY_COUNT_LIMIT: usize = 100;
 
 pub(crate) fn list_local_directory(
     request: ListDirectoryRequest,
@@ -41,6 +43,20 @@ pub(crate) fn list_local_directory(
         request.entry_offset,
         request.entry_limit,
     ))
+}
+
+pub(crate) fn read_file_metadata(
+    request: FileMetadataRequest,
+) -> Result<FileMetadataResponse, RuntimeError> {
+    let file_path = request.root_path.join(request.root_relative_path.as_path());
+    let metadata =
+        fs::metadata(&file_path).map_err(|source| RuntimeError::read_file(&file_path, source))?;
+
+    Ok(FileMetadataResponse {
+        root_relative_path: request.root_relative_path,
+        size: metadata.len(),
+        last_modified_ms: modified_timestamp_ms(&metadata),
+    })
 }
 
 fn paged_response(
@@ -207,16 +223,18 @@ fn collect_immediate_entries(
         let metadata = entry
             .metadata()
             .map_err(|source| RuntimeError::read_directory_entry(&entry_path, source))?;
+        let entry_count = if kind == DirectoryEntryKind::Directory {
+            Some(directory_entry_count(&entry_path)?)
+        } else {
+            None
+        };
 
         entries.push(DirectoryEntry {
             root_relative_path: root_relative_path.child(&name),
             name,
             kind,
-            is_empty: if kind == DirectoryEntryKind::Directory {
-                Some(is_directory_empty(&entry_path)?)
-            } else {
-                None
-            },
+            is_empty: entry_count.map(|count| count == 0),
+            entry_count,
             size: if kind == DirectoryEntryKind::File {
                 Some(metadata.len())
             } else {
@@ -267,6 +285,7 @@ fn collect_flattened_file_entries(
             name,
             kind: DirectoryEntryKind::File,
             is_empty: None,
+            entry_count: None,
             size: Some(metadata.len()),
             last_modified_ms: modified_timestamp_ms(&metadata),
         });
@@ -286,14 +305,30 @@ fn directory_entry_kind_rank(kind: DirectoryEntryKind) -> u8 {
     }
 }
 
-fn is_directory_empty(path: &Path) -> Result<bool, RuntimeError> {
-    let mut entries =
-        fs::read_dir(path).map_err(|source| RuntimeError::read_directory(path, source))?;
-    Ok(entries
-        .next()
-        .transpose()
-        .map_err(|source| RuntimeError::read_directory_entry(path, source))?
-        .is_none())
+fn directory_entry_count(path: &Path) -> Result<usize, RuntimeError> {
+    let mut count = 0;
+    for entry_result in
+        fs::read_dir(path).map_err(|source| RuntimeError::read_directory(path, source))?
+    {
+        let entry =
+            entry_result.map_err(|source| RuntimeError::read_directory_entry(path, source))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|source| RuntimeError::read_directory_entry(&entry.path(), source))?;
+        if !(file_type.is_dir() || file_type.is_file()) {
+            continue;
+        }
+        if file_type.is_dir() && is_reserved_folder_name(&entry.file_name().to_string_lossy()) {
+            continue;
+        }
+
+        count += 1;
+        if count >= DIRECTORY_ENTRY_COUNT_LIMIT {
+            return Ok(count);
+        }
+    }
+
+    Ok(count)
 }
 
 fn modified_timestamp_ms(metadata: &fs::Metadata) -> Option<u64> {

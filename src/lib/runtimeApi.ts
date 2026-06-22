@@ -23,6 +23,7 @@ export interface RuntimeDirectoryEntry {
   rootRelativePath: string
   kind: 'directory' | 'file'
   isEmpty?: boolean
+  entryCount?: number
   size?: number
   lastModifiedMs?: number
 }
@@ -49,6 +50,17 @@ export interface RuntimeTextPreviewRequest {
 export interface RuntimeFileContentRequest {
   rootPath: string
   rootRelativePath: string
+}
+
+export interface RuntimeFileMetadataRequest {
+  rootPath: string
+  rootRelativePath: string
+}
+
+export interface RuntimeFileMetadataResponse {
+  rootRelativePath: string
+  size: number
+  lastModifiedMs?: number
 }
 
 export interface RuntimeRootTrashRequest {
@@ -298,6 +310,9 @@ function parseRuntimeDirectoryEntry(value: unknown): RuntimeDirectoryEntry | nul
     isEmpty: kind === 'directory' && typeof value.isEmpty === 'boolean'
       ? value.isEmpty
       : undefined,
+    entryCount: kind === 'directory'
+      ? toFiniteNumber(value.entryCount)
+      : undefined,
     size: kind === 'file' ? toFiniteNumber(value.size) : undefined,
     lastModifiedMs: toFiniteNumber(value.lastModifiedMs),
   }
@@ -329,6 +344,19 @@ function parseRuntimeListDirectoryResponse(payload: unknown): RuntimeListDirecto
 
 function normalizeRootRelativePath(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).join('/')
+}
+
+function isAbsolutePathLike(path: string): boolean {
+  return path.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(path)
+}
+
+function joinRootPath(rootPath: string, rootRelativePath: string): string | undefined {
+  const normalizedRootPath = rootPath.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedRootRelativePath = normalizeRootRelativePath(rootRelativePath)
+  if (!normalizedRootPath || !normalizedRootRelativePath) {
+    return undefined
+  }
+  return `${normalizedRootPath}/${normalizedRootRelativePath}`
 }
 
 export async function loadRuntimeHealth(timeoutMs?: number): Promise<RuntimeHealthSnapshot> {
@@ -492,6 +520,34 @@ export function buildRuntimeFileContentUrl(request: RuntimeFileContentRequest): 
     rootRelativePath: request.rootRelativePath,
   })
   return buildRuntimeUrl(`/v1/file-content?${query.toString()}`)
+}
+
+export async function loadRuntimeFileMetadata(
+  request: RuntimeFileMetadataRequest,
+  timeoutMs?: number,
+): Promise<RuntimeFileMetadataResponse> {
+  const query = new URLSearchParams({
+    rootPath: request.rootPath,
+    rootRelativePath: request.rootRelativePath,
+  })
+  const payload = await callRuntimeJson(`/v1/file-metadata?${query.toString()}`, timeoutMs)
+  return parseRuntimeFileMetadataResponse(payload)
+}
+
+export function buildRuntimeFileContentUrlForItem(file: FileItem): string | null {
+  const rootPath = typeof file.sourceRootPath === 'string' ? file.sourceRootPath.trim() : ''
+  const rootRelativePath = typeof file.sourceRelativePath === 'string'
+    ? normalizeRootRelativePath(file.sourceRelativePath)
+    : normalizeRootRelativePath(file.path)
+
+  if (!rootPath || !rootRelativePath || isAbsolutePathLike(rootRelativePath)) {
+    return null
+  }
+
+  return buildRuntimeFileContentUrl({
+    rootPath,
+    rootRelativePath,
+  })
 }
 
 function rootTrashQuery(request: RuntimeRootTrashRequest): URLSearchParams {
@@ -811,10 +867,37 @@ function parseRuntimeTextPreviewPayload(payload: unknown): TextPreviewPayload {
   }
 }
 
-export function toRuntimeFileItems(entries: RuntimeDirectoryEntry[]): FileItem[] {
+function parseRuntimeFileMetadataResponse(payload: unknown): RuntimeFileMetadataResponse {
+  if (!isObject(payload)) {
+    throw new RuntimeApiError('Fauplay Runtime File Metadata response was invalid')
+  }
+
+  const rootRelativePath = typeof payload.rootRelativePath === 'string'
+    ? normalizeRootRelativePath(payload.rootRelativePath)
+    : ''
+  const size = toFiniteNumber(payload.size)
+  if (!rootRelativePath || typeof size !== 'number') {
+    throw new RuntimeApiError('Fauplay Runtime File Metadata response was invalid')
+  }
+
+  return {
+    rootRelativePath,
+    size,
+    lastModifiedMs: toFiniteNumber(payload.lastModifiedMs),
+  }
+}
+
+export function toRuntimeFileItems(entries: RuntimeDirectoryEntry[], rootPath?: string | null): FileItem[] {
+  const normalizedRootPath = typeof rootPath === 'string' && rootPath.trim()
+    ? rootPath.trim()
+    : null
+
   return entries.map((entry) => {
     const lastModified = typeof entry.lastModifiedMs === 'number'
       ? new Date(entry.lastModifiedMs)
+      : undefined
+    const absolutePath = normalizedRootPath && entry.kind === 'file'
+      ? joinRootPath(normalizedRootPath, entry.rootRelativePath)
       : undefined
 
     return {
@@ -822,11 +905,15 @@ export function toRuntimeFileItems(entries: RuntimeDirectoryEntry[]): FileItem[]
       path: entry.rootRelativePath,
       kind: entry.kind,
       isEmpty: entry.isEmpty,
+      entryCount: entry.entryCount,
       size: entry.size,
       lastModified,
       lastModifiedMs: entry.lastModifiedMs,
       mimeType: entry.kind === 'file' ? getMimeType(entry.name) : undefined,
       displayPath: entry.rootRelativePath,
+      absolutePath,
+      sourceRootPath: normalizedRootPath ?? undefined,
+      sourceRelativePath: entry.rootRelativePath,
     }
   })
 }

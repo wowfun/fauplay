@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import { buildGatewayFileThumbnailUrlForItem } from '@/lib/gateway'
+import { buildRuntimeFileContentUrlForItem } from '@/lib/runtimeApi'
 import { GRID_SELECTABLE_ITEM_ATTR } from '@/hooks/useGridSelection'
 import {
   getExactCachedThumbnailFromPipeline,
@@ -75,7 +76,9 @@ export function FileGridCard({
   const isDir = file.kind === 'directory'
   const previewKind = getFilePreviewKind(file.name)
   const mediaType = previewKind === 'image' || previewKind === 'video' ? previewKind : null
-  const fileLastModifiedMs = file.lastModified?.getTime()
+  const fileLastModifiedMs = typeof file.lastModifiedMs === 'number'
+    ? file.lastModifiedMs
+    : file.lastModified?.getTime()
   const thumbnailBoxSize = THUMBNAIL_BOX_SIZE_BY_PRESET[thumbnailSizePreset]
   const iconSize = ICON_SIZE_BY_PRESET[thumbnailSizePreset]
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
@@ -84,7 +87,24 @@ export function FileGridCard({
     useState<ThumbnailLoadState>('placeholder')
   const [directoryItemCount, setDirectoryItemCount] = useState<number | null>(null)
   const requestIdentityRef = useRef<string | null>(null)
+  const listingDirectoryEntryCount = isDir
+    && typeof file.entryCount === 'number'
+    && Number.isFinite(file.entryCount)
+    ? Math.max(0, Math.trunc(file.entryCount))
+    : null
+  const displayedDirectoryItemCount = listingDirectoryEntryCount ?? directoryItemCount
   const hasRemoteLocator = typeof file.remoteRootId === 'string' && file.remoteRootId.trim().length > 0
+  const runtimeFileContentUrl = (
+    rootHandle
+    && !isDir
+    && mediaType
+    && !hasRemoteLocator
+  )
+    ? buildRuntimeFileContentUrlForItem(file)
+    : null
+  const runtimeThumbnailUrl = mediaType === 'image' ? runtimeFileContentUrl : null
+  const runtimeVideoThumbnailSourceUrl = mediaType === 'video' ? runtimeFileContentUrl : null
+  const shouldUseRuntimeThumbnail = Boolean(runtimeThumbnailUrl)
   const shouldUseRemoteGatewayThumbnail = Boolean(
     !isDir
     && mediaType === 'image'
@@ -94,6 +114,7 @@ export function FileGridCard({
     !isDir
     && mediaType === 'image'
     && file.absolutePath
+    && !shouldUseRuntimeThumbnail
     && (!rootHandle || file.path === file.absolutePath || file.sourceType === 'global_recycle')
   )
   const requestIdentity = !isDir && mediaType
@@ -129,14 +150,15 @@ export function FileGridCard({
     })
     : null
   const displayedThumbnailUrl =
+    runtimeThumbnailUrl ??
     gatewayThumbnailUrl ??
     (requestIdentity && thumbnailUrlIdentity === requestIdentity ? thumbnailUrl : null) ??
     latestCachedThumbnailUrl
 
   useEffect(() => {
     if (!rootHandle || isDir) {
-      if (shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
-        setThumbnailState(gatewayThumbnailUrl ? 'loading' : 'failed')
+      if (shouldUseRuntimeThumbnail || shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
+        setThumbnailState(runtimeThumbnailUrl || gatewayThumbnailUrl ? 'loading' : 'failed')
         return
       }
       setThumbnailUrl(null)
@@ -152,10 +174,10 @@ export function FileGridCard({
       return
     }
 
-    if (shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
+    if (shouldUseRuntimeThumbnail || shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
       setThumbnailUrl(null)
       setThumbnailUrlIdentity(null)
-      setThumbnailState(gatewayThumbnailUrl ? 'loading' : 'failed')
+      setThumbnailState(runtimeThumbnailUrl || gatewayThumbnailUrl ? 'loading' : 'failed')
       return
     }
 
@@ -187,6 +209,27 @@ export function FileGridCard({
       setThumbnailState('loading')
 
       try {
+        if (runtimeVideoThumbnailSourceUrl) {
+          const url = await requestThumbnailFromPipeline({
+            sourceUrl: runtimeVideoThumbnailSourceUrl,
+            filePath: file.path,
+            fileSize: file.size,
+            fileLastModifiedMs,
+            sizePreset: thumbnailSizePreset,
+            mediaType,
+            priority: thumbnailPriority,
+            signal: controller.signal,
+            crossOrigin: true,
+          })
+
+          if (!cancelled) {
+            setThumbnailUrl(url)
+            setThumbnailUrlIdentity(requestIdentity)
+            setThumbnailState('ready')
+          }
+          return
+        }
+
         const fileObj = await getFileFromPath(rootHandle, file.path)
         if (!fileObj || cancelled) {
           if (!cancelled) {
@@ -247,13 +290,17 @@ export function FileGridCard({
     thumbnailPriority,
     requestIdentity,
     exactCachedThumbnailUrl,
+    runtimeFileContentUrl,
+    runtimeThumbnailUrl,
+    runtimeVideoThumbnailSourceUrl,
     gatewayThumbnailUrl,
+    shouldUseRuntimeThumbnail,
     shouldUseLocalGatewayThumbnail,
     shouldUseRemoteGatewayThumbnail,
   ])
 
   useEffect(() => {
-    if (!rootHandle || !isDir) {
+    if (listingDirectoryEntryCount !== null || !rootHandle || !isDir) {
       setDirectoryItemCount(null)
       return
     }
@@ -278,7 +325,7 @@ export function FileGridCard({
     return () => {
       cancelled = true
     }
-  }, [rootHandle, isDir, file.path])
+  }, [rootHandle, isDir, file.path, listingDirectoryEntryCount])
 
   const getIcon = () => {
     if (isDir) return <FolderOpen size={iconSize} className="text-yellow-500" />
@@ -345,9 +392,9 @@ export function FileGridCard({
               失败
             </span>
           )}
-          {isDir && directoryItemCount !== null && (
+          {isDir && displayedDirectoryItemCount !== null && (
             <span className="absolute right-1 top-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-secondary-foreground">
-              {directoryItemCount > 99 ? '99+' : directoryItemCount}
+              {displayedDirectoryItemCount > 99 ? '99+' : displayedDirectoryItemCount}
             </span>
           )}
         </div>

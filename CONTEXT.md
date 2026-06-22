@@ -44,6 +44,10 @@ _Avoid_: offset slice, pagination response
 A caller's requested view of a Listing before it is split into Listing Pages. It can narrow entries by name or kind and define the Listing order.
 _Avoid_: frontend filter, client-side search
 
+**Directory Entry Count**:
+A display-oriented count of visible immediate entries under a directory. It does not include Reserved Folders and may be capped when the caller only needs a badge count.
+_Avoid_: folder size, recursive count
+
 **Reserved Folder**:
 A folder inside a Local Root that Fauplay owns for runtime data or recovery workflows. Reserved Folders are not user content and should not appear in normal browsing results.
 _Avoid_: hidden folder, system folder
@@ -79,6 +83,10 @@ _Avoid_: full file read, raw file fetch
 **File Content**:
 A browser-renderable byte stream for a file under a Local Root, addressed by Root-relative Path and served with a MIME type.
 _Avoid_: raw file read, blob passthrough
+
+**File Metadata**:
+Lightweight observable attributes for a file under a Local Root, such as byte size and modification time. File Metadata does not include File Content.
+_Avoid_: stat, file info
 
 **File Content Range**:
 A contiguous byte segment of File Content, reported with its inclusive byte positions and the total file size. It supports media playback and progressive reads without changing the Root-relative Path identity of the file.
