@@ -11,7 +11,12 @@ import type {
   ListingQueryState,
 } from '@/types'
 import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
-import { listRuntimeLocalDirectory, toRuntimeFileItems } from '@/lib/runtimeApi'
+import {
+  listRuntimeLocalDirectory,
+  listRuntimeRootTrash,
+  toRuntimeFileItems,
+  toRuntimeRootTrashFileItems,
+} from '@/lib/runtimeApi'
 import {
   getCachedRootHandle,
   listCachedRoots,
@@ -157,6 +162,21 @@ function toTrashFileItem(item: RecycleListItem): FileItem | null {
     lastModifiedMs,
     lastModified: typeof lastModifiedMs === 'number' ? new Date(lastModifiedMs) : undefined,
   }
+}
+
+function sortTrashFileItems(items: FileItem[]): FileItem[] {
+  return [...items].sort((left, right) => {
+    const leftDeletedAt = Number(left.deletedAt ?? 0)
+    const rightDeletedAt = Number(right.deletedAt ?? 0)
+    if (leftDeletedAt !== rightDeletedAt) {
+      return rightDeletedAt - leftDeletedAt
+    }
+    const sourceOrder = String(left.sourceType || '').localeCompare(String(right.sourceType || ''))
+    if (sourceOrder !== 0) {
+      return sourceOrder
+    }
+    return left.path.localeCompare(right.path)
+  })
 }
 
 function createSessionRootId(handle: FileSystemDirectoryHandle): string {
@@ -424,16 +444,30 @@ export function useFileSystem() {
 
   const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
     const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
+    let rootTrashFiles: FileItem[] = []
+    let shouldLoadRootTrashFromGateway = true
+
+    if (boundRootPath) {
+      try {
+        const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
+        rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
+        shouldLoadRootTrashFromGateway = false
+      } catch {
+        // Fall back to the gateway Root Trash listing while the runtime-backed trash view is being adopted.
+      }
+    }
+
     const response = await callGatewayHttp<{ items?: RecycleListItem[] }>('/v1/recycle/items/list', {
       ...(boundRootPath ? { rootPath: boundRootPath } : {}),
-      includeRootTrash: true,
+      includeRootTrash: shouldLoadRootTrashFromGateway,
       includeGlobalRecycle: true,
     }, 120000)
-    const nextFiles = Array.isArray(response.items)
+    const gatewayFiles = Array.isArray(response.items)
       ? response.items
         .map((item) => toTrashFileItem(item))
         .filter((item): item is FileItem => item !== null)
       : []
+    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...gatewayFiles])
 
     setFiles(nextFiles)
     setRuntimeListingPageCursor(null)

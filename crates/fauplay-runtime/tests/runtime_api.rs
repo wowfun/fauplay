@@ -115,6 +115,36 @@ fn runtime_api_decodes_query_values_before_listing() {
 }
 
 #[test]
+fn runtime_api_decodes_url_search_params_space_encoding() {
+    let fixture = Fixture::new("runtime api decodes url search params space encoding");
+    fixture.create_dir("albums/2024 photos");
+    fixture.write_file("albums/2024 photos/photo one.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request_with_root_relative_path(
+        &address.to_string(),
+        &percent_encode(&fixture.root.to_string_lossy()),
+        "albums/2024+photos",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"albums/2024 photos/photo one.jpg\""),
+        "response should decode + as a query-space encoding: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_exposes_file_metadata() {
     let fixture = Fixture::new("runtime_api_exposes_file_metadata");
     fixture.write_file("photo.jpg", "image");
@@ -569,6 +599,154 @@ fn runtime_api_returns_file_content_byte_range() {
 }
 
 #[test]
+fn runtime_api_moves_root_relative_path_to_root_trash() {
+    let fixture = Fixture::new("runtime_api_moves_root_relative_path_to_root_trash");
+    fixture.write_file("photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_trash_request(
+        &address.to_string(),
+        "move",
+        &fixture.root.display().to_string(),
+        "photo.jpg",
+        false,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"completed\":1"),
+        "response should report a completed Root Trash move: {response}"
+    );
+    assert!(
+        response.contains("\"nextRootRelativePath\":\".trash/photo.jpg\""),
+        "response should include the Root Trash target path: {response}"
+    );
+    fixture.assert_missing("photo.jpg");
+    fixture.assert_file(".trash/photo.jpg", "image");
+}
+
+#[test]
+fn runtime_api_moves_multiple_root_relative_paths_to_root_trash() {
+    let fixture = Fixture::new("runtime_api_moves_multiple_root_relative_paths_to_root_trash");
+    fixture.write_file("photo-a.jpg", "image a");
+    fixture.write_file("photo-b.jpg", "image b");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_trash_request_with_paths(
+        &address.to_string(),
+        "move",
+        &fixture.root.display().to_string(),
+        &["photo-a.jpg", "photo-b.jpg"],
+        false,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"total\":2"),
+        "response should include both Root Trash items: {response}"
+    );
+    assert!(
+        response.contains("\"completed\":2"),
+        "response should complete both Root Trash moves: {response}"
+    );
+    fixture.assert_missing("photo-a.jpg");
+    fixture.assert_missing("photo-b.jpg");
+    fixture.assert_file(".trash/photo-a.jpg", "image a");
+    fixture.assert_file(".trash/photo-b.jpg", "image b");
+}
+
+#[test]
+fn runtime_api_restores_root_trash_item() {
+    let fixture = Fixture::new("runtime_api_restores_root_trash_item");
+    fixture.write_file(".trash/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_trash_request(
+        &address.to_string(),
+        "restore",
+        &fixture.root.display().to_string(),
+        ".trash/photo.jpg",
+        false,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"completed\":1"),
+        "response should report a completed Root Trash restore: {response}"
+    );
+    assert!(
+        response.contains("\"nextRootRelativePath\":\"photo.jpg\""),
+        "response should include the restored Root-relative Path: {response}"
+    );
+    fixture.assert_missing(".trash/photo.jpg");
+    fixture.assert_file("photo.jpg", "image");
+}
+
+#[test]
+fn runtime_api_lists_root_trash_entries() {
+    let fixture = Fixture::new("runtime_api_lists_root_trash_entries");
+    fixture.write_file(".trash/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response =
+        send_root_trash_list_request(&address.to_string(), &fixture.root.display().to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\".trash/photo.jpg\""),
+        "response should include the Root Trash Entry path: {response}"
+    );
+    assert!(
+        response.contains("\"originalRootRelativePath\":\"photo.jpg\""),
+        "response should include the restore target Root-relative Path: {response}"
+    );
+    assert!(
+        response.contains("\"deletedAtMs\":"),
+        "response should include deletion timestamp metadata: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_allows_browser_preflight_requests() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("listener should have address");
@@ -599,7 +777,7 @@ fn runtime_api_allows_browser_preflight_requests() {
         "preflight should allow browser origins: {response}"
     );
     assert!(
-        response.contains("Access-Control-Allow-Methods: GET, OPTIONS\r\n"),
+        response.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"),
         "preflight should allow Runtime API methods: {response}"
     );
 }
@@ -823,6 +1001,63 @@ fn send_file_content_request_with_headers(
     response
 }
 
+fn send_root_trash_request(
+    address: &str,
+    operation: &str,
+    root_path: &str,
+    root_relative_path: &str,
+    dry_run: bool,
+) -> String {
+    send_root_trash_request_with_paths(
+        address,
+        operation,
+        root_path,
+        &[root_relative_path],
+        dry_run,
+    )
+}
+
+fn send_root_trash_request_with_paths(
+    address: &str,
+    operation: &str,
+    root_path: &str,
+    root_relative_paths: &[&str],
+    dry_run: bool,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let root_relative_path_query = root_relative_paths
+        .iter()
+        .map(|path| format!("rootRelativePath={path}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    write!(
+        stream,
+        "POST /v1/root-trash/{operation}?rootPath={root_path}&{root_relative_path_query}&dryRun={dry_run} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_root_trash_list_request(address: &str, root_path: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/root-trash?rootPath={root_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
 fn read_listen_address(stdout: &mut impl BufRead) -> String {
     let mut line = String::new();
     stdout
@@ -867,10 +1102,31 @@ impl Fixture {
     }
 
     fn write_file(&self, relative_path: &str, contents: &str) {
-        fs::write(self.root.join(relative_path), contents).expect("fixture file should be written");
+        let path = self.root.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("fixture parent should be created");
+        }
+        fs::write(path, contents).expect("fixture file should be written");
     }
 
     fn write_bytes(&self, relative_path: &str, contents: &[u8]) {
-        fs::write(self.root.join(relative_path), contents).expect("fixture file should be written");
+        let path = self.root.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("fixture parent should be created");
+        }
+        fs::write(path, contents).expect("fixture file should be written");
+    }
+
+    fn assert_file(&self, relative_path: &str, contents: &str) {
+        let path = self.root.join(relative_path);
+        let actual = fs::read_to_string(path).expect("fixture file should exist");
+        assert_eq!(actual, contents);
+    }
+
+    fn assert_missing(&self, relative_path: &str) {
+        assert!(
+            !self.root.join(relative_path).exists(),
+            "{relative_path} should not exist",
+        );
     }
 }

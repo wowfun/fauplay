@@ -1,11 +1,12 @@
-/* global process */
+/* global process, URL, URLSearchParams, fetch */
 import { execFileSync } from 'node:child_process'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import readline from 'node:readline'
 
 const MCP_PROTOCOL_VERSION = '2025-11-05'
-const TRASH_DIR_NAME = '.trash'
+const DEFAULT_RUNTIME_BASE_URL =
+  (typeof process.env.FAUPLAY_RUNTIME_BASE_URL === 'string' && process.env.FAUPLAY_RUNTIME_BASE_URL.trim())
+  || 'http://127.0.0.1:3211'
 
 const TOOL_DEFINITIONS = [
   {
@@ -167,10 +168,6 @@ function parseJsonRpcRequest(payload) {
   }
 }
 
-function toPosixPath(value) {
-  return value.split(path.sep).join('/')
-}
-
 function normalizeRelativePath(input) {
   if (typeof input !== 'string' || !input.trim()) {
     throw toInvalidParamsError('relativePath contains invalid value')
@@ -213,15 +210,6 @@ function resolveRootPath(input) {
   }
 
   return raw
-}
-
-function resolvePathWithinRoot(rootPath, relativePath) {
-  const target = path.resolve(rootPath, ...relativePath.split('/'))
-  const relative = path.relative(rootPath, target)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw toInvalidParamsError('relativePath escapes rootPath')
-  }
-  return target
 }
 
 function parseConfirm(input) {
@@ -276,13 +264,11 @@ function parseSoftDeleteTargets(args) {
 
   if (hasRelativePath) {
     return {
-      mode: 'single',
       relativePaths: [normalizeRelativePath(args.relativePath)],
     }
   }
 
   return {
-    mode: 'batch',
     relativePaths: parseBatchRelativePaths(args.relativePaths),
   }
 }
@@ -301,262 +287,95 @@ function parseRestoreTargets(args) {
 
   if (hasRelativePath) {
     return {
-      mode: 'single',
       relativePaths: [normalizeRelativePath(args.relativePath)],
     }
   }
 
   return {
-    mode: 'batch',
     relativePaths: parseBatchRelativePaths(args.relativePaths),
   }
 }
 
-async function pathExists(targetPath) {
+function buildRuntimeUrl(endpointPath) {
+  return new URL(
+    endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`,
+    `${DEFAULT_RUNTIME_BASE_URL.replace(/\/+$/, '')}/`
+  ).toString()
+}
+
+function toRuntimeToolError(message, code = 'MCP_TOOL_CALL_FAILED') {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+async function callRootTrashRuntime({ operation, rootPath, relativePaths, dryRun }) {
+  const query = new URLSearchParams({ rootPath })
+  for (const relativePath of relativePaths) {
+    query.append('rootRelativePath', relativePath)
+  }
+  if (dryRun) {
+    query.set('dryRun', 'true')
+  }
+
+  let response
   try {
-    await fs.access(targetPath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function allocateDedupedPath({ sourceAbsolutePath, candidateAbsolutePath, reservedTargetPaths }) {
-  const parsed = path.parse(candidateAbsolutePath)
-  let attemptPath = candidateAbsolutePath
-  let suffixIndex = 1
-
-  while (true) {
-    if (attemptPath === sourceAbsolutePath) {
-      return attemptPath
-    }
-
-    if (!reservedTargetPaths.has(attemptPath)) {
-      const exists = await pathExists(attemptPath)
-      if (!exists) {
-        return attemptPath
-      }
-    }
-
-    attemptPath = path.join(parsed.dir, `${parsed.name} (${suffixIndex})${parsed.ext}`)
-    suffixIndex += 1
-  }
-}
-
-async function buildSoftDeletePlans({ rootPath, relativePaths, mode }) {
-  const plans = []
-  const reservedTargetPaths = new Set()
-
-  for (const normalizedRelativePath of relativePaths) {
-    try {
-      const sourceAbsolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
-
-      let stat
-      try {
-        stat = await fs.lstat(sourceAbsolutePath)
-      } catch {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'SOFT_DELETE_SOURCE_NOT_FOUND',
-          error: 'source file not found',
-        })
-        continue
-      }
-
-      const sourceIsFile = stat.isFile()
-      const sourceIsDirectory = stat.isDirectory()
-      if (!sourceIsFile && !sourceIsDirectory) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'SOFT_DELETE_UNSUPPORTED_KIND',
-          error: 'only file and directory items are supported',
-        })
-        continue
-      }
-
-      if (mode === 'single' && sourceIsDirectory) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'SOFT_DELETE_UNSUPPORTED_KIND',
-          error: 'relativePath only supports file items',
-        })
-        continue
-      }
-
-      const candidateRelativePath = `${TRASH_DIR_NAME}/${normalizedRelativePath}`
-      const candidateAbsolutePath = resolvePathWithinRoot(rootPath, candidateRelativePath)
-      const targetAbsolutePath = await allocateDedupedPath({
-        sourceAbsolutePath,
-        candidateAbsolutePath,
-        reservedTargetPaths,
-      })
-      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
-
-      plans.push({
-        relativePath: normalizedRelativePath,
-        nextRelativePath: targetRelativePath,
-        sourceAbsolutePath,
-        targetAbsolutePath,
-        ok: true,
-        skipped: false,
-      })
-      reservedTargetPaths.add(targetAbsolutePath)
-    } catch (error) {
-      plans.push({
-        relativePath: normalizedRelativePath,
-        ok: false,
-        skipped: false,
-        reasonCode: 'SOFT_DELETE_INVALID_PATH',
-        error: error instanceof Error ? error.message : 'invalid path',
-      })
-    }
+    response = await fetch(buildRuntimeUrl(`/v1/root-trash/${operation}?${query.toString()}`), {
+      method: 'POST',
+    })
+  } catch (error) {
+    throw toRuntimeToolError(
+      error instanceof Error
+        ? `failed to call Fauplay Runtime: ${error.message}`
+        : 'failed to call Fauplay Runtime'
+    )
   }
 
-  return plans
-}
-
-async function buildRestorePlans({ rootPath, relativePaths, mode }) {
-  const plans = []
-  const reservedTargetPaths = new Set()
-
-  for (const normalizedRelativePath of relativePaths) {
-    try {
-      if (!normalizedRelativePath.startsWith(`${TRASH_DIR_NAME}/`)) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RESTORE_INVALID_SOURCE',
-          error: 'restore source must be under .trash',
-        })
-        continue
-      }
-
-      const sourceAbsolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
-
-      let stat
-      try {
-        stat = await fs.lstat(sourceAbsolutePath)
-      } catch {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RESTORE_SOURCE_NOT_FOUND',
-          error: 'restore source not found',
-        })
-        continue
-      }
-
-      const sourceIsFile = stat.isFile()
-      const sourceIsDirectory = stat.isDirectory()
-      if (!sourceIsFile && !sourceIsDirectory) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RESTORE_UNSUPPORTED_KIND',
-          error: 'only file and directory items are supported',
-        })
-        continue
-      }
-      if (mode === 'single' && sourceIsDirectory) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RESTORE_UNSUPPORTED_KIND',
-          error: 'relativePath only supports file items',
-        })
-        continue
-      }
-
-      const restoredRelativePath = normalizedRelativePath.slice(TRASH_DIR_NAME.length + 1)
-      if (!restoredRelativePath) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RESTORE_INVALID_SOURCE',
-          error: 'restore source must be under .trash',
-        })
-        continue
-      }
-
-      const candidateAbsolutePath = resolvePathWithinRoot(rootPath, restoredRelativePath)
-      const targetAbsolutePath = await allocateDedupedPath({
-        sourceAbsolutePath,
-        candidateAbsolutePath,
-        reservedTargetPaths,
-      })
-      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
-
-      plans.push({
-        relativePath: normalizedRelativePath,
-        nextRelativePath: targetRelativePath,
-        sourceAbsolutePath,
-        targetAbsolutePath,
-        ok: true,
-        skipped: false,
-      })
-      reservedTargetPaths.add(targetAbsolutePath)
-    } catch (error) {
-      plans.push({
-        relativePath: normalizedRelativePath,
-        ok: false,
-        skipped: false,
-        reasonCode: 'RESTORE_INVALID_PATH',
-        error: error instanceof Error ? error.message : 'invalid path',
-      })
-    }
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw toRuntimeToolError(
+      typeof payload?.error === 'string'
+        ? payload.error
+        : `Fauplay Runtime request failed: ${response.status}`
+    )
+  }
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+    throw toRuntimeToolError('Fauplay Runtime returned an invalid Root Trash response')
   }
 
-  return plans
+  return payload
 }
 
-async function commitPlans({ items, targetExistsReasonCode, commitFailedReasonCode, commitFailedMessage }) {
-  for (const item of items) {
-    if (!item.ok || item.skipped || !item.sourceAbsolutePath || !item.targetAbsolutePath) {
-      continue
-    }
-
-    try {
-      await fs.mkdir(path.dirname(item.targetAbsolutePath), { recursive: true })
-
-      if (await pathExists(item.targetAbsolutePath)) {
-        item.ok = false
-        item.skipped = false
-        item.reasonCode = targetExistsReasonCode
-        item.error = 'target path already exists'
-        continue
-      }
-
-      await fs.rename(item.sourceAbsolutePath, item.targetAbsolutePath)
-    } catch (error) {
-      item.ok = false
-      item.skipped = false
-      item.reasonCode = commitFailedReasonCode
-      item.error = error instanceof Error ? error.message : commitFailedMessage
-    }
+function mapRuntimeFailureReason(operation, reason) {
+  if (operation === 'restore') {
+    if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
+    if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
+    if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
+    if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
+    if (reason === 'mutation_failed') return 'RESTORE_FAILED'
+    return reason ? 'RESTORE_FAILED' : undefined
   }
+
+  if (reason === 'invalid_source') return 'SOFT_DELETE_INVALID_SOURCE'
+  if (reason === 'source_not_found') return 'SOFT_DELETE_SOURCE_NOT_FOUND'
+  if (reason === 'unsupported_kind') return 'SOFT_DELETE_UNSUPPORTED_KIND'
+  if (reason === 'target_exists') return 'SOFT_DELETE_TARGET_EXISTS'
+  if (reason === 'mutation_failed') return 'SOFT_DELETE_FAILED'
+  return reason ? 'SOFT_DELETE_FAILED' : undefined
 }
 
-function toResponseItems(items) {
-  return items.map((item) => ({
-    relativePath: item.relativePath,
-    nextRelativePath: item.nextRelativePath,
-    absolutePath: item.sourceAbsolutePath,
-    nextAbsolutePath: item.targetAbsolutePath,
-    ok: item.ok,
-    skipped: item.skipped,
-    reasonCode: item.reasonCode,
-    error: item.error,
+function toResponseItems(runtimeResponse, operation) {
+  return runtimeResponse.items.map((item) => ({
+    relativePath: typeof item.rootRelativePath === 'string' ? item.rootRelativePath : undefined,
+    nextRelativePath: typeof item.nextRootRelativePath === 'string' ? item.nextRootRelativePath : undefined,
+    absolutePath: typeof item.absolutePath === 'string' ? item.absolutePath : undefined,
+    nextAbsolutePath: typeof item.nextAbsolutePath === 'string' ? item.nextAbsolutePath : undefined,
+    ok: item.ok === true,
+    skipped: false,
+    reasonCode: typeof item.reason === 'string'
+      ? mapRuntimeFailureReason(operation, item.reason)
+      : undefined,
+    error: typeof item.error === 'string' ? item.error : undefined,
   }))
 }
 
@@ -574,22 +393,14 @@ async function runSoftDelete(args) {
   const targetInfo = parseSoftDeleteTargets(args)
   const confirm = parseConfirm(args.confirm)
 
-  const items = await buildSoftDeletePlans({
+  const runtimeResponse = await callRootTrashRuntime({
+    operation: 'move',
     rootPath: normalizedRootPath,
     relativePaths: targetInfo.relativePaths,
-    mode: targetInfo.mode,
+    dryRun: !confirm,
   })
 
-  if (confirm) {
-    await commitPlans({
-      items,
-      targetExistsReasonCode: 'SOFT_DELETE_TARGET_EXISTS',
-      commitFailedReasonCode: 'SOFT_DELETE_SOURCE_NOT_FOUND',
-      commitFailedMessage: 'soft delete failed',
-    })
-  }
-
-  const responseItems = toResponseItems(items)
+  const responseItems = toResponseItems(runtimeResponse, 'move')
   const counts = countOutcomeItems(responseItems)
 
   return {
@@ -608,22 +419,14 @@ async function runRestore(args) {
   const targetInfo = parseRestoreTargets(args)
   const confirm = parseConfirm(args.confirm)
 
-  const items = await buildRestorePlans({
+  const runtimeResponse = await callRootTrashRuntime({
+    operation: 'restore',
     rootPath: normalizedRootPath,
     relativePaths: targetInfo.relativePaths,
-    mode: targetInfo.mode,
+    dryRun: !confirm,
   })
 
-  if (confirm) {
-    await commitPlans({
-      items,
-      targetExistsReasonCode: 'RESTORE_TARGET_EXISTS',
-      commitFailedReasonCode: 'RESTORE_SOURCE_NOT_FOUND',
-      commitFailedMessage: 'restore failed',
-    })
-  }
-
-  const responseItems = toResponseItems(items)
+  const responseItems = toResponseItems(runtimeResponse, 'restore')
   const counts = countOutcomeItems(responseItems)
 
   return {

@@ -10,7 +10,9 @@ pub use api::{
     DirectoryEntry, DirectoryEntryKind, FileContentRange, FileContentRangeRequest,
     FileContentRequest, FileContentResponse, ListDirectoryRequest, ListDirectoryResponse,
     ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
-    RootRelativePath, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
+    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
+    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 
@@ -41,5 +43,26 @@ impl FauplayRuntime {
         request: FileContentRequest,
     ) -> Result<FileContentResponse, RuntimeError> {
         media::read_file_content(request)
+    }
+
+    pub fn move_to_root_trash(
+        &self,
+        request: RootTrashRequest,
+    ) -> Result<RootTrashMutationResponse, RuntimeError> {
+        fs::move_to_root_trash(request)
+    }
+
+    pub fn restore_from_root_trash(
+        &self,
+        request: RootTrashRequest,
+    ) -> Result<RootTrashMutationResponse, RuntimeError> {
+        fs::restore_from_root_trash(request)
+    }
+
+    pub fn list_root_trash(
+        &self,
+        request: RootTrashListRequest,
+    ) -> Result<RootTrashListResponse, RuntimeError> {
+        fs::list_root_trash(request)
     }
 }

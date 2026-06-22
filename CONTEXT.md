@@ -44,6 +44,14 @@ _Avoid_: frontend filter, client-side search
 A folder inside a Local Root that Fauplay owns for runtime data or recovery workflows. Reserved Folders are not user content and should not appear in normal browsing results.
 _Avoid_: hidden folder, system folder
 
+**Root Trash**:
+A Reserved Folder inside a Local Root that stores user content moved out of normal browsing so it can be restored later.
+_Avoid_: recycle bin, deleted folder, soft-delete plugin storage
+
+**Root Trash Entry**:
+A file currently stored in Root Trash, identified by its current Root-relative Path and the original Root-relative Path it would restore to.
+_Avoid_: recycle item, deleted item
+
 **Runtime Capability**:
 A capability owned by the Fauplay Runtime because it depends on privileged local access, shared runtime state, or long-running task coordination.
 _Avoid_: backend feature, native feature

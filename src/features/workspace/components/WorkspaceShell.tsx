@@ -56,6 +56,7 @@ import {
 } from '@/features/faces/utils/reviewFilterTagStore'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
+import { listRuntimeRootTrash } from '@/lib/runtimeApi'
 import {
   areWorkspaceBrowserHistorySnapshotsEqual,
   buildWorkspaceBrowserHistoryUrl,
@@ -2897,12 +2898,24 @@ export function WorkspaceShell({
     let disposed = false
 
     const refreshTrashAvailability = async () => {
-      let hasLegacyTrashEntries = false
-      try {
-        const itemCount = await getDirectoryItemCount(rootHandle, LEGACY_TRASH_RELATIVE_PATH, 1)
-        hasLegacyTrashEntries = itemCount > 0
-      } catch {
-        hasLegacyTrashEntries = false
+      let hasRootTrashEntries = false
+      const boundRootPath = getBoundRootPath(rootId)
+      if (boundRootPath) {
+        try {
+          const listing = await listRuntimeRootTrash({ rootPath: boundRootPath, limit: 1 }, 120000)
+          hasRootTrashEntries = listing.entries.length > 0
+        } catch {
+          hasRootTrashEntries = false
+        }
+      }
+
+      if (!hasRootTrashEntries) {
+        try {
+          const itemCount = await getDirectoryItemCount(rootHandle, LEGACY_TRASH_RELATIVE_PATH, 1)
+          hasRootTrashEntries = itemCount > 0
+        } catch {
+          hasRootTrashEntries = false
+        }
       }
 
       try {
@@ -2912,11 +2925,11 @@ export function WorkspaceShell({
         }, 120000)
         if (!disposed) {
           const globalRecycleCount = Array.isArray(result.items) ? result.items.length : 0
-          setHasTrashEntries(hasLegacyTrashEntries || globalRecycleCount > 0)
+          setHasTrashEntries(hasRootTrashEntries || globalRecycleCount > 0)
         }
       } catch {
         if (!disposed) {
-          setHasTrashEntries(hasLegacyTrashEntries)
+          setHasTrashEntries(hasRootTrashEntries)
         }
       }
     }
@@ -2925,7 +2938,7 @@ export function WorkspaceShell({
     return () => {
       disposed = true
     }
-  }, [accessProvider, files, rootHandle])
+  }, [accessProvider, files, rootHandle, rootId])
 
   useEffect(() => {
     void Promise.all([
