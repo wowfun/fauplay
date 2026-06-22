@@ -1,0 +1,14 @@
+[package]
+name = "fauplay-runtime"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "fauplay_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fauplay-runtime"
+path = "src/main.rs"
+
