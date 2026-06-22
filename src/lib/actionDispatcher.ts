@@ -1,8 +1,12 @@
 import { ensureRootPath } from '@/lib/reveal'
 import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
 import {
+  moveRuntimePathToGlobalTrash,
   moveRuntimePathToRootTrash,
+  restoreRuntimeGlobalTrash,
   restoreRuntimePathFromRootTrash,
+  type RuntimeGlobalTrashMoveResponse,
+  type RuntimeGlobalTrashRestoreResponse,
   type RuntimeRootTrashResponse,
 } from '@/lib/runtimeApi'
 
@@ -188,11 +192,55 @@ function readRestoreRootRelativePaths(args: Record<string, unknown>, rootPath: s
   return paths.length > 0 ? compactRootRelativePaths(paths) : null
 }
 
+function readMoveGlobalTrashAbsolutePaths(args: Record<string, unknown>): string[] | null {
+  if (!isStringArray(args.absolutePaths)) {
+    return null
+  }
+
+  const absolutePaths = args.absolutePaths
+    .map((item) => item.trim())
+    .filter((item) => item)
+
+  return absolutePaths.length > 0 ? absolutePaths : null
+}
+
+function readRestoreGlobalTrashRecycleIds(args: Record<string, unknown>): string[] | null {
+  if (typeof args.recycleId === 'string' && args.recycleId.trim()) {
+    return [args.recycleId.trim()]
+  }
+
+  if (isStringArray(args.recycleIds)) {
+    const recycleIds = args.recycleIds
+      .map((item) => item.trim())
+      .filter((item) => item)
+    return recycleIds.length > 0 ? recycleIds : null
+  }
+
+  if (!isObjectArray(args.items)) {
+    return null
+  }
+
+  const recycleIds: string[] = []
+  for (const item of args.items) {
+    if (item.sourceType !== 'global_recycle') {
+      return null
+    }
+    const recycleId = typeof item.recycleId === 'string' ? item.recycleId.trim() : ''
+    if (!recycleId) {
+      return null
+    }
+    recycleIds.push(recycleId)
+  }
+
+  return recycleIds.length > 0 ? recycleIds : null
+}
+
 function mapRuntimeFailureReason(operation: RuntimeRootTrashOperation, reason: string | null): string | undefined {
   if (!reason) return undefined
 
   if (operation === 'restore') {
     if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
+    if (reason === 'recycle_item_not_found') return 'RECYCLE_ITEM_NOT_FOUND'
     if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
     if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
     if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
@@ -229,6 +277,58 @@ function toRuntimeRootTrashToolResult(
     dryRun: response.dryRun,
     total: items.length,
     ...(operation === 'restore' ? { restored: movedOrRestored } : { moved: movedOrRestored }),
+    skipped: 0,
+    failed,
+    items,
+  }
+}
+
+function toRuntimeGlobalTrashMoveToolResult(response: RuntimeGlobalTrashMoveResponse): ToolCallResult {
+  const items = response.items.map((item) => ({
+    sourceType: 'global_recycle',
+    recycleId: item.recycleId || undefined,
+    absolutePath: item.absolutePath,
+    nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+    deletedAt: item.deletedAt,
+    ok: item.ok,
+    skipped: false,
+    reasonCode: mapRuntimeFailureReason('move', item.reason),
+    error: item.error ?? undefined,
+  }))
+  const moved = items.filter((item) => item.ok === true && item.skipped !== true).length
+  const failed = items.filter((item) => item.ok !== true && item.skipped !== true).length
+
+  return {
+    ok: true,
+    dryRun: response.dryRun,
+    total: items.length,
+    moved,
+    skipped: 0,
+    failed,
+    items,
+  }
+}
+
+function toRuntimeGlobalTrashToolResult(response: RuntimeGlobalTrashRestoreResponse): ToolCallResult {
+  const items = response.items.map((item) => ({
+    sourceType: 'global_recycle',
+    recycleId: item.recycleId,
+    absolutePath: item.absolutePath,
+    originalAbsolutePath: item.originalAbsolutePath,
+    nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+    ok: item.ok,
+    skipped: false,
+    reasonCode: mapRuntimeFailureReason('restore', item.reason),
+    error: item.error ?? undefined,
+  }))
+  const restored = items.filter((item) => item.ok === true && item.skipped !== true).length
+  const failed = items.filter((item) => item.ok !== true && item.skipped !== true).length
+
+  return {
+    ok: true,
+    dryRun: response.dryRun,
+    total: items.length,
+    restored,
     skipped: 0,
     failed,
     items,
@@ -272,6 +372,40 @@ async function dispatchRuntimeRootTrash(
   }
 
   return null
+}
+
+async function dispatchRuntimeGlobalTrash(
+  toolName: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<ToolCallResult | null> {
+  if (toolName === 'fs.softDelete') {
+    const absolutePaths = readMoveGlobalTrashAbsolutePaths(args)
+    if (!absolutePaths) {
+      return null
+    }
+
+    const response = await moveRuntimePathToGlobalTrash({
+      absolutePath: absolutePaths,
+      dryRun: args.confirm === false,
+    }, timeoutMs)
+    return toRuntimeGlobalTrashMoveToolResult(response)
+  }
+
+  if (toolName !== 'fs.restore') {
+    return null
+  }
+
+  const recycleIds = readRestoreGlobalTrashRecycleIds(args)
+  if (!recycleIds) {
+    return null
+  }
+
+  const response = await restoreRuntimeGlobalTrash({
+    recycleId: recycleIds,
+    dryRun: args.confirm === false,
+  }, timeoutMs)
+  return toRuntimeGlobalTrashToolResult(response)
 }
 
 function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown>): DispatchHttpRoute | null {
@@ -523,7 +657,11 @@ export async function dispatchSystemTool({
       ...(additionalArgs ?? {}),
     }
     const runtimeRootTrashResult = await dispatchRuntimeRootTrash(toolName, argsPayload, timeoutMs)
-    const httpRoute = runtimeRootTrashResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
+    const runtimeGlobalTrashResult = runtimeRootTrashResult
+      ? null
+      : await dispatchRuntimeGlobalTrash(toolName, argsPayload, timeoutMs)
+    const runtimeTrashResult = runtimeRootTrashResult ?? runtimeGlobalTrashResult
+    const httpRoute = runtimeTrashResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
     if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''
       return {
@@ -536,7 +674,7 @@ export async function dispatchSystemTool({
       }
     }
 
-    const result = runtimeRootTrashResult
+    const result = runtimeTrashResult
       ?? (httpRoute
         ? await callGatewayHttp(
           httpRoute.endpointPath,

@@ -195,6 +195,98 @@ fn runtime_api_lists_global_trash_entries() {
 }
 
 #[test]
+fn runtime_api_moves_file_to_global_trash() {
+    let fixture = Fixture::new("runtime_api_moves_file_to_global_trash");
+    fixture.write_file("source/original.jpg", "image");
+    let source_path = fixture.root.join("source/original.jpg");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root.clone();
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_move_request(&address.to_string(), &[&source_path], false);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"moved\":1"),
+        "response should report a moved Global Trash Entry: {response}"
+    );
+    assert!(
+        response.contains("\"sourceType\":\"global_recycle\""),
+        "response should mark the moved item as Global Trash: {response}"
+    );
+    assert!(
+        response.contains("\"recycleId\":\""),
+        "response should include a recycle id: {response}"
+    );
+    fixture.assert_missing("source/original.jpg");
+    assert!(
+        fixture.root.join("global/recycle/items.json").is_file(),
+        "Global Trash metadata should be written"
+    );
+}
+
+#[test]
+fn runtime_api_restores_global_trash_entry() {
+    let fixture = Fixture::new("runtime_api_restores_global_trash_entry");
+    fixture.write_file("global/recycle/files/item-1.jpg", "image");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.jpg");
+    let original_path = fixture.root.join("restored/original.jpg");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"{}","name":"original.jpg","size":5,"mimeType":"image/jpeg","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+            json_path(&original_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root.clone();
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_restore_request(&address.to_string(), &["item-1"], false);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"restored\":1"),
+        "response should report a restored Global Trash Entry: {response}"
+    );
+    assert!(
+        response.contains(&format!(
+            "\"nextAbsolutePath\":\"{}\"",
+            json_path(&original_path)
+        )),
+        "response should include the restored absolute path: {response}"
+    );
+    fixture.assert_missing("global/recycle/files/item-1.jpg");
+    fixture.assert_file("restored/original.jpg", "image");
+    fixture.assert_file("global/recycle/items.json", "[]");
+}
+
+#[test]
 fn runtime_api_decodes_query_values_before_listing() {
     let fixture = Fixture::new("runtime api decodes query values");
     fixture.create_dir("albums/2024 photos");
@@ -1188,6 +1280,55 @@ fn send_global_trash_request(address: &str) -> String {
     write!(
         stream,
         "GET /v1/global-trash HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_move_request(
+    address: &str,
+    absolute_paths: &[&Path],
+    dry_run: bool,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let absolute_path_query = absolute_paths
+        .iter()
+        .map(|absolute_path| {
+            format!(
+                "absolutePath={}",
+                percent_encode(&absolute_path.display().to_string())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    write!(
+        stream,
+        "POST /v1/global-trash/move?{absolute_path_query}&dryRun={dry_run} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_restore_request(address: &str, recycle_ids: &[&str], dry_run: bool) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let recycle_id_query = recycle_ids
+        .iter()
+        .map(|recycle_id| format!("recycleId={}", percent_encode(recycle_id)))
+        .collect::<Vec<_>>()
+        .join("&");
+    write!(
+        stream,
+        "POST /v1/global-trash/restore?{recycle_id_query}&dryRun={dry_run} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     .expect("request should be written");
 

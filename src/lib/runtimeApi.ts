@@ -106,6 +106,54 @@ export interface RuntimeGlobalTrashListResponse {
   nextOffset: number | null
 }
 
+export interface RuntimeGlobalTrashMoveRequest {
+  absolutePath: string | string[]
+  dryRun?: boolean
+}
+
+export interface RuntimeGlobalTrashMoveItem {
+  sourceType: 'global_recycle'
+  recycleId: string
+  absolutePath: string
+  nextAbsolutePath: string | null
+  deletedAt?: number
+  ok: boolean
+  reason: string | null
+  error: string | null
+}
+
+export interface RuntimeGlobalTrashMoveResponse {
+  dryRun: boolean
+  total: number
+  moved: number
+  failed: number
+  items: RuntimeGlobalTrashMoveItem[]
+}
+
+export interface RuntimeGlobalTrashRestoreRequest {
+  recycleId: string | string[]
+  dryRun?: boolean
+}
+
+export interface RuntimeGlobalTrashRestoreItem {
+  sourceType: 'global_recycle'
+  recycleId: string
+  absolutePath: string
+  originalAbsolutePath: string
+  nextAbsolutePath: string | null
+  ok: boolean
+  reason: string | null
+  error: string | null
+}
+
+export interface RuntimeGlobalTrashRestoreResponse {
+  dryRun: boolean
+  total: number
+  restored: number
+  failed: number
+  items: RuntimeGlobalTrashRestoreItem[]
+}
+
 export interface RuntimeRootTrashItem {
   rootRelativePath: string
   nextRootRelativePath: string | null
@@ -402,6 +450,18 @@ export async function moveRuntimePathToRootTrash(
   return parseRuntimeRootTrashResponse(payload)
 }
 
+export async function moveRuntimePathToGlobalTrash(
+  request: RuntimeGlobalTrashMoveRequest,
+  timeoutMs?: number,
+): Promise<RuntimeGlobalTrashMoveResponse> {
+  const payload = await callRuntimeJson(
+    `/v1/global-trash/move?${globalTrashMoveQuery(request).toString()}`,
+    timeoutMs,
+    'POST',
+  )
+  return parseRuntimeGlobalTrashMoveResponse(payload)
+}
+
 export async function restoreRuntimePathFromRootTrash(
   request: RuntimeRootTrashRequest,
   timeoutMs?: number,
@@ -412,6 +472,18 @@ export async function restoreRuntimePathFromRootTrash(
     'POST',
   )
   return parseRuntimeRootTrashResponse(payload)
+}
+
+export async function restoreRuntimeGlobalTrash(
+  request: RuntimeGlobalTrashRestoreRequest,
+  timeoutMs?: number,
+): Promise<RuntimeGlobalTrashRestoreResponse> {
+  const payload = await callRuntimeJson(
+    `/v1/global-trash/restore?${globalTrashRestoreQuery(request).toString()}`,
+    timeoutMs,
+    'POST',
+  )
+  return parseRuntimeGlobalTrashRestoreResponse(payload)
 }
 
 export function buildRuntimeFileContentUrl(request: RuntimeFileContentRequest): string {
@@ -431,6 +503,34 @@ function rootTrashQuery(request: RuntimeRootTrashRequest): URLSearchParams {
     : [request.rootRelativePath]
   for (const rootRelativePath of rootRelativePaths) {
     query.append('rootRelativePath', rootRelativePath)
+  }
+  if (request.dryRun === true) {
+    query.set('dryRun', 'true')
+  }
+  return query
+}
+
+function globalTrashMoveQuery(request: RuntimeGlobalTrashMoveRequest): URLSearchParams {
+  const query = new URLSearchParams()
+  const absolutePaths = Array.isArray(request.absolutePath)
+    ? request.absolutePath
+    : [request.absolutePath]
+  for (const absolutePath of absolutePaths) {
+    query.append('absolutePath', absolutePath)
+  }
+  if (request.dryRun === true) {
+    query.set('dryRun', 'true')
+  }
+  return query
+}
+
+function globalTrashRestoreQuery(request: RuntimeGlobalTrashRestoreRequest): URLSearchParams {
+  const query = new URLSearchParams()
+  const recycleIds = Array.isArray(request.recycleId)
+    ? request.recycleId
+    : [request.recycleId]
+  for (const recycleId of recycleIds) {
+    query.append('recycleId', recycleId)
   }
   if (request.dryRun === true) {
     query.set('dryRun', 'true')
@@ -458,6 +558,54 @@ function parseRuntimeRootTrashResponse(payload: unknown): RuntimeRootTrashRespon
       ? payload.items
         .map((item) => parseRuntimeRootTrashItem(item))
         .filter((item): item is RuntimeRootTrashItem => item !== null)
+      : [],
+  }
+}
+
+function parseRuntimeGlobalTrashMoveResponse(payload: unknown): RuntimeGlobalTrashMoveResponse {
+  if (!isObject(payload)) {
+    return {
+      dryRun: false,
+      total: 0,
+      moved: 0,
+      failed: 0,
+      items: [],
+    }
+  }
+
+  return {
+    dryRun: payload.dryRun === true,
+    total: Math.max(0, Math.trunc(toFiniteNumber(payload.total) ?? 0)),
+    moved: Math.max(0, Math.trunc(toFiniteNumber(payload.moved) ?? 0)),
+    failed: Math.max(0, Math.trunc(toFiniteNumber(payload.failed) ?? 0)),
+    items: Array.isArray(payload.items)
+      ? payload.items
+        .map((item) => parseRuntimeGlobalTrashMoveItem(item))
+        .filter((item): item is RuntimeGlobalTrashMoveItem => item !== null)
+      : [],
+  }
+}
+
+function parseRuntimeGlobalTrashRestoreResponse(payload: unknown): RuntimeGlobalTrashRestoreResponse {
+  if (!isObject(payload)) {
+    return {
+      dryRun: false,
+      total: 0,
+      restored: 0,
+      failed: 0,
+      items: [],
+    }
+  }
+
+  return {
+    dryRun: payload.dryRun === true,
+    total: Math.max(0, Math.trunc(toFiniteNumber(payload.total) ?? 0)),
+    restored: Math.max(0, Math.trunc(toFiniteNumber(payload.restored) ?? 0)),
+    failed: Math.max(0, Math.trunc(toFiniteNumber(payload.failed) ?? 0)),
+    items: Array.isArray(payload.items)
+      ? payload.items
+        .map((item) => parseRuntimeGlobalTrashRestoreItem(item))
+        .filter((item): item is RuntimeGlobalTrashRestoreItem => item !== null)
       : [],
   }
 }
@@ -503,6 +651,42 @@ function parseRuntimeGlobalTrashListResponse(payload: unknown): RuntimeGlobalTra
     nextOffset: typeof payload.nextOffset === 'number' && Number.isFinite(payload.nextOffset)
       ? payload.nextOffset
       : null,
+  }
+}
+
+function parseRuntimeGlobalTrashMoveItem(value: unknown): RuntimeGlobalTrashMoveItem | null {
+  if (!isObject(value)) return null
+  const absolutePath = typeof value.absolutePath === 'string' ? value.absolutePath : ''
+  if (!absolutePath) return null
+
+  return {
+    sourceType: 'global_recycle',
+    recycleId: typeof value.recycleId === 'string' ? value.recycleId : '',
+    absolutePath,
+    nextAbsolutePath: typeof value.nextAbsolutePath === 'string' ? value.nextAbsolutePath : null,
+    deletedAt: toFiniteNumber(value.deletedAt),
+    ok: value.ok === true,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    error: typeof value.error === 'string' ? value.error : null,
+  }
+}
+
+function parseRuntimeGlobalTrashRestoreItem(value: unknown): RuntimeGlobalTrashRestoreItem | null {
+  if (!isObject(value)) return null
+  const recycleId = typeof value.recycleId === 'string' ? value.recycleId.trim() : ''
+  if (!recycleId) return null
+
+  return {
+    sourceType: 'global_recycle',
+    recycleId,
+    absolutePath: typeof value.absolutePath === 'string' ? value.absolutePath : '',
+    originalAbsolutePath: typeof value.originalAbsolutePath === 'string'
+      ? value.originalAbsolutePath
+      : '',
+    nextAbsolutePath: typeof value.nextAbsolutePath === 'string' ? value.nextAbsolutePath : null,
+    ok: value.ok === true,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    error: typeof value.error === 'string' ? value.error : null,
   }
 }
 

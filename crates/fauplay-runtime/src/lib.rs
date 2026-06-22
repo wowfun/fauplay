@@ -9,9 +9,11 @@ mod tasks;
 pub use api::{
     DirectoryEntry, DirectoryEntryKind, FileContentRange, FileContentRangeRequest,
     FileContentRequest, FileContentResponse, GlobalShortcutConfigResponse, GlobalTrashEntry,
-    GlobalTrashListRequest, GlobalTrashListResponse, ListDirectoryRequest, ListDirectoryResponse,
-    ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
-    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
+    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem,
+    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreItem,
+    GlobalTrashRestoreRequest, GlobalTrashRestoreResponse, ListDirectoryRequest,
+    ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
+    ListingSortKey, RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
     RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
     RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
@@ -49,6 +51,20 @@ impl FauplayRuntime {
         request: GlobalTrashListRequest,
     ) -> Result<GlobalTrashListResponse, RuntimeError> {
         store::list_global_trash(&self.runtime_home_path, request)
+    }
+
+    pub fn move_to_global_trash(
+        &self,
+        request: GlobalTrashMoveRequest,
+    ) -> Result<GlobalTrashMoveResponse, RuntimeError> {
+        store::move_to_global_trash(&self.runtime_home_path, request)
+    }
+
+    pub fn restore_global_trash(
+        &self,
+        request: GlobalTrashRestoreRequest,
+    ) -> Result<GlobalTrashRestoreResponse, RuntimeError> {
+        store::restore_global_trash(&self.runtime_home_path, request)
     }
 
     pub fn list_local_directory(

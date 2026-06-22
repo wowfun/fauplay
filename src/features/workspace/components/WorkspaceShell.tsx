@@ -60,7 +60,9 @@ import { getBoundRootPath } from '@/lib/reveal'
 import {
   listRuntimeGlobalTrash,
   listRuntimeRootTrash,
+  restoreRuntimeGlobalTrash,
   restoreRuntimePathFromRootTrash,
+  type RuntimeGlobalTrashRestoreResponse,
   type RuntimeRootTrashResponse,
 } from '@/lib/runtimeApi'
 import {
@@ -559,8 +561,29 @@ function resolveRootTrashRestorePaths(
   return rootRelativePaths
 }
 
+function resolveGlobalTrashRestoreRecycleIds(items: DeleteUndoRestoreItem[]): string[] | null {
+  if (items.length === 0) {
+    return null
+  }
+
+  const recycleIds: string[] = []
+  for (const item of items) {
+    if (item.sourceType !== 'global_recycle') {
+      return null
+    }
+    const recycleId = typeof item.recycleId === 'string' ? item.recycleId.trim() : ''
+    if (!recycleId) {
+      return null
+    }
+    recycleIds.push(recycleId)
+  }
+
+  return recycleIds
+}
+
 function mapRuntimeRestoreReasonCode(reason: string | null): string | undefined {
   if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
+  if (reason === 'recycle_item_not_found') return 'RECYCLE_ITEM_NOT_FOUND'
   if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
   if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
   if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
@@ -573,6 +596,23 @@ function toRestoreRecycleResponseFromRuntime(response: RuntimeRootTrashResponse)
     ok: true,
     total: response.total,
     restored: response.completed,
+    failed: response.failed,
+    items: response.items.map((item) => ({
+      ok: item.ok,
+      nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+      reasonCode: mapRuntimeRestoreReasonCode(item.reason),
+      error: item.error ?? undefined,
+    })),
+  }
+}
+
+function toRestoreRecycleResponseFromGlobalTrashRuntime(
+  response: RuntimeGlobalTrashRestoreResponse
+): RestoreRecycleResponse {
+  return {
+    ok: true,
+    total: response.total,
+    restored: response.restored,
     failed: response.failed,
     items: response.items.map((item) => ({
       ok: item.ok,
@@ -2550,6 +2590,9 @@ export function WorkspaceShell({
         batch.restoreItems,
         batch.snapshot.rootPath,
       )
+      const globalTrashRestoreRecycleIds = rootTrashRestorePaths
+        ? null
+        : resolveGlobalTrashRestoreRecycleIds(batch.restoreItems)
       const response = rootTrashRestorePaths && batch.snapshot.rootPath
         ? toRestoreRecycleResponseFromRuntime(
           await restoreRuntimePathFromRootTrash({
@@ -2557,9 +2600,15 @@ export function WorkspaceShell({
             rootRelativePath: rootTrashRestorePaths,
           }, 120000)
         )
-        : await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
-          items: batch.restoreItems,
-        }, 120000)
+        : globalTrashRestoreRecycleIds
+          ? toRestoreRecycleResponseFromGlobalTrashRuntime(
+            await restoreRuntimeGlobalTrash({
+              recycleId: globalTrashRestoreRecycleIds,
+            }, 120000)
+          )
+          : await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
+            items: batch.restoreItems,
+          }, 120000)
       const responseItems = Array.isArray(response.items) ? response.items : []
       const restoredAbsolutePathByOriginalAbsolutePath = new Map<string, string>()
       const failedRestoreItems: DeleteUndoRestoreItem[] = []
