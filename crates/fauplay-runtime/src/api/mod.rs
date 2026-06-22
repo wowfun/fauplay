@@ -26,6 +26,18 @@ pub struct TextPreviewRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileContentRequest {
+    pub root_path: PathBuf,
+    pub root_relative_path: RootRelativePath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileContentResponse {
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextPreviewResponse {
     pub status: TextPreviewStatus,
     pub content: Option<String>,

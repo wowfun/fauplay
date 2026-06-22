@@ -34,6 +34,11 @@ export interface RuntimeTextPreviewRequest {
   sizeLimitBytes?: number
 }
 
+export interface RuntimeFileContentRequest {
+  rootPath: string
+  rootRelativePath: string
+}
+
 export interface RuntimeListDirectoryResponse {
   entries: RuntimeDirectoryEntry[]
   isTruncated: boolean
@@ -216,6 +221,14 @@ export async function loadRuntimeTextPreview(
 
   const payload = await callRuntimeJson(`/v1/text-preview?${query.toString()}`, timeoutMs)
   return parseRuntimeTextPreviewPayload(payload)
+}
+
+export function buildRuntimeFileContentUrl(request: RuntimeFileContentRequest): string {
+  const query = new URLSearchParams({
+    rootPath: request.rootPath,
+    rootRelativePath: request.rootRelativePath,
+  })
+  return buildRuntimeUrl(`/v1/file-content?${query.toString()}`)
 }
 
 function parseRuntimeTextPreviewPayload(payload: unknown): TextPreviewPayload {

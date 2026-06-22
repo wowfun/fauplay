@@ -9,6 +9,7 @@ import type {
   FilterState,
 } from '@/types'
 import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { listRuntimeLocalDirectory, toRuntimeFileItems } from '@/lib/runtimeApi'
 import {
   getCachedRootHandle,
   listCachedRoots,
@@ -103,6 +104,11 @@ function createSessionRootId(handle: FileSystemDirectoryHandle): string {
 
 interface NavigateToPathOptions {
   resetFlattenView?: boolean
+}
+
+interface LoadDirectoryItemsOptions {
+  rootId?: string | null
+  resolveDirectoryHandle?: () => Promise<FileSystemDirectoryHandle | null>
 }
 
 function dedupeFavoriteFolders(entries: FavoriteFolderEntry[]): FavoriteFolderEntry[] {
@@ -251,11 +257,32 @@ export function useFileSystem() {
   }, [favoriteFolders])
 
   const loadDirectoryItems = useCallback(async (
-    dirHandle: FileSystemDirectoryHandle,
+    dirHandle: FileSystemDirectoryHandle | null,
     basePath: string,
-    flattenView: boolean
+    flattenView: boolean,
+    options: LoadDirectoryItemsOptions = {}
   ) => {
-    const result = await readDirectory(dirHandle, flattenView)
+    const boundRootPath = options.rootId ? getBoundRootPath(options.rootId) : null
+    if (boundRootPath) {
+      try {
+        const runtimeListing = await listRuntimeLocalDirectory({
+          rootPath: boundRootPath,
+          rootRelativePath: basePath,
+          flattened: flattenView,
+        })
+        setFiles(toRuntimeFileItems(runtimeListing.entries))
+        return
+      } catch {
+        // Fall back to File System Access while the runtime-backed Listing path is being adopted.
+      }
+    }
+
+    const fallbackHandle = dirHandle ?? await options.resolveDirectoryHandle?.() ?? null
+    if (!fallbackHandle) {
+      throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
+    }
+
+    const result = await readDirectory(fallbackHandle, flattenView)
     if (flattenView) {
       setFiles(withBasePath(result.files, basePath))
       return
@@ -336,8 +363,10 @@ export function useFileSystem() {
       await loadUnifiedTrashItems(nextRootId, nextRootHandle)
       return
     }
-    const targetDirectory = await getDirectoryHandleByPathFromRoot(nextRootHandle, normalizedPath)
-    await loadDirectoryItems(targetDirectory, normalizedPath, false)
+    await loadDirectoryItems(null, normalizedPath, false, {
+      rootId: nextRootId,
+      resolveDirectoryHandle: () => getDirectoryHandleByPathFromRoot(nextRootHandle, normalizedPath),
+    })
     setRootHandle(nextRootHandle)
     setRootId(nextRootId)
     setCurrentPath(normalizedPath)
@@ -372,6 +401,23 @@ export function useFileSystem() {
     if (isVirtualTrashPath(normalizedPath)) {
       return []
     }
+
+    const boundRootPath = rootId ? getBoundRootPath(rootId) : null
+    if (boundRootPath) {
+      try {
+        const runtimeListing = await listRuntimeLocalDirectory({
+          rootPath: boundRootPath,
+          rootRelativePath: normalizedPath,
+        })
+        return runtimeListing.entries
+          .filter((entry) => entry.kind === 'directory')
+          .map((entry) => entry.name)
+          .sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
+      } catch {
+        // Fall back to File System Access while the runtime-backed Listing path is being adopted.
+      }
+    }
+
     const directory = await getDirectoryHandleByPath(normalizedPath)
     if (!directory) return []
 
@@ -384,7 +430,7 @@ export function useFileSystem() {
 
     directoryNames.sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
     return directoryNames
-  }, [rootHandle, getDirectoryHandleByPath])
+  }, [rootHandle, rootId, getDirectoryHandleByPath])
 
   const selectDirectory = useCallback(async () => {
     setIsLoading(true)
@@ -397,8 +443,8 @@ export function useFileSystem() {
       const cached = await upsertCachedRootHandle(handle).catch(() => null)
       const resolvedRootId = cached?.rootId ?? createSessionRootId(handle)
 
-      await activateRootHandle(handle, resolvedRootId, '')
       warmupRootPathBinding(resolvedRootId, handle.name)
+      await activateRootHandle(handle, resolvedRootId, '')
       await refreshCachedRoots()
     } catch (err) {
       setError((err as Error).message)
@@ -428,9 +474,9 @@ export function useFileSystem() {
         return false
       }
 
+      warmupRootPathBinding(targetRootId, cachedHandle.name)
       await activateRootHandle(cachedHandle, targetRootId, '')
       await markCachedRootAsUsed(targetRootId)
-      warmupRootPathBinding(targetRootId, cachedHandle.name)
       await refreshCachedRoots()
       return true
     } catch (err) {
@@ -481,9 +527,10 @@ export function useFileSystem() {
         await loadUnifiedTrashItems(rootId, rootHandle)
         return true
       }
-      const targetDirectory = await getDirectoryHandleByPath(normalizedPath)
-      if (!targetDirectory) return false
-      await loadDirectoryItems(targetDirectory, normalizedPath, nextFlattenView)
+      await loadDirectoryItems(null, normalizedPath, nextFlattenView, {
+        rootId,
+        resolveDirectoryHandle: () => getDirectoryHandleByPath(normalizedPath),
+      })
       setCurrentPath(normalizedPath)
       if (options.resetFlattenView) {
         setIsFlattenView(false)
@@ -525,9 +572,9 @@ export function useFileSystem() {
         return false
       }
 
+      warmupRootPathBinding(targetRootId, cachedHandle.name)
       await activateRootHandle(cachedHandle, targetRootId, normalizedPath)
       await markCachedRootAsUsed(targetRootId)
-      warmupRootPathBinding(targetRootId, cachedHandle.name)
       await refreshCachedRoots()
       return true
     } catch (err) {
@@ -632,16 +679,17 @@ export function useFileSystem() {
     setIsLoading(true)
     setError(null)
     try {
-      const current = await getCurrentDirectoryHandle()
-      if (!current) return
-      await loadDirectoryItems(current, currentPath, flattenView)
+      await loadDirectoryItems(null, currentPath, flattenView, {
+        rootId,
+        resolveDirectoryHandle: getCurrentDirectoryHandle,
+      })
       setIsFlattenView(flattenView)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setIsLoading(false)
     }
-  }, [rootHandle, getCurrentDirectoryHandle, loadDirectoryItems, currentPath])
+  }, [rootHandle, getCurrentDirectoryHandle, loadDirectoryItems, currentPath, rootId])
 
   const filterFiles = useCallback((files: FileItem[], filter: FilterState): FileItem[] => {
     let result = [...files]

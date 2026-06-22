@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
+import { buildRuntimeFileContentUrl, loadRuntimeTextPreview } from '@/lib/runtimeApi'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
 import {
   buildGatewayFileContentUrlForItem,
@@ -271,6 +272,26 @@ export function FilePreviewPanel({
       )
     )
   ), [canAccessThroughCurrentRoot, file, hasRemoteFileLocator])
+  const shouldUseRuntimeTextPreview = useMemo(() => (
+    Boolean(
+      file
+      && file.kind === 'file'
+      && getFilePreviewKind(file.name) === 'text'
+      && boundRootPath
+      && canAccessThroughCurrentRoot
+      && !shouldUseGatewayFileAccess
+    )
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, shouldUseGatewayFileAccess])
+  const shouldUseRuntimeFileContent = useMemo(() => (
+    Boolean(
+      file
+      && file.kind === 'file'
+      && (previewKind === 'image' || previewKind === 'video')
+      && boundRootPath
+      && canAccessThroughCurrentRoot
+      && !shouldUseGatewayFileAccess
+    )
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, previewKind, shouldUseGatewayFileAccess])
   const canUseAnnotationContext = useMemo(() => (
     Boolean(
       file
@@ -592,6 +613,39 @@ export function FilePreviewPanel({
           return
         }
 
+        if (shouldUseRuntimeTextPreview && boundRootPath) {
+          setFileMimeType(file.mimeType || getMimeType(file.name))
+          setFileSizeBytes(file.size ?? null)
+          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
+          replacePreviewUrl(null)
+
+          try {
+            const textResult = await loadRuntimeTextPreview({
+              rootPath: boundRootPath,
+              rootRelativePath: file.path,
+              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+            })
+            if (cancelled) return
+            setFileSizeBytes(textResult.fileSizeBytes ?? file.size ?? null)
+            setTextPreview(textResult)
+            return
+          } catch {
+            // Fall back to File System Access while the runtime-backed preview path is being adopted.
+          }
+        }
+
+        if (shouldUseRuntimeFileContent && boundRootPath) {
+          setFileMimeType(file.mimeType || getMimeType(file.name))
+          setFileSizeBytes(file.size ?? null)
+          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
+          setTextPreview(INITIAL_TEXT_PREVIEW)
+          replacePreviewUrl(buildRuntimeFileContentUrl({
+            rootPath: boundRootPath,
+            rootRelativePath: file.path,
+          }))
+          return
+        }
+
         if (!rootHandle) {
           throw new Error('当前文件无法通过工作区目录句柄读取')
         }
@@ -682,7 +736,15 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true
     }
-  }, [file, replacePreviewUrl, rootHandle, shouldUseGatewayFileAccess])
+  }, [
+    boundRootPath,
+    file,
+    replacePreviewUrl,
+    rootHandle,
+    shouldUseGatewayFileAccess,
+    shouldUseRuntimeFileContent,
+    shouldUseRuntimeTextPreview,
+  ])
 
   useEffect(() => {
     return () => {

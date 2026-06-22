@@ -20,6 +20,10 @@ _Avoid_: root folder, mounted folder, source directory
 A path interpreted inside a Local Root. A Root-relative Path must stay within its Local Root and have one stable display form.
 _Avoid_: relative path, file path
 
+**Listing**:
+An ordered set of files and directories under a Root-relative Path, expressed using Root-relative Paths.
+_Avoid_: file list, directory read
+
 **Flattened Listing**:
 A listing of all descendant files under a Root-relative Path, returned as Root-relative Paths without directory grouping. It supports workflows that need to scan or compare a subtree as one file set.
 _Avoid_: recursive view, deep list
@@ -47,6 +51,10 @@ _Avoid_: backend API, gateway API
 **Text Preview**:
 A bounded textual view of a file that reports when content is too large or not text, without requiring the Web App to load the full file.
 _Avoid_: full file read, raw file fetch
+
+**File Content**:
+A browser-renderable byte stream for a file under a Local Root, addressed by Root-relative Path and served with a MIME type.
+_Avoid_: raw file read, blob passthrough
 
 **Plugin Capability**:
 An optional or replaceable capability provided through plugin/MCP integration. Plugin Capabilities may use Runtime Capabilities but do not define the runtime boundary.

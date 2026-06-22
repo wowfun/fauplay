@@ -334,6 +334,195 @@ fn runtime_api_returns_text_preview() {
 }
 
 #[test]
+fn runtime_api_reports_text_preview_too_large() {
+    let fixture = Fixture::new("runtime_api_reports_text_preview_too_large");
+    fixture.write_file("notes.txt", "hello runtime");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_text_preview_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "notes.txt",
+        4,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"too_large\""),
+        "response should report too large status: {response}"
+    );
+    assert!(
+        response.contains("\"content\":null"),
+        "response should not include content: {response}"
+    );
+    assert!(
+        response.contains("\"fileSizeBytes\":13"),
+        "response should include file size: {response}"
+    );
+    assert!(
+        response.contains("\"sizeLimitBytes\":4"),
+        "response should include caller size limit: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_reports_binary_text_preview() {
+    let fixture = Fixture::new("runtime_api_reports_binary_text_preview");
+    fixture.write_bytes("blob.txt", &[0, 159, 146, 150]);
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_text_preview_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "blob.txt",
+        1024,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"binary\""),
+        "response should report binary status: {response}"
+    );
+    assert!(
+        response.contains("\"content\":null"),
+        "response should not include content: {response}"
+    );
+    assert!(
+        response.contains("\"fileSizeBytes\":4"),
+        "response should include file size: {response}"
+    );
+    assert!(
+        response.contains("\"sizeLimitBytes\":1024"),
+        "response should include caller size limit: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_returns_file_content() {
+    let fixture = Fixture::new("runtime_api_returns_file_content");
+    fixture.write_file("diagram.svg", "<svg>runtime</svg>");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_file_content_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "diagram.svg",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Type: image/svg+xml\r\n".len())
+            .any(|window| window == b"Content-Type: image/svg+xml\r\n"),
+        "response should include SVG content type: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Access-Control-Allow-Origin: *\r\n".len())
+            .any(|window| window == b"Access-Control-Allow-Origin: *\r\n"),
+        "response should include CORS headers: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"<svg>runtime</svg>"),
+        "response body should include file content: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_returns_file_content_byte_range() {
+    let fixture = Fixture::new("runtime_api_returns_file_content_byte_range");
+    fixture.write_file("clip.mp4", "0123456789");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_file_content_request_with_range(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "clip.mp4",
+        "bytes=2-5",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 206 Partial Content\r\n"),
+        "response should be partial content: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Type: video/mp4\r\n".len())
+            .any(|window| window == b"Content-Type: video/mp4\r\n"),
+        "response should include MP4 content type: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Accept-Ranges: bytes\r\n".len())
+            .any(|window| window == b"Accept-Ranges: bytes\r\n"),
+        "response should advertise byte range support: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Range: bytes 2-5/10\r\n".len())
+            .any(|window| window == b"Content-Range: bytes 2-5/10\r\n"),
+        "response should include the served byte range: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Length: 4\r\n".len())
+            .any(|window| window == b"Content-Length: 4\r\n"),
+        "response should include range body length: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"2345"),
+        "response body should include requested bytes: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
 fn runtime_api_allows_browser_preflight_requests() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("listener should have address");
@@ -550,6 +739,44 @@ fn send_text_preview_request(
     response
 }
 
+fn send_file_content_request(address: &str, root_path: &str, root_relative_path: &str) -> Vec<u8> {
+    send_file_content_request_with_headers(address, root_path, root_relative_path, "")
+}
+
+fn send_file_content_request_with_range(
+    address: &str,
+    root_path: &str,
+    root_relative_path: &str,
+    range: &str,
+) -> Vec<u8> {
+    send_file_content_request_with_headers(
+        address,
+        root_path,
+        root_relative_path,
+        &format!("Range: {range}\r\n"),
+    )
+}
+
+fn send_file_content_request_with_headers(
+    address: &str,
+    root_path: &str,
+    root_relative_path: &str,
+    headers: &str,
+) -> Vec<u8> {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/file-content?rootPath={root_path}&rootRelativePath={root_relative_path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{headers}Connection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .expect("response should be readable");
+    response
+}
+
 fn read_listen_address(stdout: &mut impl BufRead) -> String {
     let mut line = String::new();
     stdout
@@ -594,6 +821,10 @@ impl Fixture {
     }
 
     fn write_file(&self, relative_path: &str, contents: &str) {
+        fs::write(self.root.join(relative_path), contents).expect("fixture file should be written");
+    }
+
+    fn write_bytes(&self, relative_path: &str, contents: &[u8]) {
         fs::write(self.root.join(relative_path), contents).expect("fixture file should be written");
     }
 }

@@ -7,8 +7,9 @@ mod store;
 mod tasks;
 
 pub use api::{
-    DirectoryEntry, DirectoryEntryKind, ListDirectoryRequest, ListDirectoryResponse,
-    RootRelativePath, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    DirectoryEntry, DirectoryEntryKind, FileContentRequest, FileContentResponse,
+    ListDirectoryRequest, ListDirectoryResponse, RootRelativePath, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 
@@ -32,5 +33,12 @@ impl FauplayRuntime {
         request: TextPreviewRequest,
     ) -> Result<TextPreviewResponse, RuntimeError> {
         media::read_text_preview(request)
+    }
+
+    pub fn read_file_content(
+        &self,
+        request: FileContentRequest,
+    ) -> Result<FileContentResponse, RuntimeError> {
+        media::read_file_content(request)
     }
 }
