@@ -1,12 +1,14 @@
-import { ensureRootPath } from '@/lib/reveal'
+import { ensureRootPath, getBoundRootPath } from '@/lib/reveal'
 import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
 import {
+  moveRuntimeRootPath,
   moveRuntimePathToGlobalTrash,
   moveRuntimePathToRootTrash,
   restoreRuntimeGlobalTrash,
   restoreRuntimePathFromRootTrash,
   type RuntimeGlobalTrashMoveResponse,
   type RuntimeGlobalTrashRestoreResponse,
+  type RuntimeRootMoveResponse,
   type RuntimeRootTrashResponse,
 } from '@/lib/runtimeApi'
 
@@ -37,6 +39,11 @@ interface DispatchHttpRoute {
 }
 
 type RuntimeRootTrashOperation = 'move' | 'restore'
+
+interface RuntimeRootMovePlan {
+  sourceRootRelativePath: string
+  targetRootRelativePath: string
+}
 
 function toToolError(error: unknown): { message: string; code?: string } {
   if (error instanceof Error) {
@@ -235,6 +242,61 @@ function readRestoreGlobalTrashRecycleIds(args: Record<string, unknown>): string
   return recycleIds.length > 0 ? recycleIds : null
 }
 
+function splitFileName(fileName: string): { baseName: string; extension: string } {
+  const dotIndex = fileName.lastIndexOf('.')
+  if (dotIndex <= 0) {
+    return {
+      baseName: fileName,
+      extension: '',
+    }
+  }
+
+  return {
+    baseName: fileName.slice(0, dotIndex),
+    extension: fileName.slice(dotIndex),
+  }
+}
+
+function getParentPath(rootRelativePath: string): string {
+  const segments = rootRelativePath.split('/').filter(Boolean)
+  if (segments.length <= 1) return ''
+  return segments.slice(0, -1).join('/')
+}
+
+function joinRootRelativePath(parentPath: string, name: string): string {
+  return parentPath ? `${parentPath}/${name}` : name
+}
+
+function readRuntimeRootMovePlan(args: Record<string, unknown>): RuntimeRootMovePlan | null {
+  if (!isStringArray(args.relativePaths) || args.relativePaths.length !== 1) {
+    return null
+  }
+  if (args.nameMask !== '[N]' || args.searchMode !== 'plain') {
+    return null
+  }
+  if (typeof args.findText !== 'string' || typeof args.replaceText !== 'string') {
+    return null
+  }
+
+  const sourceRootRelativePath = normalizeRootRelativePath(args.relativePaths[0])
+  const nextBaseName = args.replaceText.trim()
+  if (!sourceRootRelativePath || !nextBaseName || nextBaseName.includes('/') || nextBaseName.includes('\\')) {
+    return null
+  }
+
+  const pathSegments = sourceRootRelativePath.split('/').filter(Boolean)
+  const fileName = pathSegments[pathSegments.length - 1] || ''
+  const { baseName, extension } = splitFileName(fileName)
+  if (baseName !== args.findText) {
+    return null
+  }
+
+  return {
+    sourceRootRelativePath,
+    targetRootRelativePath: joinRootRelativePath(getParentPath(sourceRootRelativePath), `${nextBaseName}${extension}`),
+  }
+}
+
 function mapRuntimeFailureReason(operation: RuntimeRootTrashOperation, reason: string | null): string | undefined {
   if (!reason) return undefined
 
@@ -252,6 +314,39 @@ function mapRuntimeFailureReason(operation: RuntimeRootTrashOperation, reason: s
   if (reason === 'unsupported_kind') return 'SOFT_DELETE_UNSUPPORTED_KIND'
   if (reason === 'target_exists') return 'SOFT_DELETE_TARGET_EXISTS'
   return 'SOFT_DELETE_FAILED'
+}
+
+function mapRootMoveFailureReason(reason: string | null): string | undefined {
+  if (!reason) return undefined
+  if (reason === 'target_exists') return 'RENAME_TARGET_EXISTS'
+  if (reason === 'source_not_found') return 'RENAME_SOURCE_NOT_FOUND'
+  if (reason === 'invalid_source') return 'RENAME_INVALID_SOURCE'
+  if (reason === 'invalid_target') return 'RENAME_INVALID_TARGET'
+  if (reason === 'unsupported_kind') return 'RENAME_UNSUPPORTED_KIND'
+  return 'RENAME_FAILED'
+}
+
+function toRuntimeRootMoveToolResult(response: RuntimeRootMoveResponse): ToolCallResult {
+  const item = {
+    relativePath: response.sourceRootRelativePath,
+    nextRelativePath: response.targetRootRelativePath,
+    absolutePath: response.absolutePath,
+    nextAbsolutePath: response.targetAbsolutePath,
+    ok: response.ok,
+    skipped: false,
+    reasonCode: mapRootMoveFailureReason(response.reason),
+    error: response.error ?? undefined,
+  }
+
+  return {
+    ok: true,
+    dryRun: response.dryRun,
+    total: 1,
+    renamed: response.ok ? 1 : 0,
+    skipped: 0,
+    failed: response.ok ? 0 : 1,
+    items: [item],
+  }
 }
 
 function toRuntimeRootTrashToolResult(
@@ -332,6 +427,38 @@ function toRuntimeGlobalTrashToolResult(response: RuntimeGlobalTrashRestoreRespo
     skipped: 0,
     failed,
     items,
+  }
+}
+
+async function dispatchRuntimeRootMove(
+  toolName: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<ToolCallResult | null> {
+  if (toolName !== 'fs.batchRename') {
+    return null
+  }
+
+  const rootPath = typeof args.rootPath === 'string' ? args.rootPath.trim() : ''
+  if (!rootPath) {
+    return null
+  }
+
+  const plan = readRuntimeRootMovePlan(args)
+  if (!plan) {
+    return null
+  }
+
+  try {
+    const response = await moveRuntimeRootPath({
+      rootPath,
+      sourceRootRelativePath: plan.sourceRootRelativePath,
+      targetRootRelativePath: plan.targetRootRelativePath,
+      dryRun: args.confirm === false,
+    }, timeoutMs)
+    return toRuntimeRootMoveToolResult(response)
+  } catch {
+    return null
   }
 }
 
@@ -625,7 +752,7 @@ export async function dispatchSystemTool({
   additionalArgs,
   timeoutMs,
 }: DispatchSystemToolOptions): Promise<DispatchSystemToolResult> {
-  if (!toolName || !rootHandle || !rootId) {
+  if (!toolName || !rootId) {
     return {
       toolName,
       ok: false,
@@ -635,12 +762,15 @@ export async function dispatchSystemTool({
     }
   }
 
-  const rootLabel = rootHandle.name || 'current-folder'
-  const rootPath = ensureRootPath({
-    rootLabel,
-    rootId,
-    promptIfMissing: true,
-  })
+  const rootLabel = rootHandle?.name || 'current-folder'
+  const rootPath = getBoundRootPath(rootId)
+    ?? (rootHandle
+      ? ensureRootPath({
+          rootLabel,
+          rootId,
+          promptIfMissing: true,
+        })
+      : null)
   if (!rootPath) {
     return {
       toolName,
@@ -656,12 +786,15 @@ export async function dispatchSystemTool({
       rootPath,
       ...(additionalArgs ?? {}),
     }
-    const runtimeRootTrashResult = await dispatchRuntimeRootTrash(toolName, argsPayload, timeoutMs)
-    const runtimeGlobalTrashResult = runtimeRootTrashResult
+    const runtimeRootMoveResult = await dispatchRuntimeRootMove(toolName, argsPayload, timeoutMs)
+    const runtimeRootTrashResult = runtimeRootMoveResult
+      ? null
+      : await dispatchRuntimeRootTrash(toolName, argsPayload, timeoutMs)
+    const runtimeGlobalTrashResult = runtimeRootMoveResult || runtimeRootTrashResult
       ? null
       : await dispatchRuntimeGlobalTrash(toolName, argsPayload, timeoutMs)
-    const runtimeTrashResult = runtimeRootTrashResult ?? runtimeGlobalTrashResult
-    const httpRoute = runtimeTrashResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
+    const runtimeResult = runtimeRootMoveResult ?? runtimeRootTrashResult ?? runtimeGlobalTrashResult
+    const httpRoute = runtimeResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
     if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''
       return {
@@ -674,7 +807,7 @@ export async function dispatchSystemTool({
       }
     }
 
-    const result = runtimeTrashResult
+    const result = runtimeResult
       ?? (httpRoute
         ? await callGatewayHttp(
           httpRoute.endpointPath,
@@ -692,6 +825,14 @@ export async function dispatchSystemTool({
   } catch (error) {
     const { message, code } = toToolError(error)
     if (isLikelyRootPathError({ message, code })) {
+      if (!rootHandle) {
+        return {
+          toolName,
+          ok: false,
+          error: '检测到 rootPath 可能错误，请重绑路径后手动重试当前操作',
+          errorCode: 'TOOL_ROOT_PATH_REBIND_REQUIRED',
+        }
+      }
       const rebound = ensureRootPath({
         rootLabel,
         rootId,

@@ -150,7 +150,7 @@ function App() {
     ? remoteFileSystem.rootId
     : localFileSystem.rootId
   const shouldShowRemoteWorkspace = accessProvider === 'remote-readonly' && Boolean(activeRemoteWorkspace)
-  const shouldShowLocalWorkspace = !shouldShowRemoteWorkspace && Boolean(localFileSystem.rootHandle)
+  const shouldShowLocalWorkspace = !shouldShowRemoteWorkspace && Boolean(localFileSystem.rootId)
   const shouldShowStartupScreen = !shouldShowRemoteWorkspace && !shouldShowLocalWorkspace
   const isLoopbackUi = isLoopbackOrigin()
   const localPublishedRootSyncPayload = useMemo(
@@ -184,7 +184,7 @@ function App() {
   }, [localFileSystem, updateAccessProvider])
 
   useDirectorySelectionShortcut(
-    accessProvider !== 'remote-readonly' && localFileSystem.rootHandle === null && !activeRemoteWorkspace,
+    accessProvider !== 'remote-readonly' && localFileSystem.rootId === null && !activeRemoteWorkspace,
     keyboardShortcuts.app.openDirectory,
     handleSelectLocalDirectory
   )
@@ -612,16 +612,18 @@ function App() {
     return <WorkspaceLoadingFallback rootName={activeRemoteWorkspace.rootLabel} />
   }
 
-  const resolvedRootId = localFileSystem.rootId ?? getFallbackSessionRootId(localFileSystem.rootHandle!)
+  const resolvedRootId = localFileSystem.rootId
+    ?? (localFileSystem.rootHandle ? getFallbackSessionRootId(localFileSystem.rootHandle) : 'local-runtime')
+  const resolvedRootName = localFileSystem.rootName || localFileSystem.rootHandle?.name || '根目录'
 
   return (
-    <Suspense fallback={<WorkspaceLoadingFallback rootName={localFileSystem.rootHandle!.name} />}>
+    <Suspense fallback={<WorkspaceLoadingFallback rootName={resolvedRootName} />}>
       <WorkspaceShell
         key={`local:${resolvedRootId}`}
         accessProvider="local-browser"
         rootHandle={localFileSystem.rootHandle}
         rootId={resolvedRootId}
-        rootName={localFileSystem.rootHandle!.name}
+        rootName={resolvedRootName}
         storageNamespace="local-browser"
         favoriteFolders={localFileSystem.favoriteFolders}
         isCurrentPathFavorited={localFileSystem.isCurrentPathFavorited}

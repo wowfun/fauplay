@@ -252,16 +252,23 @@ export function FilePreviewPanel({
     [rootId]
   )
   const hasRemoteFileLocator = Boolean(file && typeof file.remoteRootId === 'string' && file.remoteRootId.trim())
+  const hasRuntimeFileLocator = Boolean(
+    file
+    && boundRootPath
+    && file.sourceRootPath === boundRootPath
+    && (file.sourceRelativePath || file.path)
+  )
   const canAccessThroughCurrentRoot = useMemo(() => {
     if (!file || file.kind !== 'file') return false
     if (hasRemoteFileLocator) return true
+    if (hasRuntimeFileLocator) return true
     if (!rootHandle) return false
     if (!file.path || isAbsolutePathLike(file.path)) return false
     if (file.sourceRootPath && file.sourceRootPath !== boundRootPath) {
       return false
     }
     return true
-  }, [boundRootPath, file, hasRemoteFileLocator, rootHandle])
+  }, [boundRootPath, file, hasRemoteFileLocator, hasRuntimeFileLocator, rootHandle])
   const shouldUseGatewayFileAccess = useMemo(() => (
     Boolean(
       file
@@ -312,6 +319,18 @@ export function FilePreviewPanel({
     () => previewActionTools.some((tool) => tool.name === 'fs.batchRename'),
     [previewActionTools]
   )
+  const canUseRuntimeRootMove = useMemo(() => (
+    Boolean(
+      file
+      && file.kind === 'file'
+      && rootId
+      && boundRootPath
+      && canAccessThroughCurrentRoot
+      && !shouldUseGatewayFileAccess
+      && file.sourceType !== 'root_trash'
+      && file.sourceType !== 'global_recycle'
+    )
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, rootId, shouldUseGatewayFileAccess])
   const hasVisionFaceTool = useMemo(
     () => (
       canUseAnnotationContext
@@ -331,17 +350,17 @@ export function FilePreviewPanel({
     if (!file || file.kind !== 'file') {
       return '当前项不可重命名'
     }
-    if (!rootHandle || !rootId) {
+    if (!rootId || (!rootHandle && !canUseRuntimeRootMove)) {
       return '工具上下文不完整'
     }
     if (!canAccessThroughCurrentRoot || file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
       return '当前结果项不支持重命名'
     }
-    if (!hasBatchRenameTool) {
-      return '重命名能力不可用（网关离线或未注册 fs.batchRename）'
+    if (!canUseRuntimeRootMove && !hasBatchRenameTool) {
+      return '重命名能力不可用（Runtime 未连接且未注册 fs.batchRename）'
     }
     return null
-  }, [canAccessThroughCurrentRoot, file, hasBatchRenameTool, rootHandle, rootId])
+  }, [canAccessThroughCurrentRoot, canUseRuntimeRootMove, file, hasBatchRenameTool, rootHandle, rootId])
 
   const canRenameFileName = renameUnavailableReason === null
   const annotationTagManageUnavailableReason = useMemo(() => {
@@ -762,7 +781,7 @@ export function FilePreviewPanel({
     if (!file || file.kind !== 'file') {
       return { ok: false, error: '当前项不可重命名' }
     }
-    if (!canRenameFileName || !rootHandle || !rootId) {
+    if (!canRenameFileName || !rootId) {
       return { ok: false, error: renameUnavailableReason || '重命名能力不可用' }
     }
 
@@ -842,7 +861,14 @@ export function FilePreviewPanel({
     } finally {
       setIsRenaming(false)
     }
-  }, [canRenameFileName, file, onMutationCommitted, renameUnavailableReason, rootHandle, rootId])
+  }, [
+    canRenameFileName,
+    file,
+    onMutationCommitted,
+    renameUnavailableReason,
+    rootHandle,
+    rootId,
+  ])
 
   useEffect(() => {
     if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) {

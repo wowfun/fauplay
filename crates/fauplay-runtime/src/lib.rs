@@ -13,10 +13,10 @@ pub use api::{
     GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem, GlobalTrashMoveRequest,
     GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter,
-    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, RootMoveFailureReason,
+    RootMoveRequest, RootMoveResponse, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
+    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -94,6 +94,13 @@ impl FauplayRuntime {
         request: FileMetadataRequest,
     ) -> Result<FileMetadataResponse, RuntimeError> {
         fs::read_file_metadata(request)
+    }
+
+    pub fn move_root_path(
+        &self,
+        request: RootMoveRequest,
+    ) -> Result<RootMoveResponse, RuntimeError> {
+        fs::move_root_path(request)
     }
 
     pub fn move_to_root_trash(

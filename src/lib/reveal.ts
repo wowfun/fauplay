@@ -6,6 +6,11 @@ interface RootPathMapV3 {
   byRootId: Record<string, string>
 }
 
+export interface LocalRootBinding {
+  rootId: string
+  rootPath: string
+}
+
 interface EnsureRootPathOptions {
   rootLabel: string
   rootId: string
@@ -151,6 +156,16 @@ export function getBoundRootPath(rootId: string): string | null {
   if (!rootId) return null
   const pathMap = getRootPathMap()
   return pathMap.byRootId[rootId] || null
+}
+
+export function listLocalRootBindings(): LocalRootBinding[] {
+  const pathMap = getRootPathMap()
+  return Object.entries(pathMap.byRootId)
+    .map(([rootId, rootPath]) => ({
+      rootId,
+      rootPath,
+    }))
+    .filter((entry) => entry.rootId && entry.rootPath)
 }
 
 export function getRootPathMapUpdatedEventName(): string {

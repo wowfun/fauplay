@@ -69,6 +69,24 @@ export interface RuntimeRootTrashRequest {
   dryRun?: boolean
 }
 
+export interface RuntimeRootMoveRequest {
+  rootPath: string
+  sourceRootRelativePath: string
+  targetRootRelativePath: string
+  dryRun?: boolean
+}
+
+export interface RuntimeRootMoveResponse {
+  dryRun: boolean
+  sourceRootRelativePath: string
+  targetRootRelativePath: string
+  absolutePath: string
+  targetAbsolutePath: string
+  ok: boolean
+  reason: string | null
+  error: string | null
+}
+
 export interface RuntimeRootTrashListRequest {
   rootPath: string
   limit?: number
@@ -478,6 +496,18 @@ export async function moveRuntimePathToRootTrash(
   return parseRuntimeRootTrashResponse(payload)
 }
 
+export async function moveRuntimeRootPath(
+  request: RuntimeRootMoveRequest,
+  timeoutMs?: number,
+): Promise<RuntimeRootMoveResponse> {
+  const payload = await callRuntimeJson(
+    `/v1/root-move?${rootMoveQuery(request).toString()}`,
+    timeoutMs,
+    'POST',
+  )
+  return parseRuntimeRootMoveResponse(payload)
+}
+
 export async function moveRuntimePathToGlobalTrash(
   request: RuntimeGlobalTrashMoveRequest,
   timeoutMs?: number,
@@ -566,6 +596,18 @@ function rootTrashQuery(request: RuntimeRootTrashRequest): URLSearchParams {
   return query
 }
 
+function rootMoveQuery(request: RuntimeRootMoveRequest): URLSearchParams {
+  const query = new URLSearchParams({
+    rootPath: request.rootPath,
+    sourceRootRelativePath: request.sourceRootRelativePath,
+    targetRootRelativePath: request.targetRootRelativePath,
+  })
+  if (request.dryRun === true) {
+    query.set('dryRun', 'true')
+  }
+  return query
+}
+
 function globalTrashMoveQuery(request: RuntimeGlobalTrashMoveRequest): URLSearchParams {
   const query = new URLSearchParams()
   const absolutePaths = Array.isArray(request.absolutePath)
@@ -592,6 +634,38 @@ function globalTrashRestoreQuery(request: RuntimeGlobalTrashRestoreRequest): URL
     query.set('dryRun', 'true')
   }
   return query
+}
+
+function parseRuntimeRootMoveResponse(payload: unknown): RuntimeRootMoveResponse {
+  if (!isObject(payload)) {
+    return {
+      dryRun: false,
+      sourceRootRelativePath: '',
+      targetRootRelativePath: '',
+      absolutePath: '',
+      targetAbsolutePath: '',
+      ok: false,
+      reason: null,
+      error: 'Fauplay Runtime Root Move response was invalid',
+    }
+  }
+
+  return {
+    dryRun: payload.dryRun === true,
+    sourceRootRelativePath: typeof payload.sourceRootRelativePath === 'string'
+      ? normalizeRootRelativePath(payload.sourceRootRelativePath)
+      : '',
+    targetRootRelativePath: typeof payload.targetRootRelativePath === 'string'
+      ? normalizeRootRelativePath(payload.targetRootRelativePath)
+      : '',
+    absolutePath: typeof payload.absolutePath === 'string' ? payload.absolutePath : '',
+    targetAbsolutePath: typeof payload.targetAbsolutePath === 'string'
+      ? payload.targetAbsolutePath
+      : '',
+    ok: payload.ok === true,
+    reason: typeof payload.reason === 'string' ? payload.reason : null,
+    error: typeof payload.error === 'string' ? payload.error : null,
+  }
 }
 
 function parseRuntimeRootTrashResponse(payload: unknown): RuntimeRootTrashResponse {

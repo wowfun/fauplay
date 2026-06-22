@@ -9,9 +9,10 @@ use crate::{
     GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
-    ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath, RootTrashFailureReason,
-    RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest,
-    RuntimeError, TextPreviewRequest, TextPreviewStatus,
+    ListingQuery, ListingSortDirection, ListingSortKey, RootMoveFailureReason, RootMoveRequest,
+    RootMoveResponse, RootRelativePath, RootTrashFailureReason, RootTrashListRequest,
+    RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -126,6 +127,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             let query = parse_query_string(&target["/v1/file-metadata?".len()..]);
             handle_file_metadata(runtime, &query)
         }
+        Some(("POST", target))
+            if target == "/v1/root-move" || target.starts_with("/v1/root-move?") =>
+        {
+            let query = target
+                .strip_prefix("/v1/root-move?")
+                .map(parse_query_string)
+                .unwrap_or_default();
+            handle_root_move(runtime, &query)
+        }
         Some(("GET", target)) if target.starts_with("/v1/root-trash?") => {
             let query = parse_query_string(&target["/v1/root-trash?".len()..]);
             handle_list_root_trash(runtime, &query)
@@ -153,6 +163,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/text-preview"
             | "/v1/file-content"
             | "/v1/file-metadata"
+            | "/v1/root-move"
             | "/v1/root-trash"
             | "/v1/root-trash/move"
             | "/v1/root-trash/restore"
@@ -418,6 +429,55 @@ fn handle_file_metadata(runtime: &FauplayRuntime, query: &HashMap<String, String
     }
 }
 
+fn handle_root_move(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> HttpResponse {
+    let Some(root_path) = query.get("rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let Some(source_root_relative_path) = query.get("sourceRootRelativePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"sourceRootRelativePath is required\"}",
+        );
+    };
+    let Some(target_root_relative_path) = query.get("targetRootRelativePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"targetRootRelativePath is required\"}",
+        );
+    };
+
+    let source_root_relative_path =
+        match RootRelativePath::try_from(source_root_relative_path.as_str()) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+    let target_root_relative_path =
+        match RootRelativePath::try_from(target_root_relative_path.as_str()) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+
+    match runtime.move_root_path(RootMoveRequest {
+        root_path: PathBuf::from(root_path),
+        source_root_relative_path,
+        target_root_relative_path,
+        dry_run: query.get("dryRun").is_some_and(|value| value == "true"),
+    }) {
+        Ok(response) => http_response(200, "OK", &root_move_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
 fn handle_list_root_trash(
     runtime: &FauplayRuntime,
     query: &HashMap<String, String>,
@@ -673,6 +733,20 @@ fn file_metadata_response_json(response: FileMetadataResponse) -> String {
     json
 }
 
+fn root_move_response_json(response: RootMoveResponse) -> String {
+    format!(
+        "{{\"dryRun\":{},\"sourceRootRelativePath\":\"{}\",\"targetRootRelativePath\":\"{}\",\"absolutePath\":\"{}\",\"targetAbsolutePath\":\"{}\",\"ok\":{},\"reason\":{},\"error\":{}}}",
+        response.dry_run,
+        escape_json_string(&response.source_root_relative_path.to_string()),
+        escape_json_string(&response.target_root_relative_path.to_string()),
+        escape_json_string(&response.absolute_path.display().to_string()),
+        escape_json_string(&response.target_absolute_path.display().to_string()),
+        response.ok,
+        optional_root_move_failure_reason_json(response.reason),
+        optional_string_json(response.error.as_deref()),
+    )
+}
+
 fn root_trash_response_json(response: RootTrashMutationResponse) -> String {
     let items = response
         .items
@@ -865,6 +939,24 @@ fn optional_global_trash_failure_reason_json(value: Option<GlobalTrashFailureRea
     match value {
         Some(value) => format!("\"{}\"", global_trash_failure_reason_json(value)),
         None => "null".to_owned(),
+    }
+}
+
+fn optional_root_move_failure_reason_json(value: Option<RootMoveFailureReason>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", root_move_failure_reason_json(value)),
+        None => "null".to_owned(),
+    }
+}
+
+fn root_move_failure_reason_json(value: RootMoveFailureReason) -> &'static str {
+    match value {
+        RootMoveFailureReason::InvalidSource => "invalid_source",
+        RootMoveFailureReason::InvalidTarget => "invalid_target",
+        RootMoveFailureReason::SourceNotFound => "source_not_found",
+        RootMoveFailureReason::UnsupportedKind => "unsupported_kind",
+        RootMoveFailureReason::TargetExists => "target_exists",
+        RootMoveFailureReason::MutationFailed => "mutation_failed",
     }
 }
 

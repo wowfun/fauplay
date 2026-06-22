@@ -230,6 +230,36 @@ pub struct RootTrashListResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveRequest {
+    pub root_path: PathBuf,
+    pub source_root_relative_path: RootRelativePath,
+    pub target_root_relative_path: RootRelativePath,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveResponse {
+    pub dry_run: bool,
+    pub source_root_relative_path: RootRelativePath,
+    pub target_root_relative_path: RootRelativePath,
+    pub absolute_path: PathBuf,
+    pub target_absolute_path: PathBuf,
+    pub ok: bool,
+    pub reason: Option<RootMoveFailureReason>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootMoveFailureReason {
+    InvalidSource,
+    InvalidTarget,
+    SourceNotFound,
+    UnsupportedKind,
+    TargetExists,
+    MutationFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootTrashEntry {
     pub name: String,
     pub root_relative_path: RootRelativePath,

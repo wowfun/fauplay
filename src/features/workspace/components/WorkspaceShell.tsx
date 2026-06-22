@@ -3006,7 +3006,7 @@ export function WorkspaceShell({
   }, [activeSurface, alignPreviewToPath, directoryFocusedPath, projectionTabs])
 
   useEffect(() => {
-    if (accessProvider === 'remote-readonly' || !rootHandle) {
+    if (accessProvider === 'remote-readonly' || !rootId) {
       setHasTrashEntries(false)
       return
     }
@@ -3041,7 +3041,7 @@ export function WorkspaceShell({
     return () => {
       disposed = true
     }
-  }, [accessProvider, files, rootHandle, rootId])
+  }, [accessProvider, files, rootId])
 
   useEffect(() => {
     void Promise.all([

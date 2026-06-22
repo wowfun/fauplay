@@ -866,6 +866,123 @@ fn runtime_api_returns_file_metadata() {
 }
 
 #[test]
+fn runtime_api_moves_root_relative_path_within_local_root() {
+    let fixture = Fixture::new("runtime_api_moves_root_relative_path_within_local_root");
+    fixture.write_file("albums/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_move_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "albums/photo.jpg",
+        "albums/renamed.jpg",
+        false,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"sourceRootRelativePath\":\"albums/photo.jpg\""),
+        "response should include the source Root-relative Path: {response}"
+    );
+    assert!(
+        response.contains("\"targetRootRelativePath\":\"albums/renamed.jpg\""),
+        "response should include the target Root-relative Path: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":true"),
+        "response should report a successful Root Move: {response}"
+    );
+    fixture.assert_missing("albums/photo.jpg");
+    fixture.assert_file("albums/renamed.jpg", "image");
+}
+
+#[test]
+fn runtime_api_plans_root_move_without_mutating_when_dry_run() {
+    let fixture = Fixture::new("runtime_api_plans_root_move_without_mutating_when_dry_run");
+    fixture.write_file("albums/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_move_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "albums/photo.jpg",
+        "albums/renamed.jpg",
+        true,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"dryRun\":true"),
+        "response should report a dry-run Root Move: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":true"),
+        "response should report a planned Root Move: {response}"
+    );
+    fixture.assert_file("albums/photo.jpg", "image");
+    fixture.assert_missing("albums/renamed.jpg");
+}
+
+#[test]
+fn runtime_api_reports_root_move_target_conflicts_without_overwriting() {
+    let fixture =
+        Fixture::new("runtime_api_reports_root_move_target_conflicts_without_overwriting");
+    fixture.write_file("albums/photo.jpg", "new image");
+    fixture.write_file("albums/renamed.jpg", "existing image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_move_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "albums/photo.jpg",
+        "albums/renamed.jpg",
+        false,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":false"),
+        "response should report a failed Root Move: {response}"
+    );
+    assert!(
+        response.contains("\"reason\":\"target_exists\""),
+        "response should report the target conflict reason: {response}"
+    );
+    fixture.assert_file("albums/photo.jpg", "new image");
+    fixture.assert_file("albums/renamed.jpg", "existing image");
+}
+
+#[test]
 fn runtime_api_moves_root_relative_path_to_root_trash() {
     let fixture = Fixture::new("runtime_api_moves_root_relative_path_to_root_trash");
     fixture.write_file("photo.jpg", "image");
@@ -1273,6 +1390,27 @@ fn send_file_metadata_request(address: &str, root_path: &str, root_relative_path
     write!(
         stream,
         "GET /v1/file-metadata?rootPath={root_path}&rootRelativePath={root_relative_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_root_move_request(
+    address: &str,
+    root_path: &str,
+    source_root_relative_path: &str,
+    target_root_relative_path: &str,
+    dry_run: bool,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "POST /v1/root-move?rootPath={root_path}&sourceRootRelativePath={source_root_relative_path}&targetRootRelativePath={target_root_relative_path}&dryRun={dry_run} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     .expect("request should be written");
 

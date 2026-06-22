@@ -25,7 +25,7 @@ import {
   removeCachedRoot,
   upsertCachedRootHandle,
 } from '@/lib/rootHandleCache'
-import { ensureRootPath, getBoundRootPath, getRootPathMapUpdatedEventName } from '@/lib/reveal'
+import { ensureRootPath, getBoundRootPath, getRootPathMapUpdatedEventName, listLocalRootBindings } from '@/lib/reveal'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -60,6 +60,12 @@ function withBasePath(items: FileItem[], basePath: string): FileItem[] {
 
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+function rootNameFromPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  const segments = normalized.split('/').filter(Boolean)
+  return segments[segments.length - 1] || ROOT_LABEL_FALLBACK
 }
 
 function isVirtualTrashPath(path: string): boolean {
@@ -240,6 +246,7 @@ function loadFavoriteFolders(): FavoriteFolderEntry[] {
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [rootId, setRootId] = useState<string | null>(null)
+  const [rootName, setRootName] = useState<string>(ROOT_LABEL_FALLBACK)
   const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
   const [isCachedRootsReady, setIsCachedRootsReady] = useState(false)
   const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => loadFavoriteFolders())
@@ -256,10 +263,33 @@ export function useFileSystem() {
 
   const refreshCachedRoots = useCallback(async () => {
     const entries = await listCachedRoots()
-    setCachedRoots(entries.map((entry) => ({
-      ...entry,
-      boundRootPath: getBoundRootPath(entry.rootId) ?? undefined,
-    })))
+    const cachedEntriesByRootId = new Map<string, CachedRootEntry>()
+    for (const entry of entries) {
+      cachedEntriesByRootId.set(entry.rootId, {
+        ...entry,
+        boundRootPath: getBoundRootPath(entry.rootId) ?? undefined,
+      })
+    }
+
+    for (const binding of listLocalRootBindings()) {
+      const existing = cachedEntriesByRootId.get(binding.rootId)
+      if (existing) {
+        cachedEntriesByRootId.set(binding.rootId, {
+          ...existing,
+          boundRootPath: binding.rootPath,
+        })
+        continue
+      }
+
+      cachedEntriesByRootId.set(binding.rootId, {
+        rootId: binding.rootId,
+        rootName: rootNameFromPath(binding.rootPath),
+        lastUsedAt: 0,
+        boundRootPath: binding.rootPath,
+      })
+    }
+
+    setCachedRoots([...cachedEntriesByRootId.values()])
     setIsCachedRootsReady(true)
   }, [])
 
@@ -466,9 +496,33 @@ export function useFileSystem() {
     })
     setRootHandle(nextRootHandle)
     setRootId(nextRootId)
+    setRootName(nextRootHandle.name || ROOT_LABEL_FALLBACK)
     setCurrentPath(normalizedPath)
     setIsFlattenView(false)
   }, [getDirectoryHandleByPathFromRoot, loadDirectoryItems, loadUnifiedTrashItems])
+
+  const activateRuntimeRoot = useCallback(async (
+    nextRootId: string,
+    nextRootName: string,
+    targetPath: string
+  ) => {
+    const normalizedPath = normalizeRelativePath(targetPath)
+    if (isVirtualTrashPath(normalizedPath)) {
+      await loadUnifiedTrashItems(nextRootId, null)
+      setRootHandle(null)
+      setRootName(nextRootName || ROOT_LABEL_FALLBACK)
+      return
+    }
+
+    await loadDirectoryItems(null, normalizedPath, false, {
+      rootId: nextRootId,
+    })
+    setRootHandle(null)
+    setRootId(nextRootId)
+    setRootName(nextRootName || ROOT_LABEL_FALLBACK)
+    setCurrentPath(normalizedPath)
+    setIsFlattenView(false)
+  }, [loadDirectoryItems, loadUnifiedTrashItems])
 
   const warmupRootPathBinding = useCallback((targetRootId: string, targetRootLabel: string) => {
     try {
@@ -499,7 +553,7 @@ export function useFileSystem() {
     setListingQueryState(normalizedQuery)
     setRuntimeListingPageCursor(null)
 
-    if (!rootHandle || !rootId || isVirtualTrashPath(currentPath)) return
+    if (!rootId || isVirtualTrashPath(currentPath)) return
     if (!getBoundRootPath(rootId)) return
 
     setIsLoading(true)
@@ -514,11 +568,9 @@ export function useFileSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems, rootHandle, rootId])
+  }, [currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems, rootId])
 
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
-    if (!rootHandle) return []
-
     const normalizedPath = normalizeRelativePath(targetPath)
     if (isVirtualTrashPath(normalizedPath)) {
       return []
@@ -539,6 +591,8 @@ export function useFileSystem() {
         // Fall back to File System Access while the runtime-backed Listing path is being adopted.
       }
     }
+
+    if (!rootHandle) return []
 
     const directory = await getDirectoryHandleByPath(normalizedPath)
     if (!directory) return []
@@ -580,12 +634,20 @@ export function useFileSystem() {
     setError(null)
 
     try {
+      const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
       const cachedHandle = await getCachedRootHandle(targetRootId)
       if (!cachedHandle) {
-        await removeCachedRoot(targetRootId)
+        const boundRootPath = targetRoot?.boundRootPath ?? getBoundRootPath(targetRootId)
+        if (!boundRootPath) {
+          await removeCachedRoot(targetRootId)
+          await refreshCachedRoots()
+          setError(ROOT_CACHE_MISS_MESSAGE)
+          return false
+        }
+
+        await activateRuntimeRoot(targetRootId, targetRoot?.rootName || ROOT_LABEL_FALLBACK, '')
         await refreshCachedRoots()
-        setError(ROOT_CACHE_MISS_MESSAGE)
-        return false
+        return true
       }
 
       const granted = await ensureDirectoryReadable(cachedHandle)
@@ -607,7 +669,7 @@ export function useFileSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [activateRootHandle, ensureDirectoryReadable, refreshCachedRoots, warmupRootPathBinding])
+  }, [activateRootHandle, activateRuntimeRoot, cachedRoots, ensureDirectoryReadable, refreshCachedRoots, warmupRootPathBinding])
 
   const rebindCachedRootPath = useCallback(async (targetRootId: string): Promise<boolean> => {
     if (!targetRootId) return false
@@ -636,7 +698,7 @@ export function useFileSystem() {
     targetPath: string,
     options: NavigateToPathOptions = {}
   ): Promise<boolean> => {
-    if (!rootHandle) return false
+    if (!rootId) return false
 
     const normalizedPath = normalizeRelativePath(targetPath)
     const nextFlattenView = options.resetFlattenView ? false : isFlattenView
@@ -670,7 +732,7 @@ export function useFileSystem() {
     if (!targetRootId) return false
 
     const normalizedPath = normalizeRelativePath(targetPath)
-    if (rootHandle && rootId === targetRootId) {
+    if (rootId === targetRootId) {
       return navigateToPath(normalizedPath, { resetFlattenView: true })
     }
 
@@ -678,12 +740,20 @@ export function useFileSystem() {
     setError(null)
 
     try {
+      const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
       const cachedHandle = await getCachedRootHandle(targetRootId)
       if (!cachedHandle) {
-        await removeCachedRoot(targetRootId)
+        const boundRootPath = targetRoot?.boundRootPath ?? getBoundRootPath(targetRootId)
+        if (!boundRootPath) {
+          await removeCachedRoot(targetRootId)
+          await refreshCachedRoots()
+          setError(ROOT_CACHE_MISS_MESSAGE)
+          return false
+        }
+
+        await activateRuntimeRoot(targetRootId, targetRoot?.rootName || ROOT_LABEL_FALLBACK, normalizedPath)
         await refreshCachedRoots()
-        setError(ROOT_CACHE_MISS_MESSAGE)
-        return false
+        return true
       }
 
       const granted = await ensureDirectoryReadable(cachedHandle)
@@ -707,10 +777,11 @@ export function useFileSystem() {
     }
   }, [
     activateRootHandle,
+    activateRuntimeRoot,
+    cachedRoots,
     ensureDirectoryReadable,
     navigateToPath,
     refreshCachedRoots,
-    rootHandle,
     rootId,
     warmupRootPathBinding,
   ])
@@ -752,16 +823,16 @@ export function useFileSystem() {
 
       return dedupeFavoriteFolders([{
         rootId,
-        rootName: rootHandle?.name || ROOT_LABEL_FALLBACK,
+        rootName: rootName || ROOT_LABEL_FALLBACK,
         path: normalizedPath,
         favoritedAt: Date.now(),
       }, ...previous])
     })
-  }, [currentPath, rootHandle, rootId])
+  }, [currentPath, rootId, rootName])
 
   useEffect(() => {
     if (!rootId) return
-    const latestRootName = rootHandle?.name || ROOT_LABEL_FALLBACK
+    const latestRootName = rootName || ROOT_LABEL_FALLBACK
 
     setFavoriteFolders((previous) => {
       let hasChanged = false
@@ -778,7 +849,7 @@ export function useFileSystem() {
       if (!hasChanged) return previous
       return dedupeFavoriteFolders(updated)
     })
-  }, [rootHandle, rootId])
+  }, [rootId, rootName])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
     const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
@@ -796,7 +867,7 @@ export function useFileSystem() {
   }, [currentPath, navigateToPath])
 
   const setFlattenView = useCallback(async (flattenView: boolean) => {
-    if (!rootHandle) return
+    if (!rootId) return
 
     setIsLoading(true)
     setError(null)
@@ -811,7 +882,7 @@ export function useFileSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [rootHandle, getCurrentDirectoryHandle, loadDirectoryItems, currentPath, rootId])
+  }, [getCurrentDirectoryHandle, loadDirectoryItems, currentPath, rootId])
 
   const filterFiles = useCallback((files: FileItem[], filter: FilterState): FileItem[] => {
     let result = [...files]
@@ -884,6 +955,7 @@ export function useFileSystem() {
   return {
     rootHandle,
     rootId,
+    rootName,
     cachedRoots,
     isCachedRootsReady,
     favoriteFolders,

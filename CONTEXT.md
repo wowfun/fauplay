@@ -16,6 +16,10 @@ _Avoid_: frontend client, browser app
 A user-selected folder that Fauplay can browse as a file workspace. All displayed relative paths are interpreted within a Local Root unless a capability states otherwise.
 _Avoid_: root folder, mounted folder, source directory
 
+**Local Root Binding**:
+An association between a Local Root identity in the Web App and the absolute host path used by Runtime Capabilities. A Local Root Binding lets Fauplay reopen a Local Root through the Fauplay Runtime without requiring a browser directory handle.
+_Avoid_: handle cache, root path map
+
 **Runtime Home**:
 A user-scoped folder where Fauplay stores configuration and runtime state outside any Local Root.
 _Avoid_: home directory, global config dir
@@ -59,6 +63,10 @@ _Avoid_: recycle bin, deleted folder, soft-delete plugin storage
 **Root Trash Entry**:
 A file currently stored in Root Trash, identified by its current Root-relative Path and the original Root-relative Path it would restore to.
 _Avoid_: recycle item, deleted item
+
+**Root Move**:
+A mutation that changes a file or directory's Root-relative Path within the same Local Root. A rename is a Root Move whose parent path does not change.
+_Avoid_: batch rename, filesystem move, rename job
 
 **Global Trash**:
 User-scoped trash storage for files that are tracked outside a specific Local Root.
