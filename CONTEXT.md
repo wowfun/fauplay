@@ -36,6 +36,10 @@ _Avoid_: partial error, failed listing
 An ordered segment of a Listing that can be followed by another segment when more matching entries exist.
 _Avoid_: offset slice, pagination response
 
+**Listing Query**:
+A caller's requested view of a Listing before it is split into Listing Pages. It can narrow entries by name or kind and define the Listing order.
+_Avoid_: frontend filter, client-side search
+
 **Reserved Folder**:
 A folder inside a Local Root that Fauplay owns for runtime data or recovery workflows. Reserved Folders are not user content and should not appear in normal browsing results.
 _Avoid_: hidden folder, system folder
@@ -55,6 +59,10 @@ _Avoid_: full file read, raw file fetch
 **File Content**:
 A browser-renderable byte stream for a file under a Local Root, addressed by Root-relative Path and served with a MIME type.
 _Avoid_: raw file read, blob passthrough
+
+**File Content Range**:
+A contiguous byte segment of File Content, reported with its inclusive byte positions and the total file size. It supports media playback and progressive reads without changing the Root-relative Path identity of the file.
+_Avoid_: partial blob, sliced file
 
 **Plugin Capability**:
 An optional or replaceable capability provided through plugin/MCP integration. Plugin Capabilities may use Runtime Capabilities but do not define the runtime boundary.

@@ -20,6 +20,7 @@ import type {
   FavoriteFolderEntry,
   FileItem,
   FilterState,
+  ListingPageState,
   ResultProjection,
   ResultPanelDisplayMode,
   ThumbnailSizePreset,
@@ -175,6 +176,8 @@ interface ExplorerWorkspaceLayoutProps {
   error: string | null
   isLoading: boolean
   directoryFiles: FileItem[]
+  listingPage?: ListingPageState
+  onLoadNextListingPage?: () => Promise<void>
   activeSurfaceFiles: FileItem[]
   rootHandle: FileSystemDirectoryHandle | null
   directoryFileGridRef: MutableRefObject<FileBrowserGridHandle | null>
@@ -290,6 +293,8 @@ export function ExplorerWorkspaceLayout({
   error,
   isLoading,
   directoryFiles,
+  listingPage,
+  onLoadNextListingPage,
   activeSurfaceFiles,
   rootHandle,
   directoryFileGridRef,
@@ -498,6 +503,9 @@ export function ExplorerWorkspaceLayout({
                       keyboardNavigationEnabled={isDirectorySurfaceActive}
                       selectedPaths={directoryGridSelectedPaths}
                       onSelectionChange={onDirectoryGridSelectionChange}
+                      hasNextPage={listingPage?.hasNextPage ?? false}
+                      isLoadingNextPage={listingPage?.isLoadingNextPage ?? false}
+                      onLoadNextPage={onLoadNextListingPage}
                     />
                   </div>
                 )}

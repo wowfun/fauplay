@@ -7,9 +7,10 @@ mod store;
 mod tasks;
 
 pub use api::{
-    DirectoryEntry, DirectoryEntryKind, FileContentRequest, FileContentResponse,
-    ListDirectoryRequest, ListDirectoryResponse, RootRelativePath, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    DirectoryEntry, DirectoryEntryKind, FileContentRange, FileContentRangeRequest,
+    FileContentRequest, FileContentResponse, ListDirectoryRequest, ListDirectoryResponse,
+    ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
+    RootRelativePath, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 

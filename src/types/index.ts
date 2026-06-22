@@ -40,6 +40,11 @@ export interface FileState {
   error: string | null
 }
 
+export interface ListingPageState {
+  hasNextPage: boolean
+  isLoadingNextPage: boolean
+}
+
 export type ViewMode = 'grid' | 'list'
 
 export type SortBy = 'name' | 'date' | 'size' | 'annotationTime'
@@ -98,6 +103,14 @@ export interface FilterState {
   annotationIncludeMatchMode: AnnotationIncludeMatchMode
   annotationIncludeTagKeys: string[]
   annotationExcludeTagKeys: string[]
+}
+
+export interface ListingQueryState {
+  search: string
+  type: 'all' | 'image' | 'video'
+  hideEmptyFolders: boolean
+  sortBy: Exclude<SortBy, 'annotationTime'>
+  sortOrder: SortOrder
 }
 
 export interface AddressPathHistoryEntry {

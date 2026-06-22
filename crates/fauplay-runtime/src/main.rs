@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process;
 
 use fauplay_runtime::{
-    DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, RootRelativePath, RuntimeError,
-    serve_http, serve_one_http_request,
+    DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, ListingQuery, RootRelativePath,
+    RuntimeError, serve_http, serve_one_http_request,
 };
 
 fn main() {
@@ -42,6 +42,7 @@ fn list_directory(root_path: PathBuf, relative_path: PathBuf) -> Result<(), CliE
         flattened: false,
         entry_limit: None,
         entry_offset: 0,
+        query: ListingQuery::default(),
     })?;
 
     for entry in response.entries {

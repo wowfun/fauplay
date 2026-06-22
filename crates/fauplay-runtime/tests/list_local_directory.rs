@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use fauplay_runtime::{
-    DirectoryEntry, DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, RootRelativePath,
+    DirectoryEntry, DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, ListingEntryFilter,
+    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath,
 };
 
 #[test]
@@ -20,6 +21,7 @@ fn lists_immediate_entries_in_a_local_root() {
             flattened: false,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("local root should be listed");
 
@@ -68,6 +70,7 @@ fn includes_file_metadata_for_frontend_sorting() {
             flattened: false,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("local root should be listed");
 
@@ -99,6 +102,7 @@ fn includes_directory_metadata_for_frontend_filtering() {
             flattened: false,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("local root should be listed");
 
@@ -138,6 +142,7 @@ fn lists_flattened_descendant_files_under_a_root_relative_path() {
             flattened: true,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("Flattened Listing should be returned");
 
@@ -175,6 +180,7 @@ fn marks_listings_truncated_when_an_entry_limit_is_reached() {
             flattened: false,
             entry_limit: Some(2),
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("Truncated Listing should be returned");
 
@@ -206,6 +212,7 @@ fn returns_next_offset_for_listing_pages() {
             flattened: false,
             entry_limit: Some(2),
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("first Listing Page should be returned");
 
@@ -225,6 +232,7 @@ fn returns_next_offset_for_listing_pages() {
             flattened: false,
             entry_limit: Some(2),
             entry_offset: first_page.next_offset.expect("first page should continue"),
+            query: ListingQuery::default(),
         })
         .expect("second Listing Page should be returned");
 
@@ -239,6 +247,120 @@ fn returns_next_offset_for_listing_pages() {
     );
     assert_eq!(second_page.next_offset, None);
     assert!(!second_page.is_truncated);
+}
+
+#[test]
+fn applies_listing_query_before_listing_pages() {
+    let fixture = Fixture::new("applies_listing_query_before_listing_pages");
+    fixture.write_file("photo-a.jpg", "image");
+    fixture.write_file("notes.txt", "notes");
+    fixture.write_file("photo-b.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(1),
+            entry_offset: 0,
+            query: ListingQuery {
+                name_contains: Some("photo".to_owned()),
+                ..ListingQuery::default()
+            },
+        })
+        .expect("Listing Query should be applied before Listing Pages");
+
+    assert_eq!(
+        entry_summaries(&response.entries),
+        vec![entry_summary(
+            "photo-a.jpg",
+            "photo-a.jpg",
+            DirectoryEntryKind::File,
+            Some(5),
+        )],
+    );
+    assert!(response.is_truncated);
+    assert_eq!(response.next_offset, Some(1));
+}
+
+#[test]
+fn applies_listing_order_before_listing_pages() {
+    let fixture = Fixture::new("applies_listing_order_before_listing_pages");
+    fixture.write_file("a-small.jpg", "1");
+    fixture.write_file("z-large.jpg", "12345");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(1),
+            entry_offset: 0,
+            query: ListingQuery {
+                order: ListingOrder {
+                    sort_key: ListingSortKey::Size,
+                    direction: ListingSortDirection::Desc,
+                },
+                ..ListingQuery::default()
+            },
+        })
+        .expect("Listing order should be applied before Listing Pages");
+
+    assert_eq!(
+        entry_summaries(&response.entries),
+        vec![entry_summary(
+            "z-large.jpg",
+            "z-large.jpg",
+            DirectoryEntryKind::File,
+            Some(5),
+        )],
+    );
+    assert!(response.is_truncated);
+    assert_eq!(response.next_offset, Some(1));
+}
+
+#[test]
+fn applies_entry_filter_and_empty_folder_filter_before_listing_pages() {
+    let fixture = Fixture::new("applies_entry_filter_and_empty_folder_filter_before_listing_pages");
+    fixture.create_dir("empty-album");
+    fixture.create_dir("filled-album");
+    fixture.write_file("filled-album/nested.jpg", "image");
+    fixture.write_file("photo.jpg", "image");
+    fixture.write_file("clip.mp4", "video");
+    fixture.write_file("notes.txt", "notes");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(2),
+            entry_offset: 0,
+            query: ListingQuery {
+                entry_filter: ListingEntryFilter::Image,
+                hide_empty_folders: true,
+                ..ListingQuery::default()
+            },
+        })
+        .expect("Listing Query should filter entries before Listing Pages");
+
+    assert_eq!(
+        entry_summaries(&response.entries),
+        vec![
+            entry_summary(
+                "filled-album",
+                "filled-album",
+                DirectoryEntryKind::Directory,
+                None,
+            ),
+            entry_summary("photo.jpg", "photo.jpg", DirectoryEntryKind::File, Some(5)),
+        ],
+    );
+    assert!(!response.is_truncated);
+    assert_eq!(response.next_offset, None);
 }
 
 #[test]
@@ -278,6 +400,7 @@ fn normalizes_root_relative_paths_for_display() {
             flattened: false,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("Root-relative Path should be normalized before listing");
 
@@ -307,6 +430,7 @@ fn hides_reserved_folders_from_local_root_listing() {
             flattened: false,
             entry_limit: None,
             entry_offset: 0,
+            query: ListingQuery::default(),
         })
         .expect("local root should be listed");
 

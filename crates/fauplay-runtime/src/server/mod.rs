@@ -4,8 +4,10 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 
 use crate::{
-    DirectoryEntryKind, FauplayRuntime, FileContentRequest, ListDirectoryRequest, RootRelativePath,
-    RuntimeError, TextPreviewRequest, TextPreviewStatus,
+    DirectoryEntryKind, FauplayRuntime, FileContentRangeRequest, FileContentRequest,
+    FileContentResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder, ListingQuery,
+    ListingSortDirection, ListingSortKey, RootRelativePath, RuntimeError, TextPreviewRequest,
+    TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -117,6 +119,7 @@ fn handle_list_local_directory(
         flattened: query.get("flattened").is_some_and(|value| value == "true"),
         entry_limit: parse_entry_limit(query.get("limit").map(String::as_str)),
         entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
+        query: parse_listing_query(query),
     }) {
         Ok(response) => http_response(200, "OK", &list_directory_response_json(response)),
         Err(error) => http_response(
@@ -136,6 +139,46 @@ fn parse_entry_offset(value: Option<&str>) -> usize {
     value
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0)
+}
+
+fn parse_listing_query(query: &HashMap<String, String>) -> ListingQuery {
+    ListingQuery {
+        name_contains: query
+            .get("nameContains")
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+        entry_filter: parse_listing_entry_filter(query.get("entryFilter").map(String::as_str)),
+        order: ListingOrder {
+            sort_key: parse_listing_sort_key(query.get("sortBy").map(String::as_str)),
+            direction: parse_listing_sort_direction(query.get("sortOrder").map(String::as_str)),
+        },
+        hide_empty_folders: query
+            .get("hideEmptyFolders")
+            .is_some_and(|value| value == "true"),
+    }
+}
+
+fn parse_listing_entry_filter(value: Option<&str>) -> ListingEntryFilter {
+    match value {
+        Some("image") => ListingEntryFilter::Image,
+        Some("video") => ListingEntryFilter::Video,
+        _ => ListingEntryFilter::All,
+    }
+}
+
+fn parse_listing_sort_key(value: Option<&str>) -> ListingSortKey {
+    match value {
+        Some("date") => ListingSortKey::Date,
+        Some("size") => ListingSortKey::Size,
+        _ => ListingSortKey::Name,
+    }
+}
+
+fn parse_listing_sort_direction(value: Option<&str>) -> ListingSortDirection {
+    match value {
+        Some("desc") => ListingSortDirection::Desc,
+        _ => ListingSortDirection::Asc,
+    }
 }
 
 fn handle_text_preview(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> HttpResponse {
@@ -192,8 +235,9 @@ fn handle_file_content(
     match runtime.read_file_content(FileContentRequest {
         root_path: PathBuf::from(root_path),
         root_relative_path,
+        range: range_header.and_then(parse_file_content_range),
     }) {
-        Ok(response) => file_content_response(response.content_type, response.bytes, range_header),
+        Ok(response) => file_content_response(response),
         Err(error) => http_response(
             500,
             "Internal Server Error",
@@ -362,32 +406,20 @@ fn escape_json_string(value: &str) -> String {
         .replace('\r', "\\r")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ByteRange {
-    start: usize,
-    end: usize,
-}
-
-fn file_content_response(
-    content_type: String,
-    bytes: Vec<u8>,
-    range_header: Option<&str>,
-) -> HttpResponse {
-    let total_len = bytes.len();
-    if let Some(byte_range) = range_header.and_then(|value| parse_byte_range(value, total_len)) {
-        let body = bytes[byte_range.start..=byte_range.end].to_vec();
+fn file_content_response(response: FileContentResponse) -> HttpResponse {
+    if let Some(range) = response.range {
         return binary_response_with_headers(
             206,
             "Partial Content",
-            &content_type,
-            body,
+            &response.content_type,
+            response.bytes,
             vec![
                 ("Accept-Ranges".to_owned(), "bytes".to_owned()),
                 (
                     "Content-Range".to_owned(),
                     format!(
                         "bytes {}-{}/{}",
-                        byte_range.start, byte_range.end, total_len
+                        range.start, range.end_inclusive, response.total_size
                     ),
                 ),
             ],
@@ -397,17 +429,13 @@ fn file_content_response(
     binary_response_with_headers(
         200,
         "OK",
-        &content_type,
-        bytes,
+        &response.content_type,
+        response.bytes,
         vec![("Accept-Ranges".to_owned(), "bytes".to_owned())],
     )
 }
 
-fn parse_byte_range(value: &str, total_len: usize) -> Option<ByteRange> {
-    if total_len == 0 {
-        return None;
-    }
-
+fn parse_file_content_range(value: &str) -> Option<FileContentRangeRequest> {
     let range_spec = value.trim().strip_prefix("bytes=")?;
     if range_spec.contains(',') {
         return None;
@@ -415,29 +443,20 @@ fn parse_byte_range(value: &str, total_len: usize) -> Option<ByteRange> {
     let (start_raw, end_raw) = range_spec.split_once('-')?;
 
     if start_raw.is_empty() {
-        let suffix_len = end_raw.parse::<usize>().ok()?;
-        if suffix_len == 0 {
-            return None;
-        }
-        let len = suffix_len.min(total_len);
-        return Some(ByteRange {
-            start: total_len - len,
-            end: total_len - 1,
+        return Some(FileContentRangeRequest::Suffix {
+            length: end_raw.parse::<u64>().ok()?,
         });
     }
 
-    let start = start_raw.parse::<usize>().ok()?;
-    if start >= total_len {
-        return None;
+    let start = start_raw.parse::<u64>().ok()?;
+    if end_raw.is_empty() {
+        return Some(FileContentRangeRequest::From { start });
     }
 
-    let end = if end_raw.is_empty() {
-        total_len - 1
-    } else {
-        end_raw.parse::<usize>().ok()?.min(total_len - 1)
-    };
-
-    (start <= end).then_some(ByteRange { start, end })
+    Some(FileContentRangeRequest::Exact {
+        start,
+        end_inclusive: end_raw.parse::<u64>().ok()?,
+    })
 }
 
 struct HttpResponse {

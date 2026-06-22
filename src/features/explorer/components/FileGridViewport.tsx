@@ -30,6 +30,9 @@ interface FileGridViewportProps {
   keyboardNavigationEnabled?: boolean
   selectedPaths?: string[]
   onSelectionChange: (selectedPaths: string[]) => void
+  hasNextPage?: boolean
+  isLoadingNextPage?: boolean
+  onLoadNextPage?: () => Promise<void>
 }
 
 export interface FileGridViewportHandle {
@@ -81,6 +84,9 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   keyboardNavigationEnabled = true,
   selectedPaths,
   onSelectionChange,
+  hasNextPage = false,
+  isLoadingNextPage = false,
+  onLoadNextPage,
 }, ref) {
   const keyboardShortcuts = useKeyboardShortcuts()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -176,6 +182,23 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       return window
     })
   }, [])
+
+  useEffect(() => {
+    if (!hasNextPage || isLoadingNextPage || !onLoadNextPage) return
+    if (files.length === 0 || rowCount === 0) return
+
+    const preloadThresholdRow = Math.max(0, rowCount - 2)
+    if (renderWindow.overscanRowStopIndex < preloadThresholdRow) return
+
+    void onLoadNextPage()
+  }, [
+    files.length,
+    hasNextPage,
+    isLoadingNextPage,
+    onLoadNextPage,
+    renderWindow.overscanRowStopIndex,
+    rowCount,
+  ])
 
   const applyRangeSelection = useCallback((targetIndex: number, options?: { queuePreviewAfterShiftRelease?: boolean }) => {
     if (files.length === 0) return

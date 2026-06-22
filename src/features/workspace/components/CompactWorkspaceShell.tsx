@@ -69,6 +69,8 @@ export function CompactWorkspaceShell({
   error,
   isLoading,
   directoryFiles,
+  listingPage,
+  onLoadNextListingPage,
   activeSurfaceFiles,
   rootHandle,
   directoryFileGridRef,
@@ -225,6 +227,9 @@ export function CompactWorkspaceShell({
               keyboardNavigationEnabled={isDirectorySurfaceActive}
               selectedPaths={directoryGridSelectedPaths}
               onSelectionChange={onDirectoryGridSelectionChange}
+              hasNextPage={listingPage?.hasNextPage ?? false}
+              isLoadingNextPage={listingPage?.isLoadingNextPage ?? false}
+              onLoadNextPage={onLoadNextListingPage}
             />
           </div>
         )}

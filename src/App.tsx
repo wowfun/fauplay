@@ -626,6 +626,7 @@ function App() {
         favoriteFolders={localFileSystem.favoriteFolders}
         isCurrentPathFavorited={localFileSystem.isCurrentPathFavorited}
         files={localFileSystem.files}
+        listingPage={localFileSystem.listingPage}
         currentPath={localFileSystem.currentPath}
         isFlattenView={localFileSystem.isFlattenView}
         isLoading={localFileSystem.isLoading}
@@ -639,6 +640,8 @@ function App() {
         navigateToDirectory={localFileSystem.navigateToDirectory}
         navigateUp={localFileSystem.navigateUp}
         listChildDirectories={localFileSystem.listChildDirectories}
+        loadNextListingPage={localFileSystem.loadNextListingPage}
+        setListingQuery={localFileSystem.setListingQuery}
         setFlattenView={localFileSystem.setFlattenView}
         filterFiles={localFileSystem.filterFiles}
       />

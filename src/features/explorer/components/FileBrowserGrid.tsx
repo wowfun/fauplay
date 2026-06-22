@@ -15,6 +15,9 @@ interface FileBrowserGridProps {
   keyboardNavigationEnabled?: boolean
   selectedPaths?: string[]
   onSelectionChange: (selectedPaths: string[]) => void
+  hasNextPage?: boolean
+  isLoadingNextPage?: boolean
+  onLoadNextPage?: () => Promise<void>
 }
 
 export type FileBrowserGridHandle = FileGridViewportHandle
@@ -31,6 +34,9 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
   keyboardNavigationEnabled,
   selectedPaths,
   onSelectionChange,
+  hasNextPage,
+  isLoadingNextPage,
+  onLoadNextPage,
 }, ref) {
   return (
     <FileGridViewport
@@ -46,6 +52,9 @@ const FileBrowserGridImpl = forwardRef<FileBrowserGridHandle, FileBrowserGridPro
       keyboardNavigationEnabled={keyboardNavigationEnabled}
       selectedPaths={selectedPaths}
       onSelectionChange={onSelectionChange}
+      hasNextPage={hasNextPage}
+      isLoadingNextPage={isLoadingNextPage}
+      onLoadNextPage={onLoadNextPage}
     />
   )
 })

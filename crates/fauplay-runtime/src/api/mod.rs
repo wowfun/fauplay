@@ -9,6 +9,7 @@ pub struct ListDirectoryRequest {
     pub flattened: bool,
     pub entry_limit: Option<usize>,
     pub entry_offset: usize,
+    pub query: ListingQuery,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +17,52 @@ pub struct ListDirectoryResponse {
     pub entries: Vec<DirectoryEntry>,
     pub is_truncated: bool,
     pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ListingQuery {
+    pub name_contains: Option<String>,
+    pub entry_filter: ListingEntryFilter,
+    pub order: ListingOrder,
+    pub hide_empty_folders: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListingEntryFilter {
+    #[default]
+    All,
+    Image,
+    Video,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListingOrder {
+    pub sort_key: ListingSortKey,
+    pub direction: ListingSortDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListingSortKey {
+    #[default]
+    Name,
+    Date,
+    Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListingSortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+impl Default for ListingOrder {
+    fn default() -> Self {
+        Self {
+            sort_key: ListingSortKey::Name,
+            direction: ListingSortDirection::Asc,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,12 +76,28 @@ pub struct TextPreviewRequest {
 pub struct FileContentRequest {
     pub root_path: PathBuf,
     pub root_relative_path: RootRelativePath,
+    pub range: Option<FileContentRangeRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileContentResponse {
     pub content_type: String,
     pub bytes: Vec<u8>,
+    pub total_size: u64,
+    pub range: Option<FileContentRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileContentRangeRequest {
+    Exact { start: u64, end_inclusive: u64 },
+    From { start: u64 },
+    Suffix { length: u64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileContentRange {
+    pub start: u64,
+    pub end_inclusive: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +152,48 @@ impl RootRelativePath {
         let mut path = self.path.clone();
         path.push(name);
         Self { path }
+    }
+}
+
+impl FileContentRangeRequest {
+    pub(crate) fn resolve(self, total_size: u64) -> Option<FileContentRange> {
+        if total_size == 0 {
+            return None;
+        }
+
+        match self {
+            Self::Exact {
+                start,
+                end_inclusive,
+            } => {
+                if start > end_inclusive || start >= total_size {
+                    return None;
+                }
+                Some(FileContentRange {
+                    start,
+                    end_inclusive: end_inclusive.min(total_size - 1),
+                })
+            }
+            Self::From { start } => {
+                if start >= total_size {
+                    return None;
+                }
+                Some(FileContentRange {
+                    start,
+                    end_inclusive: total_size - 1,
+                })
+            }
+            Self::Suffix { length } => {
+                if length == 0 {
+                    return None;
+                }
+                let length = length.min(total_size);
+                Some(FileContentRange {
+                    start: total_size - length,
+                    end_inclusive: total_size - 1,
+                })
+            }
+        }
     }
 }
 

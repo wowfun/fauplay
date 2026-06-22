@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { appConfig } from '@/config/appConfig'
 import { callGatewayHttp } from '@/lib/gateway'
 import type {
@@ -7,6 +7,8 @@ import type {
   FavoriteFolderEntry,
   FileItem,
   FilterState,
+  ListingPageState,
+  ListingQueryState,
 } from '@/types'
 import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
 import { listRuntimeLocalDirectory, toRuntimeFileItems } from '@/lib/runtimeApi'
@@ -25,6 +27,22 @@ const FAVORITE_FOLDERS_STORAGE_KEY = 'fauplay:favorite-folders'
 const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
 const ROOT_LABEL_FALLBACK = '根目录'
 const VIRTUAL_TRASH_PATH = '@trash'
+const RUNTIME_LISTING_PAGE_SIZE = 500
+const DEFAULT_LISTING_QUERY: ListingQueryState = {
+  search: '',
+  type: 'all',
+  hideEmptyFolders: false,
+  sortBy: 'name',
+  sortOrder: 'asc',
+}
+
+interface RuntimeListingPageCursor {
+  rootPath: string
+  rootRelativePath: string
+  flattened: boolean
+  query: ListingQueryState
+  nextOffset: number
+}
 
 interface RecycleListItem {
   path?: string
@@ -57,6 +75,50 @@ function normalizeRelativePath(path: string): string {
 
 function isVirtualTrashPath(path: string): boolean {
   return normalizeRelativePath(path) === VIRTUAL_TRASH_PATH
+}
+
+function normalizeListingQuery(query: ListingQueryState): ListingQueryState {
+  return {
+    search: query.search.trim(),
+    type: query.type === 'image' || query.type === 'video' ? query.type : 'all',
+    hideEmptyFolders: query.hideEmptyFolders === true,
+    sortBy: query.sortBy === 'date' || query.sortBy === 'size' ? query.sortBy : 'name',
+    sortOrder: query.sortOrder === 'desc' ? 'desc' : 'asc',
+  }
+}
+
+function isSameListingQuery(left: ListingQueryState, right: ListingQueryState): boolean {
+  return (
+    left.search === right.search
+    && left.type === right.type
+    && left.hideEmptyFolders === right.hideEmptyFolders
+    && left.sortBy === right.sortBy
+    && left.sortOrder === right.sortOrder
+  )
+}
+
+function toRuntimeListingQueryRequest(query: ListingQueryState) {
+  return {
+    nameContains: query.search,
+    entryFilter: query.type,
+    hideEmptyFolders: query.hideEmptyFolders,
+    sortBy: query.sortBy,
+    sortOrder: query.sortOrder,
+  }
+}
+
+function isSameRuntimeListingPageCursor(
+  left: RuntimeListingPageCursor | null,
+  right: RuntimeListingPageCursor
+): boolean {
+  return Boolean(
+    left
+    && left.rootPath === right.rootPath
+    && left.rootRelativePath === right.rootRelativePath
+    && left.flattened === right.flattened
+    && isSameListingQuery(left.query, right.query)
+    && left.nextOffset === right.nextOffset
+  )
 }
 
 function toTrashFileItem(item: RecycleListItem): FileItem | null {
@@ -216,6 +278,11 @@ export function useFileSystem() {
   const [isCachedRootsReady, setIsCachedRootsReady] = useState(false)
   const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => loadFavoriteFolders())
   const [files, setFiles] = useState<FileItem[]>([])
+  const [listingQuery, setListingQueryState] = useState<ListingQueryState>(DEFAULT_LISTING_QUERY)
+  const [runtimeListingPageCursor, setRuntimeListingPageCursor] = useState<RuntimeListingPageCursor | null>(null)
+  const [isLoadingNextListingPage, setIsLoadingNextListingPage] = useState(false)
+  const listingQueryRef = useRef<ListingQueryState>(DEFAULT_LISTING_QUERY)
+  const runtimeListingPageCursorRef = useRef<RuntimeListingPageCursor | null>(null)
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isFlattenView, setIsFlattenView] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -233,6 +300,14 @@ export function useFileSystem() {
   useEffect(() => {
     void refreshCachedRoots()
   }, [refreshCachedRoots])
+
+  useEffect(() => {
+    runtimeListingPageCursorRef.current = runtimeListingPageCursor
+  }, [runtimeListingPageCursor])
+
+  useEffect(() => {
+    listingQueryRef.current = listingQuery
+  }, [listingQuery])
 
   useEffect(() => {
     const eventName = getRootPathMapUpdatedEventName()
@@ -265,17 +340,31 @@ export function useFileSystem() {
     const boundRootPath = options.rootId ? getBoundRootPath(options.rootId) : null
     if (boundRootPath) {
       try {
+        const activeListingQuery = listingQueryRef.current
         const runtimeListing = await listRuntimeLocalDirectory({
           rootPath: boundRootPath,
           rootRelativePath: basePath,
           flattened: flattenView,
+          limit: RUNTIME_LISTING_PAGE_SIZE,
+          ...toRuntimeListingQueryRequest(activeListingQuery),
         })
         setFiles(toRuntimeFileItems(runtimeListing.entries))
+        setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
+          ? {
+              rootPath: boundRootPath,
+              rootRelativePath: normalizeRelativePath(basePath),
+              flattened: flattenView,
+              query: activeListingQuery,
+              nextOffset: runtimeListing.nextOffset,
+            }
+          : null)
         return
       } catch {
         // Fall back to File System Access while the runtime-backed Listing path is being adopted.
       }
     }
+
+    setRuntimeListingPageCursor(null)
 
     const fallbackHandle = dirHandle ?? await options.resolveDirectoryHandle?.() ?? null
     if (!fallbackHandle) {
@@ -292,6 +381,47 @@ export function useFileSystem() {
     setFiles(withBasePath(allItems, basePath))
   }, [])
 
+  const loadNextListingPage = useCallback(async (): Promise<void> => {
+    const cursor = runtimeListingPageCursorRef.current
+    if (!cursor || isLoadingNextListingPage) return
+
+    setIsLoadingNextListingPage(true)
+    setError(null)
+
+    try {
+      const runtimeListing = await listRuntimeLocalDirectory({
+        rootPath: cursor.rootPath,
+        rootRelativePath: cursor.rootRelativePath,
+        flattened: cursor.flattened,
+        limit: RUNTIME_LISTING_PAGE_SIZE,
+        offset: cursor.nextOffset,
+        ...toRuntimeListingQueryRequest(cursor.query),
+      })
+
+      if (!isSameRuntimeListingPageCursor(runtimeListingPageCursorRef.current, cursor)) {
+        return
+      }
+
+      const nextItems = toRuntimeFileItems(runtimeListing.entries)
+      setFiles((previous) => {
+        const existingPaths = new Set(previous.map((item) => item.path))
+        const appendedItems = nextItems.filter((item) => !existingPaths.has(item.path))
+        if (appendedItems.length === 0) return previous
+        return [...previous, ...appendedItems]
+      })
+      setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
+        ? {
+            ...cursor,
+            nextOffset: runtimeListing.nextOffset,
+          }
+        : null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setIsLoadingNextListingPage(false)
+    }
+  }, [isLoadingNextListingPage])
+
   const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
     const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
     const response = await callGatewayHttp<{ items?: RecycleListItem[] }>('/v1/recycle/items/list', {
@@ -306,6 +436,7 @@ export function useFileSystem() {
       : []
 
     setFiles(nextFiles)
+    setRuntimeListingPageCursor(null)
     setCurrentPath(VIRTUAL_TRASH_PATH)
     setIsFlattenView(false)
     if (targetRootHandle) {
@@ -393,6 +524,31 @@ export function useFileSystem() {
   const getCurrentDirectoryHandle = useCallback(async () => {
     return getDirectoryHandleByPath(currentPath)
   }, [getDirectoryHandleByPath, currentPath])
+
+  const setListingQuery = useCallback(async (nextQuery: ListingQueryState): Promise<void> => {
+    const normalizedQuery = normalizeListingQuery(nextQuery)
+    if (isSameListingQuery(listingQueryRef.current, normalizedQuery)) return
+
+    listingQueryRef.current = normalizedQuery
+    setListingQueryState(normalizedQuery)
+    setRuntimeListingPageCursor(null)
+
+    if (!rootHandle || !rootId || isVirtualTrashPath(currentPath)) return
+    if (!getBoundRootPath(rootId)) return
+
+    setIsLoading(true)
+    setError(null)
+    try {
+      await loadDirectoryItems(null, currentPath, isFlattenView, {
+        rootId,
+        resolveDirectoryHandle: getCurrentDirectoryHandle,
+      })
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems, rootHandle, rootId])
 
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
     if (!rootHandle) return []
@@ -754,6 +910,11 @@ export function useFileSystem() {
     })
   })()
 
+  const listingPage: ListingPageState = {
+    hasNextPage: runtimeListingPageCursor !== null,
+    isLoadingNextPage: isLoadingNextListingPage,
+  }
+
   return {
     rootHandle,
     rootId,
@@ -762,6 +923,7 @@ export function useFileSystem() {
     favoriteFolders,
     isCurrentPathFavorited,
     files,
+    listingPage,
     currentPath,
     isFlattenView,
     isLoading,
@@ -777,6 +939,8 @@ export function useFileSystem() {
     navigateToDirectory,
     navigateUp,
     listChildDirectories,
+    loadNextListingPage,
+    setListingQuery,
     setFlattenView,
     filterFiles,
   }

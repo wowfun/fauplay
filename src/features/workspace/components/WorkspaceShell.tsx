@@ -75,6 +75,8 @@ import {
   type FavoriteFolderEntry,
   type FileItem,
   type FilterState,
+  type ListingPageState,
+  type ListingQueryState,
   type ResultPanelDisplayMode,
   type ResultProjection,
   type ThumbnailSizePreset,
@@ -111,6 +113,7 @@ interface WorkspaceShellProps {
   favoriteFolders: FavoriteFolderEntry[]
   isCurrentPathFavorited: boolean
   files: FileItem[]
+  listingPage?: ListingPageState
   currentPath: string
   isFlattenView: boolean
   isLoading: boolean
@@ -127,6 +130,8 @@ interface WorkspaceShellProps {
   navigateToDirectory: (dirName: string) => Promise<void>
   navigateUp: () => Promise<void>
   listChildDirectories: (targetPath: string) => Promise<string[]>
+  loadNextListingPage?: () => Promise<void>
+  setListingQuery?: (query: ListingQueryState) => Promise<void>
   setFlattenView: (flattenView: boolean) => Promise<void>
   filterFiles: (files: FileItem[], filter: FilterState) => FileItem[]
   onSwitchWorkspace?: () => void
@@ -244,6 +249,16 @@ function createDefaultPersistedWorkspaceFilterState(): PersistedWorkspaceFilterS
     annotationIncludeMatchMode: defaultFilter.annotationIncludeMatchMode,
     annotationIncludeTagKeys: [],
     annotationExcludeTagKeys: [],
+  }
+}
+
+function toListingQueryState(filter: FilterState): ListingQueryState {
+  return {
+    search: filter.search,
+    type: filter.type,
+    hideEmptyFolders: filter.hideEmptyFolders,
+    sortBy: filter.sortBy === 'date' || filter.sortBy === 'size' ? filter.sortBy : 'name',
+    sortOrder: filter.sortOrder,
   }
 }
 
@@ -884,6 +899,7 @@ export function WorkspaceShell({
   favoriteFolders,
   isCurrentPathFavorited,
   files,
+  listingPage,
   currentPath,
   isFlattenView,
   isLoading,
@@ -897,6 +913,8 @@ export function WorkspaceShell({
   navigateToDirectory,
   navigateUp,
   listChildDirectories,
+  loadNextListingPage,
+  setListingQuery,
   setFlattenView,
   filterFiles,
   onSwitchWorkspace,
@@ -969,6 +987,13 @@ export function WorkspaceShell({
     setDirectorySelectedPaths([])
     setFilter(withSyncedAnnotationFilterMode(nextFilter))
   }, [])
+  const listingQuery = useMemo(() => toListingQueryState(filter), [filter])
+
+  useEffect(() => {
+    if (!setListingQuery) return
+    void setListingQuery(listingQuery)
+  }, [listingQuery, setListingQuery])
+
   const isAnnotationFilterGateResolved = isAnnotationFilterUiGateResolved(rootId)
   const isReviewFilterGateResolved = isReviewFilterTagSnapshotReady(rootId)
   const annotationTagFilterVisible = isAnnotationFilterUiVisible(rootId)
@@ -3238,6 +3263,8 @@ export function WorkspaceShell({
       onRemoveFavoriteFolder: removeFavoriteFolder,
       onToggleCurrentPathFavorite: toggleCurrentFolderFavorite,
       directoryFiles: filteredFiles,
+      listingPage,
+      onLoadNextListingPage: loadNextListingPage,
       activeSurfaceFiles,
       rootHandle,
       directoryFileGridRef,

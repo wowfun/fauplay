@@ -292,6 +292,52 @@ fn runtime_api_returns_next_offset_for_listing_pages() {
 }
 
 #[test]
+fn runtime_api_applies_listing_query_parameters() {
+    let fixture = Fixture::new("runtime_api_applies_listing_query_parameters");
+    fixture.write_file("a-small.jpg", "1");
+    fixture.write_file("z-large.jpg", "12345");
+    fixture.write_file("notes.txt", "notes");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request_with_options(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "",
+        &[
+            ("nameContains", "jpg"),
+            ("entryFilter", "image"),
+            ("sortBy", "size"),
+            ("sortOrder", "desc"),
+            ("limit", "1"),
+        ],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"z-large.jpg\""),
+        "response should return the queried first Listing Page: {response}"
+    );
+    assert!(
+        !response.contains("\"rootRelativePath\":\"notes.txt\""),
+        "response should omit non-matching entries: {response}"
+    );
+    assert!(
+        response.contains("\"nextOffset\":1"),
+        "response should page the queried Listing: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_returns_text_preview() {
     let fixture = Fixture::new("runtime_api_returns_text_preview");
     fixture.write_file("notes.txt", "hello runtime");

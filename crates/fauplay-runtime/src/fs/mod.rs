@@ -1,10 +1,12 @@
+use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use crate::{
     DirectoryEntry, DirectoryEntryKind, ListDirectoryRequest, ListDirectoryResponse,
-    RootRelativePath, RuntimeError,
+    ListingEntryFilter, ListingQuery, ListingSortDirection, ListingSortKey, RootRelativePath,
+    RuntimeError,
 };
 
 const RESERVED_FOLDER_NAMES: &[&str] = &[".trash"];
@@ -17,11 +19,8 @@ pub(crate) fn list_local_directory(
 
     if request.flattened {
         collect_flattened_file_entries(&directory_path, &request.root_relative_path, &mut entries)?;
-        entries.sort_by(|left, right| {
-            left.root_relative_path
-                .to_string()
-                .cmp(&right.root_relative_path.to_string())
-        });
+        entries = apply_listing_query(entries, &request.query);
+        sort_entries(&mut entries, &request.query, true);
         return Ok(paged_response(
             entries,
             request.entry_offset,
@@ -30,11 +29,8 @@ pub(crate) fn list_local_directory(
     }
 
     collect_immediate_entries(&directory_path, &request.root_relative_path, &mut entries)?;
-    entries.sort_by(|left, right| {
-        directory_entry_kind_rank(left.kind)
-            .cmp(&directory_entry_kind_rank(right.kind))
-            .then_with(|| left.name.cmp(&right.name))
-    });
+    entries = apply_listing_query(entries, &request.query);
+    sort_entries(&mut entries, &request.query, false);
 
     Ok(paged_response(
         entries,
@@ -62,6 +58,118 @@ fn paged_response(
         is_truncated,
         next_offset,
     }
+}
+
+fn apply_listing_query(entries: Vec<DirectoryEntry>, query: &ListingQuery) -> Vec<DirectoryEntry> {
+    entries
+        .into_iter()
+        .filter(|entry| matches_name_query(entry, query.name_contains.as_deref()))
+        .filter(|entry| matches_empty_folder_query(entry, query.hide_empty_folders))
+        .filter(|entry| matches_entry_filter(entry, query.entry_filter))
+        .collect()
+}
+
+fn matches_name_query(entry: &DirectoryEntry, name_contains: Option<&str>) -> bool {
+    let Some(name_contains) = name_contains
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    entry
+        .name
+        .to_lowercase()
+        .contains(&name_contains.to_lowercase())
+}
+
+fn matches_empty_folder_query(entry: &DirectoryEntry, hide_empty_folders: bool) -> bool {
+    if !hide_empty_folders {
+        return true;
+    }
+    !(entry.kind == DirectoryEntryKind::Directory && entry.is_empty == Some(true))
+}
+
+fn matches_entry_filter(entry: &DirectoryEntry, entry_filter: ListingEntryFilter) -> bool {
+    if entry.kind == DirectoryEntryKind::Directory {
+        return true;
+    }
+
+    let extension = entry
+        .root_relative_path
+        .as_path()
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match entry_filter {
+        ListingEntryFilter::All => true,
+        ListingEntryFilter::Image => is_image_extension(&extension),
+        ListingEntryFilter::Video => is_video_extension(&extension),
+    }
+}
+
+fn is_image_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "ico"
+    )
+}
+
+fn is_video_extension(extension: &str) -> bool {
+    matches!(extension, "mp4" | "webm" | "mov" | "avi" | "mkv" | "ogg")
+}
+
+fn sort_entries(entries: &mut [DirectoryEntry], query: &ListingQuery, flattened: bool) {
+    entries.sort_by(|left, right| {
+        if !flattened {
+            let kind_order =
+                directory_entry_kind_rank(left.kind).cmp(&directory_entry_kind_rank(right.kind));
+            if kind_order != Ordering::Equal {
+                return kind_order;
+            }
+        }
+
+        let entry_order = compare_listing_entries(left, right, query.order.sort_key, flattened);
+        match query.order.direction {
+            ListingSortDirection::Asc => entry_order,
+            ListingSortDirection::Desc => entry_order.reverse(),
+        }
+    });
+}
+
+fn compare_listing_entries(
+    left: &DirectoryEntry,
+    right: &DirectoryEntry,
+    sort_key: ListingSortKey,
+    flattened: bool,
+) -> Ordering {
+    match sort_key {
+        ListingSortKey::Name => compare_listing_names(left, right, flattened),
+        ListingSortKey::Date => match (left.last_modified_ms, right.last_modified_ms) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            _ => compare_listing_names(left, right, flattened),
+        },
+        ListingSortKey::Size => match (left.size, right.size) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            _ => compare_listing_names(left, right, flattened),
+        },
+    }
+}
+
+fn compare_listing_names(
+    left: &DirectoryEntry,
+    right: &DirectoryEntry,
+    flattened: bool,
+) -> Ordering {
+    if flattened {
+        return left
+            .root_relative_path
+            .to_string()
+            .cmp(&right.root_relative_path.to_string());
+    }
+
+    left.name.cmp(&right.name)
 }
 
 fn collect_immediate_entries(

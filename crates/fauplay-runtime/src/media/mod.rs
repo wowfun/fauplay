@@ -1,24 +1,68 @@
 //! Media-derived runtime capabilities, such as thumbnails and previews.
 
 use std::fs;
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::{
-    FileContentRequest, FileContentResponse, RuntimeError, TextPreviewRequest, TextPreviewResponse,
-    TextPreviewStatus,
+    FileContentRange, FileContentRequest, FileContentResponse, RuntimeError, TextPreviewRequest,
+    TextPreviewResponse, TextPreviewStatus,
 };
 
 pub(crate) fn read_file_content(
     request: FileContentRequest,
 ) -> Result<FileContentResponse, RuntimeError> {
     let file_path = request.root_path.join(request.root_relative_path.as_path());
-    let bytes =
-        fs::read(&file_path).map_err(|source| RuntimeError::read_file(&file_path, source))?;
+    let mut file =
+        fs::File::open(&file_path).map_err(|source| RuntimeError::read_file(&file_path, source))?;
+    let total_size = file
+        .metadata()
+        .map_err(|source| RuntimeError::read_file(&file_path, source))?
+        .len();
+    let range = request
+        .range
+        .and_then(|range_request| range_request.resolve(total_size));
+    let bytes = match range {
+        Some(range) => read_file_content_range(&file_path, &mut file, range)?,
+        None => {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .map_err(|source| RuntimeError::read_file(&file_path, source))?;
+            bytes
+        }
+    };
 
     Ok(FileContentResponse {
         content_type: infer_content_type(request.root_relative_path.as_path()).to_owned(),
         bytes,
+        total_size,
+        range,
     })
+}
+
+fn read_file_content_range(
+    file_path: &Path,
+    file: &mut fs::File,
+    range: FileContentRange,
+) -> Result<Vec<u8>, RuntimeError> {
+    let byte_count = range.end_inclusive - range.start + 1;
+    let byte_count = usize::try_from(byte_count).map_err(|_| {
+        RuntimeError::read_file(
+            file_path,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File Content Range is too large",
+            ),
+        )
+    })?;
+    let mut bytes = vec![0; byte_count];
+
+    file.seek(SeekFrom::Start(range.start))
+        .map_err(|source| RuntimeError::read_file(file_path, source))?;
+    file.read_exact(&mut bytes)
+        .map_err(|source| RuntimeError::read_file(file_path, source))?;
+
+    Ok(bytes)
 }
 
 pub(crate) fn read_text_preview(

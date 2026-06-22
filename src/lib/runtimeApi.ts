@@ -26,6 +26,11 @@ export interface RuntimeListDirectoryRequest {
   flattened?: boolean
   limit?: number
   offset?: number
+  nameContains?: string
+  entryFilter?: 'all' | 'image' | 'video'
+  hideEmptyFolders?: boolean
+  sortBy?: 'name' | 'date' | 'size'
+  sortOrder?: 'asc' | 'desc'
 }
 
 export interface RuntimeTextPreviewRequest {
@@ -198,6 +203,22 @@ export async function listRuntimeLocalDirectory(
   }
   if (typeof request.offset === 'number' && Number.isFinite(request.offset) && request.offset > 0) {
     query.set('offset', String(Math.trunc(request.offset)))
+  }
+  const nameContains = request.nameContains?.trim()
+  if (nameContains) {
+    query.set('nameContains', nameContains)
+  }
+  if (request.entryFilter === 'image' || request.entryFilter === 'video') {
+    query.set('entryFilter', request.entryFilter)
+  }
+  if (request.hideEmptyFolders === true) {
+    query.set('hideEmptyFolders', 'true')
+  }
+  if (request.sortBy === 'date' || request.sortBy === 'size') {
+    query.set('sortBy', request.sortBy)
+  }
+  if (request.sortOrder === 'desc') {
+    query.set('sortOrder', 'desc')
   }
   const payload = await callRuntimeJson(`/v1/local-directory?${query.toString()}`, timeoutMs)
   return parseRuntimeListDirectoryResponse(payload)
