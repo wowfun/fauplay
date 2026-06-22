@@ -39,6 +39,9 @@ fn list_directory(root_path: PathBuf, relative_path: PathBuf) -> Result<(), CliE
     let response = runtime.list_local_directory(ListDirectoryRequest {
         root_path,
         root_relative_path,
+        flattened: false,
+        entry_limit: None,
+        entry_offset: 0,
     })?;
 
     for entry in response.entries {

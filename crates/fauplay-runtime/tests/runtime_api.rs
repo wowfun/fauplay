@@ -49,6 +49,42 @@ fn runtime_api_lists_a_local_root_directory() {
 }
 
 #[test]
+fn runtime_api_reports_health() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "health response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"ok\""),
+        "health response should report ok status: {response}"
+    );
+    assert!(
+        response.contains("\"runtime\":\"fauplay-runtime\""),
+        "health response should identify the runtime: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_decodes_query_values_before_listing() {
     let fixture = Fixture::new("runtime api decodes query values");
     fixture.create_dir("albums/2024 photos");
@@ -75,6 +111,261 @@ fn runtime_api_decodes_query_values_before_listing() {
     assert!(
         response.contains("\"rootRelativePath\":\"albums/2024 photos/photo one.jpg\""),
         "response should include the decoded child entry: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_exposes_file_metadata() {
+    let fixture = Fixture::new("runtime_api_exposes_file_metadata");
+    fixture.write_file("photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request(&address.to_string(), &fixture.root);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"size\":5"),
+        "response should include file size metadata: {response}"
+    );
+    assert!(
+        response.contains("\"lastModifiedMs\":"),
+        "response should include file modification metadata: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_exposes_directory_emptiness_metadata() {
+    let fixture = Fixture::new("runtime_api_exposes_directory_emptiness_metadata");
+    fixture.create_dir("empty-album");
+    fixture.create_dir("filled-album");
+    fixture.write_file("filled-album/photo.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request(&address.to_string(), &fixture.root);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains(
+            "\"rootRelativePath\":\"empty-album\",\"kind\":\"directory\",\"isEmpty\":true"
+        ),
+        "response should include empty directory metadata: {response}"
+    );
+    assert!(
+        response.contains(
+            "\"rootRelativePath\":\"filled-album\",\"kind\":\"directory\",\"isEmpty\":false"
+        ),
+        "response should include non-empty directory metadata: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_lists_flattened_descendant_files() {
+    let fixture = Fixture::new("runtime_api_lists_flattened_descendant_files");
+    fixture.write_file("cover.jpg", "cover");
+    fixture.create_dir("albums/2024");
+    fixture.write_file("albums/2024/photo.jpg", "image");
+    fixture.create_dir("albums/empty");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request_with_options(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "albums",
+        &[("flattened", "true")],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"albums/2024/photo.jpg\""),
+        "response should include nested file entry: {response}"
+    );
+    assert!(
+        !response.contains("\"rootRelativePath\":\"albums/2024\",\"kind\":\"directory\""),
+        "Flattened Listing should not include directory entries: {response}"
+    );
+    assert!(
+        !response.contains("\"rootRelativePath\":\"cover.jpg\""),
+        "Flattened Listing should stay under the requested Root-relative Path: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_marks_limited_listings_truncated() {
+    let fixture = Fixture::new("runtime_api_marks_limited_listings_truncated");
+    fixture.write_file("a.jpg", "image");
+    fixture.write_file("b.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request_with_options(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "",
+        &[("limit", "1")],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"isTruncated\":true"),
+        "response should report a Truncated Listing: {response}"
+    );
+    assert_eq!(
+        response.matches("\"kind\":\"file\"").count(),
+        1,
+        "response should only include the requested number of entries: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_returns_next_offset_for_listing_pages() {
+    let fixture = Fixture::new("runtime_api_returns_next_offset_for_listing_pages");
+    fixture.write_file("a.jpg", "image");
+    fixture.write_file("b.jpg", "image");
+    fixture.write_file("c.jpg", "image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_list_request_with_options(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "",
+        &[("limit", "1"), ("offset", "1")],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"b.jpg\""),
+        "response should return the requested Listing Page: {response}"
+    );
+    assert!(
+        response.contains("\"nextOffset\":2"),
+        "response should include the next Listing Page offset: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_returns_text_preview() {
+    let fixture = Fixture::new("runtime_api_returns_text_preview");
+    fixture.write_file("notes.txt", "hello runtime");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_text_preview_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        "notes.txt",
+        1024,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"ready\""),
+        "response should report ready status: {response}"
+    );
+    assert!(
+        response.contains("\"content\":\"hello runtime\""),
+        "response should include preview content: {response}"
+    );
+    assert!(
+        response.contains("\"fileSizeBytes\":13"),
+        "response should include file size: {response}"
+    );
+    assert!(
+        response.contains("\"sizeLimitBytes\":1024"),
+        "response should include size limit: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_allows_browser_preflight_requests() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "OPTIONS /v1/local-directory HTTP/1.1\r\nOrigin: http://localhost:5173\r\nAccess-Control-Request-Method: GET\r\nAccess-Control-Request-Headers: content-type\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 204 No Content\r\n"),
+        "preflight should succeed: {response}"
+    );
+    assert!(
+        response.contains("Access-Control-Allow-Origin: *\r\n"),
+        "preflight should allow browser origins: {response}"
+    );
+    assert!(
+        response.contains("Access-Control-Allow-Methods: GET, OPTIONS\r\n"),
+        "preflight should allow Runtime API methods: {response}"
     );
 }
 
@@ -194,13 +485,32 @@ fn send_list_request_with_root_relative_path(
     root_path: &str,
     root_relative_path: &str,
 ) -> String {
+    send_list_request_with_options(address, root_path, root_relative_path, &[])
+}
+
+fn send_list_request_with_options(
+    address: &str,
+    root_path: &str,
+    root_relative_path: &str,
+    options: &[(&str, &str)],
+) -> String {
     let mut last_error = None;
     for _ in 0..20 {
         match TcpStream::connect(address) {
             Ok(mut stream) => {
+                let option_query = options
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("&");
+                let option_query = if option_query.is_empty() {
+                    String::new()
+                } else {
+                    format!("&{option_query}")
+                };
                 write!(
                     stream,
-                    "GET /v1/local-directory?rootPath={root_path}&rootRelativePath={root_relative_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+                    "GET /v1/local-directory?rootPath={root_path}&rootRelativePath={root_relative_path}{option_query} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
                 )
                 .expect("request should be written");
 
@@ -218,6 +528,26 @@ fn send_list_request_with_root_relative_path(
     }
 
     panic!("client should connect to Runtime API: {last_error:?}");
+}
+
+fn send_text_preview_request(
+    address: &str,
+    root_path: &str,
+    root_relative_path: &str,
+    size_limit_bytes: u64,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/text-preview?rootPath={root_path}&rootRelativePath={root_relative_path}&sizeLimitBytes={size_limit_bytes} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
 }
 
 fn read_listen_address(stdout: &mut impl BufRead) -> String {

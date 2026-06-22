@@ -20,6 +20,18 @@ _Avoid_: root folder, mounted folder, source directory
 A path interpreted inside a Local Root. A Root-relative Path must stay within its Local Root and have one stable display form.
 _Avoid_: relative path, file path
 
+**Flattened Listing**:
+A listing of all descendant files under a Root-relative Path, returned as Root-relative Paths without directory grouping. It supports workflows that need to scan or compare a subtree as one file set.
+_Avoid_: recursive view, deep list
+
+**Truncated Listing**:
+A listing that stopped at a caller-defined entry limit and explicitly reports that more matching entries exist.
+_Avoid_: partial error, failed listing
+
+**Listing Page**:
+An ordered segment of a Listing that can be followed by another segment when more matching entries exist.
+_Avoid_: offset slice, pagination response
+
 **Reserved Folder**:
 A folder inside a Local Root that Fauplay owns for runtime data or recovery workflows. Reserved Folders are not user content and should not appear in normal browsing results.
 _Avoid_: hidden folder, system folder
@@ -31,6 +43,10 @@ _Avoid_: backend feature, native feature
 **Runtime API**:
 The versioned interface used by the Web App and application hosts to call Runtime Capabilities.
 _Avoid_: backend API, gateway API
+
+**Text Preview**:
+A bounded textual view of a file that reports when content is too large or not text, without requiring the Web App to load the full file.
+_Avoid_: full file read, raw file fetch
 
 **Plugin Capability**:
 An optional or replaceable capability provided through plugin/MCP integration. Plugin Capabilities may use Runtime Capabilities but do not define the runtime boundary.

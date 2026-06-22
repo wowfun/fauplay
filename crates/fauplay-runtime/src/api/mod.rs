@@ -6,11 +6,39 @@ use std::path::{Component, Path, PathBuf};
 pub struct ListDirectoryRequest {
     pub root_path: PathBuf,
     pub root_relative_path: RootRelativePath,
+    pub flattened: bool,
+    pub entry_limit: Option<usize>,
+    pub entry_offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListDirectoryResponse {
     pub entries: Vec<DirectoryEntry>,
+    pub is_truncated: bool,
+    pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextPreviewRequest {
+    pub root_path: PathBuf,
+    pub root_relative_path: RootRelativePath,
+    pub size_limit_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextPreviewResponse {
+    pub status: TextPreviewStatus,
+    pub content: Option<String>,
+    pub file_size_bytes: u64,
+    pub size_limit_bytes: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextPreviewStatus {
+    Ready,
+    TooLarge,
+    Binary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +46,9 @@ pub struct DirectoryEntry {
     pub name: String,
     pub root_relative_path: RootRelativePath,
     pub kind: DirectoryEntryKind,
+    pub is_empty: Option<bool>,
+    pub size: Option<u64>,
+    pub last_modified_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +132,12 @@ impl RuntimeError {
                 "failed to read directory entry {}: {source}",
                 path.display()
             ),
+        }
+    }
+
+    pub(crate) fn read_file(path: &Path, source: io::Error) -> Self {
+        Self {
+            message: format!("failed to read file {}: {source}", path.display()),
         }
     }
 

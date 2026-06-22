@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use fauplay_runtime::{DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, RootRelativePath};
+use fauplay_runtime::{
+    DirectoryEntry, DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, RootRelativePath,
+};
 
 #[test]
 fn lists_immediate_entries_in_a_local_root() {
@@ -15,14 +17,17 @@ fn lists_immediate_entries_in_a_local_root() {
         .list_local_directory(ListDirectoryRequest {
             root_path: fixture.root.clone(),
             root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
         })
         .expect("local root should be listed");
 
     assert_eq!(
-        response.entries,
+        entry_summaries(&response.entries),
         vec![
-            entry("albums", DirectoryEntryKind::Directory),
-            entry("photo.jpg", DirectoryEntryKind::File),
+            entry_summary("albums", "albums", DirectoryEntryKind::Directory, None),
+            entry_summary("photo.jpg", "photo.jpg", DirectoryEntryKind::File, Some(5)),
         ],
     );
 }
@@ -48,6 +53,192 @@ fn binary_lists_immediate_entries_in_a_local_root() {
         String::from_utf8_lossy(&output.stdout),
         "directory\talbums\nfile\tphoto.jpg\n"
     );
+}
+
+#[test]
+fn includes_file_metadata_for_frontend_sorting() {
+    let fixture = Fixture::new("includes_file_metadata_for_frontend_sorting");
+    fixture.write_file("photo.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
+        })
+        .expect("local root should be listed");
+
+    let entry = response
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == "photo.jpg")
+        .expect("file entry should be listed");
+
+    assert_eq!(entry.size, Some(5));
+    assert!(
+        entry.last_modified_ms.is_some(),
+        "file entry should include a millisecond modification timestamp"
+    );
+}
+
+#[test]
+fn includes_directory_metadata_for_frontend_filtering() {
+    let fixture = Fixture::new("includes_directory_metadata_for_frontend_filtering");
+    fixture.create_dir("empty-album");
+    fixture.create_dir("filled-album");
+    fixture.write_file("filled-album/photo.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
+        })
+        .expect("local root should be listed");
+
+    let empty_album = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "empty-album")
+        .expect("empty directory should be listed");
+    let filled_album = response
+        .entries
+        .iter()
+        .find(|entry| entry.name == "filled-album")
+        .expect("non-empty directory should be listed");
+
+    assert_eq!(empty_album.kind, DirectoryEntryKind::Directory);
+    assert_eq!(empty_album.size, None);
+    assert_eq!(empty_album.is_empty, Some(true));
+    assert_eq!(filled_album.kind, DirectoryEntryKind::Directory);
+    assert_eq!(filled_album.size, None);
+    assert_eq!(filled_album.is_empty, Some(false));
+}
+
+#[test]
+fn lists_flattened_descendant_files_under_a_root_relative_path() {
+    let fixture = Fixture::new("lists_flattened_descendant_files_under_a_root_relative_path");
+    fixture.write_file("cover.jpg", "cover");
+    fixture.create_dir("albums/2024");
+    fixture.write_file("albums/2024/photo.jpg", "image");
+    fixture.write_file("albums/2024/notes.txt", "notes");
+    fixture.create_dir("albums/empty");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: root_relative_path("albums"),
+            flattened: true,
+            entry_limit: None,
+            entry_offset: 0,
+        })
+        .expect("Flattened Listing should be returned");
+
+    assert_eq!(
+        entry_summaries(&response.entries),
+        vec![
+            entry_summary(
+                "notes.txt",
+                "albums/2024/notes.txt",
+                DirectoryEntryKind::File,
+                Some(5),
+            ),
+            entry_summary(
+                "photo.jpg",
+                "albums/2024/photo.jpg",
+                DirectoryEntryKind::File,
+                Some(5),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn marks_listings_truncated_when_an_entry_limit_is_reached() {
+    let fixture = Fixture::new("marks_listings_truncated_when_an_entry_limit_is_reached");
+    fixture.create_dir("albums");
+    fixture.write_file("a.jpg", "image");
+    fixture.write_file("b.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(2),
+            entry_offset: 0,
+        })
+        .expect("Truncated Listing should be returned");
+
+    assert_eq!(
+        entry_summaries(&response.entries),
+        vec![
+            entry_summary("albums", "albums", DirectoryEntryKind::Directory, None),
+            entry_summary("a.jpg", "a.jpg", DirectoryEntryKind::File, Some(5)),
+        ],
+    );
+    assert!(
+        response.is_truncated,
+        "listing should report that more matching entries exist"
+    );
+}
+
+#[test]
+fn returns_next_offset_for_listing_pages() {
+    let fixture = Fixture::new("returns_next_offset_for_listing_pages");
+    fixture.create_dir("albums");
+    fixture.write_file("a.jpg", "image");
+    fixture.write_file("b.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let first_page = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root.clone(),
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(2),
+            entry_offset: 0,
+        })
+        .expect("first Listing Page should be returned");
+
+    assert_eq!(
+        entry_summaries(&first_page.entries),
+        vec![
+            entry_summary("albums", "albums", DirectoryEntryKind::Directory, None),
+            entry_summary("a.jpg", "a.jpg", DirectoryEntryKind::File, Some(5)),
+        ],
+    );
+    assert_eq!(first_page.next_offset, Some(2));
+
+    let second_page = runtime
+        .list_local_directory(ListDirectoryRequest {
+            root_path: fixture.root,
+            root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: Some(2),
+            entry_offset: first_page.next_offset.expect("first page should continue"),
+        })
+        .expect("second Listing Page should be returned");
+
+    assert_eq!(
+        entry_summaries(&second_page.entries),
+        vec![entry_summary(
+            "b.jpg",
+            "b.jpg",
+            DirectoryEntryKind::File,
+            Some(5),
+        )],
+    );
+    assert_eq!(second_page.next_offset, None);
+    assert!(!second_page.is_truncated);
 }
 
 #[test]
@@ -84,16 +275,20 @@ fn normalizes_root_relative_paths_for_display() {
         .list_local_directory(ListDirectoryRequest {
             root_path: fixture.root,
             root_relative_path: root_relative_path("./albums/./2024"),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
         })
         .expect("Root-relative Path should be normalized before listing");
 
     assert_eq!(
-        response.entries,
-        vec![fauplay_runtime::DirectoryEntry {
-            name: "photo.jpg".to_owned(),
-            root_relative_path: root_relative_path("albums/2024/photo.jpg"),
-            kind: DirectoryEntryKind::File,
-        }],
+        entry_summaries(&response.entries),
+        vec![entry_summary(
+            "photo.jpg",
+            "albums/2024/photo.jpg",
+            DirectoryEntryKind::File,
+            Some(5),
+        )],
     );
 }
 
@@ -109,25 +304,46 @@ fn hides_reserved_folders_from_local_root_listing() {
         .list_local_directory(ListDirectoryRequest {
             root_path: fixture.root,
             root_relative_path: RootRelativePath::root(),
+            flattened: false,
+            entry_limit: None,
+            entry_offset: 0,
         })
         .expect("local root should be listed");
 
     assert_eq!(
-        response.entries,
-        vec![fauplay_runtime::DirectoryEntry {
-            name: "photo.jpg".to_owned(),
-            root_relative_path: root_relative_path("photo.jpg"),
-            kind: DirectoryEntryKind::File,
-        }],
+        entry_summaries(&response.entries),
+        vec![entry_summary(
+            "photo.jpg",
+            "photo.jpg",
+            DirectoryEntryKind::File,
+            Some(5),
+        )],
     );
 }
 
-fn entry(name: &str, kind: DirectoryEntryKind) -> fauplay_runtime::DirectoryEntry {
-    fauplay_runtime::DirectoryEntry {
-        name: name.to_owned(),
-        root_relative_path: root_relative_path(name),
-        kind,
-    }
+fn entry_summaries(
+    entries: &[DirectoryEntry],
+) -> Vec<(String, String, DirectoryEntryKind, Option<u64>)> {
+    entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.name.clone(),
+                entry.root_relative_path.to_string(),
+                entry.kind,
+                entry.size,
+            )
+        })
+        .collect()
+}
+
+fn entry_summary(
+    name: &str,
+    root_relative_path: &str,
+    kind: DirectoryEntryKind,
+    size: Option<u64>,
+) -> (String, String, DirectoryEntryKind, Option<u64>) {
+    (name.to_owned(), root_relative_path.to_owned(), kind, size)
 }
 
 fn root_relative_path(path: &str) -> RootRelativePath {

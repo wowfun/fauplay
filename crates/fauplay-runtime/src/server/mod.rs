@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, RootRelativePath, RuntimeError,
+    TextPreviewRequest, TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -64,9 +65,23 @@ fn read_http_request(stream: &mut impl Read) -> Result<String, RuntimeError> {
 
 fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> String {
     match parse_http_request_line(request) {
+        Some(("GET", "/v1/health")) => http_response(
+            200,
+            "OK",
+            "{\"status\":\"ok\",\"runtime\":\"fauplay-runtime\"}",
+        ),
+        Some(("OPTIONS", target))
+            if target == "/v1/local-directory" || target == "/v1/text-preview" =>
+        {
+            http_response(204, "No Content", "")
+        }
         Some(("GET", target)) if target.starts_with("/v1/local-directory?") => {
             let query = parse_query_string(&target["/v1/local-directory?".len()..]);
             handle_list_local_directory(runtime, &query)
+        }
+        Some(("GET", target)) if target.starts_with("/v1/text-preview?") => {
+            let query = parse_query_string(&target["/v1/text-preview?".len()..]);
+            handle_text_preview(runtime, &query)
         }
         _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
     }
@@ -92,8 +107,55 @@ fn handle_list_local_directory(
     match runtime.list_local_directory(ListDirectoryRequest {
         root_path: PathBuf::from(root_path),
         root_relative_path,
+        flattened: query.get("flattened").is_some_and(|value| value == "true"),
+        entry_limit: parse_entry_limit(query.get("limit").map(String::as_str)),
+        entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
     }) {
-        Ok(response) => http_response(200, "OK", &list_directory_response_json(response.entries)),
+        Ok(response) => http_response(200, "OK", &list_directory_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn parse_entry_limit(value: Option<&str>) -> Option<usize> {
+    let limit = value?.parse::<usize>().ok()?;
+    (limit > 0).then_some(limit)
+}
+
+fn parse_entry_offset(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn handle_text_preview(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> String {
+    let Some(root_path) = query.get("rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_path = query
+        .get("rootRelativePath")
+        .map(String::as_str)
+        .unwrap_or("");
+    let size_limit_bytes = query
+        .get("sizeLimitBytes")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1024 * 1024);
+
+    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+
+    match runtime.read_text_preview(TextPreviewRequest {
+        root_path: PathBuf::from(root_path),
+        root_relative_path,
+        size_limit_bytes,
+    }) {
+        Ok(response) => http_response(200, "OK", &text_preview_response_json(response)),
         Err(error) => http_response(
             500,
             "Internal Server Error",
@@ -160,21 +222,71 @@ fn decode_hex_digit(value: u8) -> Option<u8> {
     }
 }
 
-fn list_directory_response_json(entries: Vec<crate::DirectoryEntry>) -> String {
-    let entries = entries
+fn list_directory_response_json(response: crate::ListDirectoryResponse) -> String {
+    let entries = response
+        .entries
         .into_iter()
         .map(|entry| {
-            format!(
-                "{{\"name\":\"{}\",\"rootRelativePath\":\"{}\",\"kind\":\"{}\"}}",
+            let mut json = format!(
+                "{{\"name\":\"{}\",\"rootRelativePath\":\"{}\",\"kind\":\"{}\"",
                 escape_json_string(&entry.name),
                 escape_json_string(&entry.root_relative_path.to_string()),
-                directory_entry_kind_json(entry.kind)
-            )
+                directory_entry_kind_json(entry.kind),
+            );
+
+            if let Some(is_empty) = entry.is_empty {
+                json.push_str(&format!(",\"isEmpty\":{is_empty}"));
+            }
+            if let Some(size) = entry.size {
+                json.push_str(&format!(",\"size\":{size}"));
+            }
+            if let Some(last_modified_ms) = entry.last_modified_ms {
+                json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
+            }
+
+            json.push('}');
+            json
         })
         .collect::<Vec<_>>()
         .join(",");
 
-    format!("{{\"entries\":[{entries}]}}")
+    format!(
+        "{{\"entries\":[{entries}],\"isTruncated\":{},\"nextOffset\":{}}}",
+        response.is_truncated,
+        optional_usize_json(response.next_offset)
+    )
+}
+
+fn optional_usize_json(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_owned())
+}
+
+fn text_preview_response_json(response: crate::TextPreviewResponse) -> String {
+    format!(
+        "{{\"status\":\"{}\",\"content\":{},\"fileSizeBytes\":{},\"sizeLimitBytes\":{},\"error\":{}}}",
+        text_preview_status_json(response.status),
+        optional_string_json(response.content.as_deref()),
+        response.file_size_bytes,
+        response.size_limit_bytes,
+        optional_string_json(response.error.as_deref()),
+    )
+}
+
+fn text_preview_status_json(status: TextPreviewStatus) -> &'static str {
+    match status {
+        TextPreviewStatus::Ready => "ready",
+        TextPreviewStatus::TooLarge => "too_large",
+        TextPreviewStatus::Binary => "binary",
+    }
+}
+
+fn optional_string_json(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", escape_json_string(value)),
+        None => "null".to_owned(),
+    }
 }
 
 fn directory_entry_kind_json(kind: DirectoryEntryKind) -> &'static str {
@@ -198,7 +310,7 @@ fn escape_json_string(value: &str) -> String {
 
 fn http_response(status_code: u16, reason: &str, body: &str) -> String {
     format!(
-        "HTTP/1.1 {status_code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status_code} {reason}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
