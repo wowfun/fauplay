@@ -42,10 +42,10 @@ const TOOL_DEFINITIONS = [
           key: 'search.scope',
           label: '查找范围',
           type: 'enum',
-          defaultValue: 'global',
+          defaultValue: 'root',
           values: [
-            { value: 'global', label: '全局' },
             { value: 'root', label: '当前 Root' },
+            { value: 'global', label: '全局' },
           ],
           sendToTool: true,
           argumentKey: 'searchScope',

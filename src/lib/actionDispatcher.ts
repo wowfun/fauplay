@@ -1,11 +1,17 @@
 import { ensureRootPath, getBoundRootPath } from '@/lib/reveal'
 import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
+import { getMimeType } from '@/lib/fileSystem'
+import { getFilePreviewKind } from '@/lib/filePreview'
 import {
+  findRuntimeDuplicateFiles,
   moveRuntimeRootPath,
   moveRuntimePathToGlobalTrash,
   moveRuntimePathToRootTrash,
   restoreRuntimeGlobalTrash,
   restoreRuntimePathFromRootTrash,
+  type RuntimeDuplicateFile,
+  type RuntimeDuplicateFilesResponse,
+  type RuntimeDuplicateSet,
   type RuntimeGlobalTrashMoveResponse,
   type RuntimeGlobalTrashRestoreResponse,
   type RuntimeRootMoveResponse,
@@ -430,6 +436,218 @@ function toRuntimeGlobalTrashToolResult(response: RuntimeGlobalTrashRestoreRespo
   }
 }
 
+function mapDuplicateSeedSkipReason(reason: string): string {
+  if (reason === 'source_not_found') return 'SOURCE_NOT_FOUND'
+  if (reason === 'not_file') return 'NOT_FILE'
+  return 'SKIPPED'
+}
+
+function toRuntimeDuplicateFileItem({
+  file,
+  rootPath,
+  groupId,
+  groupRank,
+  isCurrentFile = false,
+}: {
+  file: RuntimeDuplicateFile
+  rootPath: string
+  groupId?: string
+  groupRank?: number
+  isCurrentFile?: boolean
+}) {
+  const lastModified = typeof file.lastModifiedMs === 'number'
+    ? new Date(file.lastModifiedMs)
+    : undefined
+
+  return {
+    name: file.name,
+    path: file.rootRelativePath,
+    kind: 'file',
+    absolutePath: file.absolutePath,
+    size: file.size,
+    mimeType: getMimeType(file.name),
+    previewKind: getFilePreviewKind(file.name),
+    displayPath: file.rootRelativePath,
+    sourceType: 'duplicate_file',
+    sourceRootPath: rootPath,
+    sourceRelativePath: file.rootRelativePath,
+    lastModifiedMs: file.lastModifiedMs,
+    lastModified,
+    ...(groupId ? { groupId } : {}),
+    ...(typeof groupRank === 'number' ? { groupRank } : {}),
+    ...(isCurrentFile ? { isCurrentFile: true } : {}),
+  }
+}
+
+function toRuntimeDuplicateFileToolResult(
+  response: RuntimeDuplicateFilesResponse,
+  rootPath: string,
+  requestedRootRelativePaths: string[],
+): ToolCallResult {
+  const currentRootRelativePath = requestedRootRelativePaths[0] ?? ''
+  const duplicateSet = response.duplicateSets.find((set) => (
+    set.seedRootRelativePaths.includes(currentRootRelativePath)
+    || set.files.some((file) => file.rootRelativePath === currentRootRelativePath)
+  ))
+  const currentFile = duplicateSet?.files.find((file) => file.rootRelativePath === currentRootRelativePath)
+  const target = currentFile
+    ? toRuntimeDuplicateFileItem({
+        file: currentFile,
+        rootPath,
+        isCurrentFile: true,
+      })
+    : undefined
+  const duplicates = duplicateSet
+    ? duplicateSet.files
+      .filter((file) => file.rootRelativePath !== currentRootRelativePath)
+      .map((file) => toRuntimeDuplicateFileItem({ file, rootPath }))
+    : []
+
+  return {
+    ok: true,
+    mode: 'file',
+    searchScope: 'root',
+    ...(target ? { target } : {}),
+    duplicateCount: duplicates.length,
+    duplicates,
+    indexing: {
+      strategy: 'runtime_scan',
+      targetStatus: response.skippedSeeds.length > 0 ? 'skipped' : 'fresh',
+    },
+    ...(target && duplicates.length > 0
+      ? {
+          projection: {
+            id: `duplicates:file:${Date.now()}`,
+            title: '重复文件',
+            entry: 'auto',
+            ordering: {
+              mode: 'listed',
+              keys: ['isCurrentFile:desc', 'lastModifiedMs:desc', 'displayPath:asc'],
+            },
+            files: [target, ...duplicates],
+          },
+        }
+      : {}),
+  }
+}
+
+function toRuntimeDuplicateWorkspaceGroup(
+  duplicateSet: RuntimeDuplicateSet,
+  rootPath: string,
+  groupRank: number,
+) {
+  const items = duplicateSet.files.map((file) => toRuntimeDuplicateFileItem({
+    file,
+    rootPath,
+    groupId: duplicateSet.setId,
+    groupRank,
+  }))
+
+  return {
+    groupId: duplicateSet.setId,
+    seedRelativePaths: duplicateSet.seedRootRelativePaths,
+    items,
+  }
+}
+
+function toRuntimeDuplicateWorkspaceToolResult(
+  response: RuntimeDuplicateFilesResponse,
+  rootPath: string,
+): ToolCallResult {
+  const groups = response.duplicateSets
+    .map((duplicateSet, index) => toRuntimeDuplicateWorkspaceGroup(duplicateSet, rootPath, index))
+    .filter((group) => group.items.length > 1)
+  const projectionFiles = groups.flatMap((group, groupRank) => (
+    group.items.map((item) => ({
+      ...item,
+      groupRank,
+    }))
+  ))
+
+  return {
+    ok: true,
+    mode: 'workspace',
+    searchScope: 'root',
+    seedCount: response.seedCount,
+    indexedSeedCount: response.seedCount - response.skippedSeeds.length,
+    needsIndexingCount: 0,
+    skippedSeeds: response.skippedSeeds.map((skip) => ({
+      relativePath: skip.rootRelativePath,
+      reasonCode: mapDuplicateSeedSkipReason(skip.reason),
+    })),
+    duplicateGroupCount: groups.length,
+    groups,
+    ...(projectionFiles.length > 0
+      ? {
+          projection: {
+            id: `duplicates:workspace:${Date.now()}`,
+            title: '重复文件',
+            entry: 'auto',
+            ordering: {
+              mode: 'group_contiguous',
+              keys: ['groupRank:asc', 'lastModifiedMs:desc', 'displayPath:asc'],
+            },
+            files: projectionFiles,
+          },
+        }
+      : {}),
+  }
+}
+
+function toRuntimeDuplicateToolResult(
+  response: RuntimeDuplicateFilesResponse,
+  rootPath: string,
+  requestedRootRelativePaths: string[],
+  mode: 'file' | 'workspace',
+): ToolCallResult {
+  if (mode === 'file') {
+    return toRuntimeDuplicateFileToolResult(response, rootPath, requestedRootRelativePaths)
+  }
+
+  return toRuntimeDuplicateWorkspaceToolResult(response, rootPath)
+}
+
+async function dispatchRuntimeDuplicateFiles(
+  toolName: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<ToolCallResult | null> {
+  if (toolName !== 'data.findDuplicateFiles') {
+    return null
+  }
+
+  const rootPath = typeof args.rootPath === 'string' ? args.rootPath.trim() : ''
+  if (!rootPath) {
+    return null
+  }
+  if (args.searchScope !== 'root') {
+    return null
+  }
+
+  const rootRelativePaths = readRootRelativePaths(args)
+  if (!rootRelativePaths) {
+    return null
+  }
+
+  try {
+    const response = await findRuntimeDuplicateFiles({
+      rootPath,
+      rootRelativePath: rootRelativePaths,
+    }, timeoutMs)
+    if (!response.ok) {
+      return null
+    }
+    return toRuntimeDuplicateToolResult(
+      response,
+      rootPath,
+      rootRelativePaths,
+      Object.prototype.hasOwnProperty.call(args, 'relativePath') ? 'file' : 'workspace',
+    )
+  } catch {
+    return null
+  }
+}
+
 async function dispatchRuntimeRootMove(
   toolName: string,
   args: Record<string, unknown>,
@@ -786,14 +1004,20 @@ export async function dispatchSystemTool({
       rootPath,
       ...(additionalArgs ?? {}),
     }
-    const runtimeRootMoveResult = await dispatchRuntimeRootMove(toolName, argsPayload, timeoutMs)
-    const runtimeRootTrashResult = runtimeRootMoveResult
+    const runtimeDuplicateFilesResult = await dispatchRuntimeDuplicateFiles(toolName, argsPayload, timeoutMs)
+    const runtimeRootMoveResult = runtimeDuplicateFilesResult
+      ? null
+      : await dispatchRuntimeRootMove(toolName, argsPayload, timeoutMs)
+    const runtimeRootTrashResult = runtimeDuplicateFilesResult || runtimeRootMoveResult
       ? null
       : await dispatchRuntimeRootTrash(toolName, argsPayload, timeoutMs)
-    const runtimeGlobalTrashResult = runtimeRootMoveResult || runtimeRootTrashResult
+    const runtimeGlobalTrashResult = runtimeDuplicateFilesResult || runtimeRootMoveResult || runtimeRootTrashResult
       ? null
       : await dispatchRuntimeGlobalTrash(toolName, argsPayload, timeoutMs)
-    const runtimeResult = runtimeRootMoveResult ?? runtimeRootTrashResult ?? runtimeGlobalTrashResult
+    const runtimeResult = runtimeDuplicateFilesResult
+      ?? runtimeRootMoveResult
+      ?? runtimeRootTrashResult
+      ?? runtimeGlobalTrashResult
     const httpRoute = runtimeResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
     if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''

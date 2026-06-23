@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAc
 import type { GatewayToolDescriptor, ToolActionAnnotation } from '@/lib/gateway'
 import { dispatchSystemTool, type DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { extractResultProjection } from '@/lib/projection'
+import { getBoundRootPath } from '@/lib/reveal'
 import type {
   PluginActionRailItem,
   PluginActionState,
@@ -151,6 +152,15 @@ function shouldTriggerMutationRefresh(tool: GatewayToolDescriptor, dispatchResul
   return true
 }
 
+function hasRootExecutionContext(
+  rootHandle: FileSystemDirectoryHandle | null,
+  rootId: string | null | undefined,
+): boolean {
+  if (!rootId) return false
+  if (rootHandle) return true
+  return getBoundRootPath(rootId) !== null
+}
+
 export function usePluginRuntime({
   scope,
   tools,
@@ -175,6 +185,10 @@ export function usePluginRuntime({
 
   const baseArguments = useMemo(() => buildBaseArguments(), [buildBaseArguments])
   const hasBaseArguments = baseArguments !== null
+  const hasExecutionContext = useMemo(
+    () => hasRootExecutionContext(rootHandle, rootId),
+    [rootHandle, rootId]
+  )
 
   const currentQueue = useMemo(
     () => resultQueueState.byContextKey[contextKey] ?? [],
@@ -194,7 +208,7 @@ export function usePluginRuntime({
     tool: GatewayToolDescriptor,
     options: RunToolCallOptions
   ): Promise<PluginToolCallOutcome> => {
-    if (!rootHandle || !rootId || !baseArguments) return 'skipped'
+    if (!hasExecutionContext || !rootId || !baseArguments) return 'skipped'
     if (canRunTool && !canRunTool(tool)) return 'skipped'
 
     const toolOptionArgs = toToolOptionArguments(tool, workbenchState.optionValuesByTool)
@@ -271,7 +285,7 @@ export function usePluginRuntime({
     }
 
     return 'executed'
-  }, [baseArguments, canRunTool, contextKey, onMutationCommitted, rootHandle, rootId, setResultQueueState, workbenchState.optionValuesByTool])
+  }, [baseArguments, canRunTool, contextKey, hasExecutionContext, onMutationCommitted, rootHandle, rootId, setResultQueueState, workbenchState.optionValuesByTool])
 
   const handleWorkbenchOptionChange = useCallback((toolName: string, optionKey: string, value: ToolWorkbenchOptionValue) => {
     setWorkbenchState((prev) => ({
@@ -331,13 +345,13 @@ export function usePluginRuntime({
             trigger: 'manual',
           })
         },
-        disabled: latestQueueItem?.status === 'loading' || !rootHandle || !rootId || !runnableInContext,
-        actionState: resolveToolActionState(currentQueue, tool.name, Boolean(rootHandle && rootId && runnableInContext)),
+        disabled: latestQueueItem?.status === 'loading' || !hasExecutionContext || !runnableInContext,
+        actionState: resolveToolActionState(currentQueue, tool.name, Boolean(hasExecutionContext && runnableInContext)),
         error: toRailErrorHint(latestQueueItem),
         iconName: tool.iconName,
       }
     })
-  }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, rootHandle, rootId, runToolCall, scopedTools])
+  }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, hasExecutionContext, runToolCall, scopedTools])
 
   const getRequestSignature = useCallback((tool: GatewayToolDescriptor, params?: {
     actionKey?: string
@@ -377,6 +391,7 @@ export function usePluginRuntime({
     handleRunWorkbenchAction,
     handleToggleResultItemCollapsed,
     hasBaseArguments,
+    hasExecutionContext,
     getRequestSignature,
     hasCompletedRequest,
   }

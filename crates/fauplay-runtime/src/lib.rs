@@ -7,16 +7,18 @@ mod store;
 mod tasks;
 
 pub use api::{
-    DirectoryEntry, DirectoryEntryKind, FileContentRange, FileContentRangeRequest,
-    FileContentRequest, FileContentResponse, FileMetadataRequest, FileMetadataResponse,
-    GlobalShortcutConfigResponse, GlobalTrashEntry, GlobalTrashFailureReason,
-    GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem, GlobalTrashMoveRequest,
-    GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
-    GlobalTrashRestoreResponse, ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter,
-    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, RootMoveFailureReason,
-    RootMoveRequest, RootMoveResponse, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
-    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
-    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
+    DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
+    FileContentRange, FileContentRangeRequest, FileContentRequest, FileContentResponse,
+    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse, GlobalTrashEntry,
+    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem,
+    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreItem,
+    GlobalTrashRestoreRequest, GlobalTrashRestoreResponse, ListDirectoryRequest,
+    ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
+    ListingSortKey, RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootRelativePath,
+    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
+    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -94,6 +96,13 @@ impl FauplayRuntime {
         request: FileMetadataRequest,
     ) -> Result<FileMetadataResponse, RuntimeError> {
         fs::read_file_metadata(request)
+    }
+
+    pub fn find_duplicate_files(
+        &self,
+        request: DuplicateFilesRequest,
+    ) -> Result<DuplicateFilesResponse, RuntimeError> {
+        fs::find_duplicate_files(request)
     }
 
     pub fn move_root_path(

@@ -85,6 +85,88 @@ fn runtime_api_reports_health() {
 }
 
 #[test]
+fn runtime_api_queries_duplicate_files_inside_local_root() {
+    let fixture = Fixture::new("runtime_api_queries_duplicate_files_inside_local_root");
+    fixture.write_file("albums/current.jpg", "same image");
+    fixture.write_file("albums/copy.jpg", "same image");
+    fixture.write_file(".trash/current.jpg", "same image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_duplicate_files_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        &["albums/current.jpg"],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"duplicateSetCount\":1"),
+        "response should report one Duplicate Set: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"albums/current.jpg\""),
+        "response should include the seed file: {response}"
+    );
+    assert!(
+        response.contains("\"rootRelativePath\":\"albums/copy.jpg\""),
+        "response should include the duplicate file: {response}"
+    );
+    assert!(
+        !response.contains(".trash/current.jpg"),
+        "response should not include Root Trash candidates: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_queries_duplicate_files_from_json_body() {
+    let fixture = Fixture::new("runtime_api_queries_duplicate_files_from_json_body");
+    fixture.write_file("albums/a.jpg", "same image");
+    fixture.write_file("albums/b.jpg", "same image");
+    fixture.write_file("albums/c.jpg", "same image");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_duplicate_files_json_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        &["albums/a.jpg", "albums/b.jpg"],
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"seedCount\":2"),
+        "response should include both JSON seed paths: {response}"
+    );
+    assert!(
+        response.contains("\"duplicateSetCount\":1"),
+        "response should report one Duplicate Set: {response}"
+    );
+    assert!(
+        response.contains("\"seedRootRelativePaths\":[\"albums/a.jpg\",\"albums/b.jpg\"]"),
+        "response should preserve seed paths in request order: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_loads_global_shortcut_config() {
     let fixture = Fixture::new("runtime_api_loads_global_shortcut_config");
     fixture.write_file(
@@ -1468,6 +1550,60 @@ fn send_root_trash_list_request(address: &str, root_path: &str) -> String {
     write!(
         stream,
         "GET /v1/root-trash?rootPath={root_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_duplicate_files_request(
+    address: &str,
+    root_path: &str,
+    root_relative_paths: &[&str],
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let mut query = format!("rootPath={}", percent_encode(root_path));
+    for root_relative_path in root_relative_paths {
+        query.push_str("&rootRelativePath=");
+        query.push_str(&percent_encode(root_relative_path));
+    }
+    write!(
+        stream,
+        "GET /v1/duplicate-files?{query} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_duplicate_files_json_request(
+    address: &str,
+    root_path: &str,
+    root_relative_paths: &[&str],
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let root_relative_paths_json = root_relative_paths
+        .iter()
+        .map(|path| format!("\"{}\"", path))
+        .collect::<Vec<_>>()
+        .join(",");
+    let body = format!(
+        "{{\"rootPath\":\"{}\",\"rootRelativePath\":[{root_relative_paths_json}]}}",
+        json_path(Path::new(root_path)),
+    );
+    write!(
+        stream,
+        "POST /v1/duplicate-files HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
     )
     .expect("request should be written");
 

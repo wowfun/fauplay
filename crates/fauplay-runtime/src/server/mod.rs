@@ -4,8 +4,9 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 
 use crate::{
-    DirectoryEntryKind, FauplayRuntime, FileContentRangeRequest, FileContentRequest,
-    FileContentResponse, FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
+    DirectoryEntryKind, DuplicateFilesRequest, DuplicateFilesResponse, DuplicateSeedSkipReason,
+    FauplayRuntime, FileContentRangeRequest, FileContentRequest, FileContentResponse,
+    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
     GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
@@ -54,6 +55,7 @@ fn serve_http_stream(runtime: &FauplayRuntime, stream: &mut TcpStream) -> Result
 fn read_http_request(stream: &mut impl Read) -> Result<String, RuntimeError> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; REQUEST_CHUNK_SIZE];
+    let mut expected_request_length = None;
 
     loop {
         let byte_count = stream.read(&mut buffer).map_err(|source| {
@@ -63,12 +65,28 @@ fn read_http_request(stream: &mut impl Read) -> Result<String, RuntimeError> {
             break;
         }
         request.extend_from_slice(&buffer[..byte_count]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+        if expected_request_length.is_none() {
+            if let Some(header_end) = find_http_header_end(&request) {
+                let header_text = String::from_utf8_lossy(&request[..header_end]).into_owned();
+                let content_length = parse_header_value(&header_text, "content-length")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                expected_request_length = Some(header_end + content_length);
+            }
+        }
+        if expected_request_length.is_some_and(|expected| request.len() >= expected) {
             break;
         }
     }
 
     Ok(String::from_utf8_lossy(&request).into_owned())
+}
+
+fn find_http_header_end(request: &[u8]) -> Option<usize> {
+    request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
 }
 
 fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
@@ -127,6 +145,11 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             let query = parse_query_string(&target["/v1/file-metadata?".len()..]);
             handle_file_metadata(runtime, &query)
         }
+        Some(("GET", target)) if target.starts_with("/v1/duplicate-files?") => {
+            let query = parse_query_pairs(&target["/v1/duplicate-files?".len()..]);
+            handle_find_duplicate_files(runtime, &query)
+        }
+        Some(("POST", "/v1/duplicate-files")) => handle_find_duplicate_files_json(runtime, request),
         Some(("POST", target))
             if target == "/v1/root-move" || target.starts_with("/v1/root-move?") =>
         {
@@ -163,6 +186,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/text-preview"
             | "/v1/file-content"
             | "/v1/file-metadata"
+            | "/v1/duplicate-files"
             | "/v1/root-move"
             | "/v1/root-trash"
             | "/v1/root-trash/move"
@@ -426,6 +450,133 @@ fn handle_file_metadata(runtime: &FauplayRuntime, query: &HashMap<String, String
             "Internal Server Error",
             &error_json(&error.to_string()),
         ),
+    }
+}
+
+fn handle_find_duplicate_files(
+    runtime: &FauplayRuntime,
+    query: &[(String, String)],
+) -> HttpResponse {
+    let Some(root_path) = first_query_value(query, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_paths = query_values(query, "rootRelativePath");
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"rootRelativePath is required\"}",
+        );
+    }
+
+    let mut seed_root_relative_paths = Vec::new();
+    for root_relative_path in root_relative_paths {
+        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+        seed_root_relative_paths.push(root_relative_path);
+    }
+
+    match runtime.find_duplicate_files(DuplicateFilesRequest {
+        root_path: PathBuf::from(root_path),
+        seed_root_relative_paths,
+    }) {
+        Ok(response) => http_response(200, "OK", &duplicate_files_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_find_duplicate_files_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
+    let body = http_request_body(request).trim();
+    if body.is_empty() {
+        return http_response(400, "Bad Request", "{\"error\":\"JSON body is required\"}");
+    }
+
+    let payload = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return http_response(
+                400,
+                "Bad Request",
+                &error_json(&format!("invalid JSON body: {error}")),
+            );
+        }
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_paths = json_root_relative_path_values(&payload);
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"rootRelativePath is required\"}",
+        );
+    }
+
+    let mut seed_root_relative_paths = Vec::new();
+    for root_relative_path in root_relative_paths {
+        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+        seed_root_relative_paths.push(root_relative_path);
+    }
+
+    match runtime.find_duplicate_files(DuplicateFilesRequest {
+        root_path: PathBuf::from(root_path),
+        seed_root_relative_paths,
+    }) {
+        Ok(response) => http_response(200, "OK", &duplicate_files_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn http_request_body(request: &str) -> &str {
+    request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or("")
+}
+
+fn json_string_field<'a>(payload: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    payload
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn json_root_relative_path_values(payload: &serde_json::Value) -> Vec<&str> {
+    let value = payload
+        .get("rootRelativePath")
+        .or_else(|| payload.get("rootRelativePaths"));
+
+    match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => vec![value.trim()],
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -733,6 +884,63 @@ fn file_metadata_response_json(response: FileMetadataResponse) -> String {
     json
 }
 
+fn duplicate_files_response_json(response: DuplicateFilesResponse) -> String {
+    let skipped_seeds = response
+        .skipped_seeds
+        .into_iter()
+        .map(|skip| {
+            format!(
+                "{{\"rootRelativePath\":\"{}\",\"reason\":\"{}\"}}",
+                escape_json_string(&skip.root_relative_path.to_string()),
+                duplicate_seed_skip_reason_json(skip.reason),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let duplicate_set_count = response.duplicate_sets.len();
+    let duplicate_sets = response
+        .duplicate_sets
+        .into_iter()
+        .map(|duplicate_set| {
+            let seed_paths = duplicate_set
+                .seed_root_relative_paths
+                .iter()
+                .map(|path| format!("\"{}\"", escape_json_string(&path.to_string())))
+                .collect::<Vec<_>>()
+                .join(",");
+            let files = duplicate_set
+                .files
+                .into_iter()
+                .map(|file| {
+                    let mut json = format!(
+                        "{{\"name\":\"{}\",\"rootRelativePath\":\"{}\",\"absolutePath\":\"{}\",\"size\":{}",
+                        escape_json_string(&file.name),
+                        escape_json_string(&file.root_relative_path.to_string()),
+                        escape_json_string(&file.absolute_path.display().to_string()),
+                        file.size,
+                    );
+                    if let Some(last_modified_ms) = file.last_modified_ms {
+                        json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
+                    }
+                    json.push('}');
+                    json
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"setId\":\"{}\",\"seedRootRelativePaths\":[{seed_paths}],\"files\":[{files}]}}",
+                escape_json_string(&duplicate_set.set_id),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{{\"ok\":true,\"seedCount\":{},\"skippedSeeds\":[{skipped_seeds}],\"duplicateSetCount\":{duplicate_set_count},\"duplicateSets\":[{duplicate_sets}]}}",
+        response.seed_count,
+    )
+}
+
 fn root_move_response_json(response: RootMoveResponse) -> String {
     format!(
         "{{\"dryRun\":{},\"sourceRootRelativePath\":\"{}\",\"targetRootRelativePath\":\"{}\",\"absolutePath\":\"{}\",\"targetAbsolutePath\":\"{}\",\"ok\":{},\"reason\":{},\"error\":{}}}",
@@ -957,6 +1165,13 @@ fn root_move_failure_reason_json(value: RootMoveFailureReason) -> &'static str {
         RootMoveFailureReason::UnsupportedKind => "unsupported_kind",
         RootMoveFailureReason::TargetExists => "target_exists",
         RootMoveFailureReason::MutationFailed => "mutation_failed",
+    }
+}
+
+fn duplicate_seed_skip_reason_json(value: DuplicateSeedSkipReason) -> &'static str {
+    match value {
+        DuplicateSeedSkipReason::SourceNotFound => "source_not_found",
+        DuplicateSeedSkipReason::NotFile => "not_file",
     }
 }
 

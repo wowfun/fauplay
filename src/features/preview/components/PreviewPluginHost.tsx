@@ -421,7 +421,7 @@ export function PreviewPluginHost({
 
   useEffect(() => {
     if (!enableContinuousAutoRunOwner) return
-    if (file.kind !== 'file' || !rootHandle) return
+    if (file.kind !== 'file' || !pluginRuntime.hasExecutionContext) return
     if (previewViewState !== 'ready') return
 
     const continuousTools = fileActionTools.filter((tool) => continuousEnabledToolNames.has(tool.name))
@@ -434,8 +434,8 @@ export function PreviewPluginHost({
     enqueueContinuousTasks,
     file.kind,
     fileActionTools,
+    pluginRuntime.hasExecutionContext,
     previewViewState,
-    rootHandle,
   ])
 
   useEffect(() => {
@@ -656,7 +656,7 @@ export function PreviewPluginHost({
       return
     }
 
-    if (!rootHandle || !rootId) return
+    if (!pluginRuntime.hasExecutionContext || !rootId) return
     void dispatchSystemTool({
       toolName: item.toolName,
       rootHandle,
