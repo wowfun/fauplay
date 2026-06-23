@@ -2,7 +2,6 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import type { FaceRecord } from '@/features/faces/types'
-import { FILE_GRID_CARD_SIZE_BY_PRESET, TARGET_GRID_COLUMNS_AT_512_PRESET, requiredGridWidthForColumns } from '@/features/explorer/constants/gridLayout'
 import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
@@ -11,7 +10,15 @@ import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWo
 import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
 import { useInputMode } from '@/features/workspace/hooks/useInputMode'
 import { useViewportMode } from '@/features/workspace/hooks/useViewportMode'
+import { useWorkspacePreviewPaneWidth } from '@/features/workspace/hooks/useWorkspacePreviewPaneWidth'
 import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useWorkspacePresentationProfile'
+import { useWorkspacePluginTools } from '@/features/workspace/hooks/useWorkspacePluginTools'
+import { useWorkspaceTrashAvailability } from '@/features/workspace/hooks/useWorkspaceTrashAvailability'
+import {
+  cloneFilterState,
+  isAnnotationFilterAtDefault,
+  useWorkspaceFilterState,
+} from '@/features/workspace/hooks/useWorkspaceFilterState'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import {
   buildDuplicateSelectionForGroup,
@@ -32,15 +39,23 @@ import {
   type DeleteUndoRestoreItem,
   type DeleteUndoSnapshot,
   normalizeAbsolutePath,
-  normalizeRelativePath as normalizeUndoRelativePath,
   remapFileItemAfterRestore,
   remapPathForRoot,
-  toRelativePathWithinRoot,
 } from '@/features/workspace/lib/deleteUndo'
 import {
+  countDeleteUndoItems,
+  createDeleteUndoId,
+  pathRefersToDeletedAbsolutePath,
+  restoreDeleteUndoItemsThroughRuntime,
+} from '@/features/workspace/lib/deleteUndoRuntime'
+import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
+import {
+  loadAddressPathHistory,
+  saveAddressPathHistory,
+  upsertAddressPathHistory,
+} from '@/features/workspace/lib/addressPathHistory'
+import {
   getAnnotationDisplayStoreVersion,
-  getFileAnnotationUpdatedAt,
-  getFileAnnotationTagKeys,
   getRootAnnotationFilterTagOptions,
   isAnnotationFilterUiGateResolved,
   isAnnotationFilterUiVisible,
@@ -48,7 +63,6 @@ import {
   subscribeAnnotationDisplayStore,
 } from '@/features/preview/utils/annotationDisplayStore'
 import {
-  getFileReviewFilterTagKeys,
   getReviewFilterTagStoreVersion,
   getRootReviewFilterTagOptions,
   isReviewFilterTagSnapshotReady,
@@ -57,14 +71,6 @@ import {
 } from '@/features/faces/utils/reviewFilterTagStore'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
-import {
-  listRuntimeGlobalTrash,
-  listRuntimeRootTrash,
-  restoreRuntimeGlobalTrash,
-  restoreRuntimePathFromRootTrash,
-  type RuntimeGlobalTrashRestoreResponse,
-  type RuntimeRootTrashResponse,
-} from '@/lib/runtimeApi'
 import {
   areWorkspaceBrowserHistorySnapshotsEqual,
   buildWorkspaceBrowserHistoryUrl,
@@ -76,8 +82,6 @@ import {
   type WorkspaceBrowserHistorySnapshot,
 } from '@/features/workspace/lib/browserHistory'
 import {
-  ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY,
-  ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY,
   ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AddressPathHistoryEntry,
   type AnnotationFilterTagOption,
@@ -90,16 +94,6 @@ import {
   type ResultProjection,
   type ThumbnailSizePreset,
 } from '@/types'
-import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
-
-const MIN_PANE_WIDTH_RATIO = 0.15
-const MAX_PANE_WIDTH_RATIO = 0.75
-const DEFAULT_PANE_WIDTH_RATIO = 0.375
-const PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY = 'fauplay:preview-pane-width-ratio'
-const ADDRESS_PATH_HISTORY_STORAGE_KEY_PREFIX = 'fauplay:address-path-history'
-const WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY_PREFIX = 'fauplay:workspace-filter-state:roots:v1'
-const MAX_ADDRESS_PATH_HISTORY_ITEMS = 20
-const GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS = 15000
 const TRASH_ROUTE_PATH = '@trash'
 const DEFAULT_RESULT_PANEL_HEIGHT_PX = 280
 const MIN_RESULT_PANEL_HEIGHT_PX = 180
@@ -154,70 +148,12 @@ interface DeleteUndoNoticeState {
   tone: DeleteUndoNoticeTone
 }
 
-interface RestoreRecycleResponseItem {
-  ok?: boolean
-  nextAbsolutePath?: string
-  reasonCode?: string
-  error?: string
-}
-
-interface RestoreRecycleResponse {
-  ok?: boolean
-  total?: number
-  restored?: number
-  failed?: number
-  items?: RestoreRecycleResponseItem[]
-}
-
 interface PendingDeleteUndoRestoreState {
   snapshot: DeleteUndoSnapshot
 }
 
-interface PersistedWorkspaceFilterState {
-  search: string
-  type: FilterState['type']
-  hideEmptyFolders: boolean
-  sortBy: FilterState['sortBy']
-  sortOrder: FilterState['sortOrder']
-  annotationIncludeMatchMode: FilterState['annotationIncludeMatchMode']
-  annotationIncludeTagKeys: string[]
-  annotationExcludeTagKeys: string[]
-}
-
-type PersistedWorkspaceFilterStateByRoot = Record<string, PersistedWorkspaceFilterState>
-
-const defaultFilter: FilterState = {
-  search: '',
-  type: 'all',
-  hideEmptyFolders: true,
-  sortBy: 'name',
-  sortOrder: 'asc',
-  annotationFilterMode: 'all',
-  annotationIncludeMatchMode: 'or',
-  annotationIncludeTagKeys: [],
-  annotationExcludeTagKeys: [],
-}
-
-interface PersistedPreviewPaneWidthState {
-  ratio: number
-  isManual: boolean
-}
-
-interface FileAnnotationFilterTags {
-  annotationTagKeys: string[]
-  virtualTagKeys: string[]
-}
-
-function clampPaneWidthRatio(value: number): number {
-  return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, value))
-}
-
 function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function cloneFileItem(file: FileItem | null): FileItem | null {
@@ -235,285 +171,6 @@ function cloneResultProjection(projection: ResultProjection): ResultProjection {
   }
 }
 
-function cloneFilterState(filter: FilterState): FilterState {
-  return {
-    ...filter,
-    annotationIncludeTagKeys: [...filter.annotationIncludeTagKeys],
-    annotationExcludeTagKeys: [...filter.annotationExcludeTagKeys],
-  }
-}
-
-function createDefaultFilterState(): FilterState {
-  return cloneFilterState(defaultFilter)
-}
-
-function createDefaultPersistedWorkspaceFilterState(): PersistedWorkspaceFilterState {
-  return {
-    search: defaultFilter.search,
-    type: defaultFilter.type,
-    hideEmptyFolders: defaultFilter.hideEmptyFolders,
-    sortBy: defaultFilter.sortBy,
-    sortOrder: defaultFilter.sortOrder,
-    annotationIncludeMatchMode: defaultFilter.annotationIncludeMatchMode,
-    annotationIncludeTagKeys: [],
-    annotationExcludeTagKeys: [],
-  }
-}
-
-function toListingQueryState(filter: FilterState): ListingQueryState {
-  return {
-    search: filter.search,
-    type: filter.type,
-    hideEmptyFolders: filter.hideEmptyFolders,
-    sortBy: filter.sortBy === 'date' || filter.sortBy === 'size' ? filter.sortBy : 'name',
-    sortOrder: filter.sortOrder,
-  }
-}
-
-function normalizePersistedTagKeys(value: unknown): { tagKeys: string[]; mutated: boolean } {
-  if (!Array.isArray(value)) {
-    return {
-      tagKeys: [],
-      mutated: true,
-    }
-  }
-
-  const seen = new Set<string>()
-  const tagKeys: string[] = []
-  let mutated = false
-  for (const item of value) {
-    if (typeof item !== 'string') {
-      mutated = true
-      continue
-    }
-
-    const normalized = item.trim()
-    if (!normalized) {
-      mutated = true
-      continue
-    }
-    if (normalized !== item) {
-      mutated = true
-    }
-    if (seen.has(normalized)) {
-      mutated = true
-      continue
-    }
-    seen.add(normalized)
-    tagKeys.push(normalized)
-  }
-
-  if (tagKeys.length !== value.length) {
-    mutated = true
-  }
-
-  return {
-    tagKeys,
-    mutated,
-  }
-}
-
-function normalizePersistedWorkspaceFilterState(
-  value: unknown
-): { state: PersistedWorkspaceFilterState; mutated: boolean } {
-  const defaults = createDefaultPersistedWorkspaceFilterState()
-  if (!isRecord(value)) {
-    return {
-      state: defaults,
-      mutated: true,
-    }
-  }
-
-  let mutated = false
-  let search = defaults.search
-  if (typeof value.search === 'string') {
-    search = value.search
-  } else {
-    mutated = true
-  }
-
-  let type = defaults.type
-  if (value.type === 'all' || value.type === 'image' || value.type === 'video') {
-    type = value.type
-  } else {
-    mutated = true
-  }
-
-  let hideEmptyFolders = defaults.hideEmptyFolders
-  if (typeof value.hideEmptyFolders === 'boolean') {
-    hideEmptyFolders = value.hideEmptyFolders
-  } else {
-    mutated = true
-  }
-
-  let sortBy = defaults.sortBy
-  if (
-    value.sortBy === 'name'
-    || value.sortBy === 'date'
-    || value.sortBy === 'size'
-    || value.sortBy === 'annotationTime'
-  ) {
-    sortBy = value.sortBy
-  } else {
-    mutated = true
-  }
-
-  let sortOrder = defaults.sortOrder
-  if (value.sortOrder === 'asc' || value.sortOrder === 'desc') {
-    sortOrder = value.sortOrder
-  } else {
-    mutated = true
-  }
-
-  let annotationIncludeMatchMode = defaults.annotationIncludeMatchMode
-  if (value.annotationIncludeMatchMode === 'or' || value.annotationIncludeMatchMode === 'and') {
-    annotationIncludeMatchMode = value.annotationIncludeMatchMode
-  } else {
-    mutated = true
-  }
-
-  const includeTagKeys = normalizePersistedTagKeys(value.annotationIncludeTagKeys)
-  const excludeTagKeys = normalizePersistedTagKeys(value.annotationExcludeTagKeys)
-  mutated = mutated || includeTagKeys.mutated || excludeTagKeys.mutated
-
-  return {
-    state: {
-      search,
-      type,
-      hideEmptyFolders,
-      sortBy,
-      sortOrder,
-      annotationIncludeMatchMode,
-      annotationIncludeTagKeys: includeTagKeys.tagKeys,
-      annotationExcludeTagKeys: excludeTagKeys.tagKeys,
-    },
-    mutated,
-  }
-}
-
-function hydratePersistedWorkspaceFilterState(state: PersistedWorkspaceFilterState): FilterState {
-  const annotationIncludeTagKeys = [...state.annotationIncludeTagKeys]
-  const annotationExcludeTagKeys = [...state.annotationExcludeTagKeys]
-  return {
-    search: state.search,
-    type: state.type,
-    hideEmptyFolders: state.hideEmptyFolders,
-    sortBy: state.sortBy,
-    sortOrder: state.sortOrder,
-    annotationFilterMode: annotationIncludeTagKeys.length > 0 || annotationExcludeTagKeys.length > 0 ? 'boolean' : 'all',
-    annotationIncludeMatchMode: state.annotationIncludeMatchMode,
-    annotationIncludeTagKeys,
-    annotationExcludeTagKeys,
-  }
-}
-
-function serializePersistedWorkspaceFilterState(filter: FilterState): PersistedWorkspaceFilterState {
-  return {
-    search: filter.search,
-    type: filter.type,
-    hideEmptyFolders: filter.hideEmptyFolders,
-    sortBy: filter.sortBy,
-    sortOrder: filter.sortOrder,
-    annotationIncludeMatchMode: filter.annotationIncludeMatchMode,
-    annotationIncludeTagKeys: [...filter.annotationIncludeTagKeys],
-    annotationExcludeTagKeys: [...filter.annotationExcludeTagKeys],
-  }
-}
-
-function toAddressHistoryStorageKey(storageNamespace: string): string {
-  return `${ADDRESS_PATH_HISTORY_STORAGE_KEY_PREFIX}:${storageNamespace}`
-}
-
-function toWorkspaceFilterStorageKey(storageNamespace: string): string {
-  return `${WORKSPACE_FILTER_STATE_BY_ROOT_STORAGE_KEY_PREFIX}:${storageNamespace}`
-}
-
-function savePersistedWorkspaceFilterStateByRoot(
-  storageNamespace: string,
-  states: PersistedWorkspaceFilterStateByRoot
-): void {
-  if (typeof window === 'undefined') return
-
-  try {
-    window.localStorage.setItem(toWorkspaceFilterStorageKey(storageNamespace), JSON.stringify(states))
-  } catch {
-    // Ignore storage write failures and keep runtime state available.
-  }
-}
-
-function parsePersistedWorkspaceFilterStateByRoot(raw: string | null): {
-  states: PersistedWorkspaceFilterStateByRoot
-  shouldRewrite: boolean
-} {
-  if (!raw) {
-    return {
-      states: {},
-      shouldRewrite: false,
-    }
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!isRecord(parsed)) {
-      return {
-        states: {},
-        shouldRewrite: true,
-      }
-    }
-
-    const states: PersistedWorkspaceFilterStateByRoot = {}
-    let shouldRewrite = false
-    for (const [rootId, value] of Object.entries(parsed)) {
-      if (!rootId) {
-        shouldRewrite = true
-        continue
-      }
-
-      const normalized = normalizePersistedWorkspaceFilterState(value)
-      states[rootId] = normalized.state
-      shouldRewrite = shouldRewrite || normalized.mutated
-    }
-
-    return {
-      states,
-      shouldRewrite,
-    }
-  } catch {
-    return {
-      states: {},
-      shouldRewrite: true,
-    }
-  }
-}
-
-function loadPersistedWorkspaceFilterStateByRoot(storageNamespace: string): PersistedWorkspaceFilterStateByRoot {
-  if (typeof window === 'undefined') return {}
-
-  try {
-    const parsed = parsePersistedWorkspaceFilterStateByRoot(
-      window.localStorage.getItem(toWorkspaceFilterStorageKey(storageNamespace))
-    )
-    if (parsed.shouldRewrite) {
-      savePersistedWorkspaceFilterStateByRoot(storageNamespace, parsed.states)
-    }
-    return parsed.states
-  } catch {
-    return {}
-  }
-}
-
-function loadPersistedWorkspaceFilterStateForRoot(
-  rootId: string | null | undefined,
-  states: PersistedWorkspaceFilterStateByRoot
-): FilterState {
-  if (!rootId) {
-    return createDefaultFilterState()
-  }
-
-  const persisted = states[rootId]
-  return persisted ? hydratePersistedWorkspaceFilterState(persisted) : createDefaultFilterState()
-}
-
 function cloneStringArrayRecord(record: Record<string, string[]>): Record<string, string[]> {
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => [key, [...value]])
@@ -528,214 +185,6 @@ function cloneDuplicateSelectionRuleRecord(
   record: Record<string, DuplicateSelectionRule | null>
 ): Record<string, DuplicateSelectionRule | null> {
   return { ...record }
-}
-
-function countDeleteUndoItems(items: DeleteUndoRestoreItem[]): number {
-  return items.length
-}
-
-function mapRuntimeRestoreReasonCode(reason: string | null): string | undefined {
-  if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
-  if (reason === 'recycle_item_not_found') return 'RECYCLE_ITEM_NOT_FOUND'
-  if (reason === 'source_not_found') return 'RESTORE_SOURCE_NOT_FOUND'
-  if (reason === 'unsupported_kind') return 'RESTORE_UNSUPPORTED_KIND'
-  if (reason === 'target_exists') return 'RESTORE_TARGET_EXISTS'
-  if (reason === 'mutation_failed') return 'RESTORE_FAILED'
-  return reason ? 'RESTORE_FAILED' : undefined
-}
-
-function toRestoreRecycleResponseFromRuntime(response: RuntimeRootTrashResponse): RestoreRecycleResponse {
-  return {
-    ok: true,
-    total: response.total,
-    restored: response.completed,
-    failed: response.failed,
-    items: response.items.map((item) => ({
-      ok: item.ok,
-      nextAbsolutePath: item.nextAbsolutePath ?? undefined,
-      reasonCode: mapRuntimeRestoreReasonCode(item.reason),
-      error: item.error ?? undefined,
-    })),
-  }
-}
-
-function toRestoreRecycleResponseFromGlobalTrashRuntime(
-  response: RuntimeGlobalTrashRestoreResponse
-): RestoreRecycleResponse {
-  return {
-    ok: true,
-    total: response.total,
-    restored: response.restored,
-    failed: response.failed,
-    items: response.items.map((item) => ({
-      ok: item.ok,
-      nextAbsolutePath: item.nextAbsolutePath ?? undefined,
-      reasonCode: mapRuntimeRestoreReasonCode(item.reason),
-      error: item.error ?? undefined,
-    })),
-  }
-}
-
-async function restoreDeleteUndoItemsThroughRuntime(
-  items: DeleteUndoRestoreItem[],
-  rootPath: string | null,
-): Promise<RestoreRecycleResponse> {
-  const responseItems: RestoreRecycleResponseItem[] = Array.from({ length: items.length }, () => ({
-    ok: false,
-    reasonCode: 'RESTORE_UNSUPPORTED_KIND',
-    error: '撤销删除项无法通过 Fauplay Runtime 恢复',
-  }))
-  const rootTrashItems: Array<{ index: number; rootRelativePath: string }> = []
-  const globalTrashItems: Array<{ index: number; recycleId: string }> = []
-
-  for (const [index, item] of items.entries()) {
-    if (item.sourceType === 'root_trash') {
-      const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
-      const rootRelativePath = rootPath && absolutePath
-        ? toRelativePathWithinRoot(rootPath, absolutePath)
-        : null
-      if (!rootRelativePath || !rootRelativePath.startsWith('.trash/')) {
-        responseItems[index] = {
-          ok: false,
-          reasonCode: 'RESTORE_INVALID_SOURCE',
-          error: 'Root Trash restore item is outside the current Local Root',
-        }
-        continue
-      }
-      rootTrashItems.push({ index, rootRelativePath })
-      continue
-    }
-
-    if (item.sourceType === 'global_recycle') {
-      const recycleId = typeof item.recycleId === 'string' ? item.recycleId.trim() : ''
-      if (!recycleId) {
-        responseItems[index] = {
-          ok: false,
-          reasonCode: 'RECYCLE_ITEM_NOT_FOUND',
-          error: 'Global Trash restore item is missing recycleId',
-        }
-        continue
-      }
-      globalTrashItems.push({ index, recycleId })
-    }
-  }
-
-  if (rootTrashItems.length > 0) {
-    if (!rootPath) {
-      throw new Error('Root Trash restore requires a Local Root Binding')
-    }
-    const response = toRestoreRecycleResponseFromRuntime(
-      await restoreRuntimePathFromRootTrash({
-        rootPath,
-        rootRelativePath: rootTrashItems.map((item) => item.rootRelativePath),
-      }, 120000)
-    )
-    rootTrashItems.forEach((item, responseIndex) => {
-      responseItems[item.index] = response.items?.[responseIndex] ?? {
-        ok: false,
-        reasonCode: 'RESTORE_FAILED',
-        error: 'Root Trash restore response was incomplete',
-      }
-    })
-  }
-
-  if (globalTrashItems.length > 0) {
-    const response = toRestoreRecycleResponseFromGlobalTrashRuntime(
-      await restoreRuntimeGlobalTrash({
-        recycleId: globalTrashItems.map((item) => item.recycleId),
-      }, 120000)
-    )
-    globalTrashItems.forEach((item, responseIndex) => {
-      responseItems[item.index] = response.items?.[responseIndex] ?? {
-        ok: false,
-        reasonCode: 'RESTORE_FAILED',
-        error: 'Global Trash restore response was incomplete',
-      }
-    })
-  }
-
-  const restored = responseItems.filter((item) => item.ok === true).length
-
-  return {
-    ok: true,
-    total: items.length,
-    restored,
-    failed: items.length - restored,
-    items: responseItems,
-  }
-}
-
-function createDeleteUndoId(prefix: string): string {
-  return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function pathRefersToDeletedAbsolutePath(
-  value: string | null | undefined,
-  rootPath: string | null,
-  deletedAbsolutePathSet: Set<string>
-): boolean {
-  const normalizedValue = typeof value === 'string' ? value.trim() : ''
-  if (!normalizedValue) {
-    return false
-  }
-
-  if (normalizedValue.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(normalizedValue)) {
-    return deletedAbsolutePathSet.has(normalizeAbsolutePath(normalizedValue))
-  }
-
-  if (!rootPath) {
-    return false
-  }
-
-  return deletedAbsolutePathSet.has(
-    normalizeAbsolutePath(`${normalizeAbsolutePath(rootPath)}/${normalizeUndoRelativePath(normalizedValue)}`)
-  )
-}
-
-function loadPersistedPreviewPaneWidthState(): PersistedPreviewPaneWidthState {
-  if (typeof window === 'undefined') {
-    return {
-      ratio: DEFAULT_PANE_WIDTH_RATIO,
-      isManual: false,
-    }
-  }
-
-  try {
-    const raw = window.localStorage.getItem(PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY)
-    if (raw === null) {
-      return {
-        ratio: DEFAULT_PANE_WIDTH_RATIO,
-        isManual: false,
-      }
-    }
-
-    const parsed = Number(raw)
-    if (!Number.isFinite(parsed)) {
-      return {
-        ratio: DEFAULT_PANE_WIDTH_RATIO,
-        isManual: false,
-      }
-    }
-
-    return {
-      ratio: clampPaneWidthRatio(parsed),
-      isManual: true,
-    }
-  } catch {
-    return {
-      ratio: DEFAULT_PANE_WIDTH_RATIO,
-      isManual: false,
-    }
-  }
-}
-
-function savePersistedPreviewPaneWidthRatio(value: number): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(PREVIEW_PANE_WIDTH_RATIO_STORAGE_KEY, String(clampPaneWidthRatio(value)))
-  } catch {
-    // Ignore storage write failures and keep runtime state available.
-  }
 }
 
 function getMaxResultPanelHeightPx(): number {
@@ -807,208 +256,6 @@ function resolveProjectionPreferredPath(projection: ResultProjection | null, pre
   return projection.files[0]?.path ?? null
 }
 
-function isAnnotationFilterAtDefault(filter: FilterState): boolean {
-  return (
-    filter.annotationFilterMode === 'all'
-    && filter.annotationIncludeMatchMode === 'or'
-    && filter.annotationIncludeTagKeys.length === 0
-    && filter.annotationExcludeTagKeys.length === 0
-  )
-}
-
-function isAnnotationBooleanFilterActive(filter: FilterState): boolean {
-  return filter.annotationIncludeTagKeys.length > 0 || filter.annotationExcludeTagKeys.length > 0
-}
-
-function withSyncedAnnotationFilterMode(filter: FilterState): FilterState {
-  const nextMode: FilterState['annotationFilterMode'] = isAnnotationBooleanFilterActive(filter) ? 'boolean' : 'all'
-  if (filter.annotationFilterMode === nextMode) {
-    return filter
-  }
-  return {
-    ...filter,
-    annotationFilterMode: nextMode,
-  }
-}
-
-function fileMatchesAnnotationTag(
-  annotationTagSet: Set<string>,
-  virtualTagSet: Set<string>,
-  tagKey: string
-): boolean {
-  if (tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
-    return annotationTagSet.size === 0
-  }
-  if (
-    tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY
-    || tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY
-  ) {
-    return virtualTagSet.has(tagKey)
-  }
-  return annotationTagSet.has(tagKey)
-}
-
-function matchesBooleanAnnotationFilter(filter: FilterState, fileTags: FileAnnotationFilterTags): boolean {
-  const includeTagKeys = filter.annotationIncludeTagKeys
-  const excludeTagKeys = filter.annotationExcludeTagKeys
-  if (includeTagKeys.length === 0 && excludeTagKeys.length === 0) {
-    return true
-  }
-
-  const annotationTagSet = new Set(fileTags.annotationTagKeys)
-  const virtualTagSet = new Set(fileTags.virtualTagKeys)
-  const includeMatched = includeTagKeys.length === 0
-    ? true
-    : filter.annotationIncludeMatchMode === 'and'
-      ? includeTagKeys.every((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
-      : includeTagKeys.some((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
-
-  if (!includeMatched) return false
-
-  return !excludeTagKeys.some((tagKey) => fileMatchesAnnotationTag(annotationTagSet, virtualTagSet, tagKey))
-}
-
-function compareByNameWithSortOrder(left: FileItem, right: FileItem, sortOrder: FilterState['sortOrder']): number {
-  const cmp = left.name.localeCompare(right.name)
-  return sortOrder === 'asc' ? cmp : -cmp
-}
-
-function sortFilesByAnnotationTime(
-  files: FileItem[],
-  rootId: string,
-  sortOrder: FilterState['sortOrder']
-): FileItem[] {
-  const next = [...files]
-  next.sort((left, right) => {
-    if (left.kind === 'directory' && right.kind === 'file') return -1
-    if (left.kind === 'file' && right.kind === 'directory') return 1
-    if (left.kind === 'directory' && right.kind === 'directory') {
-      return compareByNameWithSortOrder(left, right, sortOrder)
-    }
-
-    const leftUpdatedAt = getFileAnnotationUpdatedAt(rootId, left.path)
-    const rightUpdatedAt = getFileAnnotationUpdatedAt(rootId, right.path)
-    const leftAnnotated = leftUpdatedAt !== null
-    const rightAnnotated = rightUpdatedAt !== null
-
-    // Unannotated items always stay at the bottom regardless of sort order.
-    if (leftAnnotated !== rightAnnotated) {
-      return leftAnnotated ? -1 : 1
-    }
-    if (!leftAnnotated && !rightAnnotated) {
-      return compareByNameWithSortOrder(left, right, sortOrder)
-    }
-
-    if (leftUpdatedAt !== rightUpdatedAt) {
-      const cmp = (leftUpdatedAt ?? 0) - (rightUpdatedAt ?? 0)
-      return sortOrder === 'asc' ? cmp : -cmp
-    }
-    return compareByNameWithSortOrder(left, right, sortOrder)
-  })
-  return next
-}
-
-function dedupeAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
-  const latestEntryByKey = new Map<string, AddressPathHistoryEntry>()
-
-  for (const item of entries) {
-    if (!item.rootId) continue
-    const normalizedPath = normalizeRelativePath(item.path)
-    const visitedAt = Number.isFinite(item.visitedAt) ? item.visitedAt : 0
-    const key = `${item.rootId}:${normalizedPath}`
-    const existing = latestEntryByKey.get(key)
-    if (!existing || visitedAt > existing.visitedAt) {
-      latestEntryByKey.set(key, {
-        rootId: item.rootId,
-        rootName: item.rootName || '根目录',
-        path: normalizedPath,
-        visitedAt,
-      })
-    }
-  }
-
-  return [...latestEntryByKey.values()]
-    .sort((left, right) => right.visitedAt - left.visitedAt)
-    .slice(0, MAX_ADDRESS_PATH_HISTORY_ITEMS)
-}
-
-interface ParsedAddressPathHistory {
-  entries: AddressPathHistoryEntry[]
-  shouldRewrite: boolean
-}
-
-function parseAddressPathHistory(raw: string | null): ParsedAddressPathHistory {
-  if (!raw) return { entries: [], shouldRewrite: false }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return { entries: [], shouldRewrite: true }
-
-    let hasLegacyEntry = false
-    let hasInvalidEntry = false
-
-    const validEntries = parsed
-      .filter((item): item is AddressPathHistoryEntry => {
-        if (!item || typeof item !== 'object') {
-          hasInvalidEntry = true
-          return false
-        }
-
-        const candidate = item as Partial<AddressPathHistoryEntry>
-        const hasPathShape = typeof candidate.path === 'string' && typeof candidate.visitedAt === 'number'
-        if (!hasPathShape) {
-          hasInvalidEntry = true
-          return false
-        }
-
-        if (typeof candidate.rootId !== 'string' || typeof candidate.rootName !== 'string') {
-          hasLegacyEntry = true
-          return false
-        }
-
-        return true
-      })
-
-    const dedupedEntries = dedupeAddressPathHistory(validEntries)
-    const shouldRewrite = hasLegacyEntry || hasInvalidEntry || dedupedEntries.length !== validEntries.length
-    if (hasLegacyEntry) {
-      return { entries: [], shouldRewrite: true }
-    }
-
-    return { entries: dedupedEntries, shouldRewrite }
-  } catch {
-    return { entries: [], shouldRewrite: true }
-  }
-}
-
-function loadAddressPathHistory(storageNamespace: string): AddressPathHistoryEntry[] {
-  if (typeof window === 'undefined') return []
-  const parsed = parseAddressPathHistory(window.localStorage.getItem(toAddressHistoryStorageKey(storageNamespace)))
-  if (parsed.shouldRewrite) {
-    saveAddressPathHistory(storageNamespace, parsed.entries)
-  }
-  return parsed.entries
-}
-
-function saveAddressPathHistory(storageNamespace: string, history: AddressPathHistoryEntry[]): void {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(toAddressHistoryStorageKey(storageNamespace), JSON.stringify(history))
-}
-
-function upsertAddressPathHistory(
-  previous: AddressPathHistoryEntry[],
-  nextEntry: Pick<AddressPathHistoryEntry, 'rootId' | 'rootName' | 'path'>
-): AddressPathHistoryEntry[] {
-  const normalizedPath = normalizeRelativePath(nextEntry.path)
-  const now = Date.now()
-  return dedupeAddressPathHistory([{
-    rootId: nextEntry.rootId,
-    rootName: nextEntry.rootName,
-    path: normalizedPath,
-    visitedAt: now,
-  }, ...previous])
-}
-
 function preloadPreviewModules(): void {
   if (previewPanelModulesPreloaded) return
   previewPanelModulesPreloaded = true
@@ -1077,22 +324,25 @@ export function WorkspaceShell({
     getReviewFilterTagStoreVersion,
     getReviewFilterTagStoreVersion
   )
-  const persistedWorkspaceFilterStateByRootRef = useRef<PersistedWorkspaceFilterStateByRoot>(
-    loadPersistedWorkspaceFilterStateByRoot(storageNamespace)
-  )
-  const hydratedFilterRootIdRef = useRef<string | null>(rootId)
-  const skipNextFilterPersistRef = useRef(true)
-  const initialPreviewPaneWidthStateRef = useRef<PersistedPreviewPaneWidthState>(loadPersistedPreviewPaneWidthState())
-  const [filter, setFilter] = useState<FilterState>(() => (
-    loadPersistedWorkspaceFilterStateForRoot(rootId, persistedWorkspaceFilterStateByRootRef.current)
-  ))
   const [thumbnailSizePreset, setThumbnailSizePreset] = useState<ThumbnailSizePreset>('auto')
-  const [paneWidthRatio, setPaneWidthRatio] = useState(initialPreviewPaneWidthStateRef.current.ratio)
   const [directorySelectedPaths, setDirectorySelectedPaths] = useState<string[]>([])
+  const clearDirectorySelectionForFilterChange = useCallback(() => {
+    setDirectorySelectedPaths([])
+  }, [])
+  const {
+    filter,
+    setFilter,
+    handleFilterChange,
+    listingQuery,
+  } = useWorkspaceFilterState({
+    rootId,
+    storageNamespace,
+    onUserFilterChange: clearDirectorySelectionForFilterChange,
+  })
   const [recentPathHistory, setRecentPathHistory] = useState<AddressPathHistoryEntry[]>(() => (
     loadAddressPathHistory(storageNamespace)
   ))
-  const [pluginTools, setPluginTools] = useState<GatewayToolDescriptor[]>([])
+  const pluginTools = useWorkspacePluginTools({ accessProvider })
   const [projectionTabs, setProjectionTabs] = useState<ResultProjection[]>([])
   const [activeProjectionTabId, setActiveProjectionTabId] = useState<string | null>(null)
   const [activeSurface, setActiveSurface] = useState<WorkspaceActiveSurface>({ kind: 'directory' })
@@ -1109,11 +359,13 @@ export function WorkspaceShell({
   const [pendingDeleteUndoRestore, setPendingDeleteUndoRestore] = useState<PendingDeleteUndoRestoreState | null>(null)
   const [pendingBrowserHistoryRestore, setPendingBrowserHistoryRestore] = useState<WorkspaceBrowserHistorySnapshot | null>(null)
   const [pendingFaceSourcePath, setPendingFaceSourcePath] = useState<string | null>(null)
-  const [hasTrashEntries, setHasTrashEntries] = useState(false)
+  const hasTrashEntries = useWorkspaceTrashAvailability({
+    accessProvider,
+    rootId,
+    refreshKey: files,
+  })
   const [showPeoplePanel, setShowPeoplePanel] = useState(false)
   const [peoplePanelPreferredPersonId, setPeoplePanelPreferredPersonId] = useState<string | null>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const isPaneWidthManualRef = useRef(initialPreviewPaneWidthStateRef.current.isManual)
   const directoryFileGridRef = useRef<FileBrowserGridHandle>(null)
   const projectionFileGridRef = useRef<FileBrowserGridHandle>(null)
   const lastNormalResultPanelHeightRef = useRef(DEFAULT_RESULT_PANEL_HEIGHT_PX)
@@ -1122,11 +374,6 @@ export function WorkspaceShell({
   const previousShellKindRef = useRef(presentationProfile.shellKind)
   const hasInitializedBrowserHistoryRef = useRef(false)
   const lastBrowserHistoryKeyRef = useRef<string | null>(null)
-  const handleFilterChange = useCallback((nextFilter: FilterState) => {
-    setDirectorySelectedPaths([])
-    setFilter(withSyncedAnnotationFilterMode(nextFilter))
-  }, [])
-  const listingQuery = useMemo(() => toListingQueryState(filter), [filter])
 
   useEffect(() => {
     if (!setListingQuery) return
@@ -1172,50 +419,15 @@ export function WorkspaceShell({
     showAnnotationFilterControls,
   ])
 
-  useEffect(() => {
-    if (hydratedFilterRootIdRef.current === rootId) return
-    hydratedFilterRootIdRef.current = null
-    skipNextFilterPersistRef.current = true
-    setFilter(loadPersistedWorkspaceFilterStateForRoot(rootId, persistedWorkspaceFilterStateByRootRef.current))
-    hydratedFilterRootIdRef.current = rootId
-  }, [rootId])
-
-  useEffect(() => {
-    if (!rootId) return
-    if (hydratedFilterRootIdRef.current !== rootId) return
-    if (skipNextFilterPersistRef.current) {
-      skipNextFilterPersistRef.current = false
-      return
-    }
-
-    const nextState = serializePersistedWorkspaceFilterState(filter)
-    persistedWorkspaceFilterStateByRootRef.current = {
-      ...persistedWorkspaceFilterStateByRootRef.current,
-      [rootId]: nextState,
-    }
-    savePersistedWorkspaceFilterStateByRoot(storageNamespace, persistedWorkspaceFilterStateByRootRef.current)
-  }, [filter, rootId, storageNamespace])
-
   const filteredFiles = useMemo(() => {
-    // Depend on external store version so file filtering reflects latest gateway tag snapshot.
-    void annotationDisplayStoreVersion
-    void reviewFilterTagStoreVersion
-    let nextFilteredFiles = filterFiles(files, filter)
-    if (isAnnotationBooleanFilterActive(filter)) {
-      nextFilteredFiles = nextFilteredFiles.filter((file) => {
-        if (file.kind !== 'file') return true
-        return matchesBooleanAnnotationFilter(filter, {
-          annotationTagKeys: getFileAnnotationTagKeys(rootId, file.path),
-          virtualTagKeys: getFileReviewFilterTagKeys(rootId, file.path),
-        })
-      })
-    }
-
-    if (filter.sortBy === 'annotationTime') {
-      return sortFilesByAnnotationTime(nextFilteredFiles, rootId, filter.sortOrder)
-    }
-
-    return nextFilteredFiles
+    return filterWorkspaceFiles({
+      files,
+      filter,
+      rootId,
+      filterFiles,
+      annotationDisplayStoreVersion,
+      reviewFilterTagStoreVersion,
+    })
   }, [annotationDisplayStoreVersion, files, filter, filterFiles, reviewFilterTagStoreVersion, rootId])
   const activeProjectionTab = useMemo(
     () => projectionTabs.find((projection) => projection.id === activeProjectionTabId) ?? projectionTabs[0] ?? null,
@@ -1300,6 +512,14 @@ export function WorkspaceShell({
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
   } = usePreviewTraversal({ filteredFiles: activeSurfaceFiles })
+  const {
+    contentRef,
+    paneWidthRatio,
+    handlePreviewPaneResizeStart,
+  } = useWorkspacePreviewPaneWidth({
+    showPreviewPane,
+    thumbnailSizePreset,
+  })
   const hasActiveVideoPreview = useMemo(() => {
     const activePreviewFile = previewFile ?? (showPreviewPane ? selectedFile : null)
     if (!activePreviewFile || activePreviewFile.kind !== 'file') {
@@ -2054,10 +1274,11 @@ export function WorkspaceShell({
     await refreshFilterTagSnapshots()
   }, [
     isFlattenView,
-    refreshFilterTagSnapshots,
-    restoreDeleteUndoPreviewSnapshot,
-    setFlattenView,
-  ])
+	    refreshFilterTagSnapshots,
+	    restoreDeleteUndoPreviewSnapshot,
+	    setFilter,
+	    setFlattenView,
+	  ])
 
   const setProjectionSelectedPathsForTab = useCallback((tabId: string, selectedPaths: string[]) => {
     setProjectionSelectedPathsById((previous) => {
@@ -3029,44 +2250,6 @@ export function WorkspaceShell({
   }, [activeSurface, alignPreviewToPath, directoryFocusedPath, projectionTabs])
 
   useEffect(() => {
-    if (accessProvider === 'remote-readonly' || !rootId) {
-      setHasTrashEntries(false)
-      return
-    }
-
-    let disposed = false
-
-    const refreshTrashAvailability = async () => {
-      let hasRootTrashEntries = false
-      const boundRootPath = getBoundRootPath(rootId)
-      if (boundRootPath) {
-        try {
-          const listing = await listRuntimeRootTrash({ rootPath: boundRootPath, limit: 1 }, 120000)
-          hasRootTrashEntries = listing.entries.length > 0
-        } catch {
-          hasRootTrashEntries = false
-        }
-      }
-
-      try {
-        const listing = await listRuntimeGlobalTrash({ limit: 1 }, 120000)
-        if (!disposed) {
-          setHasTrashEntries(hasRootTrashEntries || listing.entries.length > 0)
-        }
-      } catch {
-        if (!disposed) {
-          setHasTrashEntries(hasRootTrashEntries)
-        }
-      }
-    }
-
-    void refreshTrashAvailability()
-    return () => {
-      disposed = true
-    }
-  }, [accessProvider, files, rootId])
-
-  useEffect(() => {
     void Promise.all([
       preloadAnnotationDisplaySnapshot({
         rootId,
@@ -3092,46 +2275,7 @@ export function WorkspaceShell({
         annotationExcludeTagKeys: [],
       }
     })
-  }, [isAnnotationFilterGateResolved, isReviewFilterGateResolved, showAnnotationFilterControls])
-
-  useEffect(() => {
-    let disposed = false
-    let refreshTimerId: number | null = null
-    let loadSnapshot: (() => Promise<GatewayCapabilitiesSnapshot>) | null = null
-
-    if (accessProvider === 'remote-readonly') {
-      setPluginTools([])
-      return () => {}
-    }
-
-    const refreshCapabilities = async () => {
-      try {
-        if (!loadSnapshot) {
-          const module = await import('@/lib/gateway')
-          loadSnapshot = module.loadGatewayCapabilities
-        }
-        const snapshot = await loadSnapshot()
-        if (disposed) return
-        setPluginTools(snapshot.online ? snapshot.tools : [])
-      } catch {
-        if (!disposed) {
-          setPluginTools([])
-        }
-      }
-    }
-
-    void refreshCapabilities()
-    refreshTimerId = window.setInterval(() => {
-      void refreshCapabilities()
-    }, GATEWAY_CAPABILITY_REFRESH_INTERVAL_MS)
-
-    return () => {
-      disposed = true
-      if (refreshTimerId !== null) {
-        window.clearInterval(refreshTimerId)
-      }
-    }
-  }, [accessProvider])
+	  }, [isAnnotationFilterGateResolved, isReviewFilterGateResolved, setFilter, showAnnotationFilterControls])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -3295,67 +2439,6 @@ export function WorkspaceShell({
     toggleAutoPlay,
     togglePlaybackOrder,
   ])
-
-  const getAdaptiveDefaultPaneWidthRatio = useCallback((containerWidth: number) => {
-    if (containerWidth <= 0 || thumbnailSizePreset !== '512') {
-      return DEFAULT_PANE_WIDTH_RATIO
-    }
-
-    const requiredGridWidth = requiredGridWidthForColumns(
-      TARGET_GRID_COLUMNS_AT_512_PRESET,
-      FILE_GRID_CARD_SIZE_BY_PRESET['512'].width
-    )
-    const maxPaneRatioForThreeColumns = 1 - requiredGridWidth / containerWidth
-    const adaptiveRatio = Math.min(DEFAULT_PANE_WIDTH_RATIO, maxPaneRatioForThreeColumns)
-
-    return Math.min(MAX_PANE_WIDTH_RATIO, Math.max(MIN_PANE_WIDTH_RATIO, adaptiveRatio))
-  }, [thumbnailSizePreset])
-
-  useEffect(() => {
-    if (!showPreviewPane || isPaneWidthManualRef.current) return
-
-    const applyAdaptiveDefault = () => {
-      const containerWidth = contentRef.current?.parentElement?.offsetWidth ?? window.innerWidth
-      const nextRatio = getAdaptiveDefaultPaneWidthRatio(containerWidth)
-      setPaneWidthRatio((currentRatio) => {
-        if (Math.abs(currentRatio - nextRatio) < 0.001) {
-          return currentRatio
-        }
-        return nextRatio
-      })
-    }
-
-    applyAdaptiveDefault()
-    window.addEventListener('resize', applyAdaptiveDefault)
-    return () => window.removeEventListener('resize', applyAdaptiveDefault)
-  }, [showPreviewPane, getAdaptiveDefaultPaneWidthRatio])
-
-  useEffect(() => {
-    if (!isPaneWidthManualRef.current) return
-    savePersistedPreviewPaneWidthRatio(paneWidthRatio)
-  }, [paneWidthRatio])
-
-  const handlePreviewPaneResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    isPaneWidthManualRef.current = true
-    const startX = event.clientX
-    const startRatio = paneWidthRatio
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const containerWidth = contentRef.current?.parentElement?.offsetWidth || window.innerWidth
-      const delta = (startX - moveEvent.clientX) / containerWidth
-      const newRatio = startRatio + delta
-      setPaneWidthRatio(clampPaneWidthRatio(newRatio))
-    }
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [paneWidthRatio])
 
   const commonShellProps = {
       filter,
