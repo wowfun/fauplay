@@ -20,6 +20,7 @@ use crate::{
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
     ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
+    LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
     RootMoveBatchFailureReason, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
     RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
     RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse,
@@ -107,6 +108,16 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             "{\"status\":\"ok\",\"runtime\":\"fauplay-runtime\"}",
         ),
         Some(("GET", "/v1/config/shortcuts")) => handle_global_shortcut_config(runtime),
+        Some(("GET", target))
+            if target == "/v1/local-root-bindings"
+                || target.starts_with("/v1/local-root-bindings?") =>
+        {
+            handle_list_local_root_bindings(runtime)
+        }
+        Some(("PUT", target)) if target.starts_with("/v1/local-root-bindings?") => {
+            let query = parse_query_string(&target["/v1/local-root-bindings?".len()..]);
+            handle_upsert_local_root_binding(runtime, &query)
+        }
         Some(("OPTIONS", target)) if is_preflight_target(target) => {
             http_response(204, "No Content", "")
         }
@@ -226,6 +237,7 @@ fn is_preflight_target(target: &str) -> bool {
         target,
         "/v1/local-directory"
             | "/v1/config/shortcuts"
+            | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"
             | "/v1/global-trash/text-preview"
@@ -261,6 +273,37 @@ fn handle_global_shortcut_config(runtime: &FauplayRuntime) -> HttpResponse {
             "Internal Server Error",
             &error_json(&error.to_string()),
         ),
+    }
+}
+
+fn handle_list_local_root_bindings(runtime: &FauplayRuntime) -> HttpResponse {
+    match runtime.list_local_root_bindings() {
+        Ok(response) => http_response(200, "OK", &local_root_bindings_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_upsert_local_root_binding(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    let Some(root_id) = query.get("rootId").map(String::as_str) else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let Some(root_path) = query.get("rootPath").map(String::as_str) else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+
+    match runtime.upsert_local_root_binding(LocalRootBindingUpsertRequest {
+        root_id: root_id.to_owned(),
+        root_path: PathBuf::from(root_path),
+    }) {
+        Ok(response) => http_response(200, "OK", &local_root_binding_json(&response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
     }
 }
 
@@ -1994,6 +2037,25 @@ fn global_shortcut_config_response_json(response: GlobalShortcutConfigResponse) 
     }
     json.push('}');
     json
+}
+
+fn local_root_bindings_response_json(response: LocalRootBindingsResponse) -> String {
+    let items = response
+        .items
+        .iter()
+        .map(local_root_binding_json)
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!("{{\"items\":[{items}]}}")
+}
+
+fn local_root_binding_json(binding: &LocalRootBinding) -> String {
+    format!(
+        "{{\"rootId\":\"{}\",\"rootPath\":\"{}\"}}",
+        escape_json_string(&binding.root_id),
+        escape_json_string(&binding.root_path.display().to_string()),
+    )
 }
 
 fn optional_root_relative_path_json(value: Option<&RootRelativePath>) -> String {

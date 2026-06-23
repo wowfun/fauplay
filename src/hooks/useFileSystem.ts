@@ -25,7 +25,13 @@ import {
   removeCachedRoot,
   upsertCachedRootHandle,
 } from '@/lib/rootHandleCache'
-import { ensureRootPath, getBoundRootPath, getRootPathMapUpdatedEventName, listLocalRootBindings } from '@/lib/reveal'
+import {
+  ensureRootPath,
+  getBoundRootPath,
+  getRootPathMapUpdatedEventName,
+  listLocalRootBindings,
+  syncLocalRootBindingsFromRuntime,
+} from '@/lib/reveal'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -262,6 +268,8 @@ export function useFileSystem() {
   const [error, setError] = useState<string | null>(null)
 
   const refreshCachedRoots = useCallback(async () => {
+    await syncLocalRootBindingsFromRuntime()
+
     const entries = await listCachedRoots()
     const cachedEntriesByRootId = new Map<string, CachedRootEntry>()
     for (const entry of entries) {

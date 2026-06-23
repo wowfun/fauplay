@@ -317,6 +317,23 @@ pub struct GlobalShortcutConfigResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRootBinding {
+    pub root_id: String,
+    pub root_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRootBindingsResponse {
+    pub items: Vec<LocalRootBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRootBindingUpsertRequest {
+    pub root_id: String,
+    pub root_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalTrashListRequest {
     pub entry_limit: Option<usize>,
     pub entry_offset: usize,
@@ -823,6 +840,12 @@ impl RuntimeError {
     pub(crate) fn invalid_file_annotation(message: &str) -> Self {
         Self {
             message: format!("invalid File Annotation: {message}"),
+        }
+    }
+
+    pub(crate) fn invalid_local_root_binding(message: &str) -> Self {
+        Self {
+            message: format!("invalid Local Root Binding: {message}"),
         }
     }
 

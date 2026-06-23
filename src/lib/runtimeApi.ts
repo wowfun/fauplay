@@ -18,6 +18,20 @@ export interface RuntimeGlobalShortcutConfigSnapshot {
   config: unknown | null
 }
 
+export interface RuntimeLocalRootBinding {
+  rootId: string
+  rootPath: string
+}
+
+export interface RuntimeLocalRootBindingsResponse {
+  items: RuntimeLocalRootBinding[]
+}
+
+export interface RuntimeLocalRootBindingUpsertRequest {
+  rootId: string
+  rootPath: string
+}
+
 export interface RuntimeDirectoryEntry {
   name: string
   rootRelativePath: string
@@ -428,6 +442,35 @@ function parseRuntimeGlobalShortcutConfigSnapshot(payload: unknown): RuntimeGlob
   }
 }
 
+function parseRuntimeLocalRootBinding(payload: unknown): RuntimeLocalRootBinding {
+  if (!isObject(payload)) {
+    throw new RuntimeApiError('Fauplay Runtime Local Root Binding response was invalid')
+  }
+
+  const rootId = typeof payload.rootId === 'string' ? payload.rootId.trim() : ''
+  const rootPath = typeof payload.rootPath === 'string' ? payload.rootPath.trim() : ''
+  if (!rootId || !rootPath) {
+    throw new RuntimeApiError('Fauplay Runtime Local Root Binding response was invalid')
+  }
+
+  return {
+    rootId,
+    rootPath,
+  }
+}
+
+function parseRuntimeLocalRootBindingsResponse(payload: unknown): RuntimeLocalRootBindingsResponse {
+  if (!isObject(payload)) {
+    throw new RuntimeApiError('Fauplay Runtime Local Root Bindings response was invalid')
+  }
+
+  return {
+    items: Array.isArray(payload.items)
+      ? payload.items.map(parseRuntimeLocalRootBinding)
+      : [],
+  }
+}
+
 function parseRuntimeDirectoryEntry(value: unknown): RuntimeDirectoryEntry | null {
   if (!isObject(value)) return null
   const name = typeof value.name === 'string' ? value.name.trim() : ''
@@ -503,6 +546,25 @@ export async function loadRuntimeGlobalShortcutConfig(
 ): Promise<RuntimeGlobalShortcutConfigSnapshot> {
   const payload = await callRuntimeJson('/v1/config/shortcuts', timeoutMs)
   return parseRuntimeGlobalShortcutConfigSnapshot(payload)
+}
+
+export async function listRuntimeLocalRootBindings(
+  timeoutMs?: number,
+): Promise<RuntimeLocalRootBindingsResponse> {
+  const payload = await callRuntimeJson('/v1/local-root-bindings', timeoutMs)
+  return parseRuntimeLocalRootBindingsResponse(payload)
+}
+
+export async function upsertRuntimeLocalRootBinding(
+  request: RuntimeLocalRootBindingUpsertRequest,
+  timeoutMs?: number,
+): Promise<RuntimeLocalRootBinding> {
+  const query = new URLSearchParams({
+    rootId: request.rootId,
+    rootPath: request.rootPath,
+  })
+  const payload = await callRuntimeJson(`/v1/local-root-bindings?${query.toString()}`, timeoutMs, 'PUT')
+  return parseRuntimeLocalRootBinding(payload)
 }
 
 export async function listRuntimeLocalDirectory(

@@ -1,5 +1,11 @@
+import {
+  listRuntimeLocalRootBindings,
+  upsertRuntimeLocalRootBinding,
+} from '@/lib/runtimeApi'
+
 const ROOT_PATH_STORAGE_KEY = 'fauplay:host-root-path-map'
 const ROOT_PATH_MAP_UPDATED_EVENT = 'fauplay:root-path-map-updated'
+const ROOT_BINDING_RUNTIME_TIMEOUT_MS = 2000
 
 interface RootPathMapV3 {
   version: 3
@@ -107,6 +113,23 @@ function setRootPathMap(pathMap: RootPathMapV3): void {
   }
 }
 
+function isSameRootPathMap(left: RootPathMapV3, right: RootPathMapV3): boolean {
+  const leftKeys = Object.keys(left.byRootId)
+  const rightKeys = Object.keys(right.byRootId)
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every((key) => left.byRootId[key] === right.byRootId[key])
+}
+
+function persistLocalRootBindingToRuntime(rootId: string, rootPath: string): void {
+  void upsertRuntimeLocalRootBinding(
+    {
+      rootId,
+      rootPath,
+    },
+    ROOT_BINDING_RUNTIME_TIMEOUT_MS
+  ).catch(() => undefined)
+}
+
 function askRootPath(rootLabel: string, existing: string): string | null {
   const input = window.prompt(
     `请输入目录「${rootLabel}」在系统中的绝对路径（Windows 路径或 /mnt/... 路径）`,
@@ -147,6 +170,7 @@ export function ensureRootPath({
       version: 3,
       byRootId: nextByRootId,
     })
+    persistLocalRootBindingToRuntime(rootId, next)
   }
 
   return next
@@ -166,6 +190,45 @@ export function listLocalRootBindings(): LocalRootBinding[] {
       rootPath,
     }))
     .filter((entry) => entry.rootId && entry.rootPath)
+}
+
+export async function syncLocalRootBindingsFromRuntime(): Promise<void> {
+  try {
+    const localMap = getRootPathMap()
+    const runtimeBindings = await listRuntimeLocalRootBindings(ROOT_BINDING_RUNTIME_TIMEOUT_MS)
+    const runtimeRootIds = new Set(runtimeBindings.items.map((item) => item.rootId))
+    const nextMap: RootPathMapV3 = {
+      version: 3,
+      byRootId: {
+        ...localMap.byRootId,
+      },
+    }
+
+    for (const item of runtimeBindings.items) {
+      if (!item.rootId || !item.rootPath) continue
+      nextMap.byRootId[item.rootId] = item.rootPath
+    }
+
+    if (!isSameRootPathMap(localMap, nextMap)) {
+      setRootPathMap(nextMap)
+    }
+
+    await Promise.allSettled(
+      Object.entries(localMap.byRootId)
+        .filter(([rootId, rootPath]) => rootId && rootPath && !runtimeRootIds.has(rootId))
+        .map(([rootId, rootPath]) => (
+          upsertRuntimeLocalRootBinding(
+            {
+              rootId,
+              rootPath,
+            },
+            ROOT_BINDING_RUNTIME_TIMEOUT_MS
+          )
+        ))
+    )
+  } catch {
+    // Keep the local mirror usable when Fauplay Runtime is unavailable.
+  }
 }
 
 export function getRootPathMapUpdatedEventName(): string {

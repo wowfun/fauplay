@@ -26,13 +26,13 @@ pub use api::{
     GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
-    ListingSortKey, MissingFileCleanupImpact, MissingFileCleanupRequest,
-    MissingFileCleanupResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
-    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
-    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashEntry,
-    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem,
-    RootTrashMutationResponse, RootTrashRequest, RuntimeError, TextPreviewRequest,
-    TextPreviewResponse, TextPreviewStatus,
+    ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
+    MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
+    RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,
+    RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode,
+    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
+    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
+    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -61,6 +61,17 @@ impl FauplayRuntime {
         &self,
     ) -> Result<GlobalShortcutConfigResponse, RuntimeError> {
         store::load_global_shortcut_config(&self.runtime_home_path)
+    }
+
+    pub fn list_local_root_bindings(&self) -> Result<LocalRootBindingsResponse, RuntimeError> {
+        store::list_local_root_bindings(&self.runtime_home_path)
+    }
+
+    pub fn upsert_local_root_binding(
+        &self,
+        request: LocalRootBindingUpsertRequest,
+    ) -> Result<LocalRootBinding, RuntimeError> {
+        store::upsert_local_root_binding(&self.runtime_home_path, request)
     }
 
     pub fn list_global_trash(

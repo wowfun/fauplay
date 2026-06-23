@@ -499,6 +499,42 @@ fn runtime_api_returns_global_trash_file_metadata_by_recycle_id() {
 }
 
 #[test]
+fn runtime_api_persists_local_root_bindings() {
+    let fixture = Fixture::new("runtime_api_persists_local_root_bindings");
+    fixture.create_dir("Library Root");
+    let bound_root_path = fixture.root.join("Library Root");
+
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let upsert_response = send_runtime_home_request_once(&runtime_home_path, |address| {
+        send_local_root_binding_upsert_request(
+            address,
+            "root-one",
+            &bound_root_path.display().to_string(),
+        )
+    });
+    let list_response = send_runtime_home_request_once(&runtime_home_path, |address| {
+        send_local_root_bindings_request(address)
+    });
+
+    assert!(
+        upsert_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "upsert response should be OK: {upsert_response}"
+    );
+    assert!(
+        list_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "list response should be OK: {list_response}"
+    );
+    assert!(
+        list_response.contains("\"rootId\":\"root-one\""),
+        "list response should include the Local Root identity: {list_response}"
+    );
+    assert!(
+        list_response.contains(&format!("\"rootPath\":\"{}\"", json_path(&bound_root_path))),
+        "list response should include the bound host path: {list_response}"
+    );
+}
+
+#[test]
 fn runtime_api_moves_file_to_global_trash() {
     let fixture = Fixture::new("runtime_api_moves_file_to_global_trash");
     fixture.write_file("source/original.jpg", "image");
@@ -2005,6 +2041,63 @@ fn send_global_trash_file_metadata_request(address: &str, recycle_id: &str) -> S
         stream,
         "GET /v1/global-trash/file-metadata?recycleId={} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         percent_encode(recycle_id)
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_runtime_home_request_once(
+    runtime_home_path: &Path,
+    send_request: impl FnOnce(&str) -> String,
+) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fauplay-runtime"))
+        .arg("serve-once")
+        .arg("127.0.0.1:0")
+        .env("FAUPLAY_HOME", runtime_home_path)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("runtime binary should start");
+
+    let stdout = child.stdout.take().expect("stdout should be captured");
+    let mut stdout = BufReader::new(stdout);
+    let address = read_listen_address(&mut stdout);
+    let response = send_request(&address);
+    let status = child.wait().expect("runtime binary should exit");
+    assert!(
+        status.success(),
+        "runtime binary should serve one request successfully"
+    );
+
+    response
+}
+
+fn send_local_root_binding_upsert_request(address: &str, root_id: &str, root_path: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "PUT /v1/local-root-bindings?rootId={}&rootPath={} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        percent_encode(root_id),
+        percent_encode(root_path)
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_local_root_bindings_request(address: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/local-root-bindings HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )
     .expect("request should be written");
 
