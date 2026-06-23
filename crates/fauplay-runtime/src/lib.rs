@@ -7,19 +7,30 @@ mod store;
 mod tasks;
 
 pub use api::{
+    AnnotationTag, AnnotationTagOption, AnnotationTagOptionsRequest, AnnotationTagOptionsResponse,
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
-    FileContentRange, FileContentRangeRequest, FileContentRequest, FileContentResponse,
-    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse, GlobalTrashEntry,
-    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem,
-    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreItem,
-    GlobalTrashRestoreRequest, GlobalTrashRestoreResponse, ListDirectoryRequest,
-    ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
-    ListingSortKey, RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest,
-    RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule,
-    RootMoveSearchMode, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
-    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
-    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
+    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
+    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
+    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
+    FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
+    FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
+    FileAnnotationTagMutationResponse, FileContentRange, FileContentRangeRequest,
+    FileContentRequest, FileContentResponse, FileIndexEnsureItem, FileIndexEnsureRequest,
+    FileIndexEnsureResponse, FileIndexFailureReason, FileMetadataRequest, FileMetadataResponse,
+    GlobalShortcutConfigResponse, GlobalTrashEntry, GlobalTrashFailureReason,
+    GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem, GlobalTrashMoveRequest,
+    GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
+    GlobalTrashRestoreResponse, ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter,
+    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, MissingFileCleanupImpact,
+    MissingFileCleanupRequest, MissingFileCleanupResponse, RootMoveBatchFailureReason,
+    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
+    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
+    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
+    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -97,6 +108,76 @@ impl FauplayRuntime {
         request: FileMetadataRequest,
     ) -> Result<FileMetadataResponse, RuntimeError> {
         fs::read_file_metadata(request)
+    }
+
+    pub fn ensure_file_index_entries(
+        &self,
+        request: FileIndexEnsureRequest,
+    ) -> Result<FileIndexEnsureResponse, RuntimeError> {
+        store::ensure_file_index_entries(&self.runtime_home_path, request)
+    }
+
+    pub fn set_file_annotation_value(
+        &self,
+        request: FileAnnotationSetValueRequest,
+    ) -> Result<FileAnnotationMutationResponse, RuntimeError> {
+        store::set_file_annotation_value(&self.runtime_home_path, request)
+    }
+
+    pub fn bind_file_annotation_tag(
+        &self,
+        request: FileAnnotationTagBindingRequest,
+    ) -> Result<FileAnnotationTagMutationResponse, RuntimeError> {
+        store::bind_file_annotation_tag(&self.runtime_home_path, request)
+    }
+
+    pub fn unbind_file_annotation_tag(
+        &self,
+        request: FileAnnotationTagBindingRequest,
+    ) -> Result<FileAnnotationTagMutationResponse, RuntimeError> {
+        store::unbind_file_annotation_tag(&self.runtime_home_path, request)
+    }
+
+    pub fn read_file_annotation(
+        &self,
+        request: FileAnnotationReadRequest,
+    ) -> Result<FileAnnotationReadResponse, RuntimeError> {
+        store::read_file_annotation(&self.runtime_home_path, request)
+    }
+
+    pub fn list_annotation_tag_options(
+        &self,
+        request: AnnotationTagOptionsRequest,
+    ) -> Result<AnnotationTagOptionsResponse, RuntimeError> {
+        store::list_annotation_tag_options(&self.runtime_home_path, request)
+    }
+
+    pub fn query_file_annotations(
+        &self,
+        request: FileAnnotationQueryRequest,
+    ) -> Result<FileAnnotationQueryResponse, RuntimeError> {
+        store::query_file_annotations(&self.runtime_home_path, request)
+    }
+
+    pub fn rebind_file_annotation_paths(
+        &self,
+        request: FileAnnotationPathRebindRequest,
+    ) -> Result<FileAnnotationPathRebindResponse, RuntimeError> {
+        store::rebind_file_annotation_paths(&self.runtime_home_path, request)
+    }
+
+    pub fn cleanup_missing_file_annotations(
+        &self,
+        request: FileAnnotationMissingCleanupRequest,
+    ) -> Result<FileAnnotationMissingCleanupResponse, RuntimeError> {
+        self.cleanup_missing_files(request)
+    }
+
+    pub fn cleanup_missing_files(
+        &self,
+        request: MissingFileCleanupRequest,
+    ) -> Result<MissingFileCleanupResponse, RuntimeError> {
+        store::cleanup_missing_files(&self.runtime_home_path, request)
     }
 
     pub fn find_duplicate_files(

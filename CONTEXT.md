@@ -104,6 +104,26 @@ _Avoid_: raw file read, blob passthrough
 Lightweight observable attributes for a file under a Local Root, such as byte size and modification time. File Metadata does not include File Content.
 _Avoid_: stat, file info
 
+**File Index**:
+A runtime-owned catalog of files observed under a Local Root. It stores last-known File Metadata for Runtime Capabilities that need to compare or maintain local file state.
+_Avoid_: sqlite index, asset table, file database
+
+**File Index Entry**:
+A File Index record for one Root-relative Path that resolved to a file when observed.
+_Avoid_: file row, asset file, indexed asset
+
+**File Annotation**:
+User-maintained metadata attached to one Root-relative Path in a Local Root.
+_Avoid_: local data, asset metadata, sidecar tag
+
+**Annotation Tag**:
+A key/value label inside a File Annotation.
+_Avoid_: tag row, local.data tag, meta tag
+
+**Missing File Cleanup**:
+A maintenance action that removes runtime-owned records whose Root-relative Paths no longer resolve to files in a Local Root.
+_Avoid_: stale database cleanup, file index cleanup
+
 **File Content Range**:
 A contiguous byte segment of File Content, reported with its inclusive byte positions and the total file size. It supports media playback and progressive reads without changing the Root-relative Path identity of the file.
 _Avoid_: partial blob, sliced file

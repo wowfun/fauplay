@@ -3,6 +3,7 @@ import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gat
 import { getMimeType } from '@/lib/fileSystem'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import {
+  callRuntimeHttp,
   findRuntimeDuplicateFiles,
   moveRuntimeRootPathBatch,
   moveRuntimePathToGlobalTrash,
@@ -373,7 +374,7 @@ async function rebindRuntimeRootMoveBatchPaths(
   }
 
   try {
-    result.rebindResult = await callGatewayHttp(
+    result.rebindResult = await callRuntimeHttp(
       '/v1/files/relative-paths',
       {
         rootPath,
@@ -790,6 +791,48 @@ async function dispatchRuntimeGlobalTrash(
   return toRuntimeGlobalTrashToolResult(response)
 }
 
+async function dispatchRuntimeFileAnnotations(
+  toolName: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<ToolCallResult | null> {
+  const operation = typeof args.operation === 'string' ? args.operation : ''
+  const payload = toArgsWithoutOperation(args)
+
+  if (toolName === 'local.data') {
+    if (operation === 'setAnnotationValue') {
+      return callRuntimeHttp<ToolCallResult>('/v1/file-annotations', payload, timeoutMs, 'PUT')
+    }
+    if (operation === 'bindAnnotationTag') {
+      return callRuntimeHttp<ToolCallResult>('/v1/file-annotations/tags/bind', payload, timeoutMs)
+    }
+    if (operation === 'unbindAnnotationTag') {
+      return callRuntimeHttp<ToolCallResult>('/v1/file-annotations/tags/unbind', payload, timeoutMs)
+    }
+    if (operation === 'batchRebindPaths') {
+      return callRuntimeHttp<ToolCallResult>('/v1/files/relative-paths', payload, timeoutMs, 'PATCH')
+    }
+    if (operation === 'cleanupMissingFiles') {
+      return callRuntimeHttp<ToolCallResult>('/v1/files/missing/cleanups', payload, timeoutMs)
+    }
+    return null
+  }
+
+  if (toolName === 'data.tags') {
+    if (operation === 'listFileTags') {
+      return callRuntimeHttp<ToolCallResult>('/v1/data/tags/file', payload, timeoutMs)
+    }
+    if (operation === 'listTagOptions') {
+      return callRuntimeHttp<ToolCallResult>('/v1/data/tags/options', payload, timeoutMs)
+    }
+    if (operation === 'queryFiles') {
+      return callRuntimeHttp<ToolCallResult>('/v1/data/tags/query', payload, timeoutMs)
+    }
+  }
+
+  return null
+}
+
 function resolveDispatchHttpRoute(toolName: string, args: Record<string, unknown>): DispatchHttpRoute | null {
   const operation = typeof args.operation === 'string' ? args.operation : ''
   const payload = toArgsWithoutOperation(args)
@@ -1051,10 +1094,14 @@ export async function dispatchSystemTool({
     const runtimeGlobalTrashResult = runtimeDuplicateFilesResult || runtimeRootMoveResult || runtimeRootTrashResult
       ? null
       : await dispatchRuntimeGlobalTrash(toolName, argsPayload, timeoutMs)
+    const runtimeFileAnnotationResult = runtimeDuplicateFilesResult || runtimeRootMoveResult || runtimeRootTrashResult || runtimeGlobalTrashResult
+      ? null
+      : await dispatchRuntimeFileAnnotations(toolName, argsPayload, timeoutMs)
     const runtimeResult = runtimeDuplicateFilesResult
       ?? runtimeRootMoveResult
       ?? runtimeRootTrashResult
       ?? runtimeGlobalTrashResult
+      ?? runtimeFileAnnotationResult
     const httpRoute = runtimeResult ? null : resolveDispatchHttpRoute(toolName, argsPayload)
     if (!httpRoute && toolName === 'local.data') {
       const operation = typeof argsPayload.operation === 'string' ? argsPayload.operation : ''

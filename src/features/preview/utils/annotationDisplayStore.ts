@@ -1,7 +1,8 @@
 import type { AnnotationFilterTagOption } from '@/types'
 import { getActiveRemoteWorkspace, isRemoteReadonlyProviderActive } from '@/lib/accessState'
-import { callGatewayHttp, callRemoteGatewayHttp } from '@/lib/gateway'
+import { callRemoteGatewayHttp } from '@/lib/gateway'
 import { ensureRootPath } from '@/lib/reveal'
+import { callRuntimeHttp } from '@/lib/runtimeApi'
 
 const TAG_QUERY_PAGE_SIZE = 1000
 const META_ANNOTATION_SOURCE = 'meta.annotation'
@@ -492,7 +493,7 @@ async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<Gatewa
         excludeTagKeys: [],
         includeMatchMode: 'or',
       })
-      : await callGatewayHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
+      : await callRuntimeHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
         rootPath: target.rootPath,
         page,
         size: TAG_QUERY_PAGE_SIZE,
@@ -738,7 +739,7 @@ export async function preloadFileAnnotationDisplaySnapshot({
         rootId: targetDescriptor.remoteRootId,
         relativePath: normalizedPath,
       })
-      : await callGatewayHttp<GatewayFileTagResult>('/v1/data/tags/file', {
+      : await callRuntimeHttp<GatewayFileTagResult>('/v1/data/tags/file', {
         rootPath: targetDescriptor.rootPath,
         relativePath: normalizedPath,
       })
@@ -787,7 +788,7 @@ export async function preloadGlobalAnnotationTagOptions({
         ? await callRemoteGatewayHttp<GatewayTagOptionsResult>('/v1/remote/tags/options', {
           rootId: getActiveRemoteWorkspace()!.configRootId,
         })
-        : await callGatewayHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})
+        : await callRuntimeHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})
       const rawOptions = readTagOptionsFromResult(result)
       globalTagOptionsSnapshot.options = buildGlobalTagOptions(rawOptions)
       globalTagOptionsSnapshot.error = null

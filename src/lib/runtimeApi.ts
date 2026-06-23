@@ -319,7 +319,7 @@ function toFiniteNumber(value: unknown): number | undefined {
 async function callRuntimeJson(
   endpointPath: string,
   timeoutMs = DEFAULT_RUNTIME_TIMEOUT_MS,
-  method: 'GET' | 'POST' = 'GET',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET',
   body?: unknown,
 ): Promise<unknown> {
   const endpoint = buildRuntimeUrl(endpointPath)
@@ -358,6 +358,22 @@ async function callRuntimeJson(
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+export async function callRuntimeHttp<T = unknown>(
+  endpointPath: string,
+  body: unknown = {},
+  timeoutMs?: number,
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'POST',
+): Promise<T> {
+  return callRuntimeJson(
+    endpointPath,
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : DEFAULT_RUNTIME_TIMEOUT_MS,
+    method,
+    method === 'GET' ? undefined : body,
+  ) as Promise<T>
 }
 
 function parseRuntimeHealthSnapshot(payload: unknown): RuntimeHealthSnapshot {
