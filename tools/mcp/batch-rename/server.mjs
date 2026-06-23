@@ -1,10 +1,12 @@
-/* global process */
+/* global process, URL, fetch */
 import { execFileSync } from 'node:child_process'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import readline from 'node:readline'
 
 const MCP_PROTOCOL_VERSION = '2025-11-05'
+const DEFAULT_RUNTIME_BASE_URL =
+  (typeof process.env.FAUPLAY_RUNTIME_BASE_URL === 'string' && process.env.FAUPLAY_RUNTIME_BASE_URL.trim())
+  || 'http://127.0.0.1:3211'
 const DEFAULT_NAME_MASK = '[N]'
 const DEFAULT_SEARCH_MODE = 'plain'
 const DEFAULT_REGEX_FLAGS = 'g'
@@ -228,10 +230,6 @@ function parseJsonRpcRequest(payload) {
   }
 }
 
-function toPosixPath(p) {
-  return p.split(path.sep).join('/')
-}
-
 function normalizeRelativePath(input) {
   if (typeof input !== 'string' || !input.trim()) {
     throw toInvalidParamsError('relativePaths contains invalid value')
@@ -274,15 +272,6 @@ function resolveRootPath(input) {
   }
 
   return raw
-}
-
-function resolvePathWithinRoot(rootPath, relativePath) {
-  const target = path.resolve(rootPath, ...relativePath.split('/'))
-  const relative = path.relative(rootPath, target)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw toInvalidParamsError('relativePath escapes rootPath')
-  }
-  return target
 }
 
 function hasOwnKey(obj, key) {
@@ -332,13 +321,24 @@ function normalizeRegexFlags(input) {
   }
 
   try {
-    // Validate flags syntax and duplicates.
     new RegExp('', flags)
   } catch {
     throw toInvalidParamsError('regexFlags is invalid')
   }
 
   return flags
+}
+
+function parseConfirm(input) {
+  if (typeof input === 'undefined') {
+    return false
+  }
+
+  if (typeof input !== 'boolean') {
+    throw toInvalidParamsError('confirm must be a boolean when provided')
+  }
+
+  return input
 }
 
 function splitRuleArgs(args) {
@@ -368,17 +368,15 @@ function splitRuleArgs(args) {
   const counterStart = parsePositiveIntOption(args.counterStart, 'counterStart', 1)
   const counterStep = parsePositiveIntOption(args.counterStep, 'counterStep', 1)
   const counterPad = parseNonNegativeIntOption(args.counterPad, 'counterPad', 0)
+  const regexFlags = normalizeRegexFlags(args.regexFlags)
 
   if (nameMask === DEFAULT_NAME_MASK && findText === '') {
     throw toInvalidParamsError('at least one rename rule is required (nameMask/findText)')
   }
 
-  let searchRegex = null
-  let regexFlags = DEFAULT_REGEX_FLAGS
   if (findText !== '' && searchMode === 'regex') {
-    regexFlags = normalizeRegexFlags(args.regexFlags)
     try {
-      searchRegex = new RegExp(findText, regexFlags)
+      new RegExp(findText, regexFlags)
     } catch {
       throw toInvalidParamsError('findText is not a valid regular expression')
     }
@@ -390,271 +388,122 @@ function splitRuleArgs(args) {
     replaceText,
     searchMode,
     regexFlags,
-    searchRegex,
     counterStart,
     counterStep,
     counterPad,
   }
 }
 
-function resolveRootBaseName(rootPath) {
-  const base = path.basename(rootPath)
-  if (base) return base
-
-  const parsed = path.parse(rootPath)
-  return parsed.name || parsed.root || rootPath
+function buildRuntimeUrl(endpointPath) {
+  return new URL(
+    endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`,
+    `${DEFAULT_RUNTIME_BASE_URL.replace(/\/+$/, '')}/`
+  ).toString()
 }
 
-function formatCounterValue(counterValue, counterPad) {
-  const raw = String(counterValue)
-  if (counterPad <= 0) return raw
-  return raw.padStart(counterPad, '0')
+function toRuntimeToolError(message, code = 'MCP_TOOL_CALL_FAILED') {
+  const error = new Error(message)
+  error.code = code
+  return error
 }
 
-function renderNameMask(mask, context) {
-  return mask.replace(/\[(N|P|G|C)\]/g, (full, token) => {
-    if (token === 'N') return context.N
-    if (token === 'P') return context.P
-    if (token === 'G') return context.G
-    if (token === 'C') return context.C
-    return full
-  })
-}
-
-function applySearchReplace(input, rule) {
-  if (rule.findText === '') {
-    return input
-  }
-
-  if (rule.searchMode === 'plain') {
-    return input.split(rule.findText).join(rule.replaceText)
-  }
-
-  return input.replace(rule.searchRegex, rule.replaceText)
-}
-
-function applyRenameRule({ sourceFileName, normalizedRelativePath, rule, counterValue, rootBaseName }) {
-  const sourceParsed = path.parse(sourceFileName)
-  const segments = normalizedRelativePath.split('/')
-
-  const context = {
-    N: sourceParsed.name,
-    P: segments.length >= 2 ? segments[segments.length - 2] : rootBaseName,
-    G: segments.length >= 3 ? segments[segments.length - 3] : '',
-    C: formatCounterValue(counterValue, rule.counterPad),
-  }
-
-  let nextBase = renderNameMask(rule.nameMask, context)
-  nextBase = applySearchReplace(nextBase, rule)
-
-  if (!nextBase) {
-    throw toInvalidParamsError('rename result basename is empty')
-  }
-
-  if (nextBase.includes('/') || nextBase.includes('\\')) {
-    throw toInvalidParamsError('rename result basename contains path separators')
-  }
-
-  return `${nextBase}${sourceParsed.ext}`
-}
-
-async function pathExists(targetPath) {
+async function callRootMoveBatchRuntime({ rootPath, relativePaths, rule, dryRun }) {
+  let response
   try {
-    await fs.access(targetPath)
-    return true
-  } catch {
-    return false
+    response = await fetch(buildRuntimeUrl('/v1/root-move/batch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rootPath,
+        rootRelativePaths: relativePaths,
+        ...rule,
+        dryRun,
+      }),
+    })
+  } catch (error) {
+    throw toRuntimeToolError(
+      error instanceof Error
+        ? `failed to call Fauplay Runtime: ${error.message}`
+        : 'failed to call Fauplay Runtime'
+    )
   }
+
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw toRuntimeToolError(
+      typeof payload?.error === 'string'
+        ? payload.error
+        : `Fauplay Runtime request failed: ${response.status}`
+    )
+  }
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+    throw toRuntimeToolError('Fauplay Runtime returned an invalid Root Move Batch response')
+  }
+
+  return payload
 }
 
-async function allocateDedupedTargetPath({ sourceAbsolutePath, candidateAbsolutePath, reservedTargetPaths }) {
-  const parsed = path.parse(candidateAbsolutePath)
-  let attemptPath = candidateAbsolutePath
-  let suffixIndex = 1
-
-  while (true) {
-    if (attemptPath === sourceAbsolutePath) {
-      return attemptPath
-    }
-
-    if (!reservedTargetPaths.has(attemptPath)) {
-      const exists = await pathExists(attemptPath)
-      if (!exists) {
-        return attemptPath
-      }
-    }
-
-    attemptPath = path.join(parsed.dir, `${parsed.name} (${suffixIndex})${parsed.ext}`)
-    suffixIndex += 1
-  }
+function mapRuntimeFailureReason(reason) {
+  if (reason === 'target_exists') return 'RENAME_TARGET_EXISTS'
+  if (reason === 'source_not_found') return 'RENAME_SOURCE_NOT_FOUND'
+  if (reason === 'invalid_path') return 'RENAME_INVALID_PATH'
+  if (reason === 'invalid_rule') return 'RENAME_INVALID_RULE'
+  if (reason === 'invalid_target') return 'RENAME_INVALID_PATH'
+  if (reason === 'unsupported_kind') return 'RENAME_UNSUPPORTED_KIND'
+  if (reason === 'no_change') return 'RENAME_NO_CHANGE'
+  if (reason === 'mutation_failed') return 'RENAME_FAILED'
+  return reason ? 'RENAME_FAILED' : undefined
 }
 
-async function buildRenamePlans({ rootPath, relativePaths, rule }) {
-  const plans = []
-  const reservedTargetPaths = new Set()
-  const rootBaseName = resolveRootBaseName(rootPath)
-  let counterValue = rule.counterStart
+function toResponseItems(runtimeResponse) {
+  return runtimeResponse.items.map((item) => ({
+    relativePath: typeof item.rootRelativePath === 'string' ? item.rootRelativePath : undefined,
+    nextRelativePath: typeof item.nextRootRelativePath === 'string' ? item.nextRootRelativePath : undefined,
+    absolutePath: typeof item.absolutePath === 'string' ? item.absolutePath : undefined,
+    nextAbsolutePath: typeof item.nextAbsolutePath === 'string' ? item.nextAbsolutePath : undefined,
+    ok: item.ok === true,
+    skipped: item.skipped === true,
+    reasonCode: typeof item.reason === 'string'
+      ? mapRuntimeFailureReason(item.reason)
+      : undefined,
+    error: typeof item.error === 'string' ? item.error : undefined,
+  }))
+}
 
-  for (const originalRelativePath of relativePaths) {
-    let normalizedRelativePath = originalRelativePath
-
-    try {
-      normalizedRelativePath = normalizeRelativePath(originalRelativePath)
-      const sourceAbsolutePath = resolvePathWithinRoot(rootPath, normalizedRelativePath)
-
-      let stat
-      try {
-        stat = await fs.lstat(sourceAbsolutePath)
-      } catch {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RENAME_SOURCE_NOT_FOUND',
-          error: 'source file not found',
-        })
-        continue
-      }
-
-      if (!stat.isFile()) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          ok: false,
-          skipped: false,
-          reasonCode: 'RENAME_UNSUPPORTED_KIND',
-          error: 'only file items are supported',
-        })
-        continue
-      }
-
-      const sourceFileName = path.basename(sourceAbsolutePath)
-      const targetFileName = applyRenameRule({
-        sourceFileName,
-        normalizedRelativePath,
-        rule,
-        counterValue,
-        rootBaseName,
-      })
-      counterValue += rule.counterStep
-
-      const candidateAbsolutePath = path.join(path.dirname(sourceAbsolutePath), targetFileName)
-      const candidateRelativePath = toPosixPath(path.relative(rootPath, candidateAbsolutePath))
-
-      if (candidateAbsolutePath === sourceAbsolutePath) {
-        plans.push({
-          relativePath: normalizedRelativePath,
-          nextRelativePath: candidateRelativePath,
-          sourceAbsolutePath,
-          targetAbsolutePath: sourceAbsolutePath,
-          ok: true,
-          skipped: true,
-          reasonCode: 'RENAME_NO_CHANGE',
-        })
-        reservedTargetPaths.add(sourceAbsolutePath)
-        continue
-      }
-
-      const targetAbsolutePath = await allocateDedupedTargetPath({
-        sourceAbsolutePath,
-        candidateAbsolutePath,
-        reservedTargetPaths,
-      })
-      const targetRelativePath = toPosixPath(path.relative(rootPath, targetAbsolutePath))
-
-      plans.push({
-        relativePath: normalizedRelativePath,
-        nextRelativePath: targetRelativePath,
-        sourceAbsolutePath,
-        targetAbsolutePath,
-        ok: true,
-        skipped: false,
-      })
-      reservedTargetPaths.add(targetAbsolutePath)
-    } catch (error) {
-      plans.push({
-        relativePath: normalizedRelativePath,
-        ok: false,
-        skipped: false,
-        reasonCode: 'RENAME_INVALID_PATH',
-        error: error instanceof Error ? error.message : 'invalid path',
-      })
-    }
+function countOutcomeItems(items) {
+  return {
+    success: items.filter((item) => item.ok && item.skipped !== true).length,
+    skipped: items.filter((item) => item.skipped === true).length,
+    failed: items.filter((item) => item.ok !== true && item.skipped !== true).length,
   }
-
-  return plans
 }
 
 async function runBatchRename(args) {
-  const rootPath = resolveRootPath(args.rootPath)
-  const normalizedRootPath = path.resolve(rootPath)
+  const rootPath = path.resolve(resolveRootPath(args.rootPath))
 
   if (!Array.isArray(args.relativePaths) || args.relativePaths.length === 0) {
     throw toInvalidParamsError('relativePaths must be a non-empty string[]')
   }
 
-  const relativePaths = args.relativePaths.map((item) => {
-    if (typeof item !== 'string') {
-      throw toInvalidParamsError('relativePaths must be a non-empty string[]')
-    }
-    return item
-  })
-
-  const confirm = args.confirm === true
-  if (typeof args.confirm !== 'undefined' && typeof args.confirm !== 'boolean') {
-    throw toInvalidParamsError('confirm must be a boolean when provided')
-  }
-
+  const relativePaths = args.relativePaths.map((item) => normalizeRelativePath(item))
+  const confirm = parseConfirm(args.confirm)
   const rule = splitRuleArgs(args)
-  const items = await buildRenamePlans({
-    rootPath: normalizedRootPath,
+
+  const runtimeResponse = await callRootMoveBatchRuntime({
+    rootPath,
     relativePaths,
     rule,
+    dryRun: !confirm,
   })
-
-  if (confirm) {
-    for (const item of items) {
-      if (!item.ok || item.skipped || !item.sourceAbsolutePath || !item.targetAbsolutePath) {
-        continue
-      }
-
-      try {
-        if (await pathExists(item.targetAbsolutePath)) {
-          item.ok = false
-          item.skipped = false
-          item.reasonCode = 'RENAME_TARGET_EXISTS'
-          item.error = 'target path already exists'
-          continue
-        }
-
-        await fs.rename(item.sourceAbsolutePath, item.targetAbsolutePath)
-      } catch (error) {
-        item.ok = false
-        item.skipped = false
-        item.reasonCode = 'RENAME_SOURCE_NOT_FOUND'
-        item.error = error instanceof Error ? error.message : 'rename failed'
-      }
-    }
-  }
-
-  const responseItems = items.map((item) => ({
-    relativePath: item.relativePath,
-    nextRelativePath: item.nextRelativePath,
-    ok: item.ok,
-    skipped: item.skipped,
-    reasonCode: item.reasonCode,
-    error: item.error,
-  }))
-
-  const renamed = responseItems.filter((item) => item.ok && item.skipped !== true).length
-  const skipped = responseItems.filter((item) => item.skipped === true).length
-  const failed = responseItems.filter((item) => item.ok !== true && item.skipped !== true).length
+  const responseItems = toResponseItems(runtimeResponse)
+  const counts = countOutcomeItems(responseItems)
 
   return {
     dryRun: !confirm,
     total: responseItems.length,
-    renamed,
-    skipped,
-    failed,
+    renamed: counts.success,
+    skipped: counts.skipped,
+    failed: counts.failed,
     items: responseItems,
   }
 }

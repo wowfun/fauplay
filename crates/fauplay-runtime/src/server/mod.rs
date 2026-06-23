@@ -10,10 +10,11 @@ use crate::{
     GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
-    ListingQuery, ListingSortDirection, ListingSortKey, RootMoveFailureReason, RootMoveRequest,
-    RootMoveResponse, RootRelativePath, RootTrashFailureReason, RootTrashListRequest,
-    RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewStatus,
+    ListingQuery, ListingSortDirection, ListingSortKey, RootMoveBatchFailureReason,
+    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
+    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest,
+    RuntimeError, TextPreviewRequest, TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -150,6 +151,7 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             handle_find_duplicate_files(runtime, &query)
         }
         Some(("POST", "/v1/duplicate-files")) => handle_find_duplicate_files_json(runtime, request),
+        Some(("POST", "/v1/root-move/batch")) => handle_root_move_batch_json(runtime, request),
         Some(("POST", target))
             if target == "/v1/root-move" || target.starts_with("/v1/root-move?") =>
         {
@@ -188,6 +190,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/file-metadata"
             | "/v1/duplicate-files"
             | "/v1/root-move"
+            | "/v1/root-move/batch"
             | "/v1/root-trash"
             | "/v1/root-trash/move"
             | "/v1/root-trash/restore"
@@ -580,6 +583,66 @@ fn json_root_relative_path_values(payload: &serde_json::Value) -> Vec<&str> {
     }
 }
 
+fn json_root_move_batch_path_values(payload: &serde_json::Value) -> Vec<&str> {
+    let value = payload
+        .get("rootRelativePaths")
+        .or_else(|| payload.get("rootRelativePath"))
+        .or_else(|| payload.get("sourceRootRelativePaths"))
+        .or_else(|| payload.get("sourceRootRelativePath"));
+
+    match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => vec![value.trim()],
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_bool_field(payload: &serde_json::Value, key: &str) -> bool {
+    payload.get(key).and_then(serde_json::Value::as_bool) == Some(true)
+}
+
+fn json_string_or_default(payload: &serde_json::Value, key: &str, default_value: &str) -> String {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_value.to_owned())
+}
+
+fn json_i64_or_default(payload: &serde_json::Value, key: &str, default_value: i64) -> Option<i64> {
+    match payload.get(key) {
+        Some(serde_json::Value::Number(value)) => value.as_i64(),
+        Some(serde_json::Value::String(value)) if value.trim().is_empty() => Some(default_value),
+        Some(serde_json::Value::String(value)) => value.trim().parse::<i64>().ok(),
+        None => Some(default_value),
+        _ => None,
+    }
+}
+
+fn json_usize_or_default(
+    payload: &serde_json::Value,
+    key: &str,
+    default_value: usize,
+) -> Option<usize> {
+    match payload.get(key) {
+        Some(serde_json::Value::Number(value)) => {
+            value.as_u64().and_then(|value| value.try_into().ok())
+        }
+        Some(serde_json::Value::String(value)) if value.trim().is_empty() => Some(default_value),
+        Some(serde_json::Value::String(value)) => value.trim().parse::<usize>().ok(),
+        None => Some(default_value),
+        _ => None,
+    }
+}
+
 fn handle_root_move(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> HttpResponse {
     let Some(root_path) = query.get("rootPath") else {
         return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
@@ -626,6 +689,87 @@ fn handle_root_move(runtime: &FauplayRuntime, query: &HashMap<String, String>) -
             "Internal Server Error",
             &error_json(&error.to_string()),
         ),
+    }
+}
+
+fn handle_root_move_batch_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
+    let payload = match serde_json::from_str::<serde_json::Value>(http_request_body(request)) {
+        Ok(payload) => payload,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_paths = json_root_move_batch_path_values(&payload);
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"rootRelativePaths is required\"}",
+        );
+    }
+
+    let mut source_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
+    for root_relative_path in root_relative_paths {
+        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+        source_root_relative_paths.push(root_relative_path);
+    }
+
+    let search_mode = match json_string_or_default(&payload, "searchMode", "plain").as_str() {
+        "plain" => RootMoveSearchMode::Plain,
+        "regex" => RootMoveSearchMode::Regex,
+        _ => {
+            return http_response(
+                400,
+                "Bad Request",
+                "{\"error\":\"searchMode must be plain or regex\"}",
+            );
+        }
+    };
+    let Some(counter_start) = json_i64_or_default(&payload, "counterStart", 1) else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"counterStart must be an integer\"}",
+        );
+    };
+    let Some(counter_step) = json_i64_or_default(&payload, "counterStep", 1) else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"counterStep must be an integer\"}",
+        );
+    };
+    let Some(counter_pad) = json_usize_or_default(&payload, "counterPad", 0) else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"counterPad must be a non-negative integer\"}",
+        );
+    };
+
+    match runtime.move_root_path_batch(RootMoveBatchRequest {
+        root_path: PathBuf::from(root_path),
+        source_root_relative_paths,
+        rule: RootMoveRule {
+            name_mask: json_string_or_default(&payload, "nameMask", "[N]"),
+            find_text: json_string_or_default(&payload, "findText", ""),
+            replace_text: json_string_or_default(&payload, "replaceText", ""),
+            search_mode,
+            regex_flags: json_string_or_default(&payload, "regexFlags", "g"),
+            counter_start,
+            counter_step,
+            counter_pad,
+        },
+        dry_run: json_bool_field(&payload, "dryRun"),
+    }) {
+        Ok(response) => http_response(200, "OK", &root_move_batch_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
     }
 }
 
@@ -955,6 +1099,32 @@ fn root_move_response_json(response: RootMoveResponse) -> String {
     )
 }
 
+fn root_move_batch_response_json(response: RootMoveBatchResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(|item| {
+            format!(
+                "{{\"rootRelativePath\":\"{}\",\"nextRootRelativePath\":{},\"absolutePath\":\"{}\",\"nextAbsolutePath\":{},\"ok\":{},\"skipped\":{},\"reason\":{},\"error\":{}}}",
+                escape_json_string(&item.root_relative_path.to_string()),
+                optional_root_relative_path_json(item.next_root_relative_path.as_ref()),
+                escape_json_string(&item.absolute_path.display().to_string()),
+                optional_path_json(item.next_absolute_path.as_ref()),
+                item.ok,
+                item.skipped,
+                optional_root_move_batch_failure_reason_json(item.reason),
+                optional_string_json(item.error.as_deref()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{{\"dryRun\":{},\"total\":{},\"moved\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
+        response.dry_run, response.total, response.moved, response.skipped, response.failed,
+    )
+}
+
 fn root_trash_response_json(response: RootTrashMutationResponse) -> String {
     let items = response
         .items
@@ -1157,6 +1327,15 @@ fn optional_root_move_failure_reason_json(value: Option<RootMoveFailureReason>) 
     }
 }
 
+fn optional_root_move_batch_failure_reason_json(
+    value: Option<RootMoveBatchFailureReason>,
+) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", root_move_batch_failure_reason_json(value)),
+        None => "null".to_owned(),
+    }
+}
+
 fn root_move_failure_reason_json(value: RootMoveFailureReason) -> &'static str {
     match value {
         RootMoveFailureReason::InvalidSource => "invalid_source",
@@ -1165,6 +1344,19 @@ fn root_move_failure_reason_json(value: RootMoveFailureReason) -> &'static str {
         RootMoveFailureReason::UnsupportedKind => "unsupported_kind",
         RootMoveFailureReason::TargetExists => "target_exists",
         RootMoveFailureReason::MutationFailed => "mutation_failed",
+    }
+}
+
+fn root_move_batch_failure_reason_json(value: RootMoveBatchFailureReason) -> &'static str {
+    match value {
+        RootMoveBatchFailureReason::InvalidPath => "invalid_path",
+        RootMoveBatchFailureReason::InvalidRule => "invalid_rule",
+        RootMoveBatchFailureReason::InvalidTarget => "invalid_target",
+        RootMoveBatchFailureReason::SourceNotFound => "source_not_found",
+        RootMoveBatchFailureReason::UnsupportedKind => "unsupported_kind",
+        RootMoveBatchFailureReason::TargetExists => "target_exists",
+        RootMoveBatchFailureReason::NoChange => "no_change",
+        RootMoveBatchFailureReason::MutationFailed => "mutation_failed",
     }
 }
 

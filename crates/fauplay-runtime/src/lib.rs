@@ -15,10 +15,11 @@ pub use api::{
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreItem,
     GlobalTrashRestoreRequest, GlobalTrashRestoreResponse, ListDirectoryRequest,
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
-    ListingSortKey, RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    ListingSortKey, RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest,
+    RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule,
+    RootMoveSearchMode, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
+    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -110,6 +111,13 @@ impl FauplayRuntime {
         request: RootMoveRequest,
     ) -> Result<RootMoveResponse, RuntimeError> {
         fs::move_root_path(request)
+    }
+
+    pub fn move_root_path_batch(
+        &self,
+        request: RootMoveBatchRequest,
+    ) -> Result<RootMoveBatchResponse, RuntimeError> {
+        fs::move_root_path_batch(request)
     }
 
     pub fn move_to_root_trash(

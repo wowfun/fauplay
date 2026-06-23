@@ -68,6 +68,10 @@ _Avoid_: recycle item, deleted item
 A mutation that changes a file or directory's Root-relative Path within the same Local Root. A rename is a Root Move whose parent path does not change.
 _Avoid_: batch rename, filesystem move, rename job
 
+**Root Move Batch**:
+An ordered set of Root Moves planned from one naming rule and applied as one user command.
+_Avoid_: batch rename job, rename script
+
 **Duplicate Set**:
 Two or more files in a Local Root that have the same File Content and are presented together for review.
 _Avoid_: duplicate group, duplicate results

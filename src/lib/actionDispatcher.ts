@@ -4,7 +4,7 @@ import { getMimeType } from '@/lib/fileSystem'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import {
   findRuntimeDuplicateFiles,
-  moveRuntimeRootPath,
+  moveRuntimeRootPathBatch,
   moveRuntimePathToGlobalTrash,
   moveRuntimePathToRootTrash,
   restoreRuntimeGlobalTrash,
@@ -14,7 +14,7 @@ import {
   type RuntimeDuplicateSet,
   type RuntimeGlobalTrashMoveResponse,
   type RuntimeGlobalTrashRestoreResponse,
-  type RuntimeRootMoveResponse,
+  type RuntimeRootMoveBatchResponse,
   type RuntimeRootTrashResponse,
 } from '@/lib/runtimeApi'
 
@@ -45,11 +45,6 @@ interface DispatchHttpRoute {
 }
 
 type RuntimeRootTrashOperation = 'move' | 'restore'
-
-interface RuntimeRootMovePlan {
-  sourceRootRelativePath: string
-  targetRootRelativePath: string
-}
 
 function toToolError(error: unknown): { message: string; code?: string } {
   if (error instanceof Error) {
@@ -248,61 +243,6 @@ function readRestoreGlobalTrashRecycleIds(args: Record<string, unknown>): string
   return recycleIds.length > 0 ? recycleIds : null
 }
 
-function splitFileName(fileName: string): { baseName: string; extension: string } {
-  const dotIndex = fileName.lastIndexOf('.')
-  if (dotIndex <= 0) {
-    return {
-      baseName: fileName,
-      extension: '',
-    }
-  }
-
-  return {
-    baseName: fileName.slice(0, dotIndex),
-    extension: fileName.slice(dotIndex),
-  }
-}
-
-function getParentPath(rootRelativePath: string): string {
-  const segments = rootRelativePath.split('/').filter(Boolean)
-  if (segments.length <= 1) return ''
-  return segments.slice(0, -1).join('/')
-}
-
-function joinRootRelativePath(parentPath: string, name: string): string {
-  return parentPath ? `${parentPath}/${name}` : name
-}
-
-function readRuntimeRootMovePlan(args: Record<string, unknown>): RuntimeRootMovePlan | null {
-  if (!isStringArray(args.relativePaths) || args.relativePaths.length !== 1) {
-    return null
-  }
-  if (args.nameMask !== '[N]' || args.searchMode !== 'plain') {
-    return null
-  }
-  if (typeof args.findText !== 'string' || typeof args.replaceText !== 'string') {
-    return null
-  }
-
-  const sourceRootRelativePath = normalizeRootRelativePath(args.relativePaths[0])
-  const nextBaseName = args.replaceText.trim()
-  if (!sourceRootRelativePath || !nextBaseName || nextBaseName.includes('/') || nextBaseName.includes('\\')) {
-    return null
-  }
-
-  const pathSegments = sourceRootRelativePath.split('/').filter(Boolean)
-  const fileName = pathSegments[pathSegments.length - 1] || ''
-  const { baseName, extension } = splitFileName(fileName)
-  if (baseName !== args.findText) {
-    return null
-  }
-
-  return {
-    sourceRootRelativePath,
-    targetRootRelativePath: joinRootRelativePath(getParentPath(sourceRootRelativePath), `${nextBaseName}${extension}`),
-  }
-}
-
 function mapRuntimeFailureReason(operation: RuntimeRootTrashOperation, reason: string | null): string | undefined {
   if (!reason) return undefined
 
@@ -326,33 +266,12 @@ function mapRootMoveFailureReason(reason: string | null): string | undefined {
   if (!reason) return undefined
   if (reason === 'target_exists') return 'RENAME_TARGET_EXISTS'
   if (reason === 'source_not_found') return 'RENAME_SOURCE_NOT_FOUND'
-  if (reason === 'invalid_source') return 'RENAME_INVALID_SOURCE'
+  if (reason === 'invalid_source' || reason === 'invalid_path') return 'RENAME_INVALID_SOURCE'
   if (reason === 'invalid_target') return 'RENAME_INVALID_TARGET'
+  if (reason === 'invalid_rule') return 'RENAME_INVALID_RULE'
   if (reason === 'unsupported_kind') return 'RENAME_UNSUPPORTED_KIND'
+  if (reason === 'no_change') return 'RENAME_NO_CHANGE'
   return 'RENAME_FAILED'
-}
-
-function toRuntimeRootMoveToolResult(response: RuntimeRootMoveResponse): ToolCallResult {
-  const item = {
-    relativePath: response.sourceRootRelativePath,
-    nextRelativePath: response.targetRootRelativePath,
-    absolutePath: response.absolutePath,
-    nextAbsolutePath: response.targetAbsolutePath,
-    ok: response.ok,
-    skipped: false,
-    reasonCode: mapRootMoveFailureReason(response.reason),
-    error: response.error ?? undefined,
-  }
-
-  return {
-    ok: true,
-    dryRun: response.dryRun,
-    total: 1,
-    renamed: response.ok ? 1 : 0,
-    skipped: 0,
-    failed: response.ok ? 0 : 1,
-    items: [item],
-  }
 }
 
 function toRuntimeRootTrashToolResult(
@@ -382,6 +301,93 @@ function toRuntimeRootTrashToolResult(
     failed,
     items,
   }
+}
+
+function toRuntimeRootMoveBatchToolResult(response: RuntimeRootMoveBatchResponse): ToolCallResult {
+  const items = response.items.map((item) => ({
+    relativePath: item.rootRelativePath,
+    nextRelativePath: item.nextRootRelativePath ?? undefined,
+    absolutePath: item.absolutePath,
+    nextAbsolutePath: item.nextAbsolutePath ?? undefined,
+    ok: item.ok,
+    skipped: item.skipped,
+    reasonCode: mapRootMoveFailureReason(item.reason),
+    error: item.error ?? undefined,
+  }))
+
+  return {
+    ok: true,
+    dryRun: response.dryRun,
+    total: response.total,
+    renamed: response.moved,
+    skipped: response.skipped,
+    failed: response.failed,
+    items,
+  }
+}
+
+interface RuntimeRootMoveRebindMapping {
+  fromRelativePath: string
+  toRelativePath: string
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function appendPostProcessWarning(result: Record<string, unknown>, warning: string): void {
+  const previous = typeof result.postProcessWarning === 'string' ? result.postProcessWarning : ''
+  result.postProcessWarning = previous ? `${previous}; ${warning}` : warning
+}
+
+function readRuntimeRootMoveRebindMappings(result: ToolCallResult): RuntimeRootMoveRebindMapping[] {
+  if (!isObjectRecord(result) || !Array.isArray(result.items)) {
+    return []
+  }
+
+  const mappings: RuntimeRootMoveRebindMapping[] = []
+  for (const item of result.items) {
+    if (!isObjectRecord(item)) continue
+    if (item.ok !== true || item.skipped === true) continue
+    const fromRelativePath = typeof item.relativePath === 'string' ? item.relativePath.trim() : ''
+    const toRelativePath = typeof item.nextRelativePath === 'string' ? item.nextRelativePath.trim() : ''
+    if (!fromRelativePath || !toRelativePath || fromRelativePath === toRelativePath) continue
+    mappings.push({ fromRelativePath, toRelativePath })
+  }
+
+  return mappings
+}
+
+async function rebindRuntimeRootMoveBatchPaths(
+  rootPath: string,
+  result: ToolCallResult,
+  timeoutMs?: number,
+): Promise<ToolCallResult> {
+  if (!isObjectRecord(result) || result.dryRun === true || Number(result.renamed ?? 0) <= 0) {
+    return result
+  }
+
+  const mappings = readRuntimeRootMoveRebindMappings(result)
+  if (mappings.length === 0) {
+    return result
+  }
+
+  try {
+    result.rebindResult = await callGatewayHttp(
+      '/v1/files/relative-paths',
+      {
+        rootPath,
+        mappings,
+      },
+      typeof timeoutMs === 'number' ? timeoutMs : 120000,
+      'PATCH',
+    )
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'unknown error'
+    appendPostProcessWarning(result, `batchRebindPaths failed: ${reason}`)
+  }
+
+  return result
 }
 
 function toRuntimeGlobalTrashMoveToolResult(response: RuntimeGlobalTrashMoveResponse): ToolCallResult {
@@ -662,19 +668,50 @@ async function dispatchRuntimeRootMove(
     return null
   }
 
-  const plan = readRuntimeRootMovePlan(args)
-  if (!plan) {
+  if (!isStringArray(args.relativePaths) || args.relativePaths.length === 0) {
     return null
   }
+  const rootRelativePaths = args.relativePaths
+    .map((item) => normalizeRootRelativePath(item))
+    .filter((item) => item)
+  if (rootRelativePaths.length !== args.relativePaths.length) {
+    return null
+  }
+  const searchMode = args.searchMode === 'regex' ? 'regex' : 'plain'
+  const nameMask = typeof args.nameMask === 'string' && args.nameMask.length > 0
+    ? args.nameMask
+    : '[N]'
+  const findText = typeof args.findText === 'string' ? args.findText : ''
+  const replaceText = typeof args.replaceText === 'string' ? args.replaceText : ''
+  const regexFlags = typeof args.regexFlags === 'string' && args.regexFlags.trim()
+    ? args.regexFlags.trim()
+    : 'g'
 
   try {
-    const response = await moveRuntimeRootPath({
+    const response = await moveRuntimeRootPathBatch({
       rootPath,
-      sourceRootRelativePath: plan.sourceRootRelativePath,
-      targetRootRelativePath: plan.targetRootRelativePath,
-      dryRun: args.confirm === false,
+      rootRelativePaths,
+      nameMask,
+      findText,
+      replaceText,
+      searchMode,
+      regexFlags,
+      counterStart: typeof args.counterStart === 'number' || typeof args.counterStart === 'string'
+        ? args.counterStart
+        : 1,
+      counterStep: typeof args.counterStep === 'number' || typeof args.counterStep === 'string'
+        ? args.counterStep
+        : 1,
+      counterPad: typeof args.counterPad === 'number' || typeof args.counterPad === 'string'
+        ? args.counterPad
+        : 0,
+      dryRun: args.confirm !== true,
     }, timeoutMs)
-    return toRuntimeRootMoveToolResult(response)
+    return rebindRuntimeRootMoveBatchPaths(
+      rootPath,
+      toRuntimeRootMoveBatchToolResult(response),
+      timeoutMs,
+    )
   } catch {
     return null
   }

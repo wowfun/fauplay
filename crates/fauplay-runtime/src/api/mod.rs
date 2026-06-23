@@ -249,6 +249,66 @@ pub struct RootMoveResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveBatchRequest {
+    pub root_path: PathBuf,
+    pub source_root_relative_paths: Vec<RootRelativePath>,
+    pub rule: RootMoveRule,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveRule {
+    pub name_mask: String,
+    pub find_text: String,
+    pub replace_text: String,
+    pub search_mode: RootMoveSearchMode,
+    pub regex_flags: String,
+    pub counter_start: i64,
+    pub counter_step: i64,
+    pub counter_pad: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootMoveSearchMode {
+    Plain,
+    Regex,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveBatchResponse {
+    pub dry_run: bool,
+    pub total: usize,
+    pub moved: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub items: Vec<RootMoveBatchItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMoveBatchItem {
+    pub root_relative_path: RootRelativePath,
+    pub next_root_relative_path: Option<RootRelativePath>,
+    pub absolute_path: PathBuf,
+    pub next_absolute_path: Option<PathBuf>,
+    pub ok: bool,
+    pub skipped: bool,
+    pub reason: Option<RootMoveBatchFailureReason>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootMoveBatchFailureReason {
+    InvalidPath,
+    InvalidRule,
+    InvalidTarget,
+    SourceNotFound,
+    UnsupportedKind,
+    TargetExists,
+    NoChange,
+    MutationFailed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootMoveFailureReason {
     InvalidSource,
@@ -518,6 +578,12 @@ impl RuntimeError {
     pub(crate) fn invalid_runtime_home_file(path: &Path, message: &str) -> Self {
         Self {
             message: format!("invalid Runtime Home file {}: {message}", path.display()),
+        }
+    }
+
+    pub(crate) fn invalid_root_move_rule(message: &str) -> Self {
+        Self {
+            message: format!("invalid Root Move rule: {message}"),
         }
     }
 

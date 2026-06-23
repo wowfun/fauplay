@@ -87,6 +87,40 @@ export interface RuntimeRootMoveResponse {
   error: string | null
 }
 
+export interface RuntimeRootMoveBatchRequest {
+  rootPath: string
+  rootRelativePaths: string[]
+  nameMask?: string
+  findText?: string
+  replaceText?: string
+  searchMode?: 'plain' | 'regex'
+  regexFlags?: string
+  counterStart?: number | string
+  counterStep?: number | string
+  counterPad?: number | string
+  dryRun?: boolean
+}
+
+export interface RuntimeRootMoveBatchItem {
+  rootRelativePath: string
+  nextRootRelativePath: string | null
+  absolutePath: string
+  nextAbsolutePath: string | null
+  ok: boolean
+  skipped: boolean
+  reason: string | null
+  error: string | null
+}
+
+export interface RuntimeRootMoveBatchResponse {
+  dryRun: boolean
+  total: number
+  moved: number
+  skipped: number
+  failed: number
+  items: RuntimeRootMoveBatchItem[]
+}
+
 export interface RuntimeDuplicateFilesRequest {
   rootPath: string
   rootRelativePath: string | string[]
@@ -550,6 +584,31 @@ export async function moveRuntimeRootPath(
   return parseRuntimeRootMoveResponse(payload)
 }
 
+export async function moveRuntimeRootPathBatch(
+  request: RuntimeRootMoveBatchRequest,
+  timeoutMs?: number,
+): Promise<RuntimeRootMoveBatchResponse> {
+  const payload = await callRuntimeJson(
+    '/v1/root-move/batch',
+    timeoutMs,
+    'POST',
+    {
+      rootPath: request.rootPath,
+      rootRelativePaths: request.rootRelativePaths,
+      nameMask: request.nameMask,
+      findText: request.findText,
+      replaceText: request.replaceText,
+      searchMode: request.searchMode,
+      regexFlags: request.regexFlags,
+      counterStart: request.counterStart,
+      counterStep: request.counterStep,
+      counterPad: request.counterPad,
+      dryRun: request.dryRun === true,
+    },
+  )
+  return parseRuntimeRootMoveBatchResponse(payload)
+}
+
 export async function moveRuntimePathToGlobalTrash(
   request: RuntimeGlobalTrashMoveRequest,
   timeoutMs?: number,
@@ -723,6 +782,54 @@ function parseRuntimeRootMoveResponse(payload: unknown): RuntimeRootMoveResponse
     ok: payload.ok === true,
     reason: typeof payload.reason === 'string' ? payload.reason : null,
     error: typeof payload.error === 'string' ? payload.error : null,
+  }
+}
+
+function parseRuntimeRootMoveBatchResponse(payload: unknown): RuntimeRootMoveBatchResponse {
+  if (!isObject(payload)) {
+    return {
+      dryRun: false,
+      total: 0,
+      moved: 0,
+      skipped: 0,
+      failed: 0,
+      items: [],
+    }
+  }
+
+  return {
+    dryRun: payload.dryRun === true,
+    total: Math.max(0, Math.trunc(toFiniteNumber(payload.total) ?? 0)),
+    moved: Math.max(0, Math.trunc(toFiniteNumber(payload.moved) ?? 0)),
+    skipped: Math.max(0, Math.trunc(toFiniteNumber(payload.skipped) ?? 0)),
+    failed: Math.max(0, Math.trunc(toFiniteNumber(payload.failed) ?? 0)),
+    items: Array.isArray(payload.items)
+      ? payload.items
+        .map((item) => parseRuntimeRootMoveBatchItem(item))
+        .filter((item): item is RuntimeRootMoveBatchItem => item !== null)
+      : [],
+  }
+}
+
+function parseRuntimeRootMoveBatchItem(value: unknown): RuntimeRootMoveBatchItem | null {
+  if (!isObject(value)) return null
+  const rootRelativePath = typeof value.rootRelativePath === 'string'
+    ? normalizeRootRelativePath(value.rootRelativePath)
+    : ''
+  const absolutePath = typeof value.absolutePath === 'string' ? value.absolutePath : ''
+  if (!rootRelativePath || !absolutePath) return null
+
+  return {
+    rootRelativePath,
+    nextRootRelativePath: typeof value.nextRootRelativePath === 'string'
+      ? normalizeRootRelativePath(value.nextRootRelativePath)
+      : null,
+    absolutePath,
+    nextAbsolutePath: typeof value.nextAbsolutePath === 'string' ? value.nextAbsolutePath : null,
+    ok: value.ok === true,
+    skipped: value.skipped === true,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    error: typeof value.error === 'string' ? value.error : null,
   }
 }
 

@@ -1026,6 +1026,52 @@ fn runtime_api_plans_root_move_without_mutating_when_dry_run() {
 }
 
 #[test]
+fn runtime_api_plans_root_move_batch_from_json_body() {
+    let fixture = Fixture::new("runtime_api_plans_root_move_batch_from_json_body");
+    fixture.write_file("albums/a.jpg", "a");
+    fixture.write_file("albums/b.jpg", "b");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let server = thread::spawn(move || {
+        serve_one_http_request(listener, FauplayRuntime::new())
+            .expect("Runtime API request should be served");
+    });
+
+    let response = send_root_move_batch_json_request(
+        &address.to_string(),
+        &fixture.root.display().to_string(),
+        &["albums/a.jpg", "albums/b.jpg"],
+        true,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"dryRun\":true"),
+        "response should report a dry-run Root Move Batch: {response}"
+    );
+    assert!(
+        response.contains("\"moved\":2"),
+        "response should report planned Root Moves: {response}"
+    );
+    assert!(
+        response.contains("\"nextRootRelativePath\":\"albums/albums-03-a.jpg\""),
+        "response should include the first planned target: {response}"
+    );
+    assert!(
+        response.contains("\"nextRootRelativePath\":\"albums/albums-04-b.jpg\""),
+        "response should include the second planned target: {response}"
+    );
+    fixture.assert_file("albums/a.jpg", "a");
+    fixture.assert_file("albums/b.jpg", "b");
+    fixture.assert_missing("albums/albums-03-a.jpg");
+}
+
+#[test]
 fn runtime_api_reports_root_move_target_conflicts_without_overwriting() {
     let fixture =
         Fixture::new("runtime_api_reports_root_move_target_conflicts_without_overwriting");
@@ -1493,6 +1539,37 @@ fn send_root_move_request(
     write!(
         stream,
         "POST /v1/root-move?rootPath={root_path}&sourceRootRelativePath={source_root_relative_path}&targetRootRelativePath={target_root_relative_path}&dryRun={dry_run} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_root_move_batch_json_request(
+    address: &str,
+    root_path: &str,
+    root_relative_paths: &[&str],
+    dry_run: bool,
+) -> String {
+    let root_relative_paths = root_relative_paths
+        .iter()
+        .map(|path| format!("\"{path}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let body = format!(
+        "{{\"rootPath\":\"{}\",\"rootRelativePaths\":[{root_relative_paths}],\"nameMask\":\"[P]-[C]-[N]\",\"findText\":\"\",\"replaceText\":\"\",\"searchMode\":\"plain\",\"regexFlags\":\"g\",\"counterStart\":3,\"counterStep\":1,\"counterPad\":2,\"dryRun\":{dry_run}}}",
+        json_path(Path::new(root_path)),
+    );
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "POST /v1/root-move/batch HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
     )
     .expect("request should be written");
 
