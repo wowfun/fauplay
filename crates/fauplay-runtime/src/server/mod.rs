@@ -13,7 +13,8 @@ use crate::{
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
     FileAnnotationTagMutationResponse, FileContentRangeRequest, FileContentRequest,
-    FileContentResponse, FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
+    FileContentResponse, FileIndexEnsureRequest, FileIndexEnsureResponse, FileIndexFailureReason,
+    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
     GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
     GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
@@ -171,6 +172,9 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/files/missing/cleanups")) => {
             handle_cleanup_missing_file_annotations_json(runtime, request)
         }
+        Some(("POST", "/v1/files/indexes")) => {
+            handle_ensure_file_index_entries_json(runtime, request)
+        }
         Some(("POST", "/v1/data/tags/file")) => handle_read_file_annotation_json(runtime, request),
         Some(("POST", "/v1/data/tags/options")) => {
             handle_list_annotation_tag_options_json(runtime, request)
@@ -221,6 +225,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/file-annotations/tags/unbind"
             | "/v1/files/relative-paths"
             | "/v1/files/missing/cleanups"
+            | "/v1/files/indexes"
             | "/v1/data/tags/file"
             | "/v1/data/tags/options"
             | "/v1/data/tags/query"
@@ -851,6 +856,43 @@ fn handle_cleanup_missing_file_annotations_json(
     }
 }
 
+fn handle_ensure_file_index_entries_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let root_relative_paths = json_root_relative_path_values(&payload);
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"relativePaths is required\"}",
+        );
+    }
+
+    let mut parsed_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
+    for root_relative_path in root_relative_paths {
+        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
+            Ok(path) => path,
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        };
+        parsed_root_relative_paths.push(root_relative_path);
+    }
+
+    match runtime.ensure_file_index_entries(FileIndexEnsureRequest {
+        root_path: PathBuf::from(root_path),
+        root_relative_paths: parsed_root_relative_paths,
+    }) {
+        Ok(response) => http_response(200, "OK", &file_index_ensure_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 fn parse_json_body(request: &str) -> Result<serde_json::Value, HttpResponse> {
     let body = http_request_body(request).trim();
     if body.is_empty() {
@@ -924,7 +966,9 @@ fn parse_file_annotation_action_source(value: Option<&str>) -> FileAnnotationAct
 fn json_root_relative_path_values(payload: &serde_json::Value) -> Vec<&str> {
     let value = payload
         .get("rootRelativePath")
-        .or_else(|| payload.get("rootRelativePaths"));
+        .or_else(|| payload.get("rootRelativePaths"))
+        .or_else(|| payload.get("relativePath"))
+        .or_else(|| payload.get("relativePaths"));
 
     match value {
         Some(serde_json::Value::String(value)) if !value.trim().is_empty() => vec![value.trim()],
@@ -1362,6 +1406,12 @@ fn optional_usize_json(value: Option<usize>) -> String {
         .unwrap_or_else(|| "null".to_owned())
 }
 
+fn optional_u64_json(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_owned())
+}
+
 fn text_preview_response_json(response: crate::TextPreviewResponse) -> String {
     format!(
         "{{\"status\":\"{}\",\"content\":{},\"fileSizeBytes\":{},\"sizeLimitBytes\":{},\"error\":{}}}",
@@ -1502,11 +1552,43 @@ fn file_annotation_missing_cleanup_response_json(
         .join(",");
 
     format!(
-        "{{\"ok\":true,\"dryRun\":{},\"missingRootRelativePaths\":[{missing_root_relative_paths}],\"missingAbsolutePaths\":[{missing_absolute_paths}],\"impact\":{{\"fileAnnotation\":{},\"annotationTag\":{}}},\"removed\":{}}}",
+        "{{\"ok\":true,\"dryRun\":{},\"missingRootRelativePaths\":[{missing_root_relative_paths}],\"missingAbsolutePaths\":[{missing_absolute_paths}],\"impact\":{{\"fileAnnotation\":{},\"annotationTag\":{},\"fileIndexEntry\":{}}},\"removed\":{}}}",
         response.dry_run,
         response.impact.file_annotations,
         response.impact.annotation_tags,
+        response.impact.file_index_entries,
         response.removed,
+    )
+}
+
+fn file_index_ensure_response_json(response: FileIndexEnsureResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(|item| {
+            let root_relative_path = item.root_relative_path.to_string();
+            let reason_code = item.reason.map(file_index_failure_reason_code);
+            format!(
+                "{{\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"ok\":{},\"skipped\":{},\"assetId\":null,\"absolutePath\":{},\"fileMtimeMs\":{},\"lastModifiedMs\":{},\"size\":{},\"reasonCode\":{},\"reason\":{},\"error\":{}}}",
+                escape_json_string(&root_relative_path),
+                escape_json_string(&root_relative_path),
+                item.ok,
+                item.skipped,
+                optional_path_json(item.absolute_path.as_ref()),
+                optional_u64_json(item.last_modified_ms),
+                optional_u64_json(item.last_modified_ms),
+                optional_u64_json(item.size),
+                optional_string_json(reason_code),
+                optional_string_json(reason_code),
+                optional_string_json(item.error.as_deref()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{{\"ok\":true,\"total\":{},\"indexed\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
+        response.total, response.indexed, response.skipped, response.failed,
     )
 }
 
@@ -1857,6 +1939,15 @@ fn file_annotation_rebind_failure_reason_code(
         FileAnnotationPathRebindFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
         FileAnnotationPathRebindFailureReason::TargetNotFound => "TARGET_NOT_FOUND",
         FileAnnotationPathRebindFailureReason::NoChange => "NO_CHANGE",
+    }
+}
+
+fn file_index_failure_reason_code(value: FileIndexFailureReason) -> &'static str {
+    match value {
+        FileIndexFailureReason::IndexFresh => "INDEX_FRESH",
+        FileIndexFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
+        FileIndexFailureReason::NotFile => "NOT_FILE",
+        FileIndexFailureReason::IndexFailed => "INDEX_FAILED",
     }
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
-import { buildRuntimeFileContentUrl, loadRuntimeTextPreview } from '@/lib/runtimeApi'
+import { buildRuntimeFileContentUrl, loadRuntimeTextPreview, resolveRuntimeFileLocator } from '@/lib/runtimeApi'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
 import {
   buildGatewayFileContentUrlForItem,
@@ -251,12 +251,17 @@ export function FilePreviewPanel({
     () => (rootId ? getBoundRootPath(rootId) : null),
     [rootId]
   )
+  const runtimeFileLocator = useMemo(
+    () => (file && file.kind === 'file' ? resolveRuntimeFileLocator(file, boundRootPath) : null),
+    [boundRootPath, file]
+  )
+  const currentRootRelativePath = runtimeFileLocator && runtimeFileLocator.rootPath === boundRootPath
+    ? runtimeFileLocator.rootRelativePath
+    : (file?.path ?? '')
   const hasRemoteFileLocator = Boolean(file && typeof file.remoteRootId === 'string' && file.remoteRootId.trim())
   const hasRuntimeFileLocator = Boolean(
-    file
-    && boundRootPath
-    && file.sourceRootPath === boundRootPath
-    && (file.sourceRelativePath || file.path)
+    runtimeFileLocator
+    && runtimeFileLocator.rootPath === boundRootPath
   )
   const canAccessThroughCurrentRoot = useMemo(() => {
     if (!file || file.kind !== 'file') return false
@@ -632,7 +637,7 @@ export function FilePreviewPanel({
           return
         }
 
-        if (shouldUseRuntimeTextPreview && boundRootPath) {
+        if (shouldUseRuntimeTextPreview && runtimeFileLocator) {
           setFileMimeType(file.mimeType || getMimeType(file.name))
           setFileSizeBytes(file.size ?? null)
           setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
@@ -640,8 +645,8 @@ export function FilePreviewPanel({
 
           try {
             const textResult = await loadRuntimeTextPreview({
-              rootPath: boundRootPath,
-              rootRelativePath: file.path,
+              rootPath: runtimeFileLocator.rootPath,
+              rootRelativePath: runtimeFileLocator.rootRelativePath,
               sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
             })
             if (cancelled) return
@@ -653,14 +658,14 @@ export function FilePreviewPanel({
           }
         }
 
-        if (shouldUseRuntimeFileContent && boundRootPath) {
+        if (shouldUseRuntimeFileContent && runtimeFileLocator) {
           setFileMimeType(file.mimeType || getMimeType(file.name))
           setFileSizeBytes(file.size ?? null)
           setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
           setTextPreview(INITIAL_TEXT_PREVIEW)
           replacePreviewUrl(buildRuntimeFileContentUrl({
-            rootPath: boundRootPath,
-            rootRelativePath: file.path,
+            rootPath: runtimeFileLocator.rootPath,
+            rootRelativePath: runtimeFileLocator.rootRelativePath,
           }))
           return
         }
@@ -669,7 +674,7 @@ export function FilePreviewPanel({
           throw new Error('当前文件无法通过工作区目录句柄读取')
         }
 
-        const fileObj = await getFileFromPath(rootHandle, file.path)
+        const fileObj = await getFileFromPath(rootHandle, currentRootRelativePath)
         if (cancelled) return
 
         setFileMimeType(fileObj.type || getMimeType(file.name))
@@ -757,9 +762,11 @@ export function FilePreviewPanel({
     }
   }, [
     boundRootPath,
+    currentRootRelativePath,
     file,
     replacePreviewUrl,
     rootHandle,
+    runtimeFileLocator,
     shouldUseGatewayFileAccess,
     shouldUseRuntimeFileContent,
     shouldUseRuntimeTextPreview,

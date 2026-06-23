@@ -52,6 +52,11 @@ export interface RuntimeFileContentRequest {
   rootRelativePath: string
 }
 
+export interface RuntimeFileLocator {
+  rootPath: string
+  rootRelativePath: string
+}
+
 export interface RuntimeFileMetadataRequest {
   rootPath: string
   rootRelativePath: string
@@ -698,19 +703,34 @@ export async function findRuntimeDuplicateFiles(
 }
 
 export function buildRuntimeFileContentUrlForItem(file: FileItem): string | null {
-  const rootPath = typeof file.sourceRootPath === 'string' ? file.sourceRootPath.trim() : ''
-  const rootRelativePath = typeof file.sourceRelativePath === 'string'
-    ? normalizeRootRelativePath(file.sourceRelativePath)
-    : normalizeRootRelativePath(file.path)
+  const locator = resolveRuntimeFileLocator(file)
+  if (!locator) {
+    return null
+  }
+
+  return buildRuntimeFileContentUrl(locator)
+}
+
+export function resolveRuntimeFileLocator(
+  file: FileItem,
+  fallbackRootPath?: string | null,
+): RuntimeFileLocator | null {
+  const rootPath = typeof file.sourceRootPath === 'string' && file.sourceRootPath.trim()
+    ? file.sourceRootPath.trim()
+    : (typeof fallbackRootPath === 'string' && fallbackRootPath.trim() ? fallbackRootPath.trim() : '')
+  const rawRootRelativePath = typeof file.sourceRelativePath === 'string' && file.sourceRelativePath.trim()
+    ? file.sourceRelativePath
+    : file.path
+  const rootRelativePath = normalizeRootRelativePath(rawRootRelativePath)
 
   if (!rootPath || !rootRelativePath || isAbsolutePathLike(rootRelativePath)) {
     return null
   }
 
-  return buildRuntimeFileContentUrl({
+  return {
     rootPath,
     rootRelativePath,
-  })
+  }
 }
 
 function rootTrashQuery(request: RuntimeRootTrashRequest): URLSearchParams {

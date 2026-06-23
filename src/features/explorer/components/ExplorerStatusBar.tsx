@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { EXPLORER_STATUS_BAR_HEIGHT_PX } from '@/features/explorer/constants/statusBar'
 import { getFileFromPath } from '@/lib/fileSystem'
 import { getBoundRootPath } from '@/lib/reveal'
-import { loadRuntimeFileMetadata } from '@/lib/runtimeApi'
+import { loadRuntimeFileMetadata, resolveRuntimeFileLocator } from '@/lib/runtimeApi'
 import type { FileItem } from '@/types'
 
 interface ExplorerStatusBarProps {
@@ -136,17 +136,15 @@ export function ExplorerStatusBar({
     }
 
     const boundRootPath = rootId ? getBoundRootPath(rootId) : null
-    const canReadThroughRuntime = Boolean(
-      boundRootPath
-      && metaTarget.path
-      && !isAbsolutePathLike(metaTarget.path)
-      && (!metaTarget.sourceRootPath || metaTarget.sourceRootPath === boundRootPath)
-    )
+    const runtimeFileLocator = resolveRuntimeFileLocator(metaTarget, boundRootPath)
+    const currentRootRelativePath = runtimeFileLocator && runtimeFileLocator.rootPath === boundRootPath
+      ? runtimeFileLocator.rootRelativePath
+      : metaTarget.path
+    const canReadThroughRuntime = Boolean(runtimeFileLocator)
     const shouldReadThroughCurrentRoot = Boolean(
       rootHandle
-      && metaTarget.path
-      && !isAbsolutePathLike(metaTarget.path)
-      && (!metaTarget.sourceRootPath || metaTarget.sourceRootPath === boundRootPath)
+      && runtimeFileLocator
+      && runtimeFileLocator.rootPath === boundRootPath
     )
     const fallbackRootHandle = shouldReadThroughCurrentRoot ? rootHandle : null
 
@@ -160,11 +158,11 @@ export function ExplorerStatusBar({
     setResolvedMeta(nextResolvedMeta)
 
     void (async () => {
-      if (canReadThroughRuntime && boundRootPath) {
+      if (canReadThroughRuntime && runtimeFileLocator) {
         try {
           const metadata = await loadRuntimeFileMetadata({
-            rootPath: boundRootPath,
-            rootRelativePath: metaTarget.sourceRelativePath || metaTarget.path,
+            rootPath: runtimeFileLocator.rootPath,
+            rootRelativePath: runtimeFileLocator.rootRelativePath,
           })
           if (cancelled) return
           setResolvedMeta({
@@ -187,7 +185,7 @@ export function ExplorerStatusBar({
       }
 
       try {
-        const file = await getFileFromPath(fallbackRootHandle, metaTarget.path)
+        const file = await getFileFromPath(fallbackRootHandle, currentRootRelativePath)
         if (cancelled) return
         setResolvedMeta({
           size: file.size,

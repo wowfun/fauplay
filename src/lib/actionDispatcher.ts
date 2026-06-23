@@ -815,6 +815,9 @@ async function dispatchRuntimeFileAnnotations(
     if (operation === 'cleanupMissingFiles') {
       return callRuntimeHttp<ToolCallResult>('/v1/files/missing/cleanups', payload, timeoutMs)
     }
+    if (operation === 'ensureFileEntries') {
+      return callRuntimeHttp<ToolCallResult>('/v1/files/indexes', payload, timeoutMs)
+    }
     return null
   }
 

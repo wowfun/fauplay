@@ -90,7 +90,7 @@ import {
   type ResultProjection,
   type ThumbnailSizePreset,
 } from '@/types'
-import { callGatewayHttp, type GatewayCapabilitiesSnapshot, type GatewayToolDescriptor } from '@/lib/gateway'
+import type { GatewayCapabilitiesSnapshot, GatewayToolDescriptor } from '@/lib/gateway'
 
 const MIN_PANE_WIDTH_RATIO = 0.15
 const MAX_PANE_WIDTH_RATIO = 0.75
@@ -534,53 +534,6 @@ function countDeleteUndoItems(items: DeleteUndoRestoreItem[]): number {
   return items.length
 }
 
-function resolveRootTrashRestorePaths(
-  items: DeleteUndoRestoreItem[],
-  rootPath: string | null,
-): string[] | null {
-  if (!rootPath || items.length === 0) {
-    return null
-  }
-
-  const rootRelativePaths: string[] = []
-  for (const item of items) {
-    if (item.sourceType !== 'root_trash') {
-      return null
-    }
-    const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
-    if (!absolutePath) {
-      return null
-    }
-    const rootRelativePath = toRelativePathWithinRoot(rootPath, absolutePath)
-    if (!rootRelativePath || !rootRelativePath.startsWith('.trash/')) {
-      return null
-    }
-    rootRelativePaths.push(rootRelativePath)
-  }
-
-  return rootRelativePaths
-}
-
-function resolveGlobalTrashRestoreRecycleIds(items: DeleteUndoRestoreItem[]): string[] | null {
-  if (items.length === 0) {
-    return null
-  }
-
-  const recycleIds: string[] = []
-  for (const item of items) {
-    if (item.sourceType !== 'global_recycle') {
-      return null
-    }
-    const recycleId = typeof item.recycleId === 'string' ? item.recycleId.trim() : ''
-    if (!recycleId) {
-      return null
-    }
-    recycleIds.push(recycleId)
-  }
-
-  return recycleIds
-}
-
 function mapRuntimeRestoreReasonCode(reason: string | null): string | undefined {
   if (reason === 'invalid_source') return 'RESTORE_INVALID_SOURCE'
   if (reason === 'recycle_item_not_found') return 'RECYCLE_ITEM_NOT_FOUND'
@@ -620,6 +573,95 @@ function toRestoreRecycleResponseFromGlobalTrashRuntime(
       reasonCode: mapRuntimeRestoreReasonCode(item.reason),
       error: item.error ?? undefined,
     })),
+  }
+}
+
+async function restoreDeleteUndoItemsThroughRuntime(
+  items: DeleteUndoRestoreItem[],
+  rootPath: string | null,
+): Promise<RestoreRecycleResponse> {
+  const responseItems: RestoreRecycleResponseItem[] = Array.from({ length: items.length }, () => ({
+    ok: false,
+    reasonCode: 'RESTORE_UNSUPPORTED_KIND',
+    error: '撤销删除项无法通过 Fauplay Runtime 恢复',
+  }))
+  const rootTrashItems: Array<{ index: number; rootRelativePath: string }> = []
+  const globalTrashItems: Array<{ index: number; recycleId: string }> = []
+
+  for (const [index, item] of items.entries()) {
+    if (item.sourceType === 'root_trash') {
+      const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
+      const rootRelativePath = rootPath && absolutePath
+        ? toRelativePathWithinRoot(rootPath, absolutePath)
+        : null
+      if (!rootRelativePath || !rootRelativePath.startsWith('.trash/')) {
+        responseItems[index] = {
+          ok: false,
+          reasonCode: 'RESTORE_INVALID_SOURCE',
+          error: 'Root Trash restore item is outside the current Local Root',
+        }
+        continue
+      }
+      rootTrashItems.push({ index, rootRelativePath })
+      continue
+    }
+
+    if (item.sourceType === 'global_recycle') {
+      const recycleId = typeof item.recycleId === 'string' ? item.recycleId.trim() : ''
+      if (!recycleId) {
+        responseItems[index] = {
+          ok: false,
+          reasonCode: 'RECYCLE_ITEM_NOT_FOUND',
+          error: 'Global Trash restore item is missing recycleId',
+        }
+        continue
+      }
+      globalTrashItems.push({ index, recycleId })
+    }
+  }
+
+  if (rootTrashItems.length > 0) {
+    if (!rootPath) {
+      throw new Error('Root Trash restore requires a Local Root Binding')
+    }
+    const response = toRestoreRecycleResponseFromRuntime(
+      await restoreRuntimePathFromRootTrash({
+        rootPath,
+        rootRelativePath: rootTrashItems.map((item) => item.rootRelativePath),
+      }, 120000)
+    )
+    rootTrashItems.forEach((item, responseIndex) => {
+      responseItems[item.index] = response.items?.[responseIndex] ?? {
+        ok: false,
+        reasonCode: 'RESTORE_FAILED',
+        error: 'Root Trash restore response was incomplete',
+      }
+    })
+  }
+
+  if (globalTrashItems.length > 0) {
+    const response = toRestoreRecycleResponseFromGlobalTrashRuntime(
+      await restoreRuntimeGlobalTrash({
+        recycleId: globalTrashItems.map((item) => item.recycleId),
+      }, 120000)
+    )
+    globalTrashItems.forEach((item, responseIndex) => {
+      responseItems[item.index] = response.items?.[responseIndex] ?? {
+        ok: false,
+        reasonCode: 'RESTORE_FAILED',
+        error: 'Global Trash restore response was incomplete',
+      }
+    })
+  }
+
+  const restored = responseItems.filter((item) => item.ok === true).length
+
+  return {
+    ok: true,
+    total: items.length,
+    restored,
+    failed: items.length - restored,
+    items: responseItems,
   }
 }
 
@@ -2586,29 +2628,10 @@ export function WorkspaceShell({
     setIsUndoingDelete(true)
 
     try {
-      const rootTrashRestorePaths = resolveRootTrashRestorePaths(
+      const response = await restoreDeleteUndoItemsThroughRuntime(
         batch.restoreItems,
         batch.snapshot.rootPath,
       )
-      const globalTrashRestoreRecycleIds = rootTrashRestorePaths
-        ? null
-        : resolveGlobalTrashRestoreRecycleIds(batch.restoreItems)
-      const response = rootTrashRestorePaths && batch.snapshot.rootPath
-        ? toRestoreRecycleResponseFromRuntime(
-          await restoreRuntimePathFromRootTrash({
-            rootPath: batch.snapshot.rootPath,
-            rootRelativePath: rootTrashRestorePaths,
-          }, 120000)
-        )
-        : globalTrashRestoreRecycleIds
-          ? toRestoreRecycleResponseFromGlobalTrashRuntime(
-            await restoreRuntimeGlobalTrash({
-              recycleId: globalTrashRestoreRecycleIds,
-            }, 120000)
-          )
-          : await callGatewayHttp<RestoreRecycleResponse>('/v1/recycle/items/restore', {
-            items: batch.restoreItems,
-          }, 120000)
       const responseItems = Array.isArray(response.items) ? response.items : []
       const restoredAbsolutePathByOriginalAbsolutePath = new Map<string, string>()
       const failedRestoreItems: DeleteUndoRestoreItem[] = []

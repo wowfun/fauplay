@@ -6,7 +6,7 @@ const MCP_PROTOCOL_VERSION = '2025-11-05'
 const TOOL_DEFINITIONS = [
   {
     name: 'local.data',
-    description: '本地数据管理：标注写入、逻辑标签补删来源、file 重绑与失效清理',
+    description: '本地数据管理：标注写入、逻辑标签补删来源、File Index 重绑与失效清理',
     inputSchema: {
       type: 'object',
       properties: {
@@ -68,14 +68,14 @@ const TOOL_DEFINITIONS = [
         {
           key: 'cleanupMissingFilesCommit',
           label: '执行清理缺失路径',
-          description: '删除缺失 file 行并级联清理',
+          description: '删除缺失 File Annotation 与 File Index Entry',
           intent: 'accent',
           arguments: { operation: 'cleanupMissingFiles', confirm: true },
         },
         {
           key: 'ensureFileEntries',
           label: '索引当前目标文件',
-          description: '为缺失或过期文件补建 file/asset 记录',
+          description: '为缺失或过期文件补建 File Index Entry',
           intent: 'primary',
           arguments: { operation: 'ensureFileEntries' },
         },
@@ -180,7 +180,7 @@ async function handleRequest(request) {
     const operation = typeof args?.operation === 'string' ? args.operation : ''
     const error = new Error(
       operation
-        ? `operation '${operation}' has moved to Gateway HTTP API; use /v1/file-annotations, /v1/file-annotations/tags/bind, /v1/file-annotations/tags/unbind, /v1/files/relative-paths, /v1/files/missing/cleanups, /v1/files/indexes instead`
+        ? `operation '${operation}' has moved to Runtime API; use /v1/file-annotations, /v1/file-annotations/tags/bind, /v1/file-annotations/tags/unbind, /v1/files/relative-paths, /v1/files/missing/cleanups, /v1/files/indexes instead`
         : 'local.data operation is required',
     )
     error.code = 'MCP_TOOL_CALL_FAILED'
