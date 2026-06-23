@@ -13,15 +13,20 @@ pub(crate) fn read_file_content(
     request: FileContentRequest,
 ) -> Result<FileContentResponse, RuntimeError> {
     let file_path = request.root_path.join(request.root_relative_path.as_path());
+    read_file_content_at_path(file_path, request.range)
+}
+
+pub(crate) fn read_file_content_at_path(
+    file_path: std::path::PathBuf,
+    range: Option<crate::FileContentRangeRequest>,
+) -> Result<FileContentResponse, RuntimeError> {
     let mut file =
         fs::File::open(&file_path).map_err(|source| RuntimeError::read_file(&file_path, source))?;
     let total_size = file
         .metadata()
         .map_err(|source| RuntimeError::read_file(&file_path, source))?
         .len();
-    let range = request
-        .range
-        .and_then(|range_request| range_request.resolve(total_size));
+    let range = range.and_then(|range_request| range_request.resolve(total_size));
     let bytes = match range {
         Some(range) => read_file_content_range(&file_path, &mut file, range)?,
         None => {
@@ -33,7 +38,7 @@ pub(crate) fn read_file_content(
     };
 
     Ok(FileContentResponse {
-        content_type: infer_content_type(request.root_relative_path.as_path()).to_owned(),
+        content_type: infer_content_type(&file_path).to_owned(),
         bytes,
         total_size,
         range,
@@ -69,16 +74,23 @@ pub(crate) fn read_text_preview(
     request: TextPreviewRequest,
 ) -> Result<TextPreviewResponse, RuntimeError> {
     let file_path = request.root_path.join(request.root_relative_path.as_path());
+    read_text_preview_at_path(file_path, request.size_limit_bytes)
+}
+
+pub(crate) fn read_text_preview_at_path(
+    file_path: std::path::PathBuf,
+    size_limit_bytes: u64,
+) -> Result<TextPreviewResponse, RuntimeError> {
     let metadata =
         fs::metadata(&file_path).map_err(|source| RuntimeError::read_file(&file_path, source))?;
     let file_size_bytes = metadata.len();
 
-    if file_size_bytes > request.size_limit_bytes {
+    if file_size_bytes > size_limit_bytes {
         return Ok(TextPreviewResponse {
             status: TextPreviewStatus::TooLarge,
             content: None,
             file_size_bytes,
-            size_limit_bytes: request.size_limit_bytes,
+            size_limit_bytes,
             error: None,
         });
     }
@@ -90,7 +102,7 @@ pub(crate) fn read_text_preview(
             status: TextPreviewStatus::Binary,
             content: None,
             file_size_bytes,
-            size_limit_bytes: request.size_limit_bytes,
+            size_limit_bytes,
             error: None,
         });
     }
@@ -102,7 +114,7 @@ pub(crate) fn read_text_preview(
                 status: TextPreviewStatus::Binary,
                 content: None,
                 file_size_bytes,
-                size_limit_bytes: request.size_limit_bytes,
+                size_limit_bytes,
                 error: None,
             });
         }
@@ -112,7 +124,7 @@ pub(crate) fn read_text_preview(
         status: TextPreviewStatus::Ready,
         content: Some(content),
         file_size_bytes,
-        size_limit_bytes: request.size_limit_bytes,
+        size_limit_bytes,
         error: None,
     })
 }

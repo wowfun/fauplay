@@ -84,6 +84,10 @@ _Avoid_: global recycle, recycle bin
 A file currently stored in Global Trash, identified by its stored location and the original absolute path it would restore to.
 _Avoid_: global recycle item, deleted item
 
+**Global Trash File Content**:
+A browser-renderable byte stream for a Global Trash Entry, addressed by its recycle identity rather than by its internal Runtime Home storage path.
+_Avoid_: recycle file URL, stored absolute path content
+
 **Runtime Capability**:
 A capability owned by the Fauplay Runtime because it depends on privileged local access, shared runtime state, or long-running task coordination.
 _Avoid_: backend feature, native feature

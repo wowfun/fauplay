@@ -4,7 +4,10 @@ import { cn } from '@/lib/utils'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import { buildGatewayFileThumbnailUrlForItem } from '@/lib/gateway'
-import { buildRuntimeFileContentUrlForItem } from '@/lib/runtimeApi'
+import {
+  buildRuntimeFileContentUrlForItem,
+  buildRuntimeGlobalTrashFileContentUrlForItem,
+} from '@/lib/runtimeApi'
 import { GRID_SELECTABLE_ITEM_ATTR } from '@/hooks/useGridSelection'
 import {
   getExactCachedThumbnailFromPipeline,
@@ -94,7 +97,7 @@ export function FileGridCard({
     : null
   const displayedDirectoryItemCount = listingDirectoryEntryCount ?? directoryItemCount
   const hasRemoteLocator = typeof file.remoteRootId === 'string' && file.remoteRootId.trim().length > 0
-  const runtimeFileContentUrl = (
+  const runtimeLocalFileContentUrl = (
     rootHandle
     && !isDir
     && mediaType
@@ -102,6 +105,15 @@ export function FileGridCard({
   )
     ? buildRuntimeFileContentUrlForItem(file)
     : null
+  const runtimeGlobalTrashFileContentUrl = (
+    !isDir
+    && mediaType
+    && !hasRemoteLocator
+    && file.sourceType === 'global_recycle'
+  )
+    ? buildRuntimeGlobalTrashFileContentUrlForItem(file)
+    : null
+  const runtimeFileContentUrl = runtimeLocalFileContentUrl ?? runtimeGlobalTrashFileContentUrl
   const runtimeThumbnailUrl = mediaType === 'image' ? runtimeFileContentUrl : null
   const runtimeVideoThumbnailSourceUrl = mediaType === 'video' ? runtimeFileContentUrl : null
   const shouldUseRuntimeThumbnail = Boolean(runtimeThumbnailUrl)

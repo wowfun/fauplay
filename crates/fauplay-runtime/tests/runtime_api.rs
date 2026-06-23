@@ -277,6 +277,228 @@ fn runtime_api_lists_global_trash_entries() {
 }
 
 #[test]
+fn runtime_api_returns_global_trash_file_content_by_recycle_id() {
+    let fixture = Fixture::new("runtime_api_returns_global_trash_file_content_by_recycle_id");
+    fixture.write_file("global/recycle/files/item-1.jpg", "image-bytes");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.jpg");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/photos/original.jpg","name":"original.jpg","size":11,"mimeType":"image/jpeg","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_file_content_request(&address.to_string(), "item-1");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Type: image/jpeg".len())
+            .any(|window| window == b"Content-Type: image/jpeg"),
+        "response should include image/jpeg content type: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"image-bytes"),
+        "response body should contain the Global Trash Entry bytes: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_ranges_global_trash_file_content_by_recycle_id() {
+    let fixture = Fixture::new("runtime_api_ranges_global_trash_file_content_by_recycle_id");
+    fixture.write_file("global/recycle/files/item-1.mp4", "0123456789");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.mp4");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/videos/original.mp4","name":"original.mp4","size":10,"mimeType":"video/mp4","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_file_content_request_with_range(
+        &address.to_string(),
+        "item-1",
+        "bytes=2-5",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 206 Partial Content\r\n"),
+        "response should be partial content: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Range: bytes 2-5/10".len())
+            .any(|window| window == b"Content-Range: bytes 2-5/10"),
+        "response should include the requested content range: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"2345"),
+        "response body should contain the requested byte range: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_rejects_global_trash_file_content_outside_runtime_storage() {
+    let fixture =
+        Fixture::new("runtime_api_rejects_global_trash_file_content_outside_runtime_storage");
+    fixture.write_file("outside.jpg", "outside-bytes");
+    let outside_path = fixture.root.join("outside.jpg");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/photos/original.jpg","name":"original.jpg","size":13,"mimeType":"image/jpeg","deletedAt":1700000000000}}]"#,
+            json_path(&outside_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_file_content_request(&address.to_string(), "item-1");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 404 Not Found\r\n"),
+        "response should reject content outside Global Trash storage: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        !response.ends_with(b"outside-bytes"),
+        "response must not include bytes outside Global Trash storage: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_returns_global_trash_text_preview_by_recycle_id() {
+    let fixture = Fixture::new("runtime_api_returns_global_trash_text_preview_by_recycle_id");
+    fixture.write_file("global/recycle/files/item-1.txt", "hello from Global Trash");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.txt");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/notes/original.txt","name":"original.txt","size":23,"mimeType":"text/plain","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_text_preview_request(&address.to_string(), "item-1", 1024);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"ready\""),
+        "response should report ready text preview: {response}"
+    );
+    assert!(
+        response.contains("\"content\":\"hello from Global Trash\""),
+        "response should include the Global Trash Entry text: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_returns_global_trash_file_metadata_by_recycle_id() {
+    let fixture = Fixture::new("runtime_api_returns_global_trash_file_metadata_by_recycle_id");
+    fixture.write_file("global/recycle/files/item-1.md", "metadata bytes");
+    let stored_path = fixture.root.join("global/recycle/files/item-1.md");
+    fixture.write_file(
+        "global/recycle/items.json",
+        &format!(
+            r#"[{{"recycleId":"item-1","storedAbsolutePath":"{}","originalAbsolutePath":"/notes/original.md","name":"original.md","size":1,"mimeType":"text/markdown","deletedAt":1700000000000}}]"#,
+            json_path(&stored_path),
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let runtime_home_path = fixture.root;
+    let server = thread::spawn(move || {
+        serve_one_http_request(
+            listener,
+            FauplayRuntime::with_runtime_home_path(runtime_home_path),
+        )
+        .expect("Runtime API request should be served");
+    });
+
+    let response = send_global_trash_file_metadata_request(&address.to_string(), "item-1");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"recycleId\":\"item-1\""),
+        "response should include the recycle id: {response}"
+    );
+    assert!(
+        response.contains("\"size\":14"),
+        "response should report the current stored file size: {response}"
+    );
+    assert!(
+        response.contains("\"lastModifiedMs\":"),
+        "response should include the current stored file modification timestamp: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_moves_file_to_global_trash() {
     let fixture = Fixture::new("runtime_api_moves_file_to_global_trash");
     fixture.write_file("source/original.jpg", "image");
@@ -1711,6 +1933,78 @@ fn send_global_trash_request(address: &str) -> String {
     write!(
         stream,
         "GET /v1/global-trash HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_file_content_request(address: &str, recycle_id: &str) -> Vec<u8> {
+    send_global_trash_file_content_request_with_headers(address, recycle_id, "")
+}
+
+fn send_global_trash_file_content_request_with_range(
+    address: &str,
+    recycle_id: &str,
+    range: &str,
+) -> Vec<u8> {
+    send_global_trash_file_content_request_with_headers(
+        address,
+        recycle_id,
+        &format!("Range: {range}\r\n"),
+    )
+}
+
+fn send_global_trash_file_content_request_with_headers(
+    address: &str,
+    recycle_id: &str,
+    headers: &str,
+) -> Vec<u8> {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/global-trash/file-content?recycleId={} HTTP/1.1\r\nHost: 127.0.0.1\r\n{headers}Connection: close\r\n\r\n",
+        percent_encode(recycle_id)
+    )
+    .expect("request should be written");
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_text_preview_request(
+    address: &str,
+    recycle_id: &str,
+    size_limit_bytes: u64,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/global-trash/text-preview?recycleId={}&sizeLimitBytes={size_limit_bytes} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        percent_encode(recycle_id)
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn send_global_trash_file_metadata_request(address: &str, recycle_id: &str) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/global-trash/file-metadata?recycleId={} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        percent_encode(recycle_id)
     )
     .expect("request should be written");
 

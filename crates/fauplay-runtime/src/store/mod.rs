@@ -640,6 +640,37 @@ pub(crate) fn list_global_trash(
     ))
 }
 
+pub(crate) fn global_trash_file_path(
+    runtime_home_path: &Path,
+    recycle_id: &str,
+) -> Result<Option<PathBuf>, RuntimeError> {
+    let recycle_id = recycle_id.trim();
+    if recycle_id.is_empty() {
+        return Ok(None);
+    }
+
+    let path = global_trash_metadata_path(runtime_home_path);
+    let Some(items) = read_global_trash_metadata(&path)? else {
+        return Ok(None);
+    };
+
+    let Some(entry) = items
+        .iter()
+        .find(|item| string_value(item.get("recycleId")).as_deref() == Some(recycle_id))
+        .and_then(global_trash_entry_from_value)
+    else {
+        return Ok(None);
+    };
+
+    let Some(stored_path) =
+        canonical_global_trash_file_path(runtime_home_path, &entry.absolute_path)
+    else {
+        return Ok(None);
+    };
+
+    Ok(stored_path.is_file().then_some(stored_path))
+}
+
 pub(crate) fn move_to_global_trash(
     runtime_home_path: &Path,
     request: GlobalTrashMoveRequest,
@@ -1206,6 +1237,13 @@ fn global_trash_files_path(runtime_home_path: &Path) -> PathBuf {
     global_trash_storage_root_path(runtime_home_path)
         .join(GLOBAL_TRASH_FOLDER_NAME)
         .join("files")
+}
+
+fn canonical_global_trash_file_path(runtime_home_path: &Path, path: &Path) -> Option<PathBuf> {
+    let storage_root = fs::canonicalize(global_trash_files_path(runtime_home_path)).ok()?;
+    let stored_path = fs::canonicalize(path).ok()?;
+
+    stored_path.starts_with(storage_root).then_some(stored_path)
 }
 
 fn read_global_trash_metadata(path: &Path) -> Result<Option<Vec<serde_json::Value>>, RuntimeError> {

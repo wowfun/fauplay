@@ -404,6 +404,30 @@ pub struct GlobalTrashEntry {
     pub deleted_at_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashFileContentRequest {
+    pub recycle_id: String,
+    pub range: Option<FileContentRangeRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashTextPreviewRequest {
+    pub recycle_id: String,
+    pub size_limit_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashFileMetadataRequest {
+    pub recycle_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalTrashFileMetadataResponse {
+    pub recycle_id: String,
+    pub size: u64,
+    pub last_modified_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileContentRangeRequest {
     Exact { start: u64, end_inclusive: u64 },

@@ -2,7 +2,14 @@ import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
 import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
-import { buildRuntimeFileContentUrl, loadRuntimeTextPreview, resolveRuntimeFileLocator } from '@/lib/runtimeApi'
+import {
+  buildRuntimeFileContentUrl,
+  buildRuntimeGlobalTrashFileContentUrlForItem,
+  loadRuntimeGlobalTrashTextPreview,
+  loadRuntimeTextPreview,
+  resolveRuntimeGlobalTrashRecycleId,
+  resolveRuntimeFileLocator,
+} from '@/lib/runtimeApi'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
 import {
   buildGatewayFileContentUrlForItem,
@@ -259,6 +266,22 @@ export function FilePreviewPanel({
     ? runtimeFileLocator.rootRelativePath
     : (file?.path ?? '')
   const hasRemoteFileLocator = Boolean(file && typeof file.remoteRootId === 'string' && file.remoteRootId.trim())
+  const runtimeGlobalTrashRecycleId = useMemo(
+    () => (file && file.kind === 'file' ? resolveRuntimeGlobalTrashRecycleId(file) : null),
+    [file]
+  )
+  const runtimeGlobalTrashFileContentUrl = useMemo(
+    () => (file && file.kind === 'file' ? buildRuntimeGlobalTrashFileContentUrlForItem(file) : null),
+    [file]
+  )
+  const shouldUseRuntimeGlobalTrashFileContent = Boolean(
+    runtimeGlobalTrashFileContentUrl
+    && (previewKind === 'image' || previewKind === 'video')
+  )
+  const shouldUseRuntimeGlobalTrashTextPreview = Boolean(
+    runtimeGlobalTrashRecycleId
+    && previewKind === 'text'
+  )
   const hasRuntimeFileLocator = Boolean(
     runtimeFileLocator
     && runtimeFileLocator.rootPath === boundRootPath
@@ -280,10 +303,21 @@ export function FilePreviewPanel({
       && file.kind === 'file'
       && (
         hasRemoteFileLocator
-        || (file.absolutePath && !canAccessThroughCurrentRoot)
+        || (
+          file.absolutePath
+          && !canAccessThroughCurrentRoot
+          && !shouldUseRuntimeGlobalTrashFileContent
+          && !shouldUseRuntimeGlobalTrashTextPreview
+        )
       )
     )
-  ), [canAccessThroughCurrentRoot, file, hasRemoteFileLocator])
+  ), [
+    canAccessThroughCurrentRoot,
+    file,
+    hasRemoteFileLocator,
+    shouldUseRuntimeGlobalTrashFileContent,
+    shouldUseRuntimeGlobalTrashTextPreview,
+  ])
   const shouldUseRuntimeTextPreview = useMemo(() => (
     Boolean(
       file
@@ -637,6 +671,31 @@ export function FilePreviewPanel({
           return
         }
 
+        if (shouldUseRuntimeGlobalTrashTextPreview && runtimeGlobalTrashRecycleId) {
+          setFileMimeType(file.mimeType || getMimeType(file.name))
+          setFileSizeBytes(file.size ?? null)
+          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
+          replacePreviewUrl(null)
+
+          const textResult = await loadRuntimeGlobalTrashTextPreview({
+            recycleId: runtimeGlobalTrashRecycleId,
+            sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
+          })
+          if (cancelled) return
+          setFileSizeBytes(textResult.fileSizeBytes ?? file.size ?? null)
+          setTextPreview(textResult)
+          return
+        }
+
+        if (shouldUseRuntimeGlobalTrashFileContent && runtimeGlobalTrashFileContentUrl) {
+          setFileMimeType(file.mimeType || getMimeType(file.name))
+          setFileSizeBytes(file.size ?? null)
+          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
+          setTextPreview(INITIAL_TEXT_PREVIEW)
+          replacePreviewUrl(runtimeGlobalTrashFileContentUrl)
+          return
+        }
+
         if (shouldUseRuntimeTextPreview && runtimeFileLocator) {
           setFileMimeType(file.mimeType || getMimeType(file.name))
           setFileSizeBytes(file.size ?? null)
@@ -766,8 +825,12 @@ export function FilePreviewPanel({
     file,
     replacePreviewUrl,
     rootHandle,
+    runtimeGlobalTrashRecycleId,
+    runtimeGlobalTrashFileContentUrl,
     runtimeFileLocator,
     shouldUseGatewayFileAccess,
+    shouldUseRuntimeGlobalTrashFileContent,
+    shouldUseRuntimeGlobalTrashTextPreview,
     shouldUseRuntimeFileContent,
     shouldUseRuntimeTextPreview,
   ])

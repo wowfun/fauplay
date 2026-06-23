@@ -236,6 +236,25 @@ export interface RuntimeGlobalTrashRestoreRequest {
   dryRun?: boolean
 }
 
+export interface RuntimeGlobalTrashFileContentRequest {
+  recycleId: string
+}
+
+export interface RuntimeGlobalTrashTextPreviewRequest {
+  recycleId: string
+  sizeLimitBytes?: number
+}
+
+export interface RuntimeGlobalTrashFileMetadataRequest {
+  recycleId: string
+}
+
+export interface RuntimeGlobalTrashFileMetadataResponse {
+  recycleId: string
+  size: number
+  lastModifiedMs?: number
+}
+
 export interface RuntimeGlobalTrashRestoreItem {
   sourceType: 'global_recycle'
   recycleId: string
@@ -543,6 +562,25 @@ export async function loadRuntimeTextPreview(
   return parseRuntimeTextPreviewPayload(payload)
 }
 
+export async function loadRuntimeGlobalTrashTextPreview(
+  request: RuntimeGlobalTrashTextPreviewRequest,
+  timeoutMs?: number,
+): Promise<TextPreviewPayload> {
+  const query = new URLSearchParams({
+    recycleId: request.recycleId,
+  })
+  if (
+    typeof request.sizeLimitBytes === 'number'
+    && Number.isFinite(request.sizeLimitBytes)
+    && request.sizeLimitBytes > 0
+  ) {
+    query.set('sizeLimitBytes', String(Math.trunc(request.sizeLimitBytes)))
+  }
+
+  const payload = await callRuntimeJson(`/v1/global-trash/text-preview?${query.toString()}`, timeoutMs)
+  return parseRuntimeTextPreviewPayload(payload)
+}
+
 export async function listRuntimeRootTrash(
   request: RuntimeRootTrashListRequest,
   timeoutMs?: number,
@@ -674,6 +712,15 @@ export function buildRuntimeFileContentUrl(request: RuntimeFileContentRequest): 
   return buildRuntimeUrl(`/v1/file-content?${query.toString()}`)
 }
 
+export function buildRuntimeGlobalTrashFileContentUrl(
+  request: RuntimeGlobalTrashFileContentRequest,
+): string {
+  const query = new URLSearchParams({
+    recycleId: request.recycleId,
+  })
+  return buildRuntimeUrl(`/v1/global-trash/file-content?${query.toString()}`)
+}
+
 export async function loadRuntimeFileMetadata(
   request: RuntimeFileMetadataRequest,
   timeoutMs?: number,
@@ -684,6 +731,17 @@ export async function loadRuntimeFileMetadata(
   })
   const payload = await callRuntimeJson(`/v1/file-metadata?${query.toString()}`, timeoutMs)
   return parseRuntimeFileMetadataResponse(payload)
+}
+
+export async function loadRuntimeGlobalTrashFileMetadata(
+  request: RuntimeGlobalTrashFileMetadataRequest,
+  timeoutMs?: number,
+): Promise<RuntimeGlobalTrashFileMetadataResponse> {
+  const query = new URLSearchParams({
+    recycleId: request.recycleId,
+  })
+  const payload = await callRuntimeJson(`/v1/global-trash/file-metadata?${query.toString()}`, timeoutMs)
+  return parseRuntimeGlobalTrashFileMetadataResponse(payload)
 }
 
 export async function findRuntimeDuplicateFiles(
@@ -709,6 +767,24 @@ export function buildRuntimeFileContentUrlForItem(file: FileItem): string | null
   }
 
   return buildRuntimeFileContentUrl(locator)
+}
+
+export function buildRuntimeGlobalTrashFileContentUrlForItem(file: FileItem): string | null {
+  const recycleId = resolveRuntimeGlobalTrashRecycleId(file)
+  if (!recycleId) {
+    return null
+  }
+
+  return buildRuntimeGlobalTrashFileContentUrl({ recycleId })
+}
+
+export function resolveRuntimeGlobalTrashRecycleId(file: FileItem): string | null {
+  if (file.sourceType !== 'global_recycle') {
+    return null
+  }
+
+  const recycleId = typeof file.recycleId === 'string' ? file.recycleId.trim() : ''
+  return recycleId || null
 }
 
 export function resolveRuntimeFileLocator(
@@ -1248,6 +1324,26 @@ function parseRuntimeFileMetadataResponse(payload: unknown): RuntimeFileMetadata
 
   return {
     rootRelativePath,
+    size,
+    lastModifiedMs: toFiniteNumber(payload.lastModifiedMs),
+  }
+}
+
+function parseRuntimeGlobalTrashFileMetadataResponse(
+  payload: unknown,
+): RuntimeGlobalTrashFileMetadataResponse {
+  if (!isObject(payload)) {
+    throw new RuntimeApiError('Fauplay Runtime Global Trash File Metadata response was invalid')
+  }
+
+  const recycleId = typeof payload.recycleId === 'string' ? payload.recycleId.trim() : ''
+  const size = toFiniteNumber(payload.size)
+  if (!recycleId || typeof size !== 'number') {
+    throw new RuntimeApiError('Fauplay Runtime Global Trash File Metadata response was invalid')
+  }
+
+  return {
+    recycleId,
     size,
     lastModifiedMs: toFiniteNumber(payload.lastModifiedMs),
   }

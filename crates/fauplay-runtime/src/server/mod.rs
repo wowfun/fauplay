@@ -15,14 +15,15 @@ use crate::{
     FileAnnotationTagMutationResponse, FileContentRangeRequest, FileContentRequest,
     FileContentResponse, FileIndexEnsureRequest, FileIndexEnsureResponse, FileIndexFailureReason,
     FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
-    GlobalTrashFailureReason, GlobalTrashListRequest, GlobalTrashListResponse,
+    GlobalTrashFailureReason, GlobalTrashFileContentRequest, GlobalTrashFileMetadataRequest,
+    GlobalTrashFileMetadataResponse, GlobalTrashListRequest, GlobalTrashListResponse,
     GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
-    GlobalTrashRestoreResponse, ListDirectoryRequest, ListingEntryFilter, ListingOrder,
-    ListingQuery, ListingSortDirection, ListingSortKey, RootMoveBatchFailureReason,
-    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
-    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashFailureReason,
-    RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse, RootTrashRequest,
-    RuntimeError, TextPreviewRequest, TextPreviewStatus,
+    GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
+    ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
+    RootMoveBatchFailureReason, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
+    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
+    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse,
+    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewStatus,
 };
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
@@ -117,6 +118,18 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
                 .map(parse_query_string)
                 .unwrap_or_default();
             handle_list_global_trash(runtime, &query)
+        }
+        Some(("GET", target)) if target.starts_with("/v1/global-trash/file-content?") => {
+            let query = parse_query_string(&target["/v1/global-trash/file-content?".len()..]);
+            handle_global_trash_file_content(runtime, &query, parse_header_value(request, "range"))
+        }
+        Some(("GET", target)) if target.starts_with("/v1/global-trash/text-preview?") => {
+            let query = parse_query_string(&target["/v1/global-trash/text-preview?".len()..]);
+            handle_global_trash_text_preview(runtime, &query)
+        }
+        Some(("GET", target)) if target.starts_with("/v1/global-trash/file-metadata?") => {
+            let query = parse_query_string(&target["/v1/global-trash/file-metadata?".len()..]);
+            handle_global_trash_file_metadata(runtime, &query)
         }
         Some(("POST", target))
             if target == "/v1/global-trash/move"
@@ -214,6 +227,9 @@ fn is_preflight_target(target: &str) -> bool {
         "/v1/local-directory"
             | "/v1/config/shortcuts"
             | "/v1/global-trash"
+            | "/v1/global-trash/file-content"
+            | "/v1/global-trash/text-preview"
+            | "/v1/global-trash/file-metadata"
             | "/v1/global-trash/move"
             | "/v1/global-trash/restore"
             | "/v1/text-preview"
@@ -257,6 +273,92 @@ fn handle_list_global_trash(
         entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
     }) {
         Ok(response) => http_response(200, "OK", &global_trash_list_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_global_trash_file_content(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+    range_header: Option<&str>,
+) -> HttpResponse {
+    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
+        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
+    };
+
+    match runtime.read_global_trash_file_content(GlobalTrashFileContentRequest {
+        recycle_id: recycle_id.to_owned(),
+        range: range_header.and_then(parse_file_content_range),
+    }) {
+        Ok(Some(response)) => file_content_response(response),
+        Ok(None) => http_response(
+            404,
+            "Not Found",
+            "{\"error\":\"Global Trash Entry was not found\"}",
+        ),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_global_trash_text_preview(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
+        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
+    };
+    let size_limit_bytes = query
+        .get("sizeLimitBytes")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(64 * 1024);
+
+    match runtime.read_global_trash_text_preview(GlobalTrashTextPreviewRequest {
+        recycle_id: recycle_id.to_owned(),
+        size_limit_bytes,
+    }) {
+        Ok(Some(response)) => http_response(200, "OK", &text_preview_response_json(response)),
+        Ok(None) => http_response(
+            404,
+            "Not Found",
+            "{\"error\":\"Global Trash Entry was not found\"}",
+        ),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+fn handle_global_trash_file_metadata(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
+        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
+    };
+
+    match runtime.read_global_trash_file_metadata(GlobalTrashFileMetadataRequest {
+        recycle_id: recycle_id.to_owned(),
+    }) {
+        Ok(Some(response)) => http_response(
+            200,
+            "OK",
+            &global_trash_file_metadata_response_json(response),
+        ),
+        Ok(None) => http_response(
+            404,
+            "Not Found",
+            "{\"error\":\"Global Trash Entry was not found\"}",
+        ),
         Err(error) => http_response(
             500,
             "Internal Server Error",
@@ -1427,6 +1529,19 @@ fn file_metadata_response_json(response: FileMetadataResponse) -> String {
     let mut json = format!(
         "{{\"rootRelativePath\":\"{}\",\"size\":{}",
         escape_json_string(&response.root_relative_path.to_string()),
+        response.size,
+    );
+    if let Some(last_modified_ms) = response.last_modified_ms {
+        json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
+    }
+    json.push('}');
+    json
+}
+
+fn global_trash_file_metadata_response_json(response: GlobalTrashFileMetadataResponse) -> String {
+    let mut json = format!(
+        "{{\"recycleId\":\"{}\",\"size\":{}",
+        escape_json_string(&response.recycle_id),
         response.size,
     );
     if let Some(last_modified_ms) = response.last_modified_ms {

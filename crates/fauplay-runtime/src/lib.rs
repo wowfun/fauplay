@@ -21,16 +21,18 @@ pub use api::{
     FileContentRequest, FileContentResponse, FileIndexEnsureItem, FileIndexEnsureRequest,
     FileIndexEnsureResponse, FileIndexFailureReason, FileMetadataRequest, FileMetadataResponse,
     GlobalShortcutConfigResponse, GlobalTrashEntry, GlobalTrashFailureReason,
+    GlobalTrashFileContentRequest, GlobalTrashFileMetadataRequest, GlobalTrashFileMetadataResponse,
     GlobalTrashListRequest, GlobalTrashListResponse, GlobalTrashMoveItem, GlobalTrashMoveRequest,
     GlobalTrashMoveResponse, GlobalTrashRestoreItem, GlobalTrashRestoreRequest,
-    GlobalTrashRestoreResponse, ListDirectoryRequest, ListDirectoryResponse, ListingEntryFilter,
-    ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey, MissingFileCleanupImpact,
-    MissingFileCleanupRequest, MissingFileCleanupResponse, RootMoveBatchFailureReason,
-    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
-    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
+    ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
+    ListingSortKey, MissingFileCleanupImpact, MissingFileCleanupRequest,
+    MissingFileCleanupResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
+    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
+    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashEntry,
+    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem,
+    RootTrashMutationResponse, RootTrashRequest, RuntimeError, TextPreviewRequest,
+    TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -101,6 +103,50 @@ impl FauplayRuntime {
         request: FileContentRequest,
     ) -> Result<FileContentResponse, RuntimeError> {
         media::read_file_content(request)
+    }
+
+    pub fn read_global_trash_file_content(
+        &self,
+        request: GlobalTrashFileContentRequest,
+    ) -> Result<Option<FileContentResponse>, RuntimeError> {
+        let Some(file_path) =
+            store::global_trash_file_path(&self.runtime_home_path, &request.recycle_id)?
+        else {
+            return Ok(None);
+        };
+
+        media::read_file_content_at_path(file_path, request.range).map(Some)
+    }
+
+    pub fn read_global_trash_text_preview(
+        &self,
+        request: GlobalTrashTextPreviewRequest,
+    ) -> Result<Option<TextPreviewResponse>, RuntimeError> {
+        let Some(file_path) =
+            store::global_trash_file_path(&self.runtime_home_path, &request.recycle_id)?
+        else {
+            return Ok(None);
+        };
+
+        media::read_text_preview_at_path(file_path, request.size_limit_bytes).map(Some)
+    }
+
+    pub fn read_global_trash_file_metadata(
+        &self,
+        request: GlobalTrashFileMetadataRequest,
+    ) -> Result<Option<GlobalTrashFileMetadataResponse>, RuntimeError> {
+        let recycle_id = request.recycle_id.trim().to_owned();
+        let Some(file_path) = store::global_trash_file_path(&self.runtime_home_path, &recycle_id)?
+        else {
+            return Ok(None);
+        };
+        let metadata = fs::read_file_metadata_at_path(&file_path)?;
+
+        Ok(Some(GlobalTrashFileMetadataResponse {
+            recycle_id,
+            size: metadata.size,
+            last_modified_ms: metadata.last_modified_ms,
+        }))
     }
 
     pub fn read_file_metadata(
