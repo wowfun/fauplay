@@ -4,28 +4,17 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 
 use crate::{
-    AnnotationTagOptionsRequest, AnnotationTagOptionsResponse, DirectoryEntryKind,
-    DuplicateFilesRequest, DuplicateFilesResponse, DuplicateSeedSkipReason, FauplayRuntime,
-    FileAnnotationActionSource, FileAnnotationMatchMode, FileAnnotationMissingCleanupRequest,
-    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
-    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason,
-    FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
-    FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
-    FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
-    FileAnnotationTagMutationResponse, FileContentRangeRequest, FileContentRequest,
-    FileContentResponse, FileIndexEnsureRequest, FileIndexEnsureResponse, FileIndexFailureReason,
-    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse,
-    GlobalTrashFailureReason, GlobalTrashFileContentRequest, GlobalTrashFileMetadataRequest,
-    GlobalTrashFileMetadataResponse, GlobalTrashListRequest, GlobalTrashListResponse,
-    GlobalTrashMoveRequest, GlobalTrashMoveResponse, GlobalTrashRestoreRequest,
-    GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
+    DirectoryEntryKind, DuplicateFilesRequest, DuplicateFilesResponse, DuplicateSeedSkipReason,
+    FauplayRuntime, FileContentRangeRequest, FileContentRequest, FileContentResponse,
+    FileMetadataRequest, FileMetadataResponse, GlobalShortcutConfigResponse, ListDirectoryRequest,
     ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
-    LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
-    RootMoveBatchFailureReason, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
-    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
-    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationResponse,
-    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewStatus,
+    LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse, RootRelativePath,
+    RuntimeError, TextPreviewRequest, TextPreviewStatus,
 };
+
+mod file_annotations;
+mod global_trash;
+mod root_operations;
 
 const REQUEST_CHUNK_SIZE: usize = 1024;
 
@@ -128,19 +117,23 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
                 .strip_prefix("/v1/global-trash?")
                 .map(parse_query_string)
                 .unwrap_or_default();
-            handle_list_global_trash(runtime, &query)
+            global_trash::handle_list_global_trash(runtime, &query)
         }
         Some(("GET", target)) if target.starts_with("/v1/global-trash/file-content?") => {
             let query = parse_query_string(&target["/v1/global-trash/file-content?".len()..]);
-            handle_global_trash_file_content(runtime, &query, parse_header_value(request, "range"))
+            global_trash::handle_global_trash_file_content(
+                runtime,
+                &query,
+                parse_header_value(request, "range"),
+            )
         }
         Some(("GET", target)) if target.starts_with("/v1/global-trash/text-preview?") => {
             let query = parse_query_string(&target["/v1/global-trash/text-preview?".len()..]);
-            handle_global_trash_text_preview(runtime, &query)
+            global_trash::handle_global_trash_text_preview(runtime, &query)
         }
         Some(("GET", target)) if target.starts_with("/v1/global-trash/file-metadata?") => {
             let query = parse_query_string(&target["/v1/global-trash/file-metadata?".len()..]);
-            handle_global_trash_file_metadata(runtime, &query)
+            global_trash::handle_global_trash_file_metadata(runtime, &query)
         }
         Some(("POST", target))
             if target == "/v1/global-trash/move"
@@ -150,7 +143,7 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
                 .strip_prefix("/v1/global-trash/move?")
                 .map(parse_query_pairs)
                 .unwrap_or_default();
-            handle_move_to_global_trash(runtime, &query)
+            global_trash::handle_move_to_global_trash(runtime, &query)
         }
         Some(("POST", target))
             if target == "/v1/global-trash/restore"
@@ -160,7 +153,7 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
                 .strip_prefix("/v1/global-trash/restore?")
                 .map(parse_query_pairs)
                 .unwrap_or_default();
-            handle_restore_global_trash(runtime, &query)
+            global_trash::handle_restore_global_trash(runtime, &query)
         }
         Some(("GET", target)) if target.starts_with("/v1/local-directory?") => {
             let query = parse_query_string(&target["/v1/local-directory?".len()..]);
@@ -183,30 +176,36 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             handle_find_duplicate_files(runtime, &query)
         }
         Some(("POST", "/v1/duplicate-files")) => handle_find_duplicate_files_json(runtime, request),
-        Some(("PUT", "/v1/file-annotations")) => handle_set_file_annotation_json(runtime, request),
+        Some(("PUT", "/v1/file-annotations")) => {
+            file_annotations::handle_set_file_annotation_json(runtime, request)
+        }
         Some(("POST", "/v1/file-annotations/tags/bind")) => {
-            handle_bind_file_annotation_tag_json(runtime, request)
+            file_annotations::handle_bind_file_annotation_tag_json(runtime, request)
         }
         Some(("POST", "/v1/file-annotations/tags/unbind")) => {
-            handle_unbind_file_annotation_tag_json(runtime, request)
+            file_annotations::handle_unbind_file_annotation_tag_json(runtime, request)
         }
         Some(("PATCH", "/v1/files/relative-paths")) => {
-            handle_rebind_file_annotation_paths_json(runtime, request)
+            file_annotations::handle_rebind_file_annotation_paths_json(runtime, request)
         }
         Some(("POST", "/v1/files/missing/cleanups")) => {
-            handle_cleanup_missing_file_annotations_json(runtime, request)
+            file_annotations::handle_cleanup_missing_file_annotations_json(runtime, request)
         }
         Some(("POST", "/v1/files/indexes")) => {
-            handle_ensure_file_index_entries_json(runtime, request)
+            file_annotations::handle_ensure_file_index_entries_json(runtime, request)
         }
-        Some(("POST", "/v1/data/tags/file")) => handle_read_file_annotation_json(runtime, request),
+        Some(("POST", "/v1/data/tags/file")) => {
+            file_annotations::handle_read_file_annotation_json(runtime, request)
+        }
         Some(("POST", "/v1/data/tags/options")) => {
-            handle_list_annotation_tag_options_json(runtime, request)
+            file_annotations::handle_list_annotation_tag_options_json(runtime, request)
         }
         Some(("POST", "/v1/data/tags/query")) => {
-            handle_query_file_annotations_json(runtime, request)
+            file_annotations::handle_query_file_annotations_json(runtime, request)
         }
-        Some(("POST", "/v1/root-move/batch")) => handle_root_move_batch_json(runtime, request),
+        Some(("POST", "/v1/root-move/batch")) => {
+            root_operations::handle_root_move_batch_json(runtime, request)
+        }
         Some(("POST", target))
             if target == "/v1/root-move" || target.starts_with("/v1/root-move?") =>
         {
@@ -214,19 +213,19 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
                 .strip_prefix("/v1/root-move?")
                 .map(parse_query_string)
                 .unwrap_or_default();
-            handle_root_move(runtime, &query)
+            root_operations::handle_root_move(runtime, &query)
         }
         Some(("GET", target)) if target.starts_with("/v1/root-trash?") => {
             let query = parse_query_string(&target["/v1/root-trash?".len()..]);
-            handle_list_root_trash(runtime, &query)
+            root_operations::handle_list_root_trash(runtime, &query)
         }
         Some(("POST", target)) if target.starts_with("/v1/root-trash/move?") => {
             let query = parse_query_pairs(&target["/v1/root-trash/move?".len()..]);
-            handle_move_to_root_trash(runtime, &query)
+            root_operations::handle_move_to_root_trash(runtime, &query)
         }
         Some(("POST", target)) if target.starts_with("/v1/root-trash/restore?") => {
             let query = parse_query_pairs(&target["/v1/root-trash/restore?".len()..]);
-            handle_restore_from_root_trash(runtime, &query)
+            root_operations::handle_restore_from_root_trash(runtime, &query)
         }
         _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
     }
@@ -304,163 +303,6 @@ fn handle_upsert_local_root_binding(
     }) {
         Ok(response) => http_response(200, "OK", &local_root_binding_json(&response)),
         Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_list_global_trash(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-) -> HttpResponse {
-    match runtime.list_global_trash(GlobalTrashListRequest {
-        entry_limit: parse_entry_limit(query.get("limit").map(String::as_str)),
-        entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
-    }) {
-        Ok(response) => http_response(200, "OK", &global_trash_list_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_global_trash_file_content(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-    range_header: Option<&str>,
-) -> HttpResponse {
-    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
-        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
-    };
-
-    match runtime.read_global_trash_file_content(GlobalTrashFileContentRequest {
-        recycle_id: recycle_id.to_owned(),
-        range: range_header.and_then(parse_file_content_range),
-    }) {
-        Ok(Some(response)) => file_content_response(response),
-        Ok(None) => http_response(
-            404,
-            "Not Found",
-            "{\"error\":\"Global Trash Entry was not found\"}",
-        ),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_global_trash_text_preview(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-) -> HttpResponse {
-    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
-        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
-    };
-    let size_limit_bytes = query
-        .get("sizeLimitBytes")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(64 * 1024);
-
-    match runtime.read_global_trash_text_preview(GlobalTrashTextPreviewRequest {
-        recycle_id: recycle_id.to_owned(),
-        size_limit_bytes,
-    }) {
-        Ok(Some(response)) => http_response(200, "OK", &text_preview_response_json(response)),
-        Ok(None) => http_response(
-            404,
-            "Not Found",
-            "{\"error\":\"Global Trash Entry was not found\"}",
-        ),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_global_trash_file_metadata(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-) -> HttpResponse {
-    let Some(recycle_id) = query.get("recycleId").map(String::as_str) else {
-        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
-    };
-
-    match runtime.read_global_trash_file_metadata(GlobalTrashFileMetadataRequest {
-        recycle_id: recycle_id.to_owned(),
-    }) {
-        Ok(Some(response)) => http_response(
-            200,
-            "OK",
-            &global_trash_file_metadata_response_json(response),
-        ),
-        Ok(None) => http_response(
-            404,
-            "Not Found",
-            "{\"error\":\"Global Trash Entry was not found\"}",
-        ),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_move_to_global_trash(
-    runtime: &FauplayRuntime,
-    query: &[(String, String)],
-) -> HttpResponse {
-    let absolute_paths = query_values(query, "absolutePath")
-        .into_iter()
-        .map(PathBuf::from)
-        .collect::<Vec<_>>();
-    if absolute_paths.is_empty() {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"absolutePath is required\"}",
-        );
-    }
-
-    match runtime.move_to_global_trash(GlobalTrashMoveRequest {
-        absolute_paths,
-        dry_run: first_query_value(query, "dryRun").is_some_and(|value| value == "true"),
-    }) {
-        Ok(response) => http_response(200, "OK", &global_trash_move_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_restore_global_trash(
-    runtime: &FauplayRuntime,
-    query: &[(String, String)],
-) -> HttpResponse {
-    let recycle_ids = query_values(query, "recycleId")
-        .into_iter()
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    if recycle_ids.is_empty() {
-        return http_response(400, "Bad Request", "{\"error\":\"recycleId is required\"}");
-    }
-
-    match runtime.restore_global_trash(GlobalTrashRestoreRequest {
-        recycle_ids,
-        dry_run: first_query_value(query, "dryRun").is_some_and(|value| value == "true"),
-    }) {
-        Ok(response) => http_response(200, "OK", &global_trash_restore_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
     }
 }
 
@@ -733,311 +575,6 @@ fn handle_find_duplicate_files_json(runtime: &FauplayRuntime, request: &str) -> 
     }
 }
 
-fn handle_set_file_annotation_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let Some(root_relative_path) = json_file_annotation_relative_path(&payload) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"relativePath is required\"}",
-        );
-    };
-    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-        Ok(path) => path,
-        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
-    };
-    let Some(key) =
-        json_string_field(&payload, "fieldKey").or_else(|| json_string_field(&payload, "key"))
-    else {
-        return http_response(400, "Bad Request", "{\"error\":\"fieldKey is required\"}");
-    };
-    let Some(value) = json_string_field(&payload, "value") else {
-        return http_response(400, "Bad Request", "{\"error\":\"value is required\"}");
-    };
-
-    match runtime.set_file_annotation_value(FileAnnotationSetValueRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_path,
-        key: key.to_owned(),
-        value: value.to_owned(),
-        source: parse_file_annotation_action_source(json_string_field(&payload, "source")),
-    }) {
-        Ok(response) => http_response(200, "OK", &file_annotation_set_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_bind_file_annotation_tag_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    handle_file_annotation_tag_binding_json(runtime, request, FileAnnotationTagBindingKind::Bind)
-}
-
-fn handle_unbind_file_annotation_tag_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    handle_file_annotation_tag_binding_json(runtime, request, FileAnnotationTagBindingKind::Unbind)
-}
-
-#[derive(Debug, Clone, Copy)]
-enum FileAnnotationTagBindingKind {
-    Bind,
-    Unbind,
-}
-
-fn handle_file_annotation_tag_binding_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-    kind: FileAnnotationTagBindingKind,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let Some(root_relative_path) = json_file_annotation_relative_path(&payload) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"relativePath is required\"}",
-        );
-    };
-    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-        Ok(path) => path,
-        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
-    };
-    let Some(key) = json_string_field(&payload, "key") else {
-        return http_response(400, "Bad Request", "{\"error\":\"key is required\"}");
-    };
-    let Some(value) = json_string_field(&payload, "value") else {
-        return http_response(400, "Bad Request", "{\"error\":\"value is required\"}");
-    };
-    let request = FileAnnotationTagBindingRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_path,
-        key: key.to_owned(),
-        value: value.to_owned(),
-    };
-    let result = match kind {
-        FileAnnotationTagBindingKind::Bind => runtime.bind_file_annotation_tag(request),
-        FileAnnotationTagBindingKind::Unbind => runtime.unbind_file_annotation_tag(request),
-    };
-
-    match result {
-        Ok(response) => http_response(200, "OK", &file_annotation_tag_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_read_file_annotation_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let Some(root_relative_path) = json_file_annotation_relative_path(&payload) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"relativePath is required\"}",
-        );
-    };
-    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-        Ok(path) => path,
-        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
-    };
-
-    match runtime.read_file_annotation(FileAnnotationReadRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_path,
-    }) {
-        Ok(response) => http_response(200, "OK", &file_annotation_read_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_list_annotation_tag_options_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    match runtime.list_annotation_tag_options(AnnotationTagOptionsRequest {
-        root_path: json_string_field(&payload, "rootPath").map(PathBuf::from),
-    }) {
-        Ok(response) => http_response(200, "OK", &annotation_tag_options_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_query_file_annotations_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let page = json_usize_or_default(&payload, "page", 1)
-        .unwrap_or(1)
-        .max(1);
-    let size = json_usize_or_default(&payload, "size", 500)
-        .unwrap_or(500)
-        .clamp(1, 5000);
-    let include_match_mode =
-        match json_string_or_default(&payload, "includeMatchMode", "or").as_str() {
-            "and" => FileAnnotationMatchMode::And,
-            _ => FileAnnotationMatchMode::Or,
-        };
-
-    match runtime.query_file_annotations(FileAnnotationQueryRequest {
-        root_path: json_string_field(&payload, "rootPath").map(PathBuf::from),
-        include_tag_keys: json_string_array_field(&payload, "includeTagKeys"),
-        exclude_tag_keys: json_string_array_field(&payload, "excludeTagKeys"),
-        include_match_mode,
-        page,
-        size,
-    }) {
-        Ok(response) => http_response(200, "OK", &file_annotation_query_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_rebind_file_annotation_paths_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let Some(mappings) = payload
-        .get("mappings")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"mappings must be an array\"}",
-        );
-    };
-    let mut parsed_mappings = Vec::with_capacity(mappings.len());
-    for mapping in mappings {
-        let Some(from_root_relative_path) =
-            json_mapping_path_field(mapping, "fromRelativePath", Some("relativePath"))
-        else {
-            return http_response(
-                400,
-                "Bad Request",
-                "{\"error\":\"fromRelativePath is required\"}",
-            );
-        };
-        let Some(to_root_relative_path) =
-            json_mapping_path_field(mapping, "toRelativePath", Some("nextRelativePath"))
-        else {
-            return http_response(
-                400,
-                "Bad Request",
-                "{\"error\":\"toRelativePath is required\"}",
-            );
-        };
-        let from_root_relative_path = match RootRelativePath::try_from(from_root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        let to_root_relative_path = match RootRelativePath::try_from(to_root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        parsed_mappings.push(FileAnnotationPathMapping {
-            from_root_relative_path,
-            to_root_relative_path,
-        });
-    }
-
-    match runtime.rebind_file_annotation_paths(FileAnnotationPathRebindRequest {
-        root_path: PathBuf::from(root_path),
-        mappings: parsed_mappings,
-    }) {
-        Ok(response) => http_response(200, "OK", &file_annotation_rebind_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_cleanup_missing_file_annotations_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-
-    match runtime.cleanup_missing_file_annotations(FileAnnotationMissingCleanupRequest {
-        root_path: PathBuf::from(root_path),
-        confirm: json_bool_field(&payload, "confirm"),
-    }) {
-        Ok(response) => http_response(
-            200,
-            "OK",
-            &file_annotation_missing_cleanup_response_json(response),
-        ),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_ensure_file_index_entries_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let root_relative_paths = json_root_relative_path_values(&payload);
-    if root_relative_paths.is_empty() {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"relativePaths is required\"}",
-        );
-    }
-
-    let mut parsed_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
-    for root_relative_path in root_relative_paths {
-        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        parsed_root_relative_paths.push(root_relative_path);
-    }
-
-    match runtime.ensure_file_index_entries(FileIndexEnsureRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_paths: parsed_root_relative_paths,
-    }) {
-        Ok(response) => http_response(200, "OK", &file_index_ensure_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
 fn parse_json_body(request: &str) -> Result<serde_json::Value, HttpResponse> {
     let body = http_request_body(request).trim();
     if body.is_empty() {
@@ -1071,11 +608,6 @@ fn json_string_field<'a>(payload: &'a serde_json::Value, key: &str) -> Option<&'
         .filter(|value| !value.is_empty())
 }
 
-fn json_file_annotation_relative_path(payload: &serde_json::Value) -> Option<&str> {
-    json_string_field(payload, "relativePath")
-        .or_else(|| json_string_field(payload, "rootRelativePath"))
-}
-
 fn json_string_array_field(payload: &serde_json::Value, key: &str) -> Vec<String> {
     match payload.get(key) {
         Some(serde_json::Value::Array(values)) => values
@@ -1101,41 +633,12 @@ fn json_mapping_path_field<'a>(
         .or_else(|| fallback_key.and_then(|fallback_key| json_string_field(mapping, fallback_key)))
 }
 
-fn parse_file_annotation_action_source(value: Option<&str>) -> FileAnnotationActionSource {
-    match value {
-        Some("hotkey") => FileAnnotationActionSource::Hotkey,
-        _ => FileAnnotationActionSource::Click,
-    }
-}
-
 fn json_root_relative_path_values(payload: &serde_json::Value) -> Vec<&str> {
     let value = payload
         .get("rootRelativePath")
         .or_else(|| payload.get("rootRelativePaths"))
         .or_else(|| payload.get("relativePath"))
         .or_else(|| payload.get("relativePaths"));
-
-    match value {
-        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => vec![value.trim()],
-        Some(serde_json::Value::Array(values)) => values
-            .iter()
-            .filter_map(|value| {
-                value
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|item| !item.is_empty())
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn json_root_move_batch_path_values(payload: &serde_json::Value) -> Vec<&str> {
-    let value = payload
-        .get("rootRelativePaths")
-        .or_else(|| payload.get("rootRelativePath"))
-        .or_else(|| payload.get("sourceRootRelativePaths"))
-        .or_else(|| payload.get("sourceRootRelativePath"));
 
     match value {
         Some(serde_json::Value::String(value)) if !value.trim().is_empty() => vec![value.trim()],
@@ -1187,221 +690,6 @@ fn json_usize_or_default(
         Some(serde_json::Value::String(value)) => value.trim().parse::<usize>().ok(),
         None => Some(default_value),
         _ => None,
-    }
-}
-
-fn handle_root_move(runtime: &FauplayRuntime, query: &HashMap<String, String>) -> HttpResponse {
-    let Some(root_path) = query.get("rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let Some(source_root_relative_path) = query.get("sourceRootRelativePath") else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"sourceRootRelativePath is required\"}",
-        );
-    };
-    let Some(target_root_relative_path) = query.get("targetRootRelativePath") else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"targetRootRelativePath is required\"}",
-        );
-    };
-
-    let source_root_relative_path =
-        match RootRelativePath::try_from(source_root_relative_path.as_str()) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-    let target_root_relative_path =
-        match RootRelativePath::try_from(target_root_relative_path.as_str()) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-
-    match runtime.move_root_path(RootMoveRequest {
-        root_path: PathBuf::from(root_path),
-        source_root_relative_path,
-        target_root_relative_path,
-        dry_run: query.get("dryRun").is_some_and(|value| value == "true"),
-    }) {
-        Ok(response) => http_response(200, "OK", &root_move_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_root_move_batch_json(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
-    let payload = match serde_json::from_str::<serde_json::Value>(http_request_body(request)) {
-        Ok(payload) => payload,
-        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let root_relative_paths = json_root_move_batch_path_values(&payload);
-    if root_relative_paths.is_empty() {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"rootRelativePaths is required\"}",
-        );
-    }
-
-    let mut source_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
-    for root_relative_path in root_relative_paths {
-        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        source_root_relative_paths.push(root_relative_path);
-    }
-
-    let search_mode = match json_string_or_default(&payload, "searchMode", "plain").as_str() {
-        "plain" => RootMoveSearchMode::Plain,
-        "regex" => RootMoveSearchMode::Regex,
-        _ => {
-            return http_response(
-                400,
-                "Bad Request",
-                "{\"error\":\"searchMode must be plain or regex\"}",
-            );
-        }
-    };
-    let Some(counter_start) = json_i64_or_default(&payload, "counterStart", 1) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"counterStart must be an integer\"}",
-        );
-    };
-    let Some(counter_step) = json_i64_or_default(&payload, "counterStep", 1) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"counterStep must be an integer\"}",
-        );
-    };
-    let Some(counter_pad) = json_usize_or_default(&payload, "counterPad", 0) else {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"counterPad must be a non-negative integer\"}",
-        );
-    };
-
-    match runtime.move_root_path_batch(RootMoveBatchRequest {
-        root_path: PathBuf::from(root_path),
-        source_root_relative_paths,
-        rule: RootMoveRule {
-            name_mask: json_string_or_default(&payload, "nameMask", "[N]"),
-            find_text: json_string_or_default(&payload, "findText", ""),
-            replace_text: json_string_or_default(&payload, "replaceText", ""),
-            search_mode,
-            regex_flags: json_string_or_default(&payload, "regexFlags", "g"),
-            counter_start,
-            counter_step,
-            counter_pad,
-        },
-        dry_run: json_bool_field(&payload, "dryRun"),
-    }) {
-        Ok(response) => http_response(200, "OK", &root_move_batch_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-fn handle_list_root_trash(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-) -> HttpResponse {
-    let Some(root_path) = query.get("rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-
-    match runtime.list_root_trash(RootTrashListRequest {
-        root_path: PathBuf::from(root_path),
-        entry_limit: parse_entry_limit(query.get("limit").map(String::as_str)),
-        entry_offset: parse_entry_offset(query.get("offset").map(String::as_str)),
-    }) {
-        Ok(response) => http_response(200, "OK", &root_trash_list_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_move_to_root_trash(runtime: &FauplayRuntime, query: &[(String, String)]) -> HttpResponse {
-    handle_root_trash_mutation(runtime, query, RootTrashMutationKind::Move)
-}
-
-fn handle_restore_from_root_trash(
-    runtime: &FauplayRuntime,
-    query: &[(String, String)],
-) -> HttpResponse {
-    handle_root_trash_mutation(runtime, query, RootTrashMutationKind::Restore)
-}
-
-#[derive(Debug, Clone, Copy)]
-enum RootTrashMutationKind {
-    Move,
-    Restore,
-}
-
-fn handle_root_trash_mutation(
-    runtime: &FauplayRuntime,
-    query: &[(String, String)],
-    kind: RootTrashMutationKind,
-) -> HttpResponse {
-    let Some(root_path) = first_query_value(query, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let root_relative_paths = query_values(query, "rootRelativePath");
-    if root_relative_paths.is_empty() {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"rootRelativePath is required\"}",
-        );
-    };
-    let mut parsed_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
-    for root_relative_path in root_relative_paths {
-        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        parsed_root_relative_paths.push(root_relative_path);
-    }
-    let request = RootTrashRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_paths: parsed_root_relative_paths,
-        dry_run: first_query_value(query, "dryRun").is_some_and(|value| value == "true"),
-    };
-    let result = match kind {
-        RootTrashMutationKind::Move => runtime.move_to_root_trash(request),
-        RootTrashMutationKind::Restore => runtime.restore_from_root_trash(request),
-    };
-
-    match result {
-        Ok(response) => http_response(200, "OK", &root_trash_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
     }
 }
 
@@ -1581,200 +869,6 @@ fn file_metadata_response_json(response: FileMetadataResponse) -> String {
     json
 }
 
-fn global_trash_file_metadata_response_json(response: GlobalTrashFileMetadataResponse) -> String {
-    let mut json = format!(
-        "{{\"recycleId\":\"{}\",\"size\":{}",
-        escape_json_string(&response.recycle_id),
-        response.size,
-    );
-    if let Some(last_modified_ms) = response.last_modified_ms {
-        json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
-    }
-    json.push('}');
-    json
-}
-
-fn file_annotation_set_response_json(response: FileAnnotationMutationResponse) -> String {
-    let root_relative_path = response.root_relative_path.to_string();
-    format!(
-        "{{\"ok\":true,\"absolutePath\":\"{}\",\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"fieldKey\":\"{}\",\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\"}}",
-        escape_json_string(&response.absolute_path.display().to_string()),
-        escape_json_string(&root_relative_path),
-        escape_json_string(&root_relative_path),
-        escape_json_string(&response.key),
-        escape_json_string(&response.key),
-        escape_json_string(&response.value),
-        file_annotation_action_source_json(response.source),
-    )
-}
-
-fn file_annotation_tag_response_json(response: FileAnnotationTagMutationResponse) -> String {
-    let root_relative_path = response.root_relative_path.to_string();
-    format!(
-        "{{\"ok\":true,\"absolutePath\":\"{}\",\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\"}}",
-        escape_json_string(&response.absolute_path.display().to_string()),
-        escape_json_string(&root_relative_path),
-        escape_json_string(&root_relative_path),
-        escape_json_string(&response.key),
-        escape_json_string(&response.value),
-        escape_json_string(&response.source),
-    )
-}
-
-fn file_annotation_read_response_json(response: FileAnnotationReadResponse) -> String {
-    match response.file {
-        Some(file) => format!(
-            "{{\"ok\":true,\"file\":{}}}",
-            file_annotation_file_json(file)
-        ),
-        None => "{\"ok\":true,\"file\":null}".to_owned(),
-    }
-}
-
-fn annotation_tag_options_response_json(response: AnnotationTagOptionsResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            format!(
-                "{{\"tagKey\":\"{}\",\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\",\"fileCount\":{}}}",
-                escape_json_string(&item.tag_key),
-                escape_json_string(&item.key),
-                escape_json_string(&item.value),
-                escape_json_string(&item.source),
-                item.file_count,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!("{{\"ok\":true,\"items\":[{items}]}}")
-}
-
-fn file_annotation_query_response_json(response: FileAnnotationQueryResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(file_annotation_file_json)
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"page\":{},\"size\":{},\"total\":{},\"items\":[{items}]}}",
-        response.page, response.size, response.total,
-    )
-}
-
-fn file_annotation_rebind_response_json(response: FileAnnotationPathRebindResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            let reason_code = item
-                .reason
-                .map(file_annotation_rebind_failure_reason_code);
-            format!(
-                "{{\"fromRelativePath\":\"{}\",\"toRelativePath\":\"{}\",\"ok\":{},\"skipped\":{},\"reasonCode\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&item.from_root_relative_path.to_string()),
-                escape_json_string(&item.to_root_relative_path.to_string()),
-                item.ok,
-                item.skipped,
-                optional_string_json(reason_code),
-                optional_string_json(reason_code),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"total\":{},\"updated\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.total, response.updated, response.skipped, response.failed,
-    )
-}
-
-fn file_annotation_missing_cleanup_response_json(
-    response: FileAnnotationMissingCleanupResponse,
-) -> String {
-    let missing_root_relative_paths = response
-        .missing_root_relative_paths
-        .iter()
-        .map(|path| format!("\"{}\"", escape_json_string(&path.to_string())))
-        .collect::<Vec<_>>()
-        .join(",");
-    let missing_absolute_paths = response
-        .missing_absolute_paths
-        .iter()
-        .map(|path| format!("\"{}\"", escape_json_string(&path.display().to_string())))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"dryRun\":{},\"missingRootRelativePaths\":[{missing_root_relative_paths}],\"missingAbsolutePaths\":[{missing_absolute_paths}],\"impact\":{{\"fileAnnotation\":{},\"annotationTag\":{},\"fileIndexEntry\":{}}},\"removed\":{}}}",
-        response.dry_run,
-        response.impact.file_annotations,
-        response.impact.annotation_tags,
-        response.impact.file_index_entries,
-        response.removed,
-    )
-}
-
-fn file_index_ensure_response_json(response: FileIndexEnsureResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            let root_relative_path = item.root_relative_path.to_string();
-            let reason_code = item.reason.map(file_index_failure_reason_code);
-            format!(
-                "{{\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"ok\":{},\"skipped\":{},\"assetId\":null,\"absolutePath\":{},\"fileMtimeMs\":{},\"lastModifiedMs\":{},\"size\":{},\"reasonCode\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&root_relative_path),
-                escape_json_string(&root_relative_path),
-                item.ok,
-                item.skipped,
-                optional_path_json(item.absolute_path.as_ref()),
-                optional_u64_json(item.last_modified_ms),
-                optional_u64_json(item.last_modified_ms),
-                optional_u64_json(item.size),
-                optional_string_json(reason_code),
-                optional_string_json(reason_code),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"total\":{},\"indexed\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.total, response.indexed, response.skipped, response.failed,
-    )
-}
-
-fn file_annotation_file_json(file: crate::FileAnnotationFile) -> String {
-    let root_relative_path = file.root_relative_path.to_string();
-    let tags = file
-        .tags
-        .into_iter()
-        .map(|tag| {
-            format!(
-                "{{\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\",\"appliedAt\":{},\"updatedAt\":{}}}",
-                escape_json_string(&tag.key),
-                escape_json_string(&tag.value),
-                escape_json_string(&tag.source),
-                tag.applied_at_ms,
-                tag.applied_at_ms,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"absolutePath\":\"{}\",\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"tags\":[{tags}]}}",
-        escape_json_string(&file.absolute_path.display().to_string()),
-        escape_json_string(&root_relative_path),
-        escape_json_string(&root_relative_path),
-    )
-}
-
 fn duplicate_files_response_json(response: DuplicateFilesResponse) -> String {
     let skipped_seeds = response
         .skipped_seeds
@@ -1832,194 +926,6 @@ fn duplicate_files_response_json(response: DuplicateFilesResponse) -> String {
     )
 }
 
-fn root_move_response_json(response: RootMoveResponse) -> String {
-    format!(
-        "{{\"dryRun\":{},\"sourceRootRelativePath\":\"{}\",\"targetRootRelativePath\":\"{}\",\"absolutePath\":\"{}\",\"targetAbsolutePath\":\"{}\",\"ok\":{},\"reason\":{},\"error\":{}}}",
-        response.dry_run,
-        escape_json_string(&response.source_root_relative_path.to_string()),
-        escape_json_string(&response.target_root_relative_path.to_string()),
-        escape_json_string(&response.absolute_path.display().to_string()),
-        escape_json_string(&response.target_absolute_path.display().to_string()),
-        response.ok,
-        optional_root_move_failure_reason_json(response.reason),
-        optional_string_json(response.error.as_deref()),
-    )
-}
-
-fn root_move_batch_response_json(response: RootMoveBatchResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            format!(
-                "{{\"rootRelativePath\":\"{}\",\"nextRootRelativePath\":{},\"absolutePath\":\"{}\",\"nextAbsolutePath\":{},\"ok\":{},\"skipped\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&item.root_relative_path.to_string()),
-                optional_root_relative_path_json(item.next_root_relative_path.as_ref()),
-                escape_json_string(&item.absolute_path.display().to_string()),
-                optional_path_json(item.next_absolute_path.as_ref()),
-                item.ok,
-                item.skipped,
-                optional_root_move_batch_failure_reason_json(item.reason),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"dryRun\":{},\"total\":{},\"moved\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.dry_run, response.total, response.moved, response.skipped, response.failed,
-    )
-}
-
-fn root_trash_response_json(response: RootTrashMutationResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            format!(
-                "{{\"rootRelativePath\":\"{}\",\"nextRootRelativePath\":{},\"absolutePath\":\"{}\",\"nextAbsolutePath\":{},\"ok\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&item.root_relative_path.to_string()),
-                optional_root_relative_path_json(item.next_root_relative_path.as_ref()),
-                escape_json_string(&item.absolute_path.display().to_string()),
-                optional_path_json(item.next_absolute_path.as_ref()),
-                item.ok,
-                optional_root_trash_failure_reason_json(item.reason),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"dryRun\":{},\"total\":{},\"completed\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.dry_run, response.total, response.completed, response.failed,
-    )
-}
-
-fn root_trash_list_response_json(response: RootTrashListResponse) -> String {
-    let entries = response
-        .entries
-        .into_iter()
-        .map(|entry| {
-            let mut json = format!(
-                "{{\"name\":\"{}\",\"rootRelativePath\":\"{}\",\"originalRootRelativePath\":\"{}\",\"absolutePath\":\"{}\",\"originalAbsolutePath\":\"{}\",\"size\":{}",
-                escape_json_string(&entry.name),
-                escape_json_string(&entry.root_relative_path.to_string()),
-                escape_json_string(&entry.original_root_relative_path.to_string()),
-                escape_json_string(&entry.absolute_path.display().to_string()),
-                escape_json_string(&entry.original_absolute_path.display().to_string()),
-                entry.size,
-            );
-            if let Some(last_modified_ms) = entry.last_modified_ms {
-                json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
-            }
-            if let Some(deleted_at_ms) = entry.deleted_at_ms {
-                json.push_str(&format!(",\"deletedAtMs\":{deleted_at_ms}"));
-            }
-            json.push('}');
-            json
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"entries\":[{entries}],\"isTruncated\":{},\"nextOffset\":{}}}",
-        response.is_truncated,
-        optional_usize_json(response.next_offset)
-    )
-}
-
-fn global_trash_list_response_json(response: GlobalTrashListResponse) -> String {
-    let entries = response
-        .entries
-        .into_iter()
-        .map(|entry| {
-            let absolute_path = entry.absolute_path.display().to_string();
-            let original_absolute_path = entry.original_absolute_path.display().to_string();
-            let mut json = format!(
-                "{{\"path\":\"{}\",\"absolutePath\":\"{}\",\"name\":\"{}\",\"kind\":\"file\",\"size\":{},\"mimeType\":\"{}\",\"previewKind\":\"{}\",\"displayPath\":\"{}\",\"deletedAt\":{},\"sourceType\":\"global_recycle\",\"recycleId\":\"{}\",\"originalAbsolutePath\":\"{}\"",
-                escape_json_string(&absolute_path),
-                escape_json_string(&absolute_path),
-                escape_json_string(&entry.name),
-                entry.size,
-                escape_json_string(&entry.mime_type),
-                escape_json_string(&entry.preview_kind),
-                escape_json_string(&entry.display_path),
-                entry.deleted_at_ms,
-                escape_json_string(&entry.recycle_id),
-                escape_json_string(&original_absolute_path),
-            );
-            if let Some(last_modified_ms) = entry.last_modified_ms {
-                json.push_str(&format!(",\"lastModifiedMs\":{last_modified_ms}"));
-            }
-            json.push('}');
-            json
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"entries\":[{entries}],\"isTruncated\":{},\"nextOffset\":{}}}",
-        response.is_truncated,
-        optional_usize_json(response.next_offset)
-    )
-}
-
-fn global_trash_move_response_json(response: GlobalTrashMoveResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            let mut json = format!(
-                "{{\"sourceType\":\"global_recycle\",\"recycleId\":\"{}\",\"absolutePath\":\"{}\",\"nextAbsolutePath\":{},\"ok\":{},\"reason\":{},\"error\":{}",
-                escape_json_string(&item.recycle_id),
-                escape_json_string(&item.absolute_path.display().to_string()),
-                optional_path_json(item.next_absolute_path.as_ref()),
-                item.ok,
-                optional_global_trash_failure_reason_json(item.reason),
-                optional_string_json(item.error.as_deref()),
-            );
-            if let Some(deleted_at_ms) = item.deleted_at_ms {
-                json.push_str(&format!(",\"deletedAt\":{deleted_at_ms}"));
-            }
-            json.push('}');
-            json
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"dryRun\":{},\"total\":{},\"moved\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.dry_run, response.total, response.moved, response.failed,
-    )
-}
-
-fn global_trash_restore_response_json(response: GlobalTrashRestoreResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            format!(
-                "{{\"sourceType\":\"global_recycle\",\"recycleId\":\"{}\",\"absolutePath\":\"{}\",\"originalAbsolutePath\":\"{}\",\"nextAbsolutePath\":{},\"ok\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&item.recycle_id),
-                escape_json_string(&item.absolute_path.display().to_string()),
-                escape_json_string(&item.original_absolute_path.display().to_string()),
-                optional_path_json(item.next_absolute_path.as_ref()),
-                item.ok,
-                optional_global_trash_failure_reason_json(item.reason),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"dryRun\":{},\"total\":{},\"restored\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.dry_run, response.total, response.restored, response.failed,
-    )
-}
-
 fn global_shortcut_config_response_json(response: GlobalShortcutConfigResponse) -> String {
     let mut json = format!(
         "{{\"ok\":true,\"loaded\":{},\"path\":\"{}\"",
@@ -2058,13 +964,6 @@ fn local_root_binding_json(binding: &LocalRootBinding) -> String {
     )
 }
 
-fn optional_root_relative_path_json(value: Option<&RootRelativePath>) -> String {
-    match value {
-        Some(value) => format!("\"{}\"", escape_json_string(&value.to_string())),
-        None => "null".to_owned(),
-    }
-}
-
 fn optional_path_json(value: Option<&PathBuf>) -> String {
     match value {
         Some(value) => format!("\"{}\"", escape_json_string(&value.display().to_string())),
@@ -2072,110 +971,10 @@ fn optional_path_json(value: Option<&PathBuf>) -> String {
     }
 }
 
-fn optional_root_trash_failure_reason_json(value: Option<RootTrashFailureReason>) -> String {
-    match value {
-        Some(value) => format!("\"{}\"", root_trash_failure_reason_json(value)),
-        None => "null".to_owned(),
-    }
-}
-
-fn optional_global_trash_failure_reason_json(value: Option<GlobalTrashFailureReason>) -> String {
-    match value {
-        Some(value) => format!("\"{}\"", global_trash_failure_reason_json(value)),
-        None => "null".to_owned(),
-    }
-}
-
-fn optional_root_move_failure_reason_json(value: Option<RootMoveFailureReason>) -> String {
-    match value {
-        Some(value) => format!("\"{}\"", root_move_failure_reason_json(value)),
-        None => "null".to_owned(),
-    }
-}
-
-fn optional_root_move_batch_failure_reason_json(
-    value: Option<RootMoveBatchFailureReason>,
-) -> String {
-    match value {
-        Some(value) => format!("\"{}\"", root_move_batch_failure_reason_json(value)),
-        None => "null".to_owned(),
-    }
-}
-
-fn file_annotation_action_source_json(value: FileAnnotationActionSource) -> &'static str {
-    match value {
-        FileAnnotationActionSource::Click => "click",
-        FileAnnotationActionSource::Hotkey => "hotkey",
-    }
-}
-
-fn file_annotation_rebind_failure_reason_code(
-    value: FileAnnotationPathRebindFailureReason,
-) -> &'static str {
-    match value {
-        FileAnnotationPathRebindFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
-        FileAnnotationPathRebindFailureReason::TargetNotFound => "TARGET_NOT_FOUND",
-        FileAnnotationPathRebindFailureReason::NoChange => "NO_CHANGE",
-    }
-}
-
-fn file_index_failure_reason_code(value: FileIndexFailureReason) -> &'static str {
-    match value {
-        FileIndexFailureReason::IndexFresh => "INDEX_FRESH",
-        FileIndexFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
-        FileIndexFailureReason::NotFile => "NOT_FILE",
-        FileIndexFailureReason::IndexFailed => "INDEX_FAILED",
-    }
-}
-
-fn root_move_failure_reason_json(value: RootMoveFailureReason) -> &'static str {
-    match value {
-        RootMoveFailureReason::InvalidSource => "invalid_source",
-        RootMoveFailureReason::InvalidTarget => "invalid_target",
-        RootMoveFailureReason::SourceNotFound => "source_not_found",
-        RootMoveFailureReason::UnsupportedKind => "unsupported_kind",
-        RootMoveFailureReason::TargetExists => "target_exists",
-        RootMoveFailureReason::MutationFailed => "mutation_failed",
-    }
-}
-
-fn root_move_batch_failure_reason_json(value: RootMoveBatchFailureReason) -> &'static str {
-    match value {
-        RootMoveBatchFailureReason::InvalidPath => "invalid_path",
-        RootMoveBatchFailureReason::InvalidRule => "invalid_rule",
-        RootMoveBatchFailureReason::InvalidTarget => "invalid_target",
-        RootMoveBatchFailureReason::SourceNotFound => "source_not_found",
-        RootMoveBatchFailureReason::UnsupportedKind => "unsupported_kind",
-        RootMoveBatchFailureReason::TargetExists => "target_exists",
-        RootMoveBatchFailureReason::NoChange => "no_change",
-        RootMoveBatchFailureReason::MutationFailed => "mutation_failed",
-    }
-}
-
 fn duplicate_seed_skip_reason_json(value: DuplicateSeedSkipReason) -> &'static str {
     match value {
         DuplicateSeedSkipReason::SourceNotFound => "source_not_found",
         DuplicateSeedSkipReason::NotFile => "not_file",
-    }
-}
-
-fn root_trash_failure_reason_json(value: RootTrashFailureReason) -> &'static str {
-    match value {
-        RootTrashFailureReason::InvalidSource => "invalid_source",
-        RootTrashFailureReason::SourceNotFound => "source_not_found",
-        RootTrashFailureReason::UnsupportedKind => "unsupported_kind",
-        RootTrashFailureReason::TargetExists => "target_exists",
-        RootTrashFailureReason::MutationFailed => "mutation_failed",
-    }
-}
-
-fn global_trash_failure_reason_json(value: GlobalTrashFailureReason) -> &'static str {
-    match value {
-        GlobalTrashFailureReason::RecycleItemNotFound => "recycle_item_not_found",
-        GlobalTrashFailureReason::SourceNotFound => "source_not_found",
-        GlobalTrashFailureReason::UnsupportedKind => "unsupported_kind",
-        GlobalTrashFailureReason::TargetExists => "target_exists",
-        GlobalTrashFailureReason::MutationFailed => "mutation_failed",
     }
 }
 
