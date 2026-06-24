@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, RefreshCw, Users, X } from 'lucide-react'
 import {
   assignFaces,
@@ -13,17 +13,20 @@ import {
   restoreIgnoredFaces,
   unassignFaces,
 } from '@/features/faces/api'
+import {
+  faceCountText,
+  readFaceMutationResultMessage,
+  type NoticeTone,
+  type PanelView,
+} from '@/features/faces/lib/peoplePanelText'
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
+import { FaceGrid } from '@/features/faces/components/FaceGrid'
+import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionActions'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
-import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
-import { getLegacyAwarePersonDisplayName, getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
+import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
-import { GRID_SELECTABLE_ITEM_ATTR, useGridSelection } from '@/hooks/useGridSelection'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
-
-type PanelView = 'people' | 'unassigned' | 'ignored'
-type NoticeTone = 'info' | 'error'
 
 interface PeoplePanelProps {
   open: boolean
@@ -35,233 +38,6 @@ interface PeoplePanelProps {
   onClose: () => void
   onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
   onProjectFaceSources?: (faces: FaceRecord[]) => boolean | Promise<boolean>
-}
-
-function statusLabel(status: FaceRecord['status']): string {
-  if (status === 'assigned') return '已归属'
-  if (status === 'manual_unassigned') return '人工未归属'
-  if (status === 'deferred') return '待聚类'
-  if (status === 'ignored') return '已忽略'
-  return '未归属'
-}
-
-function faceCountText(person: PersonSummary, scope: PersonScope): string {
-  if (scope === 'global') {
-    return `${person.faceCount} 张脸`
-  }
-  return `当前 ${person.faceCount} / 全局 ${person.globalFaceCount}`
-}
-
-function formatFrameTsMs(frameTsMs: number | null): string | null {
-  if (typeof frameTsMs !== 'number' || !Number.isFinite(frameTsMs) || frameTsMs < 0) return null
-  const totalSeconds = Math.floor(frameTsMs / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
-
-function readResultMessage(result: FaceMutationResult): { tone: NoticeTone; message: string } | null {
-  if (result.failed <= 0) {
-    return {
-      tone: 'info',
-      message: `已完成 ${result.succeeded} 项`,
-    }
-  }
-
-  const firstError = result.items.find((item) => !item.ok)?.error
-  if (result.succeeded <= 0) {
-    return {
-      tone: 'error',
-      message: firstError || `操作失败（${result.failed} 项）`,
-    }
-  }
-
-  return {
-    tone: 'error',
-    message: `已完成 ${result.succeeded} 项，失败 ${result.failed} 项${firstError ? `：${firstError}` : ''}`,
-  }
-}
-
-interface FaceGridProps {
-  faces: FaceRecord[]
-  selectedFaceIds: Set<string>
-  onSelectionChange: (faceIds: string[]) => void
-  onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
-  compact?: boolean
-}
-
-function getFaceSelectionId(face: FaceRecord): string {
-  return face.faceId
-}
-
-function FaceGrid({
-  faces,
-  selectedFaceIds,
-  onSelectionChange,
-  onOpenFaceSource,
-  compact = false,
-}: FaceGridProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const selectedFaceIdsRef = useRef<Set<string>>(selectedFaceIds)
-  const preClickSelectionRef = useRef<Set<string> | null>(null)
-  const singleClickTimeoutRef = useRef<number | null>(null)
-  const {
-    selectedIdSet,
-    marqueeRect,
-    replaceSelection,
-    toggleSelection,
-    setAnchorId,
-    selectRangeToId,
-    handleMarqueePointerDown,
-    shouldSuppressClick,
-  } = useGridSelection({
-    items: faces,
-    getId: getFaceSelectionId,
-    selectedIds: selectedFaceIds,
-    onSelectionChange,
-    containerRef,
-  })
-
-  useEffect(() => {
-    selectedFaceIdsRef.current = selectedFaceIds
-  }, [selectedFaceIds])
-
-  const clearPendingSingleClick = useCallback(() => {
-    if (singleClickTimeoutRef.current !== null) {
-      window.clearTimeout(singleClickTimeoutRef.current)
-      singleClickTimeoutRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => clearPendingSingleClick()
-  }, [clearPendingSingleClick])
-
-  const handleFaceClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>, faceId: string) => {
-    if (shouldSuppressClick()) {
-      clearPendingSingleClick()
-      return
-    }
-
-    if (event.detail > 1) {
-      clearPendingSingleClick()
-      return
-    }
-
-    const isRangeSelection = event.shiftKey
-    const isToggleSelection = event.ctrlKey || event.metaKey
-    preClickSelectionRef.current = new Set(selectedFaceIdsRef.current)
-    clearPendingSingleClick()
-    singleClickTimeoutRef.current = window.setTimeout(() => {
-      singleClickTimeoutRef.current = null
-      if (isRangeSelection) {
-        selectRangeToId(faceId)
-        return
-      }
-
-      setAnchorId(faceId)
-      if (isToggleSelection) {
-        toggleSelection(faceId)
-        return
-      }
-
-      replaceSelection([faceId])
-    }, 240)
-  }, [clearPendingSingleClick, replaceSelection, selectRangeToId, setAnchorId, shouldSuppressClick, toggleSelection])
-
-  const handleFaceDoubleClick = useCallback((face: FaceRecord) => {
-    if (shouldSuppressClick()) {
-      clearPendingSingleClick()
-      return
-    }
-
-    clearPendingSingleClick()
-    const previousSelection = preClickSelectionRef.current
-    if (previousSelection) {
-      replaceSelection(previousSelection)
-    }
-    void onOpenFaceSource?.(face)
-  }, [clearPendingSingleClick, onOpenFaceSource, replaceSelection, shouldSuppressClick])
-
-  if (faces.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
-        当前视图暂无人脸
-      </div>
-    )
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className={cn(
-        'relative grid gap-3',
-        compact
-          ? 'grid-cols-[repeat(auto-fill,minmax(128px,1fr))]'
-          : 'grid-cols-[repeat(auto-fill,minmax(160px,1fr))]'
-      )}
-      onPointerDown={handleMarqueePointerDown}
-    >
-      {marqueeRect && (
-        <div
-          className="pointer-events-none fixed z-[70] rounded-sm border border-primary bg-primary/15"
-          style={marqueeRect}
-        />
-      )}
-      {faces.map((face) => {
-        const isSelected = selectedIdSet.has(face.faceId)
-        const frameTs = formatFrameTsMs(face.frameTsMs)
-        const sourcePath = face.assetPath || '未知路径'
-        const statusText = statusLabel(face.status)
-        const personText = face.personId
-          ? getLegacyAwarePersonDisplayName({
-            personId: face.personId,
-            name: face.personName,
-          })
-          : '未归属'
-        return (
-          <button
-            key={face.faceId}
-            type="button"
-            {...{ [GRID_SELECTABLE_ITEM_ATTR]: face.faceId }}
-            title={`${statusText} · ${personText} · ${sourcePath}`}
-            aria-label={`人脸 ${sourcePath}，score ${face.score.toFixed(2)}，${statusText}`}
-            className={cn(
-              'rounded-md border p-2 text-left transition-colors select-none',
-              isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/60'
-            )}
-            onClick={(event) => handleFaceClick(event, face.faceId)}
-            onDoubleClick={() => handleFaceDoubleClick(face)}
-            >
-              <GatewayFaceCropImage
-                faceId={face.faceId}
-                size={compact ? 128 : 160}
-                padding={0.35}
-                alt="人脸裁切"
-                draggable={false}
-                className={cn(
-                  'w-full rounded-md border border-border object-cover',
-                  compact ? 'h-28' : 'h-36'
-                )}
-              />
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground">
-                score {face.score.toFixed(2)}
-              </span>
-              {face.mediaType === 'video' && frameTs && (
-                <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {frameTs}
-                </span>
-              )}
-            </div>
-            <div className="mt-1 truncate text-xs text-muted-foreground" title={face.assetPath || undefined}>
-              {sourcePath}
-            </div>
-          </button>
-        )
-      })}
-    </div>
-  )
 }
 
 export function PeoplePanel({
@@ -668,7 +444,7 @@ export function PeoplePanel({
     setNotice(null)
     try {
       const result = await task()
-      setNotice(readResultMessage(result))
+      setNotice(readFaceMutationResultMessage(result))
       clearSelection()
       await refreshAll()
       return true
@@ -704,6 +480,26 @@ export function PeoplePanel({
     return runFaceMutation(() => createPersonFromFaces(context, {
       faceIds: selectedIds,
       name,
+    }))
+  }, [context, runFaceMutation, selectedIds])
+  const handleUnassignSelectedFaces = useCallback(async () => {
+    return runFaceMutation(() => unassignFaces(context, {
+      faceIds: selectedIds,
+    }))
+  }, [context, runFaceMutation, selectedIds])
+  const handleIgnoreSelectedFaces = useCallback(async () => {
+    return runFaceMutation(() => ignoreFaces(context, {
+      faceIds: selectedIds,
+    }))
+  }, [context, runFaceMutation, selectedIds])
+  const handleRestoreIgnoredFaces = useCallback(async () => {
+    return runFaceMutation(() => restoreIgnoredFaces(context, {
+      faceIds: selectedIds,
+    }))
+  }, [context, runFaceMutation, selectedIds])
+  const handleRequeueSelectedFaces = useCallback(async () => {
+    return runFaceMutation(() => requeueFaces(context, {
+      faceIds: selectedIds,
     }))
   }, [context, runFaceMutation, selectedIds])
   const showCompactPeopleList = isCompact && view === 'people' && compactPeopleStage === 'list'
@@ -1048,87 +844,25 @@ export function PeoplePanel({
                       </div>
 
                       {!readonly && (
-                        <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                          <div className="space-y-2">
-                            <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
-                            <PersonAssignmentInput
-                              key={`compact-detail:${assignmentInputKey}`}
-                              context={context}
-                              scope={scope}
-                              querySize={40}
-                              emptyQuerySize={40}
-                              disabled={isMutatingFaces || selectedIds.length === 0}
-                              excludedPersonIds={assignmentExcludedPersonIds}
-                              onAssign={handleAssignSelectedFaces}
-                              onCreate={handleCreatePersonForSelectedFaces}
-                            />
-                          </div>
-                          <div className="grid grid-cols-1 gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || selectedIds.length === 0}
-                              onClick={() => {
-                                void runFaceMutation(() => unassignFaces(context, {
-                                  faceIds: selectedIds,
-                                }))
-                              }}
-                            >
-                              移出为未归属
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || selectedIds.length === 0}
-                              onClick={() => {
-                                void runFaceMutation(() => ignoreFaces(context, {
-                                  faceIds: selectedIds,
-                                }))
-                              }}
-                            >
-                              标记忽略
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'ignored')}
-                              onClick={() => {
-                                void runFaceMutation(() => restoreIgnoredFaces(context, {
-                                  faceIds: selectedIds,
-                                }))
-                              }}
-                            >
-                              恢复忽略
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'manual_unassigned')}
-                              onClick={() => {
-                                void runFaceMutation(() => requeueFaces(context, {
-                                  faceIds: selectedIds,
-                                }))
-                              }}
-                            >
-                              重新交给聚类
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isMutatingFaces || isProjectingSources || selectedIds.length === 0}
-                              onClick={() => {
-                                void handleProjectFaceSources()
-                              }}
-                            >
-                              投射源文件
-                            </Button>
-                          </div>
-                        </div>
+                        <FaceSelectionActions
+                          className="mb-4"
+                          layout="stacked"
+                          assignmentInputKey={`compact-detail:${assignmentInputKey}`}
+                          context={context}
+                          scope={scope}
+                          selectedFaceIds={selectedIds}
+                          selectedFaces={selectedFaces}
+                          excludedPersonIds={assignmentExcludedPersonIds}
+                          isMutatingFaces={isMutatingFaces}
+                          isProjectingSources={isProjectingSources}
+                          onAssign={handleAssignSelectedFaces}
+                          onCreate={handleCreatePersonForSelectedFaces}
+                          onUnassign={handleUnassignSelectedFaces}
+                          onIgnore={handleIgnoreSelectedFaces}
+                          onRestoreIgnored={handleRestoreIgnoredFaces}
+                          onRequeue={handleRequeueSelectedFaces}
+                          onProjectSources={handleProjectFaceSources}
+                        />
                       )}
 
                       {isLoadingFaces ? (
@@ -1164,87 +898,25 @@ export function PeoplePanel({
                       )}
                     </div>
 
-                    <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
-                        <PersonAssignmentInput
-                          key={`compact-review:${assignmentInputKey}`}
-                          context={context}
-                          scope={scope}
-                          querySize={40}
-                          emptyQuerySize={40}
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          excludedPersonIds={assignmentExcludedPersonIds}
-                          onAssign={handleAssignSelectedFaces}
-                          onCreate={handleCreatePersonForSelectedFaces}
-                        />
-                      </div>
-                      <div className="grid grid-cols-1 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => unassignFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          移出为未归属
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => ignoreFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          标记忽略
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'ignored')}
-                          onClick={() => {
-                            void runFaceMutation(() => restoreIgnoredFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          恢复忽略
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'manual_unassigned')}
-                          onClick={() => {
-                            void runFaceMutation(() => requeueFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          重新交给聚类
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isMutatingFaces || isProjectingSources || selectedIds.length === 0}
-                          onClick={() => {
-                            void handleProjectFaceSources()
-                          }}
-                        >
-                          投射源文件
-                        </Button>
-                      </div>
-                    </div>
+                    <FaceSelectionActions
+                      className="mb-4"
+                      layout="stacked"
+                      assignmentInputKey={`compact-review:${assignmentInputKey}`}
+                      context={context}
+                      scope={scope}
+                      selectedFaceIds={selectedIds}
+                      selectedFaces={selectedFaces}
+                      excludedPersonIds={assignmentExcludedPersonIds}
+                      isMutatingFaces={isMutatingFaces}
+                      isProjectingSources={isProjectingSources}
+                      onAssign={handleAssignSelectedFaces}
+                      onCreate={handleCreatePersonForSelectedFaces}
+                      onUnassign={handleUnassignSelectedFaces}
+                      onIgnore={handleIgnoreSelectedFaces}
+                      onRestoreIgnored={handleRestoreIgnoredFaces}
+                      onRequeue={handleRequeueSelectedFaces}
+                      onProjectSources={handleProjectFaceSources}
+                    />
 
                     {isLoadingFaces ? (
                       <div className="py-8 text-sm text-muted-foreground">人脸数据加载中...</div>
@@ -1482,84 +1154,25 @@ export function PeoplePanel({
                   </div>
 
                   {!readonly && (
-                    <div className="mb-4 space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-muted-foreground">归属到人物</div>
-                        <PersonAssignmentInput
-                          key={`wide:${assignmentInputKey}`}
-                          context={context}
-                          scope={scope}
-                          querySize={40}
-                          emptyQuerySize={40}
-                          className="max-w-[560px]"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          excludedPersonIds={assignmentExcludedPersonIds}
-                          onAssign={handleAssignSelectedFaces}
-                          onCreate={handleCreatePersonForSelectedFaces}
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => unassignFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          移出为未归属
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedIds.length === 0}
-                          onClick={() => {
-                            void runFaceMutation(() => ignoreFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          标记忽略
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'ignored')}
-                          onClick={() => {
-                            void runFaceMutation(() => restoreIgnoredFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          恢复忽略
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || selectedFaces.every((face) => face.status !== 'manual_unassigned')}
-                          onClick={() => {
-                            void runFaceMutation(() => requeueFaces(context, {
-                              faceIds: selectedIds,
-                            }))
-                          }}
-                        >
-                          重新交给聚类
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMutatingFaces || isProjectingSources || selectedIds.length === 0}
-                          onClick={() => {
-                            void handleProjectFaceSources()
-                          }}
-                        >
-                          投射源文件
-                        </Button>
-                      </div>
-                    </div>
+                    <FaceSelectionActions
+                      className="mb-4"
+                      assignmentClassName="max-w-[560px]"
+                      assignmentInputKey={`wide:${assignmentInputKey}`}
+                      context={context}
+                      scope={scope}
+                      selectedFaceIds={selectedIds}
+                      selectedFaces={selectedFaces}
+                      excludedPersonIds={assignmentExcludedPersonIds}
+                      isMutatingFaces={isMutatingFaces}
+                      isProjectingSources={isProjectingSources}
+                      onAssign={handleAssignSelectedFaces}
+                      onCreate={handleCreatePersonForSelectedFaces}
+                      onUnassign={handleUnassignSelectedFaces}
+                      onIgnore={handleIgnoreSelectedFaces}
+                      onRestoreIgnored={handleRestoreIgnoredFaces}
+                      onRequeue={handleRequeueSelectedFaces}
+                      onProjectSources={handleProjectFaceSources}
+                    />
                   )}
 
                   {isLoadingFaces ? (

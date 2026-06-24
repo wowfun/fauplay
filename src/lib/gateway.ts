@@ -1,21 +1,44 @@
 import {
-  clearRemoteSession,
   fromRemoteUiRootId,
   getActiveRemoteWorkspace,
-  getCurrentOrigin,
   isRemoteReadonlyProviderActive,
 } from '@/lib/accessState'
+import {
+  DEFAULT_RUNTIME_API_TIMEOUT_MS,
+  GatewayHttpError,
+  GatewayMcpError,
+  buildLocalRuntimeUrl,
+  buildRemoteLoginHeaders,
+  callLocalRuntimeHttp,
+  callRemoteRuntimeHttp,
+  callSameOriginRemoteHttp,
+  createClientTimeoutError,
+  fetchJsonWithTimeout,
+  fetchSameOriginJsonWithTimeout,
+  getLocalRuntimeBaseUrl,
+  getSameOriginRuntimeBaseUrl,
+  isAbortError,
+  normalizeEndpointPath,
+  type SameOriginRequestOptions,
+  type ToolCallResult,
+} from '@/lib/runtimeApi/http'
+export type { ToolCallResult } from '@/lib/runtimeApi/http'
 import type { FileItem, TextPreviewPayload } from '@/types'
 
-const LOCAL_GATEWAY_BASE_URL_CONFIG = (import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:3210'
 const HEALTH_ENDPOINT_PATH = '/v1/health'
 const MCP_ENDPOINT_PATH = '/v1/mcp'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
-const DEFAULT_TOOL_TIMEOUT_MS = 5000
+const DEFAULT_TOOL_TIMEOUT_MS = DEFAULT_RUNTIME_API_TIMEOUT_MS
 const ML_CLASSIFY_TOOL_TIMEOUT_MS = 120000
 const VIDEO_SAME_DURATION_TIMEOUT_MS = 20000
 const LOCAL_DATA_TOOL_TIMEOUT_MS = 120000
+const buildLocalGatewayUrl = buildLocalRuntimeUrl
+const getLocalGatewayBaseUrl = getLocalRuntimeBaseUrl
+const getSameOriginGatewayBaseUrl = getSameOriginRuntimeBaseUrl
+
+export const callGatewayHttp = callLocalRuntimeHttp
+export const callRemoteGatewayHttp = callRemoteRuntimeHttp
 const MCP_CLIENT_INFO = {
   name: 'fauplay-web',
   version: '0.0.1',
@@ -110,17 +133,6 @@ interface GatewayHealthResponse {
   status?: string
 }
 
-interface GatewayHttpErrorPayload {
-  ok?: boolean
-  error?: string
-  code?: string
-}
-
-interface SameOriginRequestOptions {
-  clearSessionOnUnauthorized?: boolean
-  headers?: Record<string, string>
-}
-
 interface RemoteSessionCreateOptions {
   rememberDevice?: boolean
   rememberDeviceLabel?: string
@@ -180,73 +192,6 @@ export interface GatewayCapabilitiesSnapshot {
   tools: GatewayToolDescriptor[]
 }
 
-export type ToolCallResult = Record<string, unknown> | unknown[] | string | number | boolean | null
-
-class GatewayMcpError extends Error {
-  code?: string
-
-  constructor(message: string, code?: string) {
-    super(message)
-    this.name = 'GatewayMcpError'
-    this.code = code
-  }
-}
-
-class GatewayHttpError extends Error {
-  code?: string
-  status?: number
-
-  constructor(message: string, code?: string, status?: number) {
-    super(message)
-    this.name = 'GatewayHttpError'
-    this.code = code
-    this.status = status
-  }
-}
-
-function getSameOriginGatewayBaseUrl(): string {
-  return getCurrentOrigin()
-}
-
-function getLocalGatewayBaseUrl(): string {
-  if (LOCAL_GATEWAY_BASE_URL_CONFIG === '/' || LOCAL_GATEWAY_BASE_URL_CONFIG === 'same-origin') {
-    return getCurrentOrigin()
-  }
-  return LOCAL_GATEWAY_BASE_URL_CONFIG
-}
-
-function buildLocalGatewayUrl(endpointPath: string): string {
-  const normalizedPath = normalizeEndpointPath(endpointPath)
-  return new URL(normalizedPath, `${getLocalGatewayBaseUrl().replace(/\/+$/, '')}/`).toString()
-}
-
-function createRemoteUnauthorizedError(status?: number): GatewayHttpError {
-  return new GatewayHttpError('远程会话已失效，请重新连接', 'REMOTE_UNAUTHORIZED', status)
-}
-
-function clearRemoteSessionOnUnauthorized() {
-  clearRemoteSession({ emitInvalidatedEvent: true })
-}
-
-function buildRemoteLoginHeaders(token: string): Record<string, string> {
-  const normalizedToken = token.trim()
-  if (!normalizedToken) {
-    throw new GatewayHttpError('远程 token 不能为空', 'REMOTE_TOKEN_REQUIRED', 400)
-  }
-  return {
-    Authorization: `Bearer ${normalizedToken}`,
-  }
-}
-
-function normalizeEndpointPath(endpointPath: string): string {
-  return endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
-}
-
-function appendQueryString(baseUrl: string, query: URLSearchParams): string {
-  const serialized = query.toString()
-  return serialized ? `${baseUrl}?${serialized}` : baseUrl
-}
-
 let mcpInitialized = false
 let mcpInitializingPromise: Promise<void> | null = null
 let mcpSessionId: string | null = null
@@ -270,15 +215,6 @@ function toGatewayMcpError(errorObj: JsonRpcErrorObject): GatewayMcpError {
   return new GatewayMcpError(message, internalCode || jsonRpcCode)
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-}
-
-function createClientTimeoutError(timeoutMs: number): GatewayMcpError {
-  const timeoutSec = Math.ceil(timeoutMs / 1000)
-  return new GatewayMcpError(`Gateway request timed out after ${timeoutSec}s`, 'MCP_CLIENT_TIMEOUT')
-}
-
 function resolveToolTimeoutMs(toolName: string, timeoutMs?: number): number {
   if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
     return timeoutMs
@@ -297,29 +233,6 @@ function resolveToolTimeoutMs(toolName: string, timeoutMs?: number): number {
   }
 
   return DEFAULT_TOOL_TIMEOUT_MS
-}
-
-async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-    })
-    if (!response.ok) {
-      throw new Error(`Gateway request failed: ${response.status}`)
-    }
-    return response.json()
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw createClientTimeoutError(timeoutMs)
-    }
-    throw error
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
 }
 
 async function callGatewayMcp<T>(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<T> {
@@ -591,153 +504,6 @@ export async function callGatewayTool<T = ToolCallResult>(
   return callGatewayMcp<T>('tools/call', { name: toolName, arguments: args }, effectiveTimeoutMs)
 }
 
-export async function callGatewayHttp<T = ToolCallResult>(
-  endpointPath: string,
-  body: unknown = {},
-  timeoutMs?: number,
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST'
-): Promise<T> {
-  const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? timeoutMs
-    : DEFAULT_TOOL_TIMEOUT_MS
-  const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
-  const endpoint = buildLocalGatewayUrl(normalizedPath)
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
-
-  try {
-    const requestInit: RequestInit = {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-    }
-    if (method !== 'GET') {
-      requestInit.body = JSON.stringify(body)
-    }
-
-    const response = await fetch(endpoint, requestInit)
-
-    const payload = (await response.json().catch(() => ({}))) as GatewayHttpErrorPayload & T
-
-    if (!response.ok) {
-      const message = typeof payload?.error === 'string'
-        ? payload.error
-        : `Gateway request failed: ${response.status}`
-      const code = typeof payload?.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
-    }
-
-    if (
-      payload
-      && typeof payload === 'object'
-      && 'ok' in payload
-      && payload.ok === false
-    ) {
-      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
-      const code = typeof payload.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
-    }
-
-    return payload as T
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw createClientTimeoutError(effectiveTimeoutMs)
-    }
-    throw error
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
-}
-
-function handleRemoteUnauthorizedResponse(
-  status: number,
-  { clearSessionOnUnauthorized = true }: SameOriginRequestOptions = {}
-): never {
-  if (clearSessionOnUnauthorized) {
-    clearRemoteSessionOnUnauthorized()
-  }
-  throw createRemoteUnauthorizedError(status)
-}
-
-async function callSameOriginRemoteHttp<T = ToolCallResult>(
-  endpointPath: string,
-  body: Record<string, unknown> = {},
-  timeoutMs?: number,
-  method: 'GET' | 'POST' = 'POST',
-  query?: URLSearchParams,
-  options: SameOriginRequestOptions = {},
-): Promise<T> {
-  const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? timeoutMs
-    : DEFAULT_TOOL_TIMEOUT_MS
-  const normalizedPath = normalizeEndpointPath(endpointPath)
-  const baseUrl = `${getSameOriginGatewayBaseUrl()}${normalizedPath}`
-  const endpoint = query ? appendQueryString(baseUrl, query) : baseUrl
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), effectiveTimeoutMs)
-
-  try {
-    const requestInit: RequestInit = {
-      method,
-      credentials: 'same-origin',
-      headers: {
-        ...(method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers ?? {}),
-      },
-      signal: controller.signal,
-    }
-    if (method !== 'GET') {
-      requestInit.body = JSON.stringify(body)
-    }
-
-    const response = await fetch(endpoint, requestInit)
-    const payload = (await response.json().catch(() => ({}))) as GatewayHttpErrorPayload & T
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleRemoteUnauthorizedResponse(response.status, options)
-      }
-      const message = typeof payload?.error === 'string'
-        ? payload.error
-        : `Gateway request failed: ${response.status}`
-      const code = typeof payload?.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
-    }
-
-    if (
-      payload
-      && typeof payload === 'object'
-      && 'ok' in payload
-      && payload.ok === false
-    ) {
-      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
-      const code = typeof payload.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
-    }
-
-    return payload as T
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw createClientTimeoutError(effectiveTimeoutMs)
-    }
-    throw error
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
-}
-
-export async function callRemoteGatewayHttp<T = ToolCallResult>(
-  endpointPath: string,
-  body: Record<string, unknown> = {},
-  timeoutMs?: number,
-  method: 'GET' | 'POST' = 'POST',
-  query?: URLSearchParams
-): Promise<T> {
-  return callSameOriginRemoteHttp(endpointPath, body, timeoutMs, method, query)
-}
-
 function appendAbsolutePathQuery(endpointPath: string, absolutePath: string, options: AbsoluteFileUrlOptions = {}): string {
   const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
   const endpoint = new URL(buildLocalGatewayUrl(normalizedPath))
@@ -905,37 +671,6 @@ export async function loadGatewayCapabilities(timeoutMs: number = 2000): Promise
   }
 }
 
-async function fetchSameOriginJsonWithTimeout(
-  endpointPath: string,
-  timeoutMs: number,
-  options: SameOriginRequestOptions = {}
-): Promise<unknown> {
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await fetch(`${getSameOriginGatewayBaseUrl()}${normalizeEndpointPath(endpointPath)}`, {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: options.headers,
-      signal: controller.signal,
-    })
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleRemoteUnauthorizedResponse(response.status, options)
-      }
-      throw new GatewayHttpError(`Gateway request failed: ${response.status}`, undefined, response.status)
-    }
-    return response.json()
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw createClientTimeoutError(timeoutMs)
-    }
-    throw error
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
-}
 export async function loadRemoteGatewayCapabilities(
   timeoutMs: number = 2000,
 ): Promise<RemoteCapabilitiesSnapshot> {
