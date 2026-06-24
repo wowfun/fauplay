@@ -14,10 +14,10 @@ use crate::{
     MissingFileCleanupResponse, RootRelativePath, RuntimeError,
 };
 
+use super::file_index::{file_index_path, read_file_index_records, write_file_index_records};
 use super::{
-    GLOBAL_CONFIG_FOLDER_NAME, file_annotation_absolute_path, file_index_path, now_ms,
-    number_value, read_file_index_records, root_path_key, root_relative_path_key, string_value,
-    write_file_index_records,
+    GLOBAL_CONFIG_FOLDER_NAME, file_annotation_absolute_path, now_ms, number_value, root_path_key,
+    root_relative_path_key, string_value,
 };
 
 const FILE_ANNOTATIONS_FILENAME: &str = "file-annotations.v1.json";
