@@ -13,8 +13,12 @@
     "gateway": "node scripts/gateway/index.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test tests/gateway/*.test.mjs tests/runtime-api/*.test.mjs tests/preview/*.test.mjs tests/workspace/*.test.mjs tests/faces/*.test.mjs",
+    "test:faces": "node --test tests/faces/*.test.mjs",
     "test:gateway": "node --test tests/gateway/*.test.mjs",
+    "test:preview": "node --test tests/preview/*.test.mjs",
     "test:runtime-api": "node --test tests/runtime-api/*.test.mjs",
+    "test:workspace": "node --test tests/workspace/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
