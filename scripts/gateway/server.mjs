@@ -1,49 +1,44 @@
 import http from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
+import { stat } from 'node:fs/promises'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
+  parseByteRangeHeader,
+  sendFileStreamResponse,
+} from './file-stream-response.mjs'
+import {
+  findHttpGatewayRoute,
+  handleHttpGatewayRoute,
+  throwHttpGatewayRouteNotFound,
+} from './http-routes.mjs'
+import {
+  createMcpServerRegistry,
+  DEFAULT_MCP_CONFIG_PATH,
+  formatMcpConfigSourceLog,
+  resolveConfigPath,
+} from './mcp-config.mjs'
+import {
+  clearRemoteReadonlyLoginFailures,
+  clearRemoteReadonlySession,
+  clearRemoteReadonlySessionsByRememberedDeviceIds,
+  clearRemoteRememberedDevice,
+  createRemoteBudgetExceededError,
+  ensureLoopbackAdminRequest,
+  ensureRemoteReadonlyLoginAllowed,
+  ensureRemoteReadonlySessionAuthorized,
+  issueRemoteReadonlySession,
+  issueRemoteRememberedDevice,
+  normalizeRememberedDeviceLabel,
+  readRemoteReadonlyClientId,
+  registerRemoteReadonlyLoginFailure,
+  REMOTE_REMEMBER_DEVICE_TTL_MS,
+} from './remote-sessions.mjs'
+import {
   batchRebindPaths,
-  ensureFileEntries,
-  queryDuplicateFiles,
-  detectAssets,
-  createDetectAssetsJob,
-  getDetectAssetsJob,
-  cancelDetectAssetsJob,
-  listDetectAssetsJobItems,
-  assignFaces,
-  bindAnnotationTag,
-  callVisionInference,
-  clusterPendingFaces,
-  listRecycleItems,
-  moveFilesToRecycle,
-  createPersonFromFaces,
-  getFileTags,
   readFileContentByAbsolutePath,
-  readFileTextPreview,
   getFaceCrop,
-  ignoreFaces,
   ingestClassificationResult,
-  listAssetFaces,
-  listPeople,
-  listReviewFaces,
-  listTagOptions,
-  mergePeople,
-  queryFilesByTags,
-  requeueFaces,
-  renamePerson,
-  restoreRecycleItems,
-  restoreIgnoredFaces,
-  saveDetectedFaces,
-  setAnnotationValue,
-  suggestPeople,
-  unassignFaces,
-  unbindAnnotationTag,
-  cleanupMissingFiles,
 } from './data/core.mjs'
 import { resolveRootPath } from './data/common.mjs'
 import {
@@ -65,7 +60,6 @@ import {
 } from './remote-readonly.mjs'
 import {
   createRemoteRememberedDeviceStore,
-  DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS,
 } from './remembered-devices.mjs'
 import {
   createRemotePublishedRootsStore,
@@ -77,28 +71,9 @@ const DEFAULT_HOST = '127.0.0.1'
 const GATEWAY_VERSION = '0.2.0'
 const MCP_PROTOCOL_VERSION = '2025-11-05'
 const MCP_SESSION_HEADER = 'mcp-session-id'
-const REMOTE_SESSION_COOKIE_NAME = '__Host-fauplay-remote-session'
-const REMOTE_REMEMBER_DEVICE_COOKIE_NAME = '__Host-fauplay-remote-remember-device'
-const PROJECT_ROOT = process.cwd()
-const DEFAULT_MCP_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'mcp.json')
-const GLOBAL_MCP_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'mcp.json')
 const REMOTE_CONTENT_CACHE_CONTROL = 'private, no-store'
 const REMOTE_DERIVATIVE_CACHE_CONTROL = 'private, max-age=300'
-const REMOTE_SESSION_ABSOLUTE_TTL_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_SESSION_ABSOLUTE_TTL_MS', 12 * 60 * 60 * 1000)
-const REMOTE_SESSION_IDLE_TTL_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_SESSION_IDLE_TTL_MS', 30 * 60 * 1000)
-const REMOTE_REMEMBER_DEVICE_TTL_MS = DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS
-const REMOTE_LOGIN_FAILURE_WINDOW_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_FAILURE_WINDOW_MS', 10 * 60 * 1000)
-const REMOTE_LOGIN_MAX_FAILURES = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_MAX_FAILURES', 8)
-const REMOTE_LOGIN_BLOCK_DURATION_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_BLOCK_DURATION_MS', 10 * 60 * 1000)
 const REMOTE_MAX_RANGE_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_MAX_RANGE_BYTES', 16 * 1024 * 1024)
-const REMEMBER_DEVICE_LABEL_MAX_LENGTH = 80
-
-function resolveConfigPath(configPath) {
-  if (typeof configPath !== 'string' || !configPath.trim()) {
-    return configPath
-  }
-  return path.isAbsolute(configPath) ? configPath : path.resolve(PROJECT_ROOT, configPath)
-}
 
 function readPositiveIntegerEnv(name, fallback) {
   const raw = Number.parseInt(process.env[name] || '', 10)
@@ -170,50 +145,12 @@ async function readJsonBody(req) {
   }
 }
 
-function toStringArray(value) {
-  if (!Array.isArray(value)) return []
-  return value.filter((item) => typeof item === 'string')
-}
-
-function toStringRecord(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-
-  const next = {}
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === 'string') {
-      next[key] = item
-    }
-  }
-
-  return Object.keys(next).length > 0 ? next : undefined
-}
-
 function isObjectRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function normalizeBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
-}
-
-function normalizeRememberedDeviceLabel(value, { required = false } = {}) {
-  if (value == null) {
-    if (required) {
-      throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'remembered-device label is required', 400)
-    }
-    return ''
-  }
-  if (typeof value !== 'string') {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'remembered-device label must be a string', 400)
-  }
-  const normalized = value.trim().replace(/\s+/g, ' ')
-  if (!normalized) {
-    if (required) {
-      return ''
-    }
-    return ''
-  }
-  return normalized.slice(0, REMEMBER_DEVICE_LABEL_MAX_LENGTH)
 }
 
 function normalizeRemoteFavoritePath(value) {
@@ -253,160 +190,6 @@ function appendPostProcessWarning(result, warning) {
   return result
 }
 
-function resolveCwd(projectDir, cwd) {
-  if (typeof cwd !== 'string' || !cwd.trim()) return undefined
-  return path.isAbsolute(cwd) ? cwd : path.resolve(projectDir, cwd)
-}
-
-function toConfigObject(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return value
-}
-
-function formatMcpConfigSourceLog(source) {
-  const suffix = source.loaded ? '' : ' (missing, skipped)'
-  return `[gateway]   - ${source.label}: ${source.path}${suffix}`
-}
-
-async function readMcpConfigFile(configPath, { allowMissing = false } = {}) {
-  let raw = ''
-  try {
-    raw = await readFile(configPath, 'utf-8')
-  } catch (error) {
-    if (allowMissing && error && typeof error === 'object' && error.code === 'ENOENT') {
-      return null
-    }
-    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `Failed to read MCP config: ${configPath}`, 500)
-  }
-
-  let parsed = null
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `Invalid JSON in MCP config: ${configPath}`, 500)
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw createMcpRuntimeError('MCP_CONFIG_ERROR', `MCP config root must be an object: ${configPath}`, 500)
-  }
-
-  return parsed
-}
-
-function mergeMcpServerEntries(baseEntry, overrideEntry) {
-  if (!baseEntry || typeof baseEntry !== 'object' || Array.isArray(baseEntry)) {
-    return overrideEntry
-  }
-  if (!overrideEntry || typeof overrideEntry !== 'object' || Array.isArray(overrideEntry)) {
-    return overrideEntry ?? baseEntry
-  }
-  return {
-    ...baseEntry,
-    ...overrideEntry,
-  }
-}
-
-function mergeMcpConfig(baseConfig, overrideConfig) {
-  const base = toConfigObject(baseConfig)
-  const override = toConfigObject(overrideConfig)
-
-  const merged = {
-    ...base,
-    ...override,
-  }
-
-  const baseServers = toConfigObject(base.servers)
-  const overrideServers = toConfigObject(override.servers)
-  const hasServers = Object.keys(baseServers).length > 0 || Object.keys(overrideServers).length > 0
-
-  if (hasServers) {
-    const mergedServers = {}
-    const serverNames = new Set([...Object.keys(baseServers), ...Object.keys(overrideServers)])
-    for (const name of serverNames) {
-      mergedServers[name] = mergeMcpServerEntries(baseServers[name], overrideServers[name])
-    }
-    merged.servers = mergedServers
-  }
-
-  return merged
-}
-
-async function loadMcpServersFromConfig(configPath, { useGlobalConfig = true } = {}) {
-  const resolvedConfigPath = resolveConfigPath(configPath)
-  const configSources = []
-  const baseConfig = await readMcpConfigFile(resolvedConfigPath)
-  configSources.push({
-    label: useGlobalConfig ? 'default' : 'custom',
-    path: resolvedConfigPath,
-    loaded: true,
-  })
-  const globalConfig = useGlobalConfig
-    ? await readMcpConfigFile(GLOBAL_MCP_CONFIG_PATH, { allowMissing: true })
-    : null
-  if (useGlobalConfig) {
-    configSources.push({
-      label: 'global',
-      path: GLOBAL_MCP_CONFIG_PATH,
-      loaded: Boolean(globalConfig),
-    })
-  }
-  const parsed = mergeMcpConfig(baseConfig, globalConfig)
-
-  const servers = parsed.servers
-  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
-    return {
-      serverRegistry: [],
-      configSources,
-    }
-  }
-
-  const serversToLoad = []
-
-  for (const [name, entry] of Object.entries(servers)) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      continue
-    }
-    if (entry.disabled === true) {
-      continue
-    }
-
-    const type = typeof entry.type === 'string' && entry.type ? entry.type : 'stdio'
-    if (type !== 'stdio') {
-      console.warn(`[gateway] Skip MCP server "${name}": unsupported type "${type}"`)
-      continue
-    }
-
-    const command = typeof entry.command === 'string' ? entry.command.trim() : ''
-    if (!command) {
-      console.warn(`[gateway] Skip MCP server "${name}": missing command`)
-      continue
-    }
-
-    serversToLoad.push({
-      transport: 'stdio',
-      sourceLabel: name,
-      command,
-      args: toStringArray(entry.args),
-      cwd: resolveCwd(PROJECT_ROOT, entry.cwd),
-      env: toStringRecord(entry.env),
-      callTimeoutMs: entry.callTimeoutMs,
-      initTimeoutMs: entry.initTimeoutMs,
-      restartWindowMs: entry.restartWindowMs,
-      maxCrashesInWindow: entry.maxCrashesInWindow,
-      restartCooldownMs: entry.restartCooldownMs,
-    })
-  }
-
-  return {
-    serverRegistry: serversToLoad,
-    configSources,
-  }
-}
-
-async function createMcpServerRegistry(configPath, options) {
-  return loadMcpServersFromConfig(configPath, options)
-}
-
 function parseJsonRpcRequest(payload) {
   if (!payload || typeof payload !== 'object') {
     throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Invalid JSON-RPC request payload', 400)
@@ -432,378 +215,6 @@ function readSessionId(req) {
   const raw = req.headers[MCP_SESSION_HEADER]
   if (Array.isArray(raw)) return raw[0] || null
   return typeof raw === 'string' && raw ? raw : null
-}
-
-function createRemoteUnauthorizedError() {
-  const error = new Error('Unauthorized')
-  error.code = 'REMOTE_UNAUTHORIZED'
-  error.statusCode = 401
-  return error
-}
-
-function createRemoteBudgetExceededError(message = 'Remote request exceeds configured budget') {
-  const error = new Error(message)
-  error.code = 'REMOTE_BUDGET_EXCEEDED'
-  error.statusCode = 422
-  return error
-}
-
-function appendSetCookieHeader(res, cookieValue) {
-  const previous = res.getHeader('Set-Cookie')
-  if (!previous) {
-    res.setHeader('Set-Cookie', cookieValue)
-    return
-  }
-  if (Array.isArray(previous)) {
-    res.setHeader('Set-Cookie', [...previous, cookieValue])
-    return
-  }
-  if (typeof previous === 'string' && previous) {
-    res.setHeader('Set-Cookie', [previous, cookieValue])
-    return
-  }
-  res.setHeader('Set-Cookie', cookieValue)
-}
-
-function parseCookieHeader(cookieHeader) {
-  if (typeof cookieHeader !== 'string' || !cookieHeader.trim()) {
-    return new Map()
-  }
-
-  const cookies = new Map()
-  for (const part of cookieHeader.split(';')) {
-    const [rawName, ...rawValueParts] = part.split('=')
-    const name = typeof rawName === 'string' ? rawName.trim() : ''
-    if (!name) continue
-    const value = rawValueParts.join('=').trim()
-    cookies.set(name, value)
-  }
-  return cookies
-}
-
-function readCookieValue(req, cookieName) {
-  const rawCookie = Array.isArray(req.headers.cookie) ? req.headers.cookie[0] : req.headers.cookie
-  const cookies = parseCookieHeader(rawCookie)
-  const encodedValue = cookies.get(cookieName)
-  if (typeof encodedValue !== 'string' || !encodedValue) {
-    return ''
-  }
-  try {
-    return decodeURIComponent(encodedValue)
-  } catch {
-    return ''
-  }
-}
-
-function readRemoteReadonlySessionId(req) {
-  return readCookieValue(req, REMOTE_SESSION_COOKIE_NAME)
-}
-
-function readRemoteRememberDeviceCookie(req) {
-  return readCookieValue(req, REMOTE_REMEMBER_DEVICE_COOKIE_NAME)
-}
-
-function readRequestUserAgent(req) {
-  const raw = req.headers['user-agent']
-  if (Array.isArray(raw)) return raw[0] || ''
-  return typeof raw === 'string' ? raw : ''
-}
-
-function isLoopbackAddress(address) {
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
-}
-
-function isLoopbackHostname(hostname) {
-  const normalized = typeof hostname === 'string'
-    ? hostname.trim().replace(/^\[|\]$/g, '').toLowerCase()
-    : ''
-  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1'
-}
-
-function isLoopbackAdminRequest(req, hostname) {
-  if (!isLoopbackHostname(hostname)) {
-    return false
-  }
-  const remoteAddress = typeof req.socket?.remoteAddress === 'string' ? req.socket.remoteAddress.trim() : ''
-  if (!isLoopbackAddress(remoteAddress)) {
-    return false
-  }
-  const forwardedFor = req.headers['x-forwarded-for']
-  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
-  if (typeof forwardedValue === 'string' && forwardedValue.trim()) {
-    const firstHop = forwardedValue.split(',')[0]?.trim() || ''
-    if (!isLoopbackAddress(firstHop)) {
-      return false
-    }
-  }
-  const originHeader = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
-  if (typeof originHeader === 'string' && originHeader.trim()) {
-    try {
-      if (!isLoopbackHostname(new URL(originHeader).hostname)) {
-        return false
-      }
-    } catch {
-      return false
-    }
-  }
-  const refererHeader = Array.isArray(req.headers.referer) ? req.headers.referer[0] : req.headers.referer
-  if (typeof refererHeader === 'string' && refererHeader.trim()) {
-    try {
-      if (!isLoopbackHostname(new URL(refererHeader).hostname)) {
-        return false
-      }
-    } catch {
-      return false
-    }
-  }
-  return true
-}
-
-function ensureLoopbackAdminRequest(req, hostname, pathname) {
-  if (!isLoopbackAdminRequest(req, hostname)) {
-    throwHttpGatewayRouteNotFound(pathname)
-  }
-}
-
-function createRemoteSessionCookie(sessionId) {
-  const maxAgeSeconds = Math.max(1, Math.ceil(REMOTE_SESSION_ABSOLUTE_TTL_MS / 1000))
-  return [
-    `${REMOTE_SESSION_COOKIE_NAME}=${encodeURIComponent(sessionId)}`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Strict',
-    `Max-Age=${maxAgeSeconds}`,
-  ].join('; ')
-}
-
-function createRemoteRememberDeviceCookie(cookieValue, expiresAtMs, nowMs = Date.now()) {
-  const maxAgeMs = Math.max(0, expiresAtMs - nowMs)
-  const maxAgeSeconds = Math.max(1, Math.ceil(maxAgeMs / 1000))
-  return [
-    `${REMOTE_REMEMBER_DEVICE_COOKIE_NAME}=${encodeURIComponent(cookieValue)}`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Strict',
-    `Max-Age=${maxAgeSeconds}`,
-  ].join('; ')
-}
-
-function createExpiredRemoteSessionCookie() {
-  return [
-    `${REMOTE_SESSION_COOKIE_NAME}=`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Strict',
-    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-    'Max-Age=0',
-  ].join('; ')
-}
-
-function createExpiredRemoteRememberDeviceCookie() {
-  return [
-    `${REMOTE_REMEMBER_DEVICE_COOKIE_NAME}=`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=Strict',
-    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-    'Max-Age=0',
-  ].join('; ')
-}
-
-function createRemoteReadonlySessionRecord(nowMs, rememberedDeviceId = null) {
-  const normalizedRememberedDeviceId = typeof rememberedDeviceId === 'string' && rememberedDeviceId.trim()
-    ? rememberedDeviceId.trim()
-    : null
-  return {
-    createdAtMs: nowMs,
-    lastSeenAtMs: nowMs,
-    rememberedDeviceId: normalizedRememberedDeviceId,
-  }
-}
-
-function clearRemoteReadonlySession(res, remoteSessions, req) {
-  const sessionId = readRemoteReadonlySessionId(req)
-  if (sessionId) {
-    remoteSessions.delete(sessionId)
-  }
-  appendSetCookieHeader(res, createExpiredRemoteSessionCookie())
-}
-
-function clearRemoteReadonlySessionsByRememberedDeviceIds(remoteSessions, rememberedDeviceIds) {
-  if (!Array.isArray(rememberedDeviceIds) || rememberedDeviceIds.length === 0) {
-    return
-  }
-  const targetIds = new Set(
-    rememberedDeviceIds
-      .filter((item) => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )
-  if (targetIds.size === 0) {
-    return
-  }
-  for (const [sessionId, session] of remoteSessions.entries()) {
-    const rememberedDeviceId = typeof session?.rememberedDeviceId === 'string'
-      ? session.rememberedDeviceId.trim()
-      : ''
-    if (rememberedDeviceId && targetIds.has(rememberedDeviceId)) {
-      remoteSessions.delete(sessionId)
-    }
-  }
-}
-
-async function clearRemoteRememberedDevice(res, remoteSessions, remoteRememberedDevices, req) {
-  const cookieValue = readRemoteRememberDeviceCookie(req)
-  if (cookieValue) {
-    const revokedDeviceIds = await remoteRememberedDevices.revoke(cookieValue)
-    clearRemoteReadonlySessionsByRememberedDeviceIds(remoteSessions, revokedDeviceIds)
-  }
-  appendSetCookieHeader(res, createExpiredRemoteRememberDeviceCookie())
-}
-
-function readRemoteReadonlyClientId(req) {
-  const forwardedFor = req.headers['x-forwarded-for']
-  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
-  if (typeof forwardedValue === 'string' && forwardedValue.trim()) {
-    const firstHop = forwardedValue.split(',')[0]?.trim()
-    if (firstHop) return firstHop
-  }
-  const remoteAddress = req.socket?.remoteAddress
-  return typeof remoteAddress === 'string' && remoteAddress.trim()
-    ? remoteAddress.trim()
-    : 'unknown'
-}
-
-function pruneRemoteReadonlyLoginFailures(state, nowMs) {
-  const failures = Array.isArray(state?.failures)
-    ? state.failures.filter((ts) => Number.isFinite(ts) && nowMs - ts <= REMOTE_LOGIN_FAILURE_WINDOW_MS)
-    : []
-  return {
-    failures,
-    blockedUntilMs: Number.isFinite(state?.blockedUntilMs) ? state.blockedUntilMs : 0,
-  }
-}
-
-function ensureRemoteReadonlyLoginAllowed(remoteLoginAttempts, clientId, nowMs = Date.now()) {
-  const nextState = pruneRemoteReadonlyLoginFailures(remoteLoginAttempts.get(clientId), nowMs)
-  if (nextState.blockedUntilMs > nowMs) {
-    remoteLoginAttempts.set(clientId, nextState)
-    throw createRemoteUnauthorizedError()
-  }
-  if (nextState.failures.length > 0 || nextState.blockedUntilMs > 0) {
-    remoteLoginAttempts.set(clientId, nextState)
-  } else {
-    remoteLoginAttempts.delete(clientId)
-  }
-}
-
-function registerRemoteReadonlyLoginFailure(remoteLoginAttempts, clientId, nowMs = Date.now()) {
-  const nextState = pruneRemoteReadonlyLoginFailures(remoteLoginAttempts.get(clientId), nowMs)
-  nextState.failures.push(nowMs)
-  if (nextState.failures.length >= REMOTE_LOGIN_MAX_FAILURES) {
-    nextState.blockedUntilMs = nowMs + REMOTE_LOGIN_BLOCK_DURATION_MS
-  }
-  remoteLoginAttempts.set(clientId, nextState)
-}
-
-function clearRemoteReadonlyLoginFailures(remoteLoginAttempts, clientId) {
-  remoteLoginAttempts.delete(clientId)
-}
-
-function cleanupExpiredRemoteReadonlySessions(remoteSessions, nowMs = Date.now()) {
-  for (const [sessionId, session] of remoteSessions.entries()) {
-    const createdAtMs = Number(session?.createdAtMs)
-    const lastSeenAtMs = Number(session?.lastSeenAtMs)
-    if (
-      !Number.isFinite(createdAtMs)
-      || !Number.isFinite(lastSeenAtMs)
-      || nowMs - createdAtMs > REMOTE_SESSION_ABSOLUTE_TTL_MS
-      || nowMs - lastSeenAtMs > REMOTE_SESSION_IDLE_TTL_MS
-    ) {
-      remoteSessions.delete(sessionId)
-    }
-  }
-}
-
-function issueRemoteReadonlySession(res, remoteSessions, req, nowMs = Date.now(), options = {}) {
-  cleanupExpiredRemoteReadonlySessions(remoteSessions, nowMs)
-  const existingSessionId = readRemoteReadonlySessionId(req)
-  if (existingSessionId) {
-    remoteSessions.delete(existingSessionId)
-  }
-  const nextSessionId = randomUUID()
-  const rememberedDeviceId = typeof options?.rememberedDeviceId === 'string'
-    ? options.rememberedDeviceId
-    : null
-  remoteSessions.set(nextSessionId, createRemoteReadonlySessionRecord(nowMs, rememberedDeviceId))
-  appendSetCookieHeader(res, createRemoteSessionCookie(nextSessionId))
-  return nextSessionId
-}
-
-async function issueRemoteRememberedDevice(res, remoteSessions, remoteRememberedDevices, req, nowMs = Date.now(), options = {}) {
-  const existingCookieValue = readRemoteRememberDeviceCookie(req)
-  if (existingCookieValue) {
-    const revokedDeviceIds = await remoteRememberedDevices.revoke(existingCookieValue, nowMs)
-    clearRemoteReadonlySessionsByRememberedDeviceIds(remoteSessions, revokedDeviceIds)
-  }
-  const rememberedDevice = await remoteRememberedDevices.create(nowMs, {
-    label: normalizeRememberedDeviceLabel(options.label),
-    userAgent: readRequestUserAgent(req),
-  })
-  appendSetCookieHeader(
-    res,
-    createRemoteRememberDeviceCookie(rememberedDevice.cookieValue, rememberedDevice.expiresAtMs, nowMs),
-  )
-  return rememberedDevice
-}
-
-async function ensureRemoteReadonlySessionAuthorized(
-  remoteConfig,
-  req,
-  res,
-  remoteSessions,
-  remoteRememberedDevices,
-) {
-  if (remoteConfig.enabled !== true || !remoteConfig.token) {
-    throw createRemoteUnauthorizedError()
-  }
-
-  const nowMs = Date.now()
-  cleanupExpiredRemoteReadonlySessions(remoteSessions, nowMs)
-  const sessionId = readRemoteReadonlySessionId(req)
-  if (sessionId) {
-    const session = remoteSessions.get(sessionId)
-    if (session) {
-      session.lastSeenAtMs = nowMs
-      return sessionId
-    }
-  }
-
-  const rememberDeviceCookie = readRemoteRememberDeviceCookie(req)
-  if (!rememberDeviceCookie) {
-    throw createRemoteUnauthorizedError()
-  }
-
-  const rotatedRememberedDevice = await remoteRememberedDevices.rotate(rememberDeviceCookie, nowMs)
-  if (!rotatedRememberedDevice) {
-    throw createRemoteUnauthorizedError()
-  }
-
-  appendSetCookieHeader(
-    res,
-    createRemoteRememberDeviceCookie(
-      rotatedRememberedDevice.cookieValue,
-      rotatedRememberedDevice.expiresAtMs,
-      nowMs,
-    ),
-  )
-  return issueRemoteReadonlySession(res, remoteSessions, req, nowMs, {
-    rememberedDeviceId: rotatedRememberedDevice.id,
-  })
 }
 
 async function sendRemoteReadonlyError(res, remoteSessions, remoteRememberedDevices, req, error) {
@@ -883,182 +294,6 @@ function toHttpErrorBody(error) {
     error: message,
     code,
   }
-}
-
-function throwHttpGatewayRouteNotFound(pathname) {
-  throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
-}
-
-function throwHttpGatewayRouteOffline(pathname) {
-  throw createMcpRuntimeError(
-    'MCP_METHOD_NOT_FOUND',
-    `Endpoint offline: ${pathname}`,
-    404,
-  )
-}
-
-function createExactHttpGatewayRoute(method, pathname, handler) {
-  return {
-    method,
-    matches(candidatePathname) {
-      return candidatePathname === pathname
-    },
-    handler,
-  }
-}
-
-function createPrefixHttpGatewayRoute(method, prefix, handler) {
-  return {
-    method,
-    matches(candidatePathname) {
-      return candidatePathname.startsWith(prefix)
-    },
-    handler,
-  }
-}
-
-function parseFaceScanJobPath(pathname) {
-  const prefix = '/v1/faces/detect-assets/jobs/'
-  if (!pathname.startsWith(prefix)) {
-    throwHttpGatewayRouteNotFound(pathname)
-  }
-  const suffix = pathname.slice(prefix.length)
-  const parts = suffix.split('/').filter(Boolean)
-  if (parts.length > 2) {
-    throwHttpGatewayRouteNotFound(pathname)
-  }
-  const jobId = parts.length > 0 ? decodeURIComponent(parts[0]) : ''
-  if (!jobId) {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'jobId is required', 400)
-  }
-  return {
-    jobId,
-    action: parts[1] || '',
-  }
-}
-
-const httpGatewayRoutes = [
-  createExactHttpGatewayRoute('POST', '/v1/data/tags/file', ({ payload }) => getFileTags(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/data/tags/options', ({ payload }) => listTagOptions(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/data/tags/query', ({ payload }) => queryFilesByTags(payload)),
-  createExactHttpGatewayRoute('PUT', '/v1/file-annotations', ({ payload }) => setAnnotationValue(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/file-annotations/tags/bind', ({ payload }) => bindAnnotationTag(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/file-annotations/tags/unbind', ({ payload }) => unbindAnnotationTag(payload)),
-  createExactHttpGatewayRoute('PATCH', '/v1/files/relative-paths', ({ payload }) => batchRebindPaths(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/files/indexes', ({ payload }) => ensureFileEntries(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/files/duplicates/query', ({ payload }) => queryDuplicateFiles(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/files/missing/cleanups', ({ payload }) => cleanupMissingFiles(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/files/text-preview', ({ payload }) => readFileTextPreview(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/recycle/items/move', ({ payload }) => moveFilesToRecycle(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/recycle/items/list', ({ payload }) => listRecycleItems(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/recycle/items/restore', ({ payload }) => restoreRecycleItems(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/file-bindings/reconciliations', ({ pathname }) => {
-    throwHttpGatewayRouteOffline(pathname)
-  }),
-  createExactHttpGatewayRoute('POST', '/v1/file-bindings/cleanups', ({ pathname }) => {
-    throwHttpGatewayRouteOffline(pathname)
-  }),
-  createExactHttpGatewayRoute('POST', '/v1/faces/detect-asset', async ({ runtime, payload }) => {
-    const inferred = await callVisionInference(runtime, payload)
-    const persisted = await saveDetectedFaces({
-      rootPath: inferred.rootPath,
-      relativePath: inferred.relativePath,
-      facePayloads: inferred.faces,
-    })
-    const runCluster = payload?.runCluster === true
-    const hasVideoFaces = persisted.faces.some((face) => face?.mediaType === 'video')
-    const cluster = runCluster && persisted.created > 0
-      ? await clusterPendingFaces({
-        limit: persisted.created,
-        assetId: persisted.assetId,
-        minFaces: hasVideoFaces ? 3 : 1,
-      })
-      : null
-    return {
-      ...persisted,
-      inferenceDetected: inferred.detected,
-      ...(cluster ? { cluster } : {}),
-    }
-  }),
-  createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets', ({ runtime, payload }) => detectAssets(runtime, payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs', ({ runtime, payload }) => createDetectAssetsJob(runtime, payload)),
-  createPrefixHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/', ({ pathname, requestUrl }) => {
-    const { jobId, action } = parseFaceScanJobPath(pathname)
-    if (!action) {
-      return getDetectAssetsJob(jobId)
-    }
-    if (action === 'items') {
-      return listDetectAssetsJobItems(jobId, {
-        offset: requestUrl.searchParams.get('offset'),
-        limit: requestUrl.searchParams.get('limit'),
-      })
-    }
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs/', ({ pathname }) => {
-    const { jobId, action } = parseFaceScanJobPath(pathname)
-    if (action === 'cancel') {
-      return cancelDetectAssetsJob(jobId)
-    }
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/list-people', ({ payload }) => listPeople(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/rename-person', ({ payload }) => renamePerson(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/merge-people', ({ payload }) => mergePeople(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/list-asset-faces', ({ payload }) => listAssetFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/list-review-faces', ({ payload }) => listReviewFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/suggest-people', ({ payload }) => suggestPeople(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/assign-faces', ({ payload }) => assignFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/create-person-from-faces', ({ payload }) => createPersonFromFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/unassign-faces', ({ payload }) => unassignFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/ignore-faces', ({ payload }) => ignoreFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/restore-ignored-faces', ({ payload }) => restoreIgnoredFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/requeue-faces', ({ payload }) => requeueFaces(payload)),
-  createPrefixHttpGatewayRoute('POST', '/v1/local-data/', ({ pathname }) => {
-    throwHttpGatewayRouteOffline(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/annotations/', ({ pathname }) => {
-    throwHttpGatewayRouteOffline(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/data/tags/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/file-annotations/tags/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/files/duplicates/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/files/missing/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/file-bindings/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/faces/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-  createPrefixHttpGatewayRoute('POST', '/v1/recycle/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
-]
-
-function findHttpGatewayRoute(method, pathname) {
-  return httpGatewayRoutes.find((route) => route.method === method && route.matches(pathname)) ?? null
-}
-
-async function handleHttpGatewayRoute(runtime, method, pathname, payload, requestUrl) {
-  const route = findHttpGatewayRoute(method, pathname)
-  if (!route) {
-    throwHttpGatewayRouteNotFound(pathname)
-  }
-  return route.handler({
-    runtime,
-    pathname,
-    payload,
-    requestUrl,
-  })
 }
 
 function buildInitializeResult() {
@@ -1192,133 +427,6 @@ async function handleMcpRequest(runtime, request, sessions, sessionId) {
   }
 
   throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Unsupported MCP method: ${request.method}`, 404)
-}
-
-function parseByteRangeHeader(rangeHeader, totalSizeBytes) {
-  if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
-    return null
-  }
-
-  if (!rangeHeader.startsWith('bytes=')) {
-    return { invalid: true }
-  }
-
-  if (!Number.isFinite(totalSizeBytes) || totalSizeBytes <= 0) {
-    return { invalid: true }
-  }
-
-  const rawRanges = rangeHeader.slice('bytes='.length).split(',').map((value) => value.trim()).filter(Boolean)
-  if (rawRanges.length !== 1) {
-    return { invalid: true }
-  }
-
-  const [startPart = '', endPart = ''] = rawRanges[0].split('-', 2)
-  if (!startPart && !endPart) {
-    return { invalid: true }
-  }
-
-  if (!startPart) {
-    const suffixLength = Number.parseInt(endPart, 10)
-    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
-      return { invalid: true }
-    }
-    const clampedLength = Math.min(suffixLength, totalSizeBytes)
-    return {
-      start: totalSizeBytes - clampedLength,
-      end: totalSizeBytes - 1,
-    }
-  }
-
-  const start = Number.parseInt(startPart, 10)
-  const end = endPart ? Number.parseInt(endPart, 10) : totalSizeBytes - 1
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= totalSizeBytes) {
-    return { invalid: true }
-  }
-
-  return {
-    start,
-    end: Math.min(end, totalSizeBytes - 1),
-  }
-}
-
-function sendRangeNotSatisfiable(res, totalSizeBytes, options = {}) {
-  res.statusCode = 416
-  res.setHeader('Accept-Ranges', 'bytes')
-  res.setHeader('Content-Range', `bytes */${Math.max(0, totalSizeBytes)}`)
-  res.setHeader('Cache-Control', options.cacheControl || 'no-store')
-  if (typeof options.lastModifiedMs === 'number' && options.lastModifiedMs > 0) {
-    res.setHeader('Last-Modified', new Date(options.lastModifiedMs).toUTCString())
-  }
-  res.end()
-}
-
-async function sendFileStreamResponse(
-  req,
-  res,
-  absolutePath,
-  contentType,
-  totalSizeBytes,
-  options = {},
-) {
-  const range = parseByteRangeHeader(req.headers.range, totalSizeBytes)
-  if (range && range.invalid === true) {
-    sendRangeNotSatisfiable(res, totalSizeBytes, options)
-    return
-  }
-
-  const start = range ? range.start : 0
-  const end = range ? range.end : Math.max(totalSizeBytes - 1, 0)
-  const contentLength = totalSizeBytes === 0 ? 0 : Math.max(0, end - start + 1)
-  const statusCode = range ? 206 : 200
-
-  res.statusCode = statusCode
-  res.setHeader('Content-Type', contentType)
-  res.setHeader('Accept-Ranges', 'bytes')
-  res.setHeader('Content-Length', String(contentLength))
-  res.setHeader('Cache-Control', options.cacheControl || 'no-store')
-  if (typeof options.lastModifiedMs === 'number' && options.lastModifiedMs > 0) {
-    res.setHeader('Last-Modified', new Date(options.lastModifiedMs).toUTCString())
-  }
-  if (range) {
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSizeBytes}`)
-  }
-
-  if (totalSizeBytes === 0) {
-    res.end()
-    return
-  }
-
-  const stream = createReadStream(absolutePath, { start, end })
-  await new Promise((resolve, reject) => {
-    let settled = false
-
-    const cleanup = () => {
-      stream.off('error', handleError)
-      res.off('error', handleError)
-      res.off('close', handleClose)
-      res.off('finish', handleFinish)
-    }
-
-    const settle = (callback) => (value) => {
-      if (settled) return
-      settled = true
-      cleanup()
-      callback(value)
-    }
-
-    const handleError = settle(reject)
-    const handleFinish = settle(resolve)
-    const handleClose = settle(() => {
-      stream.destroy()
-      resolve()
-    })
-
-    stream.on('error', handleError)
-    res.on('error', handleError)
-    res.on('close', handleClose)
-    res.on('finish', handleFinish)
-    stream.pipe(res)
-  })
 }
 
 async function sendFileContentBinaryResponse(res, absolutePath) {

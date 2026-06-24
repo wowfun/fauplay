@@ -11,6 +11,7 @@
     "gateway": "node scripts/gateway/index.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:gateway": "node --test tests/gateway/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
