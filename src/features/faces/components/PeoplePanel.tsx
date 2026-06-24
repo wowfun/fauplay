@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, RefreshCw, Users, X } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import {
   assignFaces,
   createPersonFromFaces,
@@ -19,11 +19,18 @@ import {
   type NoticeTone,
   type PanelView,
 } from '@/features/faces/lib/peoplePanelText'
+import {
+  type CompactPeopleStage,
+  resolvePeoplePanelSelectionModel,
+} from '@/features/faces/lib/peoplePanelModel'
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { FaceGrid } from '@/features/faces/components/FaceGrid'
 import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionActions'
 import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
+import { PeoplePanelHeader } from '@/features/faces/components/PeoplePanelHeader'
+import { PeoplePanelNotice } from '@/features/faces/components/PeoplePanelNotice'
+import { PeoplePanelViewTabs } from '@/features/faces/components/PeoplePanelViewTabs'
 import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTargetList'
 import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
@@ -76,43 +83,42 @@ export function PeoplePanel({
   const [isMutatingFaces, setIsMutatingFaces] = useState(false)
   const [isProjectingSources, setIsProjectingSources] = useState(false)
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null)
-  const [compactPeopleStage, setCompactPeopleStage] = useState<'list' | 'detail'>('list')
+  const [compactPeopleStage, setCompactPeopleStage] = useState<CompactPeopleStage>('list')
   const previousFaceSelectionScopeKeyRef = useRef<string | null>(null)
   const isCompact = layoutMode === 'compact'
-  const faceSelectionScopeKey = useMemo(
-    () => `${scope}:${view}:${selectedPersonId ?? ''}`,
-    [scope, selectedPersonId, view]
-  )
-
-  const selectedPerson = useMemo(
-    () => (
-      people.find((person) => person.personId === selectedPersonId)
-      ?? allPeople.find((person) => person.personId === selectedPersonId)
-      ?? null
-    ),
-    [allPeople, people, selectedPersonId]
-  )
-  const selectedFaces = useMemo(
-    () => faces.filter((face) => selectedFaceIds.has(face.faceId)),
-    [faces, selectedFaceIds]
-  )
-  const mergeTargetCandidates = useMemo(
-    () => {
-      const query = mergeTargetQuery.trim().toLowerCase()
-      return allPeople
-        .filter((person) => {
-          if (person.personId === selectedPersonId) return false
-          if (!query) return true
-          return (
-            getPersonDisplayName(person).toLowerCase().includes(query)
-            || person.personId.toLowerCase().includes(query)
-            || (person.featureAssetPath ?? '').toLowerCase().includes(query)
-          )
-        })
-        .slice(0, 40)
-    },
-    [allPeople, mergeTargetQuery, selectedPersonId]
-  )
+  const {
+    selectedPerson,
+    selectedFaces,
+    mergeTargetCandidates,
+    selectedIds,
+    assignmentExcludedPersonIds,
+    assignmentInputKey,
+    faceSelectionScopeKey,
+    showCompactPeopleList,
+    showCompactPeopleDetail,
+  } = useMemo(() => resolvePeoplePanelSelectionModel({
+    people,
+    allPeople,
+    selectedPersonId,
+    faces,
+    selectedFaceIds,
+    mergeTargetQuery,
+    scope,
+    view,
+    isCompact,
+    compactPeopleStage,
+  }), [
+    allPeople,
+    compactPeopleStage,
+    faces,
+    isCompact,
+    mergeTargetQuery,
+    people,
+    scope,
+    selectedFaceIds,
+    selectedPersonId,
+    view,
+  ])
 
   const clearSelection = useCallback(() => {
     setSelectedFaceIds(new Set())
@@ -461,15 +467,6 @@ export function PeoplePanel({
     }
   }, [clearSelection, refreshAll, selectedFaceIds.size])
 
-  const selectedIds = useMemo(() => [...selectedFaceIds], [selectedFaceIds])
-  const assignmentExcludedPersonIds = useMemo(
-    () => (view === 'people' && selectedPersonId ? [selectedPersonId] : []),
-    [selectedPersonId, view]
-  )
-  const assignmentInputKey = useMemo(
-    () => `${scope}:${view}:${selectedPersonId ?? ''}`,
-    [scope, selectedPersonId, view]
-  )
   const handleAssignSelectedFaces = useCallback(async (personId: string) => {
     if (selectedIds.length === 0) return false
     return runFaceMutation(() => assignFaces(context, {
@@ -504,9 +501,6 @@ export function PeoplePanel({
       faceIds: selectedIds,
     }))
   }, [context, runFaceMutation, selectedIds])
-  const showCompactPeopleList = isCompact && view === 'people' && compactPeopleStage === 'list'
-  const showCompactPeopleDetail = isCompact && view === 'people' && compactPeopleStage === 'detail'
-
   if (!open) return null
 
   return (
@@ -521,112 +515,28 @@ export function PeoplePanel({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-full flex-col">
-          <div className={cn('border-b border-border', isCompact ? 'px-3 py-3' : 'px-4 py-3')}>
-            <div className={cn('flex items-center justify-between gap-3', isCompact && 'flex-wrap')}>
-              <div className="flex min-w-0 items-center gap-2">
-                <Users className="h-4 w-4 shrink-0" />
-                <h2 className="truncate text-sm font-semibold">{readonly ? '人物浏览' : '人物管理'}</h2>
-              </div>
-              <div className={cn('flex items-center gap-2', isCompact && 'w-full flex-wrap justify-end')}>
-                {readonly ? (
-                  <div className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground">
-                    当前 Root
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-border p-1">
-                    <button
-                      type="button"
-                      className={cn(
-                        'rounded px-2 py-1 text-xs',
-                        scope === 'global' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
-                      )}
-                      onClick={() => setScope('global')}
-                    >
-                      全局
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        'rounded px-2 py-1 text-xs',
-                        scope === 'root' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
-                      )}
-                      onClick={() => setScope('root')}
-                    >
-                      当前 Root
-                    </button>
-                  </div>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1"
-                  disabled={isLoadingPeople || isLoadingFaces}
-                  onClick={() => {
-                    void refreshAll()
-                  }}
-                >
-                  <RefreshCw className={cn('h-3.5 w-3.5', (isLoadingPeople || isLoadingFaces) && 'animate-spin')} />
-                  刷新
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} title="关闭">
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
+          <PeoplePanelHeader
+            readonly={readonly}
+            isCompact={isCompact}
+            scope={scope}
+            isLoading={isLoadingPeople || isLoadingFaces}
+            onScopeChange={setScope}
+            onRefresh={() => {
+              void refreshAll()
+            }}
+            onClose={onClose}
+          />
 
-          {notice && (
-            <div
-              className={cn(
-                isCompact ? 'mx-3 mt-3' : 'mx-4 mt-3',
-                'rounded-md px-3 py-2 text-sm',
-                notice.tone === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-foreground'
-              )}
-            >
-              {notice.message}
-            </div>
-          )}
+          <PeoplePanelNotice isCompact={isCompact} notice={notice} />
 
           {isCompact ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="border-b border-border px-3 py-2">
-                <div className={cn('grid gap-2', readonly ? 'grid-cols-1' : 'grid-cols-3')}>
-                  <button
-                    type="button"
-                    className={cn(
-                      'rounded-md px-3 py-2 text-left text-sm',
-                      view === 'people' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                    )}
-                    onClick={() => handleSwitchView('people')}
-                  >
-                    人物
-                  </button>
-                  {!readonly && (
-                    <>
-                      <button
-                        type="button"
-                        className={cn(
-                          'rounded-md px-3 py-2 text-left text-sm',
-                          view === 'unassigned' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                        )}
-                        onClick={() => handleSwitchView('unassigned')}
-                      >
-                        未归属
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'rounded-md px-3 py-2 text-left text-sm',
-                          view === 'ignored' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                        )}
-                        onClick={() => handleSwitchView('ignored')}
-                      >
-                        误检 / 忽略
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+              <PeoplePanelViewTabs
+                readonly={readonly}
+                view={view}
+                layout="compact"
+                onSwitchView={handleSwitchView}
+              />
 
               <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
                 {showCompactPeopleList && (
@@ -854,42 +764,12 @@ export function PeoplePanel({
           ) : (
             <div className="flex min-h-0 flex-1 overflow-hidden">
               <div className="w-[300px] shrink-0 border-r border-border">
-                <div className="border-b border-border p-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      'mb-1 w-full rounded-md px-3 py-2 text-left text-sm',
-                      view === 'people' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                    )}
-                    onClick={() => handleSwitchView('people')}
-                  >
-                    人物
-                  </button>
-                  {!readonly && (
-                    <>
-                      <button
-                        type="button"
-                        className={cn(
-                          'mb-1 w-full rounded-md px-3 py-2 text-left text-sm',
-                          view === 'unassigned' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                        )}
-                        onClick={() => handleSwitchView('unassigned')}
-                      >
-                        未归属
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'w-full rounded-md px-3 py-2 text-left text-sm',
-                          view === 'ignored' ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                        )}
-                        onClick={() => handleSwitchView('ignored')}
-                      >
-                        误检 / 忽略
-                      </button>
-                    </>
-                  )}
-                </div>
+                <PeoplePanelViewTabs
+                  readonly={readonly}
+                  view={view}
+                  layout="wide"
+                  onSwitchView={handleSwitchView}
+                />
 
                 {view === 'people' && (
                   <PeopleList

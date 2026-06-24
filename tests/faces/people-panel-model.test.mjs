@@ -1,0 +1,187 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { resolvePeoplePanelSelectionModel } from '../../src/features/faces/lib/peoplePanelModel.ts'
+
+function person(overrides) {
+  return {
+    personId: 'person-1',
+    name: 'Ada',
+    faceCount: 1,
+    globalFaceCount: 1,
+    featureFaceId: null,
+    featureAssetPath: null,
+    updatedAt: null,
+    ...overrides,
+  }
+}
+
+function face(faceId, personId = null) {
+  return {
+    faceId,
+    assetId: `asset-${faceId}`,
+    assetPath: `${faceId}.jpg`,
+    boundingBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
+    score: 0.9,
+    status: personId ? 'assigned' : 'unassigned',
+    mediaType: 'image',
+    frameTsMs: null,
+    personId,
+    personName: null,
+    assignedBy: null,
+    updatedAt: 1,
+  }
+}
+
+test('People Panel Selection Model resolves selected person from visible or cached people', () => {
+  const visible = person({ personId: 'visible', name: 'Visible' })
+  const cached = person({ personId: 'cached', name: 'Cached' })
+
+  assert.equal(
+    resolvePeoplePanelSelectionModel({
+      people: [visible],
+      allPeople: [cached],
+      selectedPersonId: 'visible',
+      faces: [],
+      selectedFaceIds: new Set(),
+      mergeTargetQuery: '',
+      scope: 'global',
+      view: 'people',
+      isCompact: false,
+      compactPeopleStage: 'list',
+    }).selectedPerson?.personId,
+    'visible',
+  )
+
+  assert.equal(
+    resolvePeoplePanelSelectionModel({
+      people: [visible],
+      allPeople: [cached],
+      selectedPersonId: 'cached',
+      faces: [],
+      selectedFaceIds: new Set(),
+      mergeTargetQuery: '',
+      scope: 'global',
+      view: 'people',
+      isCompact: false,
+      compactPeopleStage: 'list',
+    }).selectedPerson?.personId,
+    'cached',
+  )
+})
+
+test('People Panel Selection Model filters merge targets by display name, person id, or source path', () => {
+  const selected = person({ personId: 'selected', name: 'Selected' })
+  const byName = person({ personId: 'by-name', name: 'Mina' })
+  const byId = person({ personId: 'archived-person', name: 'Other' })
+  const byPath = person({ personId: 'by-path', name: 'Another', featureAssetPath: 'portraits/match.jpg' })
+  const ignored = person({ personId: 'ignored', name: 'Nope', featureAssetPath: 'other.jpg' })
+
+  const model = resolvePeoplePanelSelectionModel({
+    people: [selected],
+    allPeople: [selected, byName, byId, byPath, ignored],
+    selectedPersonId: selected.personId,
+    faces: [],
+    selectedFaceIds: new Set(),
+    mergeTargetQuery: 'match',
+    scope: 'root',
+    view: 'people',
+    isCompact: true,
+    compactPeopleStage: 'detail',
+  })
+
+  assert.deepEqual(
+    model.mergeTargetCandidates.map((item) => item.personId),
+    ['by-path'],
+  )
+
+  assert.deepEqual(
+    resolvePeoplePanelSelectionModel({
+      people: [selected],
+      allPeople: [selected, byName, byId, byPath, ignored],
+      selectedPersonId: selected.personId,
+      faces: [],
+      selectedFaceIds: new Set(),
+      mergeTargetQuery: 'archived',
+      scope: 'root',
+      view: 'people',
+      isCompact: true,
+      compactPeopleStage: 'detail',
+    }).mergeTargetCandidates.map((item) => item.personId),
+    ['archived-person'],
+  )
+
+  assert.deepEqual(
+    resolvePeoplePanelSelectionModel({
+      people: [selected],
+      allPeople: [selected, byName, byId, byPath, ignored],
+      selectedPersonId: selected.personId,
+      faces: [],
+      selectedFaceIds: new Set(),
+      mergeTargetQuery: 'mina',
+      scope: 'root',
+      view: 'people',
+      isCompact: true,
+      compactPeopleStage: 'detail',
+    }).mergeTargetCandidates.map((item) => item.personId),
+    ['by-name'],
+  )
+})
+
+test('People Panel Selection Model derives selected faces and assignment state', () => {
+  const model = resolvePeoplePanelSelectionModel({
+    people: [],
+    allPeople: [],
+    selectedPersonId: 'person-1',
+    faces: [face('face-1', 'person-1'), face('face-2', 'person-1'), face('face-3')],
+    selectedFaceIds: new Set(['face-1', 'face-3']),
+    mergeTargetQuery: '',
+    scope: 'root',
+    view: 'people',
+    isCompact: true,
+    compactPeopleStage: 'detail',
+  })
+
+  assert.deepEqual(model.selectedFaces.map((item) => item.faceId), ['face-1', 'face-3'])
+  assert.deepEqual(model.selectedIds, ['face-1', 'face-3'])
+  assert.deepEqual(model.assignmentExcludedPersonIds, ['person-1'])
+  assert.equal(model.assignmentInputKey, 'root:people:person-1')
+  assert.equal(model.faceSelectionScopeKey, 'root:people:person-1')
+  assert.equal(model.showCompactPeopleList, false)
+  assert.equal(model.showCompactPeopleDetail, true)
+})
+
+test('People Panel Selection Model derives compact list stage only for people view', () => {
+  const peopleListModel = resolvePeoplePanelSelectionModel({
+    people: [],
+    allPeople: [],
+    selectedPersonId: null,
+    faces: [],
+    selectedFaceIds: new Set(),
+    mergeTargetQuery: '',
+    scope: 'global',
+    view: 'people',
+    isCompact: true,
+    compactPeopleStage: 'list',
+  })
+
+  const reviewModel = resolvePeoplePanelSelectionModel({
+    people: [],
+    allPeople: [],
+    selectedPersonId: null,
+    faces: [],
+    selectedFaceIds: new Set(),
+    mergeTargetQuery: '',
+    scope: 'global',
+    view: 'ignored',
+    isCompact: true,
+    compactPeopleStage: 'list',
+  })
+
+  assert.equal(peopleListModel.showCompactPeopleList, true)
+  assert.equal(peopleListModel.showCompactPeopleDetail, false)
+  assert.equal(reviewModel.showCompactPeopleList, false)
+  assert.equal(reviewModel.showCompactPeopleDetail, false)
+  assert.deepEqual(reviewModel.assignmentExcludedPersonIds, [])
+  assert.equal(reviewModel.assignmentInputKey, 'global:ignored:')
+})
