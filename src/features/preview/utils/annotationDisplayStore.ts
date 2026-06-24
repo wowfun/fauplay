@@ -3,9 +3,30 @@ import { getActiveRemoteWorkspace, isRemoteReadonlyProviderActive } from '@/lib/
 import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import { ensureRootPath } from '@/lib/reveal'
 import { callRuntimeHttp } from '@/lib/runtimeApi'
+import {
+  META_ANNOTATION_SOURCE,
+  buildAnnotationFilterTagOptions as buildFilterTagOptions,
+  buildAnnotationPathSnapshotFromTagViews as buildPathSnapshotFromTagViews,
+  buildAnnotationPathStateFromTags as buildPathStateFromTags,
+  buildGlobalAnnotationTagOptions as buildGlobalTagOptions,
+  buildLogicalAnnotationTags as buildLogicalTags,
+  getAnnotationFilterTagIdentity as parseAnnotationFilterTagKey,
+  getStoredAnnotationTagsUpdatedAt as computeUpdatedAt,
+  normalizeAnnotationRelativePath as normalizeRelativePath,
+  readAnnotationTagOptionsFromResult as readTagOptionsFromResult,
+  readAnnotationTagViewsFromResult as readTagViewsFromResult,
+} from '@/features/preview/lib/annotationTagModel'
+import type {
+  AnnotationGatewayFileTagView,
+  AnnotationGatewayTagOptionRecord,
+  AnnotationLogicalTag,
+  StoredAnnotationTagRecord,
+} from '@/features/preview/lib/annotationTagModel'
+
+export type { AnnotationLogicalTag } from '@/features/preview/lib/annotationTagModel'
+export { toAnnotationFilterTagKey } from '@/features/preview/lib/annotationTagModel'
 
 const TAG_QUERY_PAGE_SIZE = 1000
-const META_ANNOTATION_SOURCE = 'meta.annotation'
 
 type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
 type GlobalTagOptionsStatus = 'idle' | 'loading' | 'ready'
@@ -16,19 +37,9 @@ type AnnotationFilterUiGateReason =
   | 'missing_sidecar_file'
   | 'no_filterable_annotations'
 
-export interface AnnotationLogicalTag {
-  tagKey: string
-  key: string
-  value: string
-  sources: string[]
-  hasMetaAnnotation: boolean
-  representativeSource: string
-  updatedAt: number
-}
-
 interface RootAnnotationDisplaySnapshot {
   status: RootSnapshotStatus
-  rawTagsByPath: Record<string, StoredTagRecord[]>
+  rawTagsByPath: Record<string, StoredAnnotationTagRecord[]>
   byPathUpdatedAt: Record<string, number>
   tagKeysByPath: Record<string, string[]>
   tagOptions: AnnotationFilterTagOption[]
@@ -93,43 +104,18 @@ export interface GlobalAnnotationTagOptionsState {
   error: string | null
 }
 
-interface StoredTagRecord {
-  key: string
-  value: string
-  source: string
-  appliedAt: number
-  updatedAt: number
-}
-
-interface GatewayTagRecord {
-  key?: string
-  value?: string
-  source?: string
-  appliedAt?: number
-  updatedAt?: number
-}
-
-interface GatewayTagOptionRecord extends GatewayTagRecord {
-  fileCount?: number
-}
-
-interface GatewayFileTagView {
-  relativePath?: string
-  tags?: GatewayTagRecord[]
-}
-
 interface GatewayTagQueryResult {
-  items?: GatewayFileTagView[]
+  items?: AnnotationGatewayFileTagView[]
   total?: number
 }
 
 interface GatewayFileTagResult {
-  file?: GatewayFileTagView | null
+  file?: AnnotationGatewayFileTagView | null
 }
 
 interface GatewayTagOptionsResult {
-  items?: GatewayTagOptionRecord[]
-  options?: GatewayTagOptionRecord[]
+  items?: AnnotationGatewayTagOptionRecord[]
+  options?: AnnotationGatewayTagOptionRecord[]
 }
 
 const rootSnapshots = new Map<string, RootAnnotationDisplaySnapshot>()
@@ -146,236 +132,6 @@ let storeVersion = 0
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.replace(/\\/g, '/').split('/').filter(Boolean).join('/')
-}
-
-export function toAnnotationFilterTagKey(key: string, value: string): string {
-  return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-}
-
-function parseAnnotationFilterTagKey(tagKey: string): { key: string; value: string } | null {
-  if (!tagKey || !tagKey.includes('=')) return null
-
-  const separator = tagKey.indexOf('=')
-  const rawKey = tagKey.slice(0, separator)
-  const rawValue = tagKey.slice(separator + 1)
-
-  try {
-    const key = decodeURIComponent(rawKey)
-    const value = decodeURIComponent(rawValue)
-    if (!key || !value) return null
-    return { key, value }
-  } catch {
-    return null
-  }
-}
-
-function compareSource(left: string, right: string): number {
-  if (left === META_ANNOTATION_SOURCE && right !== META_ANNOTATION_SOURCE) return -1
-  if (left !== META_ANNOTATION_SOURCE && right === META_ANNOTATION_SOURCE) return 1
-  return left.localeCompare(right)
-}
-
-function toSortedSources(sourceSet: Iterable<string>): string[] {
-  return [...new Set(sourceSet)].sort(compareSource)
-}
-
-function getRepresentativeSource(sources: string[]): string {
-  return sources[0] ?? ''
-}
-
-function compareLogicalIdentity(
-  left: Pick<AnnotationLogicalTag, 'key' | 'value'>,
-  right: Pick<AnnotationLogicalTag, 'key' | 'value'>
-): number {
-  const keyCmp = left.key.localeCompare(right.key, 'zh-Hans-CN')
-  if (keyCmp !== 0) return keyCmp
-  return left.value.localeCompare(right.value, 'zh-Hans-CN')
-}
-
-function computeUpdatedAt(rawTags: StoredTagRecord[]): number {
-  let maxUpdatedAt = 0
-  for (const tag of rawTags) {
-    maxUpdatedAt = Math.max(maxUpdatedAt, tag.updatedAt)
-  }
-  return maxUpdatedAt
-}
-
-function toUpdatedAt(value: unknown, fallbackValue?: unknown): number {
-  const numeric = Number(value)
-  if (Number.isFinite(numeric)) return Math.max(0, Math.trunc(numeric))
-
-  const fallbackNumeric = Number(fallbackValue)
-  if (Number.isFinite(fallbackNumeric)) return Math.max(0, Math.trunc(fallbackNumeric))
-
-  return 0
-}
-
-function normalizeStoredTagRecord(tag: unknown): StoredTagRecord | null {
-  if (!isRecord(tag)) return null
-
-  const key = typeof tag.key === 'string' ? tag.key.trim() : ''
-  const value = typeof tag.value === 'string' ? tag.value.trim() : ''
-  const source = typeof tag.source === 'string' ? tag.source.trim() : ''
-  if (!key || !value || !source) return null
-
-  const updatedAt = toUpdatedAt(tag.appliedAt, tag.updatedAt)
-  return {
-    key,
-    value,
-    source,
-    appliedAt: updatedAt,
-    updatedAt,
-  }
-}
-
-function buildLogicalTags(rawTags: StoredTagRecord[]): AnnotationLogicalTag[] {
-  const entryByTagKey = new Map<string, {
-    key: string
-    value: string
-    sources: Set<string>
-    updatedAt: number
-    hasMetaAnnotation: boolean
-  }>()
-
-  for (const tag of rawTags) {
-    const tagKey = toAnnotationFilterTagKey(tag.key, tag.value)
-    const existing = entryByTagKey.get(tagKey)
-    if (existing) {
-      existing.sources.add(tag.source)
-      existing.updatedAt = Math.max(existing.updatedAt, tag.updatedAt)
-      existing.hasMetaAnnotation = existing.hasMetaAnnotation || tag.source === META_ANNOTATION_SOURCE
-      continue
-    }
-
-    entryByTagKey.set(tagKey, {
-      key: tag.key,
-      value: tag.value,
-      sources: new Set([tag.source]),
-      updatedAt: tag.updatedAt,
-      hasMetaAnnotation: tag.source === META_ANNOTATION_SOURCE,
-    })
-  }
-
-  const logicalTags = [...entryByTagKey.entries()].map(([tagKey, entry]) => {
-    const sources = toSortedSources(entry.sources)
-    return {
-      tagKey,
-      key: entry.key,
-      value: entry.value,
-      sources,
-      hasMetaAnnotation: entry.hasMetaAnnotation,
-      representativeSource: getRepresentativeSource(sources),
-      updatedAt: entry.updatedAt,
-    } satisfies AnnotationLogicalTag
-  })
-
-  logicalTags.sort(compareLogicalIdentity)
-  return logicalTags
-}
-
-function buildFilterTagOptions(rawTagsByPath: Record<string, StoredTagRecord[]>): AnnotationFilterTagOption[] {
-  const countByTagKey = new Map<string, number>()
-  const entryByTagKey = new Map<string, {
-    key: string
-    value: string
-    sources: Set<string>
-    hasMetaAnnotation: boolean
-  }>()
-
-  for (const rawTags of Object.values(rawTagsByPath)) {
-    const logicalTags = buildLogicalTags(rawTags)
-    for (const logicalTag of logicalTags) {
-      countByTagKey.set(logicalTag.tagKey, (countByTagKey.get(logicalTag.tagKey) ?? 0) + 1)
-
-      const existing = entryByTagKey.get(logicalTag.tagKey)
-      if (existing) {
-        logicalTag.sources.forEach((source) => existing.sources.add(source))
-        existing.hasMetaAnnotation = existing.hasMetaAnnotation || logicalTag.hasMetaAnnotation
-        continue
-      }
-
-      entryByTagKey.set(logicalTag.tagKey, {
-        key: logicalTag.key,
-        value: logicalTag.value,
-        sources: new Set(logicalTag.sources),
-        hasMetaAnnotation: logicalTag.hasMetaAnnotation,
-      })
-    }
-  }
-
-  const options: AnnotationFilterTagOption[] = []
-  for (const [tagKey, entry] of entryByTagKey.entries()) {
-    const sources = toSortedSources(entry.sources)
-    options.push({
-      tagKey,
-      key: entry.key,
-      value: entry.value,
-      sources,
-      hasMetaAnnotation: entry.hasMetaAnnotation,
-      representativeSource: getRepresentativeSource(sources),
-      fileCount: countByTagKey.get(tagKey) ?? 0,
-    })
-  }
-
-  options.sort((left, right) => compareLogicalIdentity(left, right))
-  return options
-}
-
-function buildGlobalTagOptions(optionRecords: GatewayTagOptionRecord[]): AnnotationFilterTagOption[] {
-  const entryByTagKey = new Map<string, {
-    key: string
-    value: string
-    sources: Set<string>
-    hasMetaAnnotation: boolean
-    fileCount?: number
-  }>()
-
-  for (const record of optionRecords) {
-    const normalized = normalizeStoredTagRecord(record)
-    if (!normalized) continue
-
-    const tagKey = toAnnotationFilterTagKey(normalized.key, normalized.value)
-    const existing = entryByTagKey.get(tagKey)
-    if (existing) {
-      existing.sources.add(normalized.source)
-      existing.hasMetaAnnotation = existing.hasMetaAnnotation || normalized.source === META_ANNOTATION_SOURCE
-      const numericFileCount = Number(record.fileCount)
-      if (Number.isFinite(numericFileCount) && numericFileCount >= 0) {
-        existing.fileCount = Math.max(existing.fileCount ?? 0, Math.trunc(numericFileCount))
-      }
-      continue
-    }
-
-    const numericFileCount = Number(record.fileCount)
-    entryByTagKey.set(tagKey, {
-      key: normalized.key,
-      value: normalized.value,
-      sources: new Set([normalized.source]),
-      hasMetaAnnotation: normalized.source === META_ANNOTATION_SOURCE,
-      fileCount: Number.isFinite(numericFileCount) && numericFileCount >= 0 ? Math.trunc(numericFileCount) : undefined,
-    })
-  }
-
-  const options: AnnotationFilterTagOption[] = []
-  for (const [tagKey, entry] of entryByTagKey.entries()) {
-    const sources = toSortedSources(entry.sources)
-    options.push({
-      tagKey,
-      key: entry.key,
-      value: entry.value,
-      sources,
-      hasMetaAnnotation: entry.hasMetaAnnotation,
-      representativeSource: getRepresentativeSource(sources),
-      fileCount: entry.fileCount,
-    })
-  }
-
-  options.sort((left, right) => compareLogicalIdentity(left, right))
-  return options
 }
 
 function applyDerivedSnapshotFields(snapshot: RootAnnotationDisplaySnapshot) {
@@ -426,26 +182,6 @@ function emitStoreUpdate() {
   }
 }
 
-function readTagViewsFromResult(rawResult: unknown): GatewayFileTagView[] {
-  if (!isRecord(rawResult)) return []
-  if (!Array.isArray(rawResult.items)) return []
-  return rawResult.items.filter((item): item is GatewayFileTagView => isRecord(item))
-}
-
-function readTagOptionsFromResult(rawResult: unknown): GatewayTagOptionRecord[] {
-  if (Array.isArray(rawResult)) {
-    return rawResult.filter((item): item is GatewayTagOptionRecord => isRecord(item))
-  }
-  if (!isRecord(rawResult)) return []
-  if (Array.isArray(rawResult.items)) {
-    return rawResult.items.filter((item): item is GatewayTagOptionRecord => isRecord(item))
-  }
-  if (Array.isArray(rawResult.options)) {
-    return rawResult.options.filter((item): item is GatewayTagOptionRecord => isRecord(item))
-  }
-  return []
-}
-
 interface ResolvedAnnotationTarget {
   remoteRootId: string | null
   rootPath: string | null
@@ -478,10 +214,10 @@ function resolveAnnotationTarget(
   }
 }
 
-async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<GatewayFileTagView[]> {
+async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<AnnotationGatewayFileTagView[]> {
   let page = 1
   let total = Number.POSITIVE_INFINITY
-  const items: GatewayFileTagView[] = []
+  const items: AnnotationGatewayFileTagView[] = []
 
   while (items.length < total) {
     const result = target.remoteRootId
@@ -521,53 +257,6 @@ async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<Gatewa
   return items
 }
 
-function buildPathSnapshotFromTagViews(tagViews: GatewayFileTagView[]) {
-  const rawTagsByPath: Record<string, StoredTagRecord[]> = {}
-  const byPathUpdatedAt: Record<string, number> = {}
-
-  for (const view of tagViews) {
-    const relativePath = typeof view.relativePath === 'string'
-      ? normalizeRelativePath(view.relativePath)
-      : ''
-    if (!relativePath) continue
-
-    const rawTags = (Array.isArray(view.tags) ? view.tags : [])
-      .map((tag) => normalizeStoredTagRecord(tag))
-      .filter((tag): tag is StoredTagRecord => tag !== null)
-
-    if (rawTags.length === 0) continue
-
-    rawTagsByPath[relativePath] = rawTags
-    byPathUpdatedAt[relativePath] = computeUpdatedAt(rawTags)
-  }
-
-  return {
-    rawTagsByPath,
-    byPathUpdatedAt,
-  }
-}
-
-function buildPathStateFromTags(tags: unknown[]): {
-  rawTags: StoredTagRecord[] | null
-  updatedAt: number | null
-} {
-  const rawTags = tags
-    .map((tag) => normalizeStoredTagRecord(tag))
-    .filter((tag): tag is StoredTagRecord => tag !== null)
-
-  if (rawTags.length === 0) {
-    return {
-      rawTags: null,
-      updatedAt: null,
-    }
-  }
-
-  return {
-    rawTags,
-    updatedAt: computeUpdatedAt(rawTags),
-  }
-}
-
 function removeRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   if (!(key in record)) return record
   const next = { ...record }
@@ -579,7 +268,7 @@ function applyFileTagsToSnapshot(
   snapshot: RootAnnotationDisplaySnapshot,
   relativePath: string,
   state: {
-    rawTags: StoredTagRecord[] | null
+    rawTags: StoredAnnotationTagRecord[] | null
     updatedAt: number | null
   }
 ) {
@@ -827,7 +516,7 @@ export function patchAnnotationSetValue(params: PatchAnnotationSetValueParams) {
     && tag.key === key
   ))
 
-  const nextRawTags: StoredTagRecord[] = [
+  const nextRawTags: StoredAnnotationTagRecord[] = [
     ...retainedRawTags,
     {
       key,
@@ -871,7 +560,7 @@ export function patchAnnotationTagBinding(params: PatchAnnotationTagBindingParam
 
   const rollback = createPathRollback(snapshot, relativePath)
   const nextUpdatedAt = Date.now()
-  const nextRawTags: StoredTagRecord[] = [
+  const nextRawTags: StoredAnnotationTagRecord[] = [
     ...existingRawTags,
     {
       key,
