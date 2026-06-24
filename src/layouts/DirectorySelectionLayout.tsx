@@ -2,7 +2,7 @@ import { ArrowLeft, FolderOpen, Loader2, Server, Shield, Star, X } from 'lucide-
 import type { CachedRootEntry, FavoriteFolderEntry } from '@/types'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
-import type { RemoteRootEntry } from '@/lib/gateway'
+import type { RemoteRootEntry } from '@/lib/remoteAccess'
 
 function buildDisplayPath(rootName: string, relativePath: string): string {
   return relativePath ? `${rootName}/${relativePath}` : rootName

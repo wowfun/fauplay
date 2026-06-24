@@ -88,6 +88,18 @@ _Avoid_: global recycle item, deleted item
 A browser-renderable byte stream for a Global Trash Entry, addressed by its recycle identity rather than by its internal Runtime Home storage path.
 _Avoid_: recycle file URL, stored absolute path content
 
+**Remote Access**:
+A read-only connection from the Web App to a published Fauplay workspace through the current application origin. Remote Access lets a user browse shared files without granting privileged local Runtime access on the remote device.
+_Avoid_: remote gateway, remote backend
+
+**Remote Root**:
+A Local Root that has been published for Remote Access and is selectable by an authenticated remote session.
+_Avoid_: remote folder, published root folder
+
+**Remembered Device**:
+A device that a Remote Access host remembers so the user can reconnect without repeatedly entering the bearer token for the same browser.
+_Avoid_: gateway session device, trusted client
+
 **Runtime Capability**:
 A capability owned by the Fauplay Runtime because it depends on privileged local access, shared runtime state, or long-running task coordination.
 _Avoid_: backend feature, native feature
@@ -131,6 +143,14 @@ _Avoid_: stale database cleanup, file index cleanup
 **File Content Range**:
 A contiguous byte segment of File Content, reported with its inclusive byte positions and the total file size. It supports media playback and progressive reads without changing the Root-relative Path identity of the file.
 _Avoid_: partial blob, sliced file
+
+**File Thumbnail**:
+A compact browser-renderable visual representation of a file used for browsing and scanning media collections. A File Thumbnail does not replace File Content.
+_Avoid_: gateway thumbnail, preview blob
+
+**Face Crop**:
+A browser-renderable cropped view around a detected face, addressed by face identity and display options.
+_Avoid_: gateway face image, crop URL
 
 **Plugin Capability**:
 An optional or replaceable capability provided through plugin/MCP integration. Plugin Capabilities may use Runtime Capabilities but do not define the runtime boundary.

@@ -1,4 +1,4 @@
-import type { GatewayToolDescriptor, ToolActionAnnotation } from '@/lib/gateway'
+import type { RuntimeToolActionAnnotation, RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { CONTINUOUS_CALL_OPTION_KEY } from '@/config/toolContinuousCall'
 import type { PluginSurfaceVariant, ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
 import {
@@ -10,18 +10,18 @@ import { Select } from '@/ui/Select'
 import { AnnotationQuickTagPanel } from '@/features/plugin-runtime/components/AnnotationQuickTagPanel'
 
 interface PluginToolWorkbenchProps {
-  tool: GatewayToolDescriptor | null
+  tool: RuntimeToolDescriptor | null
   optionValues?: Record<string, ToolWorkbenchOptionValue>
   onOptionChange: (toolName: string, optionKey: string, value: ToolWorkbenchOptionValue) => void
-  onRunAction: (tool: GatewayToolDescriptor, action: ToolActionAnnotation) => void
-  onRunCustomToolCall?: (tool: GatewayToolDescriptor, params: { additionalArgs: Record<string, unknown>; actionLabel?: string }) => void
+  onRunAction: (tool: RuntimeToolDescriptor, action: RuntimeToolActionAnnotation) => void
+  onRunCustomToolCall?: (tool: RuntimeToolDescriptor, params: { additionalArgs: Record<string, unknown>; actionLabel?: string }) => void
   rootId?: string | null
   annotationTargetPath?: string | null
   surfaceVariant: PluginSurfaceVariant
   subzone?: string
 }
 
-function toActionVariant(action: ToolActionAnnotation): 'default' | 'outline' | 'accent' {
+function toActionVariant(action: RuntimeToolActionAnnotation): 'default' | 'outline' | 'accent' {
   if (action.intent === 'primary') return 'default'
   if (action.intent === 'accent') return 'accent'
   return 'outline'

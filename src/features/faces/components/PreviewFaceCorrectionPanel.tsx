@@ -10,7 +10,7 @@ import {
   unassignFaces,
 } from '@/features/faces/api'
 import type { FaceMutationResult, PersonSuggestion, PreviewFaceOverlayItem } from '@/features/faces/types'
-import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PersonAssignmentInput } from '@/features/faces/components/PersonAssignmentInput'
 import { getLegacyAwarePersonDisplayName, getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { Button } from '@/ui/Button'
@@ -185,7 +185,7 @@ export function PreviewFaceCorrectionPanel({
       </div>
 
       <div className="mt-3 flex gap-3">
-        <GatewayFaceCropImage
+        <FaceCropImage
           faceId={face.faceId}
           size={112}
           padding={0.35}

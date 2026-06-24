@@ -1,6 +1,6 @@
 import { faceCountText } from '@/features/faces/lib/peoplePanelText'
 import type { PersonScope, PersonSummary } from '@/features/faces/types'
-import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { Input } from '@/ui/Input'
@@ -64,7 +64,7 @@ function PeopleListContent({
               onClick={() => onSelectPerson(person.personId)}
             >
               {person.featureFaceId ? (
-                <GatewayFaceCropImage
+                <FaceCropImage
                   faceId={person.featureFaceId}
                   size={72}
                   padding={0.35}

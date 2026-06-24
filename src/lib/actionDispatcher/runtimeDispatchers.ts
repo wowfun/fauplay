@@ -7,7 +7,7 @@ import {
   restoreRuntimeGlobalTrash,
   restoreRuntimePathFromRootTrash,
 } from '@/lib/runtimeApi'
-import type { ToolCallResult } from '@/lib/gateway'
+import type { ToolCallResult } from '@/lib/runtimeApi'
 import {
   isStringArray,
   normalizeRootRelativePath,

@@ -9,13 +9,13 @@ import {
   loadRuntimeTextPreview,
   resolveRuntimeGlobalTrashRecycleId,
   resolveRuntimeFileLocator,
+  type RuntimeToolDescriptor,
 } from '@/lib/runtimeApi'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
 import {
-  buildGatewayFileContentUrlForItem,
-  loadGatewayTextPreviewForItem,
-  type GatewayToolDescriptor,
-} from '@/lib/gateway'
+  buildFileContentUrlForItem,
+  loadTextPreviewForItem,
+} from '@/lib/fileAccess'
 import { getBoundRootPath } from '@/lib/reveal'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -44,7 +44,7 @@ interface FilePreviewPanelProps {
   file: FileItem | null
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
-  previewActionTools: GatewayToolDescriptor[]
+  previewActionTools: RuntimeToolDescriptor[]
   onClose: () => void
   onOpenFullscreen?: () => void
   titleMode?: 'actionable' | 'static'
@@ -297,7 +297,7 @@ export function FilePreviewPanel({
     }
     return true
   }, [boundRootPath, file, hasRemoteFileLocator, hasRuntimeFileLocator, rootHandle])
-  const shouldUseGatewayFileAccess = useMemo(() => (
+  const shouldUseFileAccess = useMemo(() => (
     Boolean(
       file
       && file.kind === 'file'
@@ -325,9 +325,9 @@ export function FilePreviewPanel({
       && getFilePreviewKind(file.name) === 'text'
       && boundRootPath
       && canAccessThroughCurrentRoot
-      && !shouldUseGatewayFileAccess
+      && !shouldUseFileAccess
     )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, shouldUseGatewayFileAccess])
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, shouldUseFileAccess])
   const shouldUseRuntimeFileContent = useMemo(() => (
     Boolean(
       file
@@ -335,9 +335,9 @@ export function FilePreviewPanel({
       && (previewKind === 'image' || previewKind === 'video')
       && boundRootPath
       && canAccessThroughCurrentRoot
-      && !shouldUseGatewayFileAccess
+      && !shouldUseFileAccess
     )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, previewKind, shouldUseGatewayFileAccess])
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, previewKind, shouldUseFileAccess])
   const canUseAnnotationContext = useMemo(() => (
     Boolean(
       file
@@ -365,11 +365,11 @@ export function FilePreviewPanel({
       && rootId
       && boundRootPath
       && canAccessThroughCurrentRoot
-      && !shouldUseGatewayFileAccess
+      && !shouldUseFileAccess
       && file.sourceType !== 'root_trash'
       && file.sourceType !== 'global_recycle'
     )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, rootId, shouldUseGatewayFileAccess])
+  ), [boundRootPath, canAccessThroughCurrentRoot, file, rootId, shouldUseFileAccess])
   const hasVisionFaceTool = useMemo(
     () => (
       canUseAnnotationContext
@@ -643,14 +643,14 @@ export function FilePreviewPanel({
       )
 
       try {
-        if (shouldUseGatewayFileAccess) {
+        if (shouldUseFileAccess) {
           setFileMimeType(file.mimeType || getMimeType(file.name))
           setFileSizeBytes(file.size ?? null)
           setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
 
           if (previewKind === 'text') {
             replacePreviewUrl(null)
-            const textResult = await loadGatewayTextPreviewForItem(file, TEXT_PREVIEW_MAX_BYTES)
+            const textResult = await loadTextPreviewForItem(file, TEXT_PREVIEW_MAX_BYTES)
             if (cancelled) return
             setTextPreview({
               status: textResult.status,
@@ -664,7 +664,7 @@ export function FilePreviewPanel({
 
           setTextPreview(INITIAL_TEXT_PREVIEW)
           if (previewKind === 'image' || previewKind === 'video') {
-            replacePreviewUrl(buildGatewayFileContentUrlForItem(file))
+            replacePreviewUrl(buildFileContentUrlForItem(file))
             return
           }
           replacePreviewUrl(null)
@@ -828,7 +828,7 @@ export function FilePreviewPanel({
     runtimeGlobalTrashRecycleId,
     runtimeGlobalTrashFileContentUrl,
     runtimeFileLocator,
-    shouldUseGatewayFileAccess,
+    shouldUseFileAccess,
     shouldUseRuntimeGlobalTrashFileContent,
     shouldUseRuntimeGlobalTrashTextPreview,
     shouldUseRuntimeFileContent,

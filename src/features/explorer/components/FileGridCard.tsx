@@ -3,7 +3,7 @@ import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
-import { buildGatewayFileThumbnailUrlForItem } from '@/lib/gateway'
+import { buildFileThumbnailUrlForItem } from '@/lib/fileAccess'
 import {
   buildRuntimeFileContentUrlForItem,
   buildRuntimeGlobalTrashFileContentUrlForItem,
@@ -117,12 +117,12 @@ export function FileGridCard({
   const runtimeThumbnailUrl = mediaType === 'image' ? runtimeFileContentUrl : null
   const runtimeVideoThumbnailSourceUrl = mediaType === 'video' ? runtimeFileContentUrl : null
   const shouldUseRuntimeThumbnail = Boolean(runtimeThumbnailUrl)
-  const shouldUseRemoteGatewayThumbnail = Boolean(
+  const shouldUseRemoteAccessThumbnail = Boolean(
     !isDir
     && mediaType === 'image'
     && hasRemoteLocator
   )
-  const shouldUseLocalGatewayThumbnail = Boolean(
+  const shouldUseLocalFileAccessThumbnail = Boolean(
     !isDir
     && mediaType === 'image'
     && file.absolutePath
@@ -156,21 +156,21 @@ export function FileGridCard({
       fileLastModifiedMs,
     })
     : null
-  const gatewayThumbnailUrl = (shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail)
-    ? buildGatewayFileThumbnailUrlForItem(file, {
+  const fileAccessThumbnailUrl = (shouldUseRemoteAccessThumbnail || shouldUseLocalFileAccessThumbnail)
+    ? buildFileThumbnailUrlForItem(file, {
       sizePreset: thumbnailSizePreset,
     })
     : null
   const displayedThumbnailUrl =
     runtimeThumbnailUrl ??
-    gatewayThumbnailUrl ??
+    fileAccessThumbnailUrl ??
     (requestIdentity && thumbnailUrlIdentity === requestIdentity ? thumbnailUrl : null) ??
     latestCachedThumbnailUrl
 
   useEffect(() => {
     if (!rootHandle || isDir) {
-      if (shouldUseRuntimeThumbnail || shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
-        setThumbnailState(runtimeThumbnailUrl || gatewayThumbnailUrl ? 'loading' : 'failed')
+      if (shouldUseRuntimeThumbnail || shouldUseRemoteAccessThumbnail || shouldUseLocalFileAccessThumbnail) {
+        setThumbnailState(runtimeThumbnailUrl || fileAccessThumbnailUrl ? 'loading' : 'failed')
         return
       }
       setThumbnailUrl(null)
@@ -186,10 +186,10 @@ export function FileGridCard({
       return
     }
 
-    if (shouldUseRuntimeThumbnail || shouldUseRemoteGatewayThumbnail || shouldUseLocalGatewayThumbnail) {
+    if (shouldUseRuntimeThumbnail || shouldUseRemoteAccessThumbnail || shouldUseLocalFileAccessThumbnail) {
       setThumbnailUrl(null)
       setThumbnailUrlIdentity(null)
-      setThumbnailState(runtimeThumbnailUrl || gatewayThumbnailUrl ? 'loading' : 'failed')
+      setThumbnailState(runtimeThumbnailUrl || fileAccessThumbnailUrl ? 'loading' : 'failed')
       return
     }
 
@@ -305,10 +305,10 @@ export function FileGridCard({
     runtimeFileContentUrl,
     runtimeThumbnailUrl,
     runtimeVideoThumbnailSourceUrl,
-    gatewayThumbnailUrl,
+    fileAccessThumbnailUrl,
     shouldUseRuntimeThumbnail,
-    shouldUseLocalGatewayThumbnail,
-    shouldUseRemoteGatewayThumbnail,
+    shouldUseLocalFileAccessThumbnail,
+    shouldUseRemoteAccessThumbnail,
   ])
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { callGatewayHttp, callGatewayTool, type ToolCallResult } from '@/lib/gateway'
+import { callRuntimeHttp, callRuntimePluginTool, type ToolCallResult } from '@/lib/runtimeApi'
 import { ensureRootPath, getBoundRootPath } from '@/lib/reveal'
 import { resolveDispatchHttpRoute } from '@/lib/actionDispatcher/httpRoutes'
 import { dispatchRuntimeSystemTool } from '@/lib/actionDispatcher/runtimeDispatchers'
@@ -49,7 +49,7 @@ function isLikelyRootPathError(error: { message: string; code?: string }): boole
 }
 
 // Dispatch system tools through one Web App interface while preferring
-// Fauplay Runtime capabilities over legacy gateway fallbacks.
+// direct Runtime Capabilities before generic Plugin Capability calls.
 export async function dispatchSystemTool({
   toolName,
   rootHandle,
@@ -107,13 +107,13 @@ export async function dispatchSystemTool({
 
     const result = runtimeResult
       ?? (httpRoute
-        ? await callGatewayHttp(
+        ? await callRuntimeHttp(
           httpRoute.endpointPath,
           httpRoute.payload,
           typeof timeoutMs === 'number' ? timeoutMs : httpRoute.timeoutMs,
           httpRoute.method,
         )
-        : await callGatewayTool(toolName, argsPayload, timeoutMs))
+        : await callRuntimePluginTool(toolName, argsPayload, timeoutMs))
 
     return {
       toolName,

@@ -1,6 +1,6 @@
 import type { AnnotationFilterTagOption } from '@/types'
 import { getActiveRemoteWorkspace, isRemoteReadonlyProviderActive } from '@/lib/accessState'
-import { callRemoteGatewayHttp } from '@/lib/gateway'
+import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import { ensureRootPath } from '@/lib/reveal'
 import { callRuntimeHttp } from '@/lib/runtimeApi'
 
@@ -485,7 +485,7 @@ async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<Gatewa
 
   while (items.length < total) {
     const result = target.remoteRootId
-      ? await callRemoteGatewayHttp<GatewayTagQueryResult>('/v1/remote/tags/query', {
+      ? await callRemoteAccessHttp<GatewayTagQueryResult>('/v1/remote/tags/query', {
         rootId: target.remoteRootId,
         page,
         size: TAG_QUERY_PAGE_SIZE,
@@ -735,7 +735,7 @@ export async function preloadFileAnnotationDisplaySnapshot({
 
   const loadTask = (async () => {
     const result = targetDescriptor.remoteRootId
-      ? await callRemoteGatewayHttp<GatewayFileTagResult>('/v1/remote/tags/file', {
+      ? await callRemoteAccessHttp<GatewayFileTagResult>('/v1/remote/tags/file', {
         rootId: targetDescriptor.remoteRootId,
         relativePath: normalizedPath,
       })
@@ -785,7 +785,7 @@ export async function preloadGlobalAnnotationTagOptions({
   const loadTask = (async () => {
     try {
       const result = isRemoteReadonlyProviderActive() && getActiveRemoteWorkspace()
-        ? await callRemoteGatewayHttp<GatewayTagOptionsResult>('/v1/remote/tags/options', {
+        ? await callRemoteAccessHttp<GatewayTagOptionsResult>('/v1/remote/tags/options', {
           rootId: getActiveRemoteWorkspace()!.configRootId,
         })
         : await callRuntimeHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})

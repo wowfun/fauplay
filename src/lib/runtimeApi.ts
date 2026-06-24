@@ -1,4 +1,5 @@
 export { RuntimeApiError, callRuntimeHttp } from './runtimeApi/core'
+export type { ToolCallResult } from './runtimeApi/http'
 export {
   RuntimeHttpError,
   RuntimeMcpError,
@@ -57,3 +58,15 @@ export {
   type RuntimeToolOptionEnumValue,
   type RuntimeToolOptionType,
 } from './runtimeApi/toolDescriptors'
+export {
+  RUNTIME_HEALTH_ENDPOINT_PATH,
+  callRuntimePluginTool,
+  createRuntimePluginCapabilityClient,
+  listRuntimePluginTools,
+  loadRuntimeCapabilities,
+  resetRuntimePluginCapabilitySession,
+  type RuntimeCapabilitiesSnapshot,
+  type RuntimePluginCapabilityClient,
+  type RuntimePluginCapabilityClientOptions,
+  type RuntimePluginToolCallResult,
+} from './runtimeApi/pluginCapabilities'

@@ -15,20 +15,20 @@ import {
   type AccessProvider,
 } from '@/lib/accessState'
 import {
-  clearRemoteGatewaySession,
-  createRemoteGatewaySession,
-  loadGatewayCapabilities,
+  clearRemoteAccessSession,
+  createRemoteAccessSession,
   loadRememberedDevicesAdmin,
-  loadRemoteGatewayCapabilities,
+  loadRemoteAccessCapabilities,
+  loadRemoteAccessRoots,
   syncRemotePublishedRootsFromLocalBrowser,
-  loadRemoteGatewayRoots,
   renameRememberedDeviceAdmin,
   revokeAllRememberedDevicesAdmin,
   revokeRememberedDeviceAdmin,
   type LocalPublishedRootSyncEntry,
   type RememberedDeviceAdminEntry,
   type RemoteRootEntry,
-} from '@/lib/gateway'
+} from '@/lib/remoteAccess'
+import { loadRuntimeCapabilities } from '@/lib/runtimeApi'
 import { RememberedDevicesAdminPanel } from '@/features/remote-access/components/RememberedDevicesAdminPanel'
 import { clearWorkspaceBrowserHistoryUrl } from '@/features/workspace/lib/browserHistory'
 
@@ -132,7 +132,7 @@ function App() {
   const [remoteError, setRemoteError] = useState<string | null>(null)
   const [isRemoteLoading, setIsRemoteLoading] = useState(false)
   const [activeRemoteWorkspace, setActiveRemoteWorkspaceState] = useState(() => getActiveRemoteWorkspace())
-  const [isLocalGatewayOnline, setIsLocalGatewayOnline] = useState(false)
+  const [isLocalRuntimeOnline, setIsLocalRuntimeOnline] = useState(false)
   const [isRememberedDevicesAdminOpen, setIsRememberedDevicesAdminOpen] = useState(false)
   const [rememberedDevices, setRememberedDevices] = useState<RememberedDeviceAdminEntry[]>([])
   const [rememberedDevicesError, setRememberedDevicesError] = useState<string | null>(null)
@@ -201,11 +201,11 @@ function App() {
       setRemoteError(null)
       setRemoteStep('token')
       try {
-        const capabilities = await loadRemoteGatewayCapabilities()
+        const capabilities = await loadRemoteAccessCapabilities()
         if (!capabilities.enabled) {
           throw new Error('当前站点未启用远程只读访问')
         }
-        const roots = await loadRemoteGatewayRoots()
+        const roots = await loadRemoteAccessRoots()
         if (cancelled) return
         setRemoteRoots(roots)
         const matchedRoot = roots.find((item) => item.id === storedWorkspace.configRootId) ?? null
@@ -302,20 +302,20 @@ function App() {
 
   useEffect(() => {
     if (!isLoopbackUi || !shouldShowStartupScreen) {
-      setIsLocalGatewayOnline(false)
+      setIsLocalRuntimeOnline(false)
       setIsRememberedDevicesAdminOpen(false)
       return
     }
 
     let cancelled = false
-    const refreshLocalGatewayStatus = async () => {
-      const snapshot = await loadGatewayCapabilities()
+    const refreshLocalRuntimeStatus = async () => {
+      const snapshot = await loadRuntimeCapabilities()
       if (!cancelled) {
-        setIsLocalGatewayOnline(snapshot.online)
+        setIsLocalRuntimeOnline(snapshot.online)
       }
     }
 
-    void refreshLocalGatewayStatus()
+    void refreshLocalRuntimeStatus()
     return () => {
       cancelled = true
     }
@@ -394,12 +394,12 @@ function App() {
       setRemoteStep('token')
 
       try {
-        const capabilities = await loadRemoteGatewayCapabilities()
+        const capabilities = await loadRemoteAccessCapabilities()
         if (!capabilities.enabled) {
           throw new Error('当前站点未启用远程只读访问')
         }
 
-        const roots = await loadRemoteGatewayRoots(2000, {
+        const roots = await loadRemoteAccessRoots(2000, {
           clearSessionOnUnauthorized: false,
         })
         if (roots.length === 0) {
@@ -446,16 +446,16 @@ function App() {
     setIsRemoteLoading(true)
     setRemoteError(null)
     try {
-      const capabilities = await loadRemoteGatewayCapabilities()
+      const capabilities = await loadRemoteAccessCapabilities()
       if (!capabilities.enabled) {
         throw new Error('当前站点未启用远程只读访问')
       }
 
-      await createRemoteGatewaySession(normalizedToken, {
+      await createRemoteAccessSession(normalizedToken, {
         rememberDevice: rememberRemoteDevice,
         rememberDeviceLabel: rememberRemoteDeviceLabel,
       })
-      const roots = await loadRemoteGatewayRoots()
+      const roots = await loadRemoteAccessRoots()
       if (roots.length === 0) {
         throw new Error('当前远程服务未配置可访问的 Root')
       }
@@ -491,7 +491,7 @@ function App() {
   }, [updateAccessProvider])
 
   const handleDisconnectRemoteWorkspace = useCallback(() => {
-    void clearRemoteGatewaySession().catch(() => undefined)
+    void clearRemoteAccessSession().catch(() => undefined)
     clearRemoteSession()
     setActiveRemoteWorkspaceState(null)
     setRemoteRoots([])
@@ -506,7 +506,7 @@ function App() {
   const handleForgetRemoteDevice = useCallback(() => {
     const forgetRemoteDevice = async () => {
       try {
-        await clearRemoteGatewaySession({
+        await clearRemoteAccessSession({
           forgetDevice: true,
         })
       } catch (error) {
@@ -561,7 +561,7 @@ function App() {
         onRemoteTokenChange={setRemoteToken}
         rememberRemoteDevice={rememberRemoteDevice}
         rememberRemoteDeviceLabel={rememberRemoteDeviceLabel}
-        showRememberedDevicesAdminEntry={isLoopbackUi && isLocalGatewayOnline}
+        showRememberedDevicesAdminEntry={isLoopbackUi && isLocalRuntimeOnline}
         onRememberRemoteDeviceChange={handleRememberRemoteDeviceChange}
         onRememberRemoteDeviceLabelChange={setRememberRemoteDeviceLabel}
         onOpenRemoteConnect={handleOpenRemoteConnect}

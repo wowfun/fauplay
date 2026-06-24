@@ -1,6 +1,6 @@
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { fromRemoteUiRootId } from '@/lib/accessState'
-import { callRemoteGatewayHttp } from '@/lib/gateway'
+import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import type {
   FaceBoundingBox,
   FaceMediaType,
@@ -211,7 +211,7 @@ async function callRemoteReadonlyFaces<T = unknown>(
 ): Promise<T | null> {
   const rootId = getRemoteReadonlyRootId(context)
   if (!rootId) return null
-  return callRemoteGatewayHttp<T>(endpointPath, {
+  return callRemoteAccessHttp<T>(endpointPath, {
     rootId,
     ...body,
   })

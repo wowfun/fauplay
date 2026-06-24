@@ -11,7 +11,7 @@ import {
 } from '@/features/workspace/lib/projectionTabs'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import type { FileItem, ResultProjection } from '@/types'
 
 type WorkspaceAccessProvider = 'local-browser' | 'remote-readonly'
@@ -20,7 +20,7 @@ interface UseWorkspacePeoplePanelParams {
   accessProvider: WorkspaceAccessProvider
   rootId: string
   currentPath: string
-  pluginTools: GatewayToolDescriptor[]
+  pluginTools: RuntimeToolDescriptor[]
   activeSurface: WorkspaceActiveSurface
   activeSurfaceFiles: FileItem[]
   filteredFiles: FileItem[]

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import type { FaceRecord } from '@/features/faces/types'
-import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { getLegacyAwarePersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { GRID_SELECTABLE_ITEM_ATTR, useGridSelection } from '@/hooks/useGridSelection'
 import { cn } from '@/lib/utils'
@@ -172,7 +172,7 @@ export function FaceGrid({
             onClick={(event) => handleFaceClick(event, face.faceId)}
             onDoubleClick={() => handleFaceDoubleClick(face)}
           >
-            <GatewayFaceCropImage
+            <FaceCropImage
               faceId={face.faceId}
               size={compact ? 128 : 160}
               padding={0.35}

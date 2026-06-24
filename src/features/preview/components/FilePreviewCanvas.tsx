@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
@@ -12,7 +12,7 @@ interface FilePreviewCanvasProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
-  previewActionTools: GatewayToolDescriptor[]
+  previewActionTools: RuntimeToolDescriptor[]
   previewUrl: string | null
   textPreview: TextPreviewPayload
   fileMimeType: string | null

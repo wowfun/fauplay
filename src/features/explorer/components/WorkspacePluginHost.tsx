@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
-import { callGatewayHttp, type GatewayToolDescriptor } from '@/lib/gateway'
 import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
+import { callRuntimeHttp, type RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { withToolScopedProjection } from '@/lib/projection'
 import { ensureRootPath } from '@/lib/reveal'
 import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
@@ -23,7 +23,7 @@ import {
 } from '@/features/plugin-runtime/utils/resultQueueState'
 
 interface WorkspacePluginHostProps {
-  tools: GatewayToolDescriptor[]
+  tools: RuntimeToolDescriptor[]
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
   currentPath: string
@@ -327,7 +327,7 @@ export function WorkspacePluginHost({
   const hasRenderableTargets = hasTargets || hasSelectedEntries
   const contextKey = currentPath || '/'
 
-  const resolveToolArguments = useCallback((tool: GatewayToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
+  const resolveToolArguments = useCallback((tool: RuntimeToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
     if (tool.name === 'fs.softDelete') {
       if (!hasSelectedEntries) return null
       if (selectedDeleteAbsoluteArgs) {
@@ -372,7 +372,7 @@ export function WorkspacePluginHost({
     selectedRestoreItems,
   ])
 
-  const handleRuntimeMutationCommitted = useCallback(async ({ tool, result }: { tool: GatewayToolDescriptor; result: DispatchSystemToolResult }) => {
+  const handleRuntimeMutationCommitted = useCallback(async ({ tool, result }: { tool: RuntimeToolDescriptor; result: DispatchSystemToolResult }) => {
     if (!onMutationCommitted) {
       return
     }
@@ -417,7 +417,7 @@ export function WorkspacePluginHost({
     workbenchState,
     setWorkbenchState,
     buildBaseArguments: useCallback(() => ({}), []),
-    canRunTool: useCallback((tool: GatewayToolDescriptor) => {
+    canRunTool: useCallback((tool: RuntimeToolDescriptor) => {
       if (tool.name === 'fs.softDelete' || tool.name === 'fs.restore') {
         return hasSelectedEntries
       }
@@ -434,7 +434,7 @@ export function WorkspacePluginHost({
     }))
   }, [contextKey, setResultQueueState])
 
-  const runWorkspaceFaceScanJob = useCallback(async (tool: GatewayToolDescriptor, additionalArgs: Record<string, unknown>) => {
+  const runWorkspaceFaceScanJob = useCallback(async (tool: RuntimeToolDescriptor, additionalArgs: Record<string, unknown>) => {
     if (!rootHandle || !rootId) return
 
     const providedRootPath = typeof additionalArgs.rootPath === 'string' && additionalArgs.rootPath.trim()
@@ -478,13 +478,13 @@ export function WorkspacePluginHost({
       if (!resolvedRootPath) {
         throw new Error('未设置有效 rootPath')
       }
-      latestSnapshot = await callGatewayHttp<FaceScanJobSnapshot>(
+      latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
         '/v1/faces/detect-assets/jobs',
         requestArgs,
         FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS
       )
       if (!latestSnapshot.jobId) {
-        throw new Error('Gateway 未返回人脸扫描任务 ID')
+        throw new Error('Runtime 未返回人脸扫描任务 ID')
       }
       const jobId = latestSnapshot.jobId
       faceScanJobIdByQueueItemIdRef.current.set(queueItemId, jobId)
@@ -492,7 +492,7 @@ export function WorkspacePluginHost({
 
       while (!isFaceScanJobTerminal(latestSnapshot.status)) {
         await delay(FACE_SCAN_JOB_POLL_INTERVAL_MS)
-        latestSnapshot = await callGatewayHttp<FaceScanJobSnapshot>(
+        latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
           `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}`,
           {},
           FACE_SCAN_JOB_POLL_TIMEOUT_MS,
@@ -555,7 +555,7 @@ export function WorkspacePluginHost({
       cancelable: false,
       message: '正在取消人脸扫描任务...',
     })
-    void callGatewayHttp<FaceScanJobSnapshot>(
+    void callRuntimeHttp<FaceScanJobSnapshot>(
       `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}/cancel`,
       {},
       FACE_SCAN_JOB_CANCEL_TIMEOUT_MS
@@ -576,7 +576,7 @@ export function WorkspacePluginHost({
   }, [updateFaceScanQueueProgress])
 
   const toolByName = useMemo(() => {
-    const map = new Map<string, GatewayToolDescriptor>()
+    const map = new Map<string, RuntimeToolDescriptor>()
     for (const tool of runtime.scopedTools) {
       map.set(tool.name, tool)
     }
@@ -623,7 +623,7 @@ export function WorkspacePluginHost({
     onDismissProjectionTool(latestDuplicateResult.toolName)
   }, [onDismissProjectionTool, runtime.currentQueue])
 
-  const handleWorkbenchRunAction = useCallback((tool: GatewayToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
+  const handleWorkbenchRunAction = useCallback((tool: RuntimeToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
     const additionalArgs = resolveToolArguments(tool, action.arguments)
     if (!additionalArgs) return
     runtime.handleWorkbenchContextChange(tool.name)

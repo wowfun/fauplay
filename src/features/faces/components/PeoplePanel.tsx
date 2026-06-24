@@ -22,7 +22,7 @@ import {
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { FaceGrid } from '@/features/faces/components/FaceGrid'
 import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionActions'
-import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
 import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTargetList'
 import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
@@ -658,7 +658,7 @@ export function PeoplePanel({
                       <div className="rounded-xl border border-border bg-card p-4">
                         <div className="flex items-start gap-3">
                           {selectedPerson.featureFaceId ? (
-                            <GatewayFaceCropImage
+                            <FaceCropImage
                               faceId={selectedPerson.featureFaceId}
                               size={88}
                               padding={0.35}
@@ -914,7 +914,7 @@ export function PeoplePanel({
                         <div className="text-sm text-muted-foreground">{faceCountText(selectedPerson, scope)}</div>
                       </div>
                       {selectedPerson.featureFaceId && (
-                        <GatewayFaceCropImage
+                        <FaceCropImage
                           faceId={selectedPerson.featureFaceId}
                           size={112}
                           padding={0.35}

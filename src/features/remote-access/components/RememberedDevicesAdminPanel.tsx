@@ -1,6 +1,6 @@
 import { ArrowLeft, Loader2, RefreshCw, Shield, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { RememberedDeviceAdminEntry } from '@/lib/gateway'
+import type { RememberedDeviceAdminEntry } from '@/lib/remoteAccess'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 

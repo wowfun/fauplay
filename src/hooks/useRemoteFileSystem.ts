@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildRemoteServiceKey, fromRemoteUiRootId, toRemoteUiRootId } from '@/lib/accessState'
 import {
-  callRemoteGatewayHttp,
-  loadRemoteGatewayFavorites,
-  removeRemoteGatewayFavorite,
+  callRemoteAccessHttp,
+  loadRemoteAccessFavorites,
+  removeRemoteAccessFavorite,
   type RemoteRootEntry,
-  upsertRemoteGatewayFavorite,
-} from '@/lib/gateway'
+  upsertRemoteAccessFavorite,
+} from '@/lib/remoteAccess'
 import { isImageFile, isVideoFile } from '@/lib/fileSystem'
 import type {
   AddressPathHistoryEntry,
@@ -122,7 +122,7 @@ export function useRemoteFileSystem({
     let cancelled = false
     const refreshFavorites = async () => {
       try {
-        const items = await loadRemoteGatewayFavorites()
+        const items = await loadRemoteAccessFavorites()
         if (!cancelled) {
           setFavoriteFolders(toFavoriteFolderEntries(roots, items))
         }
@@ -145,7 +145,7 @@ export function useRemoteFileSystem({
     flattenView: boolean
   ) => {
     const normalizedPath = normalizeRelativePath(targetPath)
-    const result = await callRemoteGatewayHttp('/v1/remote/files/list', {
+    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
       rootId: configRootId,
       path: normalizedPath,
       flattenView,
@@ -225,7 +225,7 @@ export function useRemoteFileSystem({
 
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
     if (!currentConfigRootId) return []
-    const result = await callRemoteGatewayHttp('/v1/remote/files/list', {
+    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
       rootId: currentConfigRootId,
       path: normalizeRelativePath(targetPath),
       flattenView: false,
@@ -261,8 +261,8 @@ export function useRemoteFileSystem({
     const run = async () => {
       const configRootId = fromUiRootId(entry.rootId)
       if (!configRootId) return
-      await removeRemoteGatewayFavorite(configRootId, normalizeRelativePath(entry.path))
-      const items = await loadRemoteGatewayFavorites()
+      await removeRemoteAccessFavorite(configRootId, normalizeRelativePath(entry.path))
+      const items = await loadRemoteAccessFavorites()
       setFavoriteFolders(toFavoriteFolderEntries(roots, items))
     }
 
@@ -282,11 +282,11 @@ export function useRemoteFileSystem({
         item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
       ))
       if (alreadyFavorited) {
-        await removeRemoteGatewayFavorite(configRootId, normalizedPath)
+        await removeRemoteAccessFavorite(configRootId, normalizedPath)
       } else {
-        await upsertRemoteGatewayFavorite(configRootId, normalizedPath)
+        await upsertRemoteAccessFavorite(configRootId, normalizedPath)
       }
-      const items = await loadRemoteGatewayFavorites()
+      const items = await loadRemoteAccessFavorites()
       setFavoriteFolders(toFavoriteFolderEntries(roots, items))
     }
 

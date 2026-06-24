@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAc
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxContinuousConcurrent } from '@/config/toolContinuousCall'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
@@ -28,7 +28,7 @@ interface PreviewPluginHostProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
-  previewActionTools: GatewayToolDescriptor[]
+  previewActionTools: RuntimeToolDescriptor[]
   previewViewState: 'loading' | 'error' | 'ready' | 'empty'
   surfaceVariant: 'preview-lightbox' | 'preview-panel'
   toolResultQueueState: PluginResultQueueState
@@ -49,7 +49,7 @@ interface PreviewPluginHostProps {
 
 interface ContinuousToolTask {
   key: string
-  tool: GatewayToolDescriptor
+  tool: RuntimeToolDescriptor
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -183,7 +183,7 @@ export function PreviewPluginHost({
     () => Boolean(previewBaseArguments && typeof previewBaseArguments.relativePath === 'string'),
     [previewBaseArguments]
   )
-  const canRunProjectedMutationTool = useCallback((tool: GatewayToolDescriptor) => {
+  const canRunProjectedMutationTool = useCallback((tool: RuntimeToolDescriptor) => {
     if (file.kind !== 'file') return false
     if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
       return tool.name === 'fs.restore'
@@ -205,7 +205,7 @@ export function PreviewPluginHost({
     workbenchState: toolWorkbenchState,
     setWorkbenchState: setToolWorkbenchState,
     buildBaseArguments: useCallback(() => previewBaseArguments, [previewBaseArguments]),
-    canRunTool: useCallback((tool: GatewayToolDescriptor) => canRunProjectedMutationTool(tool), [canRunProjectedMutationTool]),
+    canRunTool: useCallback((tool: RuntimeToolDescriptor) => canRunProjectedMutationTool(tool), [canRunProjectedMutationTool]),
     onMutationCommitted: onMutationCommitted
       ? async ({ tool, result }) => {
         const mutationParams: PreviewMutationCommitParams = {
@@ -239,13 +239,13 @@ export function PreviewPluginHost({
 
   const fileActionTools = pluginRuntime.scopedTools
   const toolByName = useMemo(() => {
-    const map = new Map<string, GatewayToolDescriptor>()
+    const map = new Map<string, RuntimeToolDescriptor>()
     for (const tool of fileActionTools) {
       map.set(tool.name, tool)
     }
     return map
   }, [fileActionTools])
-  const resolveToolArguments = useCallback((tool: GatewayToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
+  const resolveToolArguments = useCallback((tool: RuntimeToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
     if (tool.name === 'fs.softDelete') {
       if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
         return {
@@ -388,7 +388,7 @@ export function PreviewPluginHost({
     }
   }, [enableContinuousAutoRunOwner, maxContinuousConcurrent, pluginRuntime])
 
-  const enqueueContinuousTasks = useCallback((tools: GatewayToolDescriptor[]) => {
+  const enqueueContinuousTasks = useCallback((tools: RuntimeToolDescriptor[]) => {
     if (!enableContinuousAutoRunOwner) return
 
     for (const tool of tools) {

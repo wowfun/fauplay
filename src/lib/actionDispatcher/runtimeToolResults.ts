@@ -10,7 +10,7 @@ import type {
   RuntimeRootMoveBatchResponse,
   RuntimeRootTrashResponse,
 } from '@/lib/runtimeApi'
-import type { ToolCallResult } from '@/lib/gateway'
+import type { ToolCallResult } from '@/lib/runtimeApi'
 
 type RuntimeRootTrashOperation = 'move' | 'restore'
 

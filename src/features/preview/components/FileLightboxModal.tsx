@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
@@ -11,7 +11,7 @@ interface FileLightboxModalProps {
   file: FileItem
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
-  previewActionTools: GatewayToolDescriptor[]
+  previewActionTools: RuntimeToolDescriptor[]
   onClose: () => void
   titleMode?: 'actionable' | 'static'
   showUnavailableReasons?: boolean

@@ -1,6 +1,6 @@
-import { buildGatewayFaceCropUrl } from '@/lib/gateway'
+import { buildFaceCropUrl } from '@/lib/fileAccess'
 
-interface GatewayFaceCropImageProps {
+interface FaceCropImageProps {
   faceId: string
   size?: number
   padding?: number
@@ -9,17 +9,17 @@ interface GatewayFaceCropImageProps {
   draggable?: boolean
 }
 
-export function GatewayFaceCropImage({
+export function FaceCropImage({
   faceId,
   size,
   padding,
   alt,
   className,
   draggable = false,
-}: GatewayFaceCropImageProps) {
+}: FaceCropImageProps) {
   return (
     <img
-      src={buildGatewayFaceCropUrl(faceId, { size, padding })}
+      src={buildFaceCropUrl(faceId, { size, padding })}
       alt={alt}
       draggable={draggable}
       className={className}

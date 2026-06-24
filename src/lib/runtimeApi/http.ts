@@ -1,12 +1,12 @@
 import {
   clearRemoteSession,
   getCurrentOrigin,
-} from '@/lib/accessState'
-import { resolveLocalRuntimeBaseUrl } from './baseUrl'
+} from '../accessState.ts'
+import { resolveLocalRuntimeBaseUrl } from './baseUrl.ts'
 import {
   RuntimeHttpError,
   createRuntimeRequestTimeoutError,
-} from './errors'
+} from './errors.ts'
 
 export {
   GatewayHttpError,
@@ -15,7 +15,7 @@ export {
   RuntimeMcpError,
   createClientTimeoutError,
   createRuntimeRequestTimeoutError,
-} from './errors'
+} from './errors.ts'
 
 export const DEFAULT_RUNTIME_API_TIMEOUT_MS = 5000
 

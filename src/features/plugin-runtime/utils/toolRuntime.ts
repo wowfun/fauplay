@@ -1,20 +1,24 @@
-import type { GatewayToolDescriptor, ToolActionAnnotation, ToolOptionAnnotation } from '@/lib/gateway'
+import type {
+  RuntimeToolActionAnnotation,
+  RuntimeToolDescriptor,
+  RuntimeToolOptionAnnotation,
+} from '@/lib/runtimeApi'
 import type { ToolWorkbenchOptionValue } from '@/features/plugin-runtime/types'
 
-export function getVisibleToolActions(tool: GatewayToolDescriptor): ToolActionAnnotation[] {
+export function getVisibleToolActions(tool: RuntimeToolDescriptor): RuntimeToolActionAnnotation[] {
   return tool.toolActions.filter((action) => action.visible !== false)
 }
 
-export function hasWorkbenchMetadata(tool: GatewayToolDescriptor): boolean {
+export function hasWorkbenchMetadata(tool: RuntimeToolDescriptor): boolean {
   return tool.toolOptions.length > 0 || getVisibleToolActions(tool).length > 0
 }
 
-export function findToolOption(tool: GatewayToolDescriptor, optionKey: string): ToolOptionAnnotation | null {
+export function findToolOption(tool: RuntimeToolDescriptor, optionKey: string): RuntimeToolOptionAnnotation | null {
   return tool.toolOptions.find((option) => option.key === optionKey) ?? null
 }
 
 export function resolveToolOptionValueFromDefinition(
-  option: ToolOptionAnnotation,
+  option: RuntimeToolOptionAnnotation,
   currentValue: ToolWorkbenchOptionValue | undefined
 ): ToolWorkbenchOptionValue | undefined {
   if (option.type === 'boolean') {
@@ -38,7 +42,7 @@ export function resolveToolOptionValueFromDefinition(
 }
 
 export function resolveToolOptionValue(
-  tool: GatewayToolDescriptor,
+  tool: RuntimeToolDescriptor,
   optionKey: string,
   optionState: Record<string, ToolWorkbenchOptionValue> | undefined
 ): ToolWorkbenchOptionValue | undefined {
@@ -48,7 +52,7 @@ export function resolveToolOptionValue(
 }
 
 export function isBooleanToolOptionEnabled(
-  tool: GatewayToolDescriptor,
+  tool: RuntimeToolDescriptor,
   optionKey: string,
   optionValuesByTool: Record<string, Record<string, ToolWorkbenchOptionValue>>
 ): boolean {

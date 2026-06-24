@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
-import type { GatewayToolDescriptor, ToolActionAnnotation } from '@/lib/gateway'
+import type { RuntimeToolActionAnnotation, RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { dispatchSystemTool, type DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { extractResultProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
@@ -37,7 +37,7 @@ interface RunToolCallOptions {
 
 interface UsePluginRuntimeOptions {
   scope: PluginScope
-  tools: GatewayToolDescriptor[]
+  tools: RuntimeToolDescriptor[]
   contextKey: string
   rootHandle: FileSystemDirectoryHandle | null
   rootId?: string | null
@@ -46,8 +46,8 @@ interface UsePluginRuntimeOptions {
   workbenchState: PluginWorkbenchState
   setWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
   buildBaseArguments: () => Record<string, unknown> | null
-  canRunTool?: (tool: GatewayToolDescriptor) => boolean
-  onMutationCommitted?: (params: { tool: GatewayToolDescriptor; result: DispatchSystemToolResult }) => void | Promise<void>
+  canRunTool?: (tool: RuntimeToolDescriptor) => boolean
+  onMutationCommitted?: (params: { tool: RuntimeToolDescriptor; result: DispatchSystemToolResult }) => void | Promise<void>
 }
 
 function toSortedSerializable(value: unknown): unknown {
@@ -82,7 +82,7 @@ function mergeArgs(
 }
 
 function toToolOptionArguments(
-  tool: GatewayToolDescriptor,
+  tool: RuntimeToolDescriptor,
   optionValuesByTool: Record<string, Record<string, ToolWorkbenchOptionValue>>
 ): Record<string, unknown> {
   const optionState = optionValuesByTool[tool.name]
@@ -139,7 +139,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function shouldTriggerMutationRefresh(tool: GatewayToolDescriptor, dispatchResult: DispatchSystemToolResult): boolean {
+function shouldTriggerMutationRefresh(tool: RuntimeToolDescriptor, dispatchResult: DispatchSystemToolResult): boolean {
   if (tool.mutation !== true || dispatchResult.ok !== true) {
     return false
   }
@@ -205,7 +205,7 @@ export function usePluginRuntime({
   }, [scopedTools, workbenchState.activeToolName])
 
   const runToolCall = useCallback(async (
-    tool: GatewayToolDescriptor,
+    tool: RuntimeToolDescriptor,
     options: RunToolCallOptions
   ): Promise<PluginToolCallOutcome> => {
     if (!hasExecutionContext || !rootId || !baseArguments) return 'skipped'
@@ -311,7 +311,7 @@ export function usePluginRuntime({
     })
   }, [setWorkbenchState])
 
-  const handleRunWorkbenchAction = useCallback((tool: GatewayToolDescriptor, action: ToolActionAnnotation) => {
+  const handleRunWorkbenchAction = useCallback((tool: RuntimeToolDescriptor, action: RuntimeToolActionAnnotation) => {
     handleWorkbenchContextChange(tool.name)
     void runToolCall(tool, {
       trigger: 'manual',
@@ -353,7 +353,7 @@ export function usePluginRuntime({
     })
   }, [canRunTool, currentQueue, handleWorkbenchContextChange, hasBaseArguments, hasExecutionContext, runToolCall, scopedTools])
 
-  const getRequestSignature = useCallback((tool: GatewayToolDescriptor, params?: {
+  const getRequestSignature = useCallback((tool: RuntimeToolDescriptor, params?: {
     actionKey?: string
     additionalArgs?: Record<string, unknown>
   }): string | null => {

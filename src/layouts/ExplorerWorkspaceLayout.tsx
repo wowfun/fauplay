@@ -25,7 +25,7 @@ import type {
   ResultPanelDisplayMode,
   ThumbnailSizePreset,
 } from '@/types'
-import type { GatewayToolDescriptor } from '@/lib/gateway'
+import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 
 const WorkspacePluginHost = lazy(async () => {
   const mod = await import('@/features/explorer/components/WorkspacePluginHost')
@@ -218,7 +218,7 @@ interface ExplorerWorkspaceLayoutProps {
   selectedFile: FileItem | null
   gridSelectedCount: number
   selectedGridMetaFile: FileItem | null
-  pluginTools: GatewayToolDescriptor[]
+  pluginTools: RuntimeToolDescriptor[]
   previewHeaderTitleMode?: WorkspacePresentationProfile['previewHeaderTitleMode']
   showPreviewUnavailableReasons?: WorkspacePresentationProfile['showPreviewUnavailableReasons']
   onClosePane: () => void
