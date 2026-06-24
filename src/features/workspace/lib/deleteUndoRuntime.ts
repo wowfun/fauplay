@@ -6,8 +6,6 @@ import {
 } from '@/lib/runtimeApi'
 import {
   type DeleteUndoRestoreItem,
-  normalizeAbsolutePath,
-  normalizeRelativePath as normalizeUndoRelativePath,
   toRelativePathWithinRoot,
 } from '@/features/workspace/lib/deleteUndo'
 
@@ -163,27 +161,4 @@ export async function restoreDeleteUndoItemsThroughRuntime(
 
 export function createDeleteUndoId(prefix: string): string {
   return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-export function pathRefersToDeletedAbsolutePath(
-  value: string | null | undefined,
-  rootPath: string | null,
-  deletedAbsolutePathSet: Set<string>
-): boolean {
-  const normalizedValue = typeof value === 'string' ? value.trim() : ''
-  if (!normalizedValue) {
-    return false
-  }
-
-  if (normalizedValue.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(normalizedValue)) {
-    return deletedAbsolutePathSet.has(normalizeAbsolutePath(normalizedValue))
-  }
-
-  if (!rootPath) {
-    return false
-  }
-
-  return deletedAbsolutePathSet.has(
-    normalizeAbsolutePath(`${normalizeAbsolutePath(rootPath)}/${normalizeUndoRelativePath(normalizedValue)}`)
-  )
 }

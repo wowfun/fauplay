@@ -1,11 +1,11 @@
-import type { DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
+import type { DuplicateSelectionRule } from './duplicateSelection.ts'
 import {
   type DeleteUndoSnapshot,
   normalizeAbsolutePath,
+  pathRefersToDeletedAbsolutePath,
   remapFileItemAfterRestore,
   remapPathForRoot,
-} from '@/features/workspace/lib/deleteUndo'
-import { pathRefersToDeletedAbsolutePath } from '@/features/workspace/lib/deleteUndoRuntime'
+} from './deleteUndo.ts'
 import type { FileItem, ResultProjection } from '@/types'
 
 export function cloneFileItem(file: FileItem | null): FileItem | null {

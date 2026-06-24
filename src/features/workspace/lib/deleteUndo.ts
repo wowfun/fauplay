@@ -175,6 +175,29 @@ export function remapFileItemAfterRestore(
   }
 }
 
+export function pathRefersToDeletedAbsolutePath(
+  value: string | null | undefined,
+  rootPath: string | null,
+  deletedAbsolutePathSet: Set<string>
+): boolean {
+  const normalizedValue = typeof value === 'string' ? value.trim() : ''
+  if (!normalizedValue) {
+    return false
+  }
+
+  if (isAbsolutePathLike(normalizedValue)) {
+    return deletedAbsolutePathSet.has(normalizeAbsolutePath(normalizedValue))
+  }
+
+  if (!rootPath) {
+    return false
+  }
+
+  return deletedAbsolutePathSet.has(
+    normalizeAbsolutePath(`${normalizeAbsolutePath(rootPath)}/${normalizeRelativePath(normalizedValue)}`)
+  )
+}
+
 export function readDeleteUndoRestoreItems(result: unknown): DeleteUndoRestoreItem[] {
   if (!isRecord(result) || !Array.isArray(result.items)) {
     return []

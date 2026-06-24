@@ -50,7 +50,6 @@ import {
   type DeleteUndoPreviewSnapshot,
   type DeleteUndoRestoreItem,
   type DeleteUndoSnapshot,
-  normalizeAbsolutePath,
 } from '@/features/workspace/lib/deleteUndo'
 import {
   countDeleteUndoItems,
@@ -58,13 +57,13 @@ import {
   restoreDeleteUndoItemsThroughRuntime,
 } from '@/features/workspace/lib/deleteUndoRuntime'
 import {
-  buildRestoredDeleteUndoSnapshot,
   cloneDuplicateSelectionRuleRecord,
   cloneFileItem,
   cloneNullableStringRecord,
   cloneResultProjection,
   cloneStringArrayRecord,
 } from '@/features/workspace/lib/deleteUndoSnapshot'
+import { resolveDeleteUndoRestoreResult } from '@/features/workspace/lib/deleteUndoRestorePlan'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
 import { getBoundRootPath } from '@/lib/reveal'
 import {
@@ -807,78 +806,38 @@ export function WorkspaceShell({
         batch.restoreItems,
         batch.snapshot.rootPath,
       )
-      const responseItems = Array.isArray(response.items) ? response.items : []
-      const restoredAbsolutePathByOriginalAbsolutePath = new Map<string, string>()
-      const failedRestoreItems: DeleteUndoRestoreItem[] = []
-
-      batch.restoreItems.forEach((restoreItem, index) => {
-        const responseItem = responseItems[index]
-        const nextAbsolutePath = typeof responseItem?.nextAbsolutePath === 'string'
-          ? responseItem.nextAbsolutePath.trim()
-          : ''
-        if (responseItem?.ok === true && nextAbsolutePath) {
-          const normalizedNextAbsolutePath = normalizeAbsolutePath(nextAbsolutePath)
-          restoredAbsolutePathByOriginalAbsolutePath.set(
-            normalizeAbsolutePath(restoreItem.originalAbsolutePath),
-            normalizedNextAbsolutePath
-          )
-          return
-        }
-        failedRestoreItems.push(restoreItem)
-      })
-
-      const failedOriginalAbsolutePathSet = new Set(
-        failedRestoreItems.map((item) => normalizeAbsolutePath(item.originalAbsolutePath))
-      )
-      const restoredCount = restoredAbsolutePathByOriginalAbsolutePath.size
-      const remainingUndoBatches = deleteUndoBatches.slice(1)
-      const retrySnapshot = buildRestoredDeleteUndoSnapshot(
-        batch.snapshot,
-        restoredAbsolutePathByOriginalAbsolutePath,
-        new Set()
-      )
-      const restoredSnapshot = buildRestoredDeleteUndoSnapshot(
-        batch.snapshot,
-        restoredAbsolutePathByOriginalAbsolutePath,
-        failedOriginalAbsolutePathSet
-      )
-      const failedRetryBatch = failedRestoreItems.length > 0
-        ? {
+      const restoreResult = resolveDeleteUndoRestoreResult({
+        batch,
+        remainingUndoBatches: deleteUndoBatches.slice(1),
+        response,
+        retryBatchMetadata: {
           id: createDeleteUndoId('delete-undo-batch'),
           createdAt: Date.now(),
-          deletedCount: failedRestoreItems.length,
-          restoreItems: failedRestoreItems,
-          snapshot: retrySnapshot,
-        }
-        : null
+        },
+      })
+      setDeleteUndoBatches(restoreResult.undoBatches)
 
-      if (failedRetryBatch) {
-        setDeleteUndoBatches([failedRetryBatch, ...remainingUndoBatches])
-      } else {
-        setDeleteUndoBatches(remainingUndoBatches)
-      }
-
-      if (restoredCount === 0) {
+      if (restoreResult.restoredCount === 0) {
         showDeleteUndoNoticeMessage('撤销删除失败，请重试', 'error')
         setIsUndoingDelete(false)
         return
       }
 
-      for (const restoredAbsolutePath of restoredAbsolutePathByOriginalAbsolutePath.values()) {
-        forgetDeletedProjectionAbsolutePath(normalizeAbsolutePath(restoredAbsolutePath))
+      for (const restoredAbsolutePath of restoreResult.restoredAbsolutePaths) {
+        forgetDeletedProjectionAbsolutePath(restoredAbsolutePath)
       }
 
       const shouldNavigateBack = (
-        rootId !== restoredSnapshot.historyEntry.rootId
-        || normalizeRelativePath(currentPath) !== normalizeRelativePath(restoredSnapshot.historyEntry.path)
+        rootId !== restoreResult.restoredSnapshot.historyEntry.rootId
+        || normalizeRelativePath(currentPath) !== normalizeRelativePath(restoreResult.restoredSnapshot.historyEntry.path)
       )
       if (shouldNavigateBack) {
-        const reopened = await openHistoryEntry(restoredSnapshot.historyEntry)
+        const reopened = await openHistoryEntry(restoreResult.restoredSnapshot.historyEntry)
         if (!reopened) {
           showDeleteUndoNoticeMessage(
-            failedRetryBatch
-              ? `已恢复 ${restoredCount} 项，但仍有 ${failedRetryBatch.deletedCount} 项待重试，且无法自动跳回原目录`
-              : `已恢复 ${restoredCount} 项，但无法自动跳回原目录`,
+            restoreResult.failedRetryBatch
+              ? `已恢复 ${restoreResult.restoredCount} 项，但仍有 ${restoreResult.failedRetryBatch.deletedCount} 项待重试，且无法自动跳回原目录`
+              : `已恢复 ${restoreResult.restoredCount} 项，但无法自动跳回原目录`,
             'error'
           )
           setIsUndoingDelete(false)
@@ -886,10 +845,10 @@ export function WorkspaceShell({
         }
       }
 
-      setPendingDeleteUndoRestore({ snapshot: restoredSnapshot })
-      if (failedRetryBatch) {
+      setPendingDeleteUndoRestore({ snapshot: restoreResult.restoredSnapshot })
+      if (restoreResult.failedRetryBatch) {
         showDeleteUndoNoticeMessage(
-          `已恢复 ${restoredCount} 项，仍有 ${failedRetryBatch.deletedCount} 项撤销失败`,
+          `已恢复 ${restoreResult.restoredCount} 项，仍有 ${restoreResult.failedRetryBatch.deletedCount} 项撤销失败`,
           'error'
         )
       } else {
