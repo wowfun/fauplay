@@ -7,15 +7,16 @@ import {
   type RemoteRootEntry,
   upsertRemoteAccessFavorite,
 } from '@/lib/remoteAccess'
-import { isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
+import { isFavoriteFolderActive } from '@/features/explorer/lib/favoriteFolderModel'
 import type {
   AddressPathHistoryEntry,
   FavoriteFolderEntry,
   FileItem,
-  FilterState,
 } from '@/types'
 
 const ROOT_LABEL_FALLBACK = '根目录'
+const REMOTE_VIRTUAL_TRASH_PATH = '@trash'
 
 function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
@@ -278,9 +279,11 @@ export function useRemoteFileSystem({
     if (!configRootId) return
 
     const run = async () => {
-      const alreadyFavorited = favoriteFolders.some((item) => (
-        item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
-      ))
+      const alreadyFavorited = isFavoriteFolderActive(favoriteFolders, {
+        rootId,
+        path: normalizedPath,
+        virtualTrashPath: REMOTE_VIRTUAL_TRASH_PATH,
+      })
       if (alreadyFavorited) {
         await removeRemoteAccessFavorite(configRootId, normalizedPath)
       } else {
@@ -295,65 +298,14 @@ export function useRemoteFileSystem({
     })
   }, [currentPath, favoriteFolders, rootId, roots])
 
-  const filterFiles = useCallback((inputFiles: FileItem[], filter: FilterState): FileItem[] => {
-    let result = [...inputFiles]
-
-    if (filter.hideEmptyFolders) {
-      result = result.filter((file) => file.kind === 'file' || !file.isEmpty)
-    }
-
-    if (filter.search) {
-      const search = filter.search.toLowerCase()
-      result = result.filter((file) => file.name.toLowerCase().includes(search))
-    }
-
-    if (filter.type !== 'all') {
-      result = result.filter((file) => {
-        if (filter.type === 'image') return file.kind === 'directory' || isImageFile(file.name)
-        if (filter.type === 'video') return file.kind === 'directory' || isVideoFile(file.name)
-        return true
-      })
-    }
-
-    result.sort((left, right) => {
-      if (left.kind === 'directory' && right.kind === 'file') return -1
-      if (left.kind === 'file' && right.kind === 'directory') return 1
-
-      let cmp = 0
-      switch (filter.sortBy) {
-        case 'name':
-          cmp = left.name.localeCompare(right.name)
-          break
-        case 'date':
-          if (typeof left.lastModifiedMs !== 'number' || typeof right.lastModifiedMs !== 'number') {
-            cmp = left.name.localeCompare(right.name)
-          } else {
-            cmp = left.lastModifiedMs - right.lastModifiedMs
-          }
-          break
-        case 'size':
-          if (typeof left.size !== 'number' || typeof right.size !== 'number') {
-            cmp = left.name.localeCompare(right.name)
-          } else {
-            cmp = left.size - right.size
-          }
-          break
-        case 'annotationTime':
-          cmp = left.name.localeCompare(right.name)
-          break
-      }
-      return filter.sortOrder === 'asc' ? cmp : -cmp
-    })
-
-    return result
-  }, [])
+  const filterFiles = useCallback(filterExplorerListingFiles, [])
 
   const isCurrentPathFavorited = (() => {
-    if (!rootId) return false
-    const normalizedPath = normalizeRelativePath(currentPath)
-    return favoriteFolders.some((item) => (
-      item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
-    ))
+    return isFavoriteFolderActive(favoriteFolders, {
+      rootId,
+      path: currentPath,
+      virtualTrashPath: REMOTE_VIRTUAL_TRASH_PATH,
+    })
   })()
 
   return {

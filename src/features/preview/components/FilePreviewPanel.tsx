@@ -41,6 +41,11 @@ import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOve
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 import { readFileSystemTextPreview } from '@/features/preview/lib/fileSystemTextPreview'
 import { resolvePreviewFileAccessPlan } from '@/features/preview/lib/previewFileAccess'
+import {
+  createPreviewFileNameRenamePlan,
+  readPreviewLocalDataSetValueResult,
+  resolvePreviewBatchRenameToolResult,
+} from '@/features/preview/lib/previewFileEditModel'
 
 interface FilePreviewPanelProps {
   file: FileItem | null
@@ -90,98 +95,12 @@ interface FilePreviewPanelProps {
   onDismissProjectionTool: (toolName: string) => void
 }
 
-interface BatchRenameItemResult {
-  nextRelativePath?: string
-  ok?: boolean
-  skipped?: boolean
-  reasonCode?: string
-  error?: string
-}
-
-interface LocalDataSetValueResult {
-  relativePath: string
-  fieldKey: string
-  value: string
-}
-
 const INITIAL_TEXT_PREVIEW: TextPreviewPayload = {
   status: 'idle',
   content: null,
   fileSizeBytes: null,
   sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
   error: null,
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function splitFileName(fileName: string): { baseName: string; extension: string } {
-  const dotIndex = fileName.lastIndexOf('.')
-  if (dotIndex <= 0) {
-    return {
-      baseName: fileName,
-      extension: '',
-    }
-  }
-
-  return {
-    baseName: fileName.slice(0, dotIndex),
-    extension: fileName.slice(dotIndex),
-  }
-}
-
-function getParentPath(relativePath: string): string {
-  const segments = relativePath.split('/').filter(Boolean)
-  if (segments.length <= 1) return ''
-  return segments.slice(0, -1).join('/')
-}
-
-function joinRelativePath(parentPath: string, fileName: string): string {
-  return parentPath ? `${parentPath}/${fileName}` : fileName
-}
-
-function readFirstBatchRenameItem(result: unknown): BatchRenameItemResult | null {
-  if (!isRecord(result) || !Array.isArray(result.items) || result.items.length === 0) {
-    return null
-  }
-
-  const first = result.items[0]
-  if (!isRecord(first)) {
-    return null
-  }
-
-  return {
-    nextRelativePath: typeof first.nextRelativePath === 'string' ? first.nextRelativePath : undefined,
-    ok: typeof first.ok === 'boolean' ? first.ok : undefined,
-    skipped: typeof first.skipped === 'boolean' ? first.skipped : undefined,
-    reasonCode: typeof first.reasonCode === 'string' ? first.reasonCode : undefined,
-    error: typeof first.error === 'string' ? first.error : undefined,
-  }
-}
-
-function toConflictAwareErrorMessage(item: BatchRenameItemResult, fallback: string): string {
-  if (item.reasonCode === 'RENAME_TARGET_EXISTS') {
-    return '目标名称已存在'
-  }
-  return item.error || fallback
-}
-
-function readLocalDataSetValueResult(result: unknown): LocalDataSetValueResult | null {
-  if (!isRecord(result)) return null
-
-  const relativePath = typeof result.relativePath === 'string' ? result.relativePath : ''
-  const fieldKey = typeof result.fieldKey === 'string' ? result.fieldKey : ''
-  const value = typeof result.value === 'string' ? result.value : ''
-  if (!relativePath || !fieldKey || !value) {
-    return null
-  }
-
-  return {
-    relativePath,
-    fieldKey,
-    value,
-  }
 }
 
 export function FilePreviewPanel({
@@ -764,19 +683,9 @@ export function FilePreviewPanel({
       return { ok: false, error: renameUnavailableReason || '重命名能力不可用' }
     }
 
-    const { baseName, extension } = splitFileName(file.name)
-    if (nextBaseName === baseName) {
+    const renamePlan = createPreviewFileNameRenamePlan(file, nextBaseName)
+    if (!renamePlan) {
       return { ok: true }
-    }
-
-    const parentPath = getParentPath(file.path)
-    const expectedRelativePath = joinRelativePath(parentPath, `${nextBaseName}${extension}`)
-    const renameRuleArgs = {
-      relativePaths: [file.path],
-      nameMask: '[N]',
-      findText: baseName,
-      replaceText: nextBaseName,
-      searchMode: 'plain',
     }
 
     setIsRenaming(true)
@@ -786,26 +695,19 @@ export function FilePreviewPanel({
         rootHandle,
         rootId,
         additionalArgs: {
-          ...renameRuleArgs,
+          ...renamePlan.ruleArgs,
           confirm: false,
         },
       })
 
-      if (!dryRunResult.ok) {
-        return { ok: false, error: dryRunResult.error || '重命名预演失败' }
-      }
-
-      const dryRunItem = readFirstBatchRenameItem(dryRunResult.result)
-      if (!dryRunItem) {
-        return { ok: false, error: '重命名预演返回无效结果' }
-      }
-
-      if (dryRunItem.ok !== true || dryRunItem.skipped === true) {
-        return { ok: false, error: toConflictAwareErrorMessage(dryRunItem, '重命名预演失败') }
-      }
-
-      if (dryRunItem.nextRelativePath !== expectedRelativePath) {
-        return { ok: false, error: '目标名称已存在' }
+      const dryRunResolution = resolvePreviewBatchRenameToolResult(dryRunResult, {
+        expectedRelativePath: renamePlan.expectedRelativePath,
+        fallbackError: '重命名预演失败',
+        invalidResultError: '重命名预演返回无效结果',
+        requireExpectedRelativePath: true,
+      })
+      if (!dryRunResolution.ok) {
+        return dryRunResolution
       }
 
       const commitResult = await dispatchSystemTool({
@@ -813,29 +715,22 @@ export function FilePreviewPanel({
         rootHandle,
         rootId,
         additionalArgs: {
-          ...renameRuleArgs,
+          ...renamePlan.ruleArgs,
           confirm: true,
         },
       })
 
-      if (!commitResult.ok) {
-        return { ok: false, error: commitResult.error || '重命名提交失败' }
+      const commitResolution = resolvePreviewBatchRenameToolResult(commitResult, {
+        expectedRelativePath: renamePlan.expectedRelativePath,
+        fallbackError: '重命名提交失败',
+        invalidResultError: '重命名提交返回无效结果',
+        requireExpectedRelativePath: false,
+      })
+      if (!commitResolution.ok) {
+        return commitResolution
       }
 
-      const commitItem = readFirstBatchRenameItem(commitResult.result)
-      if (!commitItem) {
-        return { ok: false, error: '重命名提交返回无效结果' }
-      }
-
-      if (commitItem.ok !== true || commitItem.skipped === true) {
-        return { ok: false, error: toConflictAwareErrorMessage(commitItem, '重命名提交失败') }
-      }
-
-      if (commitItem.nextRelativePath && commitItem.nextRelativePath !== expectedRelativePath) {
-        return { ok: false, error: '目标名称已存在' }
-      }
-
-      await onMutationCommitted?.({ preferredPreviewPath: expectedRelativePath })
+      await onMutationCommitted?.({ preferredPreviewPath: renamePlan.expectedRelativePath })
       return { ok: true }
     } finally {
       setIsRenaming(false)
@@ -863,7 +758,7 @@ export function FilePreviewPanel({
     if (handledLocalDataQueueItemIdRef.current === latestLocalDataSuccess.id) return
     handledLocalDataQueueItemIdRef.current = latestLocalDataSuccess.id
 
-    const setValueResult = readLocalDataSetValueResult(latestLocalDataSuccess.result)
+    const setValueResult = readPreviewLocalDataSetValueResult(latestLocalDataSuccess.result)
     if (setValueResult) {
       patchAnnotationSetValue({
         rootId,

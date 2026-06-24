@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Input } from '@/ui/Input'
+import { splitPreviewFileName } from '@/features/preview/lib/previewFileEditModel'
 
 export interface PreviewRenameResult {
   ok: boolean
@@ -15,21 +16,6 @@ interface PreviewTitleRowProps {
   onSubmitRename: (nextBaseName: string) => Promise<PreviewRenameResult>
 }
 
-function splitFileName(fileName: string): { baseName: string; extension: string } {
-  const dotIndex = fileName.lastIndexOf('.')
-  if (dotIndex <= 0) {
-    return {
-      baseName: fileName,
-      extension: '',
-    }
-  }
-
-  return {
-    baseName: fileName.slice(0, dotIndex),
-    extension: fileName.slice(dotIndex),
-  }
-}
-
 export function PreviewTitleRow({
   fileName,
   titleMode,
@@ -38,7 +24,7 @@ export function PreviewTitleRow({
   renameUnavailableReason,
   onSubmitRename,
 }: PreviewTitleRowProps) {
-  const { baseName, extension } = useMemo(() => splitFileName(fileName), [fileName])
+  const { baseName, extension } = useMemo(() => splitPreviewFileName(fileName), [fileName])
   const [isEditing, setIsEditing] = useState(false)
   const [draftBaseName, setDraftBaseName] = useState(baseName)
   const [renameError, setRenameError] = useState<string | null>(null)

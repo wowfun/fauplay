@@ -44,7 +44,7 @@ import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspace
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { normalizeRootRelativePath as normalizeRelativePath } from '@/features/workspace/lib/projectionTabs'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
-import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
+import { getFilePreviewKind } from '@/lib/filePreview'
 import {
   type DeleteUndoBatch,
   type DeleteUndoPreviewSnapshot,
@@ -64,6 +64,7 @@ import {
   cloneStringArrayRecord,
 } from '@/features/workspace/lib/deleteUndoSnapshot'
 import { resolveDeleteUndoRestoreResult } from '@/features/workspace/lib/deleteUndoRestorePlan'
+import { resolveWorkspacePreviewMutationPlan } from '@/features/workspace/lib/previewMutationPlan'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
 import { getBoundRootPath } from '@/lib/reveal'
 import {
@@ -685,90 +686,42 @@ export function WorkspaceShell({
     refreshFilterTagSnapshots,
   ])
 
-  const resolveNextFileAfterDelete = useCallback((deletedRelativePath: string): FileItem | null => {
-    const normalizedDeletedPath = normalizeRelativePath(deletedRelativePath)
-    if (!normalizedDeletedPath || activeSurfaceFileItems.length <= 1) return null
-
-    const deletedIndex = activeSurfaceFileItems.findIndex((file) => (
-      normalizeRelativePath(file.path) === normalizedDeletedPath
-    ))
-    if (deletedIndex < 0) return null
-
-    const nextIndex = (deletedIndex + 1) % activeSurfaceFileItems.length
-    const nextFile = activeSurfaceFileItems[nextIndex]
-    if (!nextFile) return null
-    if (normalizeRelativePath(nextFile.path) === normalizedDeletedPath) return null
-    return nextFile
-  }, [activeSurfaceFileItems])
-
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
     const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
-    const preferredPreviewPath = normalizeRelativePath(params?.preferredPreviewPath || '')
-    if (preferredPreviewPath) {
-      alignPreviewToPath(preferredPreviewPath)
+    const activePreviewFile = previewFile ?? selectedFile
+    const mutationPlan = resolveWorkspacePreviewMutationPlan({
+      params,
+      activeSurface,
+      activeSurfaceFileItems,
+      activePreviewFile,
+      isPreviewModalOpen: Boolean(previewFile),
+    })
+
+    if (mutationPlan.preferredPreviewPath) {
+      alignPreviewToPath(mutationPlan.preferredPreviewPath)
       await navigateToPath(currentPath)
       await refreshFilterTagSnapshots()
       pushDeleteUndoBatch(deleteUndoBatch)
       return
     }
 
-    if (params?.mutationToolName === 'fs.softDelete') {
-      const activePreviewFile = previewFile ?? selectedFile
-      const fallbackProjectionTabId = params.projectionTabId
-        ?? (activeSurface.kind === 'projection' ? activeSurface.tabId : null)
-      const fallbackDeletedProjectionPaths = (
-        Array.isArray(params.deletedProjectionPaths) && params.deletedProjectionPaths.length > 0
-      )
-        ? params.deletedProjectionPaths
-        : (
-          fallbackProjectionTabId && activePreviewFile?.kind === 'file'
-            ? [activePreviewFile.path]
-            : []
-        )
-      const fallbackDeletedAbsolutePaths = (
-        Array.isArray(params.deletedAbsolutePaths) && params.deletedAbsolutePaths.length > 0
-      )
-        ? params.deletedAbsolutePaths
-        : (
-          activePreviewFile?.kind === 'file' && typeof activePreviewFile.absolutePath === 'string' && activePreviewFile.absolutePath.trim()
-            ? [activePreviewFile.absolutePath.trim()]
-            : []
-        )
-      if (fallbackDeletedAbsolutePaths.length > 0 || fallbackDeletedProjectionPaths.length > 0) {
-        pruneDeletedFilesFromProjectionTabs({
-          deletedAbsolutePaths: fallbackDeletedAbsolutePaths,
-          deletedProjectionPaths: fallbackDeletedProjectionPaths,
-          projectionTabId: fallbackProjectionTabId,
-        })
+    if (mutationPlan.shouldPruneDeletedProjectionTabs) {
+      pruneDeletedFilesFromProjectionTabs(mutationPlan.pruneDeletedProjectionTabsParams)
+    }
+
+    if (mutationPlan.previewContinuation.kind === 'navigate-media-next') {
+      if (mutationPlan.previewContinuation.target === 'modal') {
+        navigateMediaFromModal('next')
+      } else {
+        navigateMediaFromPane('next')
       }
+    }
 
-      const deletedRelativePath = normalizeRelativePath(params.deletedRelativePath || '')
-      const activePreviewPath = activePreviewFile?.kind === 'file'
-        ? normalizeRelativePath(activePreviewFile.path)
-        : ''
-
-      if (
-        deletedRelativePath
-        && activePreviewFile?.kind === 'file'
-        && activePreviewPath === deletedRelativePath
-      ) {
-        const previewKind = getFilePreviewKind(activePreviewFile.name)
-        if (isMediaPreviewKind(previewKind)) {
-          if (previewFile) {
-            navigateMediaFromModal('next')
-          } else {
-            navigateMediaFromPane('next')
-          }
-        } else {
-          const nextFile = resolveNextFileAfterDelete(deletedRelativePath)
-          if (nextFile) {
-            if (previewFile) {
-              openFileInModal(nextFile)
-            } else {
-              openFileInPrimaryTarget(nextFile)
-            }
-          }
-        }
+    if (mutationPlan.previewContinuation.kind === 'open-file') {
+      if (mutationPlan.previewContinuation.target === 'modal') {
+        openFileInModal(mutationPlan.previewContinuation.file)
+      } else {
+        openFileInPrimaryTarget(mutationPlan.previewContinuation.file)
       }
     }
 
@@ -787,10 +740,10 @@ export function WorkspaceShell({
     pushDeleteUndoBatch,
     pruneDeletedFilesFromProjectionTabs,
     refreshFilterTagSnapshots,
-    resolveNextFileAfterDelete,
     selectedFile,
     openFileInPrimaryTarget,
     openFileInModal,
+    activeSurfaceFileItems,
   ])
 
   const handleUndoDelete = useCallback(async () => {

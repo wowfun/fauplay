@@ -28,6 +28,10 @@ _Avoid_: home directory, global config dir
 A path interpreted inside a Local Root. A Root-relative Path must stay within its Local Root and have one stable display form.
 _Avoid_: relative path, file path
 
+**Favorite Folder**:
+A user-saved Root-relative Path within a selectable root, used as a durable navigation target.
+_Avoid_: bookmark, pinned path, saved directory
+
 **Listing**:
 An ordered set of files and directories under a Root-relative Path, expressed using Root-relative Paths.
 _Avoid_: file list, directory read

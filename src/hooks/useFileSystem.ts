@@ -5,11 +5,10 @@ import type {
   CachedRootEntry,
   FavoriteFolderEntry,
   FileItem,
-  FilterState,
   ListingPageState,
   ListingQueryState,
 } from '@/types'
-import { openDirectory, readDirectory, isHiddenSystemDirectory, isImageFile, isVideoFile } from '@/lib/fileSystem'
+import { openDirectory, readDirectory, isHiddenSystemDirectory } from '@/lib/fileSystem'
 import {
   listRuntimeGlobalTrash,
   listRuntimeLocalDirectory,
@@ -32,6 +31,23 @@ import {
   listLocalRootBindings,
   syncLocalRootBindingsFromRuntime,
 } from '@/lib/reveal'
+import {
+  isFavoriteFolderActive,
+  parseFavoriteFolders,
+  removeFavoriteFolder as removeFavoriteFolderEntry,
+  toggleFavoriteFolder,
+  updateFavoriteFolderRootName,
+} from '@/features/explorer/lib/favoriteFolderModel'
+import {
+  DEFAULT_LISTING_QUERY,
+  type RuntimeListingPageCursor,
+  isSameListingQuery,
+  isSameRuntimeListingPageCursor,
+  normalizeListingQuery,
+  sortTrashFileItems,
+  toRuntimeListingQueryRequest,
+} from '@/features/explorer/lib/listingQueryModel'
+import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -40,22 +56,10 @@ const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
 const ROOT_LABEL_FALLBACK = '根目录'
 const VIRTUAL_TRASH_PATH = '@trash'
 const RUNTIME_LISTING_PAGE_SIZE = 500
-const DEFAULT_LISTING_QUERY: ListingQueryState = {
-  search: '',
-  type: 'all',
-  hideEmptyFolders: false,
-  sortBy: 'name',
-  sortOrder: 'asc',
+const FAVORITE_FOLDER_MODEL_OPTIONS = {
+  maxItems: FAVORITE_FOLDERS_MAX_ITEMS,
+  rootLabelFallback: ROOT_LABEL_FALLBACK,
 }
-
-interface RuntimeListingPageCursor {
-  rootPath: string
-  rootRelativePath: string
-  flattened: boolean
-  query: ListingQueryState
-  nextOffset: number
-}
-
 function withBasePath(items: FileItem[], basePath: string): FileItem[] {
   if (!basePath) return items
   return items.map((item) => ({
@@ -78,65 +82,6 @@ function isVirtualTrashPath(path: string): boolean {
   return normalizeRelativePath(path) === VIRTUAL_TRASH_PATH
 }
 
-function normalizeListingQuery(query: ListingQueryState): ListingQueryState {
-  return {
-    search: query.search.trim(),
-    type: query.type === 'image' || query.type === 'video' ? query.type : 'all',
-    hideEmptyFolders: query.hideEmptyFolders === true,
-    sortBy: query.sortBy === 'date' || query.sortBy === 'size' ? query.sortBy : 'name',
-    sortOrder: query.sortOrder === 'desc' ? 'desc' : 'asc',
-  }
-}
-
-function isSameListingQuery(left: ListingQueryState, right: ListingQueryState): boolean {
-  return (
-    left.search === right.search
-    && left.type === right.type
-    && left.hideEmptyFolders === right.hideEmptyFolders
-    && left.sortBy === right.sortBy
-    && left.sortOrder === right.sortOrder
-  )
-}
-
-function toRuntimeListingQueryRequest(query: ListingQueryState) {
-  return {
-    nameContains: query.search,
-    entryFilter: query.type,
-    hideEmptyFolders: query.hideEmptyFolders,
-    sortBy: query.sortBy,
-    sortOrder: query.sortOrder,
-  }
-}
-
-function isSameRuntimeListingPageCursor(
-  left: RuntimeListingPageCursor | null,
-  right: RuntimeListingPageCursor
-): boolean {
-  return Boolean(
-    left
-    && left.rootPath === right.rootPath
-    && left.rootRelativePath === right.rootRelativePath
-    && left.flattened === right.flattened
-    && isSameListingQuery(left.query, right.query)
-    && left.nextOffset === right.nextOffset
-  )
-}
-
-function sortTrashFileItems(items: FileItem[]): FileItem[] {
-  return [...items].sort((left, right) => {
-    const leftDeletedAt = Number(left.deletedAt ?? 0)
-    const rightDeletedAt = Number(right.deletedAt ?? 0)
-    if (leftDeletedAt !== rightDeletedAt) {
-      return rightDeletedAt - leftDeletedAt
-    }
-    const sourceOrder = String(left.sourceType || '').localeCompare(String(right.sourceType || ''))
-    if (sourceOrder !== 0) {
-      return sourceOrder
-    }
-    return left.path.localeCompare(right.path)
-  })
-}
-
 function createSessionRootId(handle: FileSystemDirectoryHandle): string {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return `session:${handle.name}:${suffix}`
@@ -151,82 +96,6 @@ interface LoadDirectoryItemsOptions {
   resolveDirectoryHandle?: () => Promise<FileSystemDirectoryHandle | null>
 }
 
-function dedupeFavoriteFolders(entries: FavoriteFolderEntry[]): FavoriteFolderEntry[] {
-  const latestEntryByKey = new Map<string, FavoriteFolderEntry>()
-
-  for (const item of entries) {
-    if (!item.rootId) continue
-    const normalizedPath = normalizeRelativePath(item.path)
-    const favoritedAt = Number.isFinite(item.favoritedAt) ? item.favoritedAt : 0
-    const key = `${item.rootId}:${normalizedPath}`
-    const existing = latestEntryByKey.get(key)
-    if (!existing || favoritedAt > existing.favoritedAt) {
-      latestEntryByKey.set(key, {
-        rootId: item.rootId,
-        rootName: item.rootName || ROOT_LABEL_FALLBACK,
-        path: normalizedPath,
-        favoritedAt,
-      })
-    }
-  }
-
-  return [...latestEntryByKey.values()]
-    .sort((left, right) => right.favoritedAt - left.favoritedAt)
-    .slice(0, FAVORITE_FOLDERS_MAX_ITEMS)
-}
-
-interface ParsedFavoriteFolders {
-  entries: FavoriteFolderEntry[]
-  shouldRewrite: boolean
-}
-
-function parseFavoriteFolders(raw: string | null): ParsedFavoriteFolders {
-  if (!raw) return { entries: [], shouldRewrite: false }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return { entries: [], shouldRewrite: true }
-
-    let hasInvalidEntry = false
-    let hasFallbackRootName = false
-    const validEntries: FavoriteFolderEntry[] = []
-
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') {
-        hasInvalidEntry = true
-        continue
-      }
-      const candidate = item as Partial<FavoriteFolderEntry>
-      if (
-        typeof candidate.rootId !== 'string'
-        || typeof candidate.path !== 'string'
-        || typeof candidate.favoritedAt !== 'number'
-      ) {
-        hasInvalidEntry = true
-        continue
-      }
-
-      if (typeof candidate.rootName !== 'string') {
-        hasFallbackRootName = true
-      }
-      validEntries.push({
-        rootId: candidate.rootId,
-        rootName: candidate.rootName || ROOT_LABEL_FALLBACK,
-        path: candidate.path,
-        favoritedAt: candidate.favoritedAt,
-      })
-    }
-
-    const dedupedEntries = dedupeFavoriteFolders(validEntries)
-    return {
-      entries: dedupedEntries,
-      shouldRewrite: hasInvalidEntry || hasFallbackRootName || dedupedEntries.length !== validEntries.length,
-    }
-  } catch {
-    return { entries: [], shouldRewrite: true }
-  }
-}
-
 function saveFavoriteFolders(entries: FavoriteFolderEntry[]): void {
   if (typeof window === 'undefined') return
   try {
@@ -239,7 +108,10 @@ function saveFavoriteFolders(entries: FavoriteFolderEntry[]): void {
 function loadFavoriteFolders(): FavoriteFolderEntry[] {
   if (typeof window === 'undefined') return []
   try {
-    const parsed = parseFavoriteFolders(window.localStorage.getItem(FAVORITE_FOLDERS_STORAGE_KEY))
+    const parsed = parseFavoriteFolders(
+      window.localStorage.getItem(FAVORITE_FOLDERS_STORAGE_KEY),
+      FAVORITE_FOLDER_MODEL_OPTIONS
+    )
     if (parsed.shouldRewrite) {
       saveFavoriteFolders(parsed.entries)
     }
@@ -803,60 +675,30 @@ export function useFileSystem() {
   }, [openPathInRoot])
 
   const removeFavoriteFolder = useCallback((entry: FavoriteFolderEntry): void => {
-    const targetPath = normalizeRelativePath(entry.path)
-    const targetKey = `${entry.rootId}:${targetPath}`
-    setFavoriteFolders((previous) => previous.filter((item) => {
-      const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
-      return key !== targetKey
-    }))
+    setFavoriteFolders((previous) => removeFavoriteFolderEntry(previous, entry))
   }, [])
 
   const toggleCurrentFolderFavorite = useCallback((): void => {
     if (!rootId) return
-    const normalizedPath = normalizeRelativePath(currentPath)
-    if (isVirtualTrashPath(normalizedPath)) return
-    const targetKey = `${rootId}:${normalizedPath}`
-
-    setFavoriteFolders((previous) => {
-      const alreadyFavorited = previous.some((item) => {
-        const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
-        return key === targetKey
-      })
-      if (alreadyFavorited) {
-        return previous.filter((item) => {
-          const key = `${item.rootId}:${normalizeRelativePath(item.path)}`
-          return key !== targetKey
-        })
-      }
-
-      return dedupeFavoriteFolders([{
+    setFavoriteFolders((previous) => (
+      toggleFavoriteFolder(previous, {
         rootId,
         rootName: rootName || ROOT_LABEL_FALLBACK,
-        path: normalizedPath,
+        path: currentPath,
         favoritedAt: Date.now(),
-      }, ...previous])
-    })
+        ...FAVORITE_FOLDER_MODEL_OPTIONS,
+        virtualTrashPath: VIRTUAL_TRASH_PATH,
+      })
+    ))
   }, [currentPath, rootId, rootName])
 
   useEffect(() => {
     if (!rootId) return
-    const latestRootName = rootName || ROOT_LABEL_FALLBACK
-
-    setFavoriteFolders((previous) => {
-      let hasChanged = false
-      const updated = previous.map((item) => {
-        if (item.rootId !== rootId || item.rootName === latestRootName) {
-          return item
-        }
-        hasChanged = true
-        return {
-          ...item,
-          rootName: latestRootName,
-        }
-      })
-      if (!hasChanged) return previous
-      return dedupeFavoriteFolders(updated)
-    })
+    setFavoriteFolders((previous) => updateFavoriteFolderRootName(previous, {
+      rootId,
+      rootName,
+      ...FAVORITE_FOLDER_MODEL_OPTIONS,
+    }))
   }, [rootId, rootName])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
@@ -892,66 +734,13 @@ export function useFileSystem() {
     }
   }, [getCurrentDirectoryHandle, loadDirectoryItems, currentPath, rootId])
 
-  const filterFiles = useCallback((files: FileItem[], filter: FilterState): FileItem[] => {
-    let result = [...files]
-
-    if (filter.hideEmptyFolders) {
-      result = result.filter(f => f.kind === 'file' || !f.isEmpty)
-    }
-
-    if (filter.search) {
-      const search = filter.search.toLowerCase()
-      result = result.filter(f => f.name.toLowerCase().includes(search))
-    }
-
-    if (filter.type !== 'all') {
-      result = result.filter(f => {
-        if (filter.type === 'image') return f.kind === 'directory' || isImageFile(f.name)
-        if (filter.type === 'video') return f.kind === 'directory' || isVideoFile(f.name)
-        return true
-      })
-    }
-
-    result.sort((a, b) => {
-      if (a.kind === 'directory' && b.kind === 'file') return -1
-      if (a.kind === 'file' && b.kind === 'directory') return 1
-
-      let cmp = 0
-      switch (filter.sortBy) {
-        case 'name':
-          cmp = a.name.localeCompare(b.name)
-          break
-        case 'date':
-          if (!a.lastModified || !b.lastModified) {
-            cmp = a.name.localeCompare(b.name)
-          } else {
-            cmp = a.lastModified.getTime() - b.lastModified.getTime()
-          }
-          break
-        case 'size':
-          if (typeof a.size !== 'number' || typeof b.size !== 'number') {
-            cmp = a.name.localeCompare(b.name)
-          } else {
-            cmp = a.size - b.size
-          }
-          break
-        case 'annotationTime':
-          cmp = a.name.localeCompare(b.name)
-          break
-      }
-
-      return filter.sortOrder === 'asc' ? cmp : -cmp
-    })
-
-    return result
-  }, [])
+  const filterFiles = useCallback(filterExplorerListingFiles, [])
 
   const isCurrentPathFavorited = (() => {
-    if (!rootId) return false
-    const normalizedPath = normalizeRelativePath(currentPath)
-    if (isVirtualTrashPath(normalizedPath)) return false
-    return favoriteFolders.some((item) => {
-      return item.rootId === rootId && normalizeRelativePath(item.path) === normalizedPath
+    return isFavoriteFolderActive(favoriteFolders, {
+      rootId,
+      path: currentPath,
+      virtualTrashPath: VIRTUAL_TRASH_PATH,
     })
   })()
 

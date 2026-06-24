@@ -22,6 +22,15 @@ import {
 import type { ShortcutHelpEntry } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { ToolbarShortcutHelpPanel } from '@/features/explorer/components/ToolbarShortcutHelpPanel'
 import { ExplorerToolbarListingControls } from '@/features/explorer/components/ExplorerToolbarListingControls'
+import {
+  type AddressSuggestionItem,
+  buildAddressSuggestionDisplayPath,
+  buildAddressSuggestions,
+  buildRootPathDisplayText,
+  getAddressSuggestionSourceLabel,
+  parseDraftPathSuggestionContext,
+  segmentKey,
+} from '@/features/explorer/lib/addressPathModel'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
@@ -70,93 +79,6 @@ interface ExplorerToolbarProps {
   canOpenPeople: boolean
   onOpenPeople: () => void
   shortcutHelpEntries: ShortcutHelpEntry[]
-}
-
-function segmentKey(path: string): string {
-  return path || '__root__'
-}
-
-function buildCopyPathText(rootLabel: string, relativePath: string): string {
-  return relativePath ? `${rootLabel}/${relativePath}` : rootLabel
-}
-
-function suggestionSourceLabel(source: AddressSuggestionSource): string {
-  if (source === 'directory') return '目录'
-  if (source === 'favorite') return '收藏'
-  return '历史'
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
-}
-
-function toLower(value: string): string {
-  return value.toLocaleLowerCase()
-}
-
-interface DraftPathSuggestionContext {
-  basePath: string
-  prefix: string
-  normalizedInput: string
-  hasTrailingSlash: boolean
-}
-
-function parseDraftPathSuggestionContext(path: string): DraftPathSuggestionContext {
-  const hasTrailingSlash = path.endsWith('/')
-  const segments = path.split('/').filter(Boolean)
-  if (hasTrailingSlash) {
-    return {
-      basePath: segments.join('/'),
-      prefix: '',
-      normalizedInput: normalizeRelativePath(path),
-      hasTrailingSlash,
-    }
-  }
-  if (segments.length === 0) {
-    return {
-      basePath: '',
-      prefix: '',
-      normalizedInput: '',
-      hasTrailingSlash,
-    }
-  }
-
-  const prefix = segments[segments.length - 1] ?? ''
-  return {
-    basePath: segments.slice(0, -1).join('/'),
-    prefix,
-    normalizedInput: normalizeRelativePath(path),
-    hasTrailingSlash,
-  }
-}
-
-function buildAddressSuggestionDisplayPath(
-  suggestion: AddressSuggestionItem,
-  currentRootId: string | null | undefined,
-  currentRootLabel: string
-): string {
-  const isCrossRoot = (
-    suggestion.rootId
-    && currentRootId
-    && suggestion.rootId !== currentRootId
-  )
-  if (!isCrossRoot) {
-    return suggestion.path || currentRootLabel
-  }
-
-  const targetRootLabel = suggestion.rootName || currentRootLabel
-  return suggestion.path ? `${targetRootLabel}/${suggestion.path}` : targetRootLabel
-}
-
-type AddressSuggestionSource = 'directory' | 'favorite' | 'history'
-
-interface AddressSuggestionItem {
-  path: string
-  source: AddressSuggestionSource
-  rootId: string | null
-  rootName: string
-  favoriteEntry: FavoriteFolderEntry | null
-  historyEntry: AddressPathHistoryEntry | null
 }
 
 type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -309,75 +231,23 @@ export function ExplorerToolbar({
   const loadAddressSuggestions = useCallback(async (draftValue: string): Promise<void> => {
     const requestSeq = ++suggestionRequestSeqRef.current
     const context = parseDraftPathSuggestionContext(draftValue)
-    const { basePath, prefix, normalizedInput, hasTrailingSlash } = context
 
     setAddressSuggestionStatus('loading')
     setAddressSuggestionError(null)
 
-    const prefixLower = toLower(prefix)
-    const normalizedInputLower = toLower(normalizedInput)
-
-    const matchPathByInput = (candidatePath: string): boolean => {
-      const normalizedCandidatePath = normalizeRelativePath(candidatePath)
-      if (!normalizedInputLower) return true
-      if (!toLower(normalizedCandidatePath).startsWith(normalizedInputLower)) return false
-      if (hasTrailingSlash && normalizedCandidatePath === normalizedInput) return false
-      return true
-    }
-
     try {
-      const childDirectories = await onListChildDirectories(basePath)
+      const childDirectories = await onListChildDirectories(context.basePath)
       if (requestSeq !== suggestionRequestSeqRef.current) return
 
-      const directorySuggestions = childDirectories
-        .filter((name) => !prefixLower || toLower(name).startsWith(prefixLower))
-        .map<AddressSuggestionItem>((name) => ({
-          path: basePath ? `${basePath}/${name}` : name,
-          source: 'directory',
-          rootId: rootId ?? null,
-          rootName: rootLabel,
-          favoriteEntry: null,
-          historyEntry: null,
-        }))
-
-      const favoriteSuggestions = sortedFavorites
-        .filter((item) => matchPathByInput(item.path))
-        .map<AddressSuggestionItem>((item) => ({
-          path: normalizeRelativePath(item.path),
-          source: 'favorite',
-          rootId: item.rootId,
-          rootName: item.rootName || rootLabel,
-          favoriteEntry: item,
-          historyEntry: null,
-        }))
-
-      const historySuggestions = sortedHistory
-        .filter((item) => matchPathByInput(item.path))
-        .map<AddressSuggestionItem>((item) => ({
-          path: normalizeRelativePath(item.path),
-          source: 'history',
-          rootId: item.rootId,
-          rootName: item.rootName || rootLabel,
-          favoriteEntry: null,
-          historyEntry: item,
-        }))
-
-      const dedupedSuggestions: AddressSuggestionItem[] = []
-      const seenPathSet = new Set<string>()
-      for (const candidate of [...directorySuggestions, ...favoriteSuggestions, ...historySuggestions]) {
-        const normalizedCandidatePath = normalizeRelativePath(candidate.path)
-        if (!normalizedCandidatePath && normalizedInput) continue
-        const key = `${candidate.rootId || '__current__'}:${normalizedCandidatePath}`
-        if (seenPathSet.has(key)) continue
-        seenPathSet.add(key)
-        dedupedSuggestions.push({
-          ...candidate,
-          path: normalizedCandidatePath,
-        })
-        if (dedupedSuggestions.length >= MAX_ADDRESS_SUGGESTION_ITEMS) break
-      }
-
-      setAddressSuggestions(dedupedSuggestions)
+      setAddressSuggestions(buildAddressSuggestions({
+        context,
+        childDirectories,
+        favoriteFolders: sortedFavorites,
+        recentPathHistory: sortedHistory,
+        currentRootId: rootId,
+        currentRootLabel: rootLabel,
+        maxItems: MAX_ADDRESS_SUGGESTION_ITEMS,
+      }))
       setAddressSuggestionStatus('ready')
       setAddressSuggestionError(null)
       setActiveSuggestionIndex(-1)
@@ -584,7 +454,7 @@ export function ExplorerToolbar({
 
   const handleCopyPath = async (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    const copyText = buildCopyPathText(rootLabel, currentPath)
+    const copyText = buildRootPathDisplayText(rootLabel, currentPath)
 
     try {
       if (!navigator.clipboard?.writeText) {
@@ -808,7 +678,7 @@ export function ExplorerToolbar({
                   ) : (
                     <div className="max-h-64 overflow-auto">
                       {sortedFavorites.map((item) => {
-                        const displayPath = buildCopyPathText(item.rootName || rootLabel, item.path)
+                        const displayPath = buildRootPathDisplayText(item.rootName || rootLabel, item.path)
                         return (
                           <div
                             key={`${item.rootId}:${item.path}`}
@@ -861,7 +731,7 @@ export function ExplorerToolbar({
                   ) : (
                     <div className="max-h-64 overflow-auto">
                       {sortedHistory.map((item) => {
-                        const displayPath = buildCopyPathText(item.rootName || rootLabel, item.path)
+                        const displayPath = buildRootPathDisplayText(item.rootName || rootLabel, item.path)
                         return (
                           <button
                             key={`${item.rootId}:${item.path}:${item.visitedAt}`}
@@ -929,7 +799,7 @@ export function ExplorerToolbar({
                         {buildAddressSuggestionDisplayPath(item, rootId, rootLabel)}
                       </span>
                       <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {suggestionSourceLabel(item.source)}
+                        {getAddressSuggestionSourceLabel(item.source)}
                       </span>
                     </div>
                   </button>
