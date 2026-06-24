@@ -23,6 +23,8 @@ import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from 
 import { FaceGrid } from '@/features/faces/components/FaceGrid'
 import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionActions'
 import { GatewayFaceCropImage } from '@/features/faces/components/GatewayFaceCropImage'
+import { PeopleList } from '@/features/faces/components/PeopleList'
+import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTargetList'
 import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/Button'
@@ -628,62 +630,16 @@ export function PeoplePanel({
 
               <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
                 {showCompactPeopleList && (
-                  <div className="flex min-h-full flex-col gap-3">
-                    <Input
-                      value={peopleQuery}
-                      onChange={(event) => setPeopleQuery(event.target.value)}
-                      placeholder="搜索人物名"
-                    />
-                    <div className="space-y-2">
-                      {isLoadingPeople && (
-                        <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          人物列表加载中...
-                        </div>
-                      )}
-                      {!isLoadingPeople && people.length === 0 && (
-                        <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          暂无人脸人物数据
-                        </div>
-                      )}
-                      {people.map((person) => {
-                        const isActive = person.personId === selectedPersonId
-                        return (
-                          <button
-                            key={person.personId}
-                            type="button"
-                            className={cn(
-                              'flex w-full min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition-colors',
-                              isActive ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent'
-                            )}
-                            onClick={() => handleSelectPerson(person.personId)}
-                          >
-                            {person.featureFaceId ? (
-                              <GatewayFaceCropImage
-                                faceId={person.featureFaceId}
-                                size={72}
-                                padding={0.35}
-                                alt={getPersonDisplayName(person)}
-                                className="h-[72px] w-[72px] shrink-0 rounded-lg border border-border object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted text-[11px] text-muted-foreground">
-                                无代表脸
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
-                              {person.featureAssetPath && (
-                                <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
-                                  {person.featureAssetPath}
-                                </div>
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+                  <PeopleList
+                    people={people}
+                    query={peopleQuery}
+                    selectedPersonId={selectedPersonId}
+                    scope={scope}
+                    loading={isLoadingPeople}
+                    layout="compact"
+                    onQueryChange={setPeopleQuery}
+                    onSelectPerson={handleSelectPerson}
+                  />
                 )}
 
                 {showCompactPeopleDetail && (
@@ -767,52 +723,14 @@ export function PeoplePanel({
                             placeholder="搜索目标人物"
                             disabled={isMerging}
                           />
-                          <div className="max-h-72 overflow-auto rounded-md border border-border bg-background p-2">
-                            {mergeTargetCandidates.length === 0 ? (
-                              <div className="px-2 py-4 text-sm text-muted-foreground">暂无可合并的目标人物</div>
-                            ) : (
-                              <div className="space-y-2">
-                                {mergeTargetCandidates.map((person) => {
-                                  const isSelected = person.personId === mergeTargetPersonId
-                                  return (
-                                    <button
-                                      key={person.personId}
-                                      type="button"
-                                      className={cn(
-                                        'flex w-full min-w-0 gap-3 rounded-md border p-2 text-left transition-colors',
-                                        isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/60'
-                                      )}
-                                      disabled={isMerging}
-                                      onClick={() => setMergeTargetPersonId(person.personId)}
-                                    >
-                                      {person.featureFaceId ? (
-                                        <GatewayFaceCropImage
-                                          faceId={person.featureFaceId}
-                                          size={64}
-                                          padding={0.35}
-                                          alt={getPersonDisplayName(person)}
-                                          className="h-14 w-14 shrink-0 rounded-md border border-border object-cover"
-                                        />
-                                      ) : (
-                                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-border bg-muted text-[11px] text-muted-foreground">
-                                          无代表脸
-                                        </div>
-                                      )}
-                                      <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
-                                        <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
-                                        {person.featureAssetPath && (
-                                          <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
-                                            {person.featureAssetPath}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
+                          <PersonMergeTargetList
+                            people={mergeTargetCandidates}
+                            selectedPersonId={mergeTargetPersonId}
+                            scope={scope}
+                            disabled={isMerging}
+                            layout="compact"
+                            onSelectPerson={setMergeTargetPersonId}
+                          />
                           <Button
                             variant="outline"
                             size="sm"
@@ -974,45 +892,16 @@ export function PeoplePanel({
                 </div>
 
                 {view === 'people' && (
-                  <div className="flex h-[calc(100%-125px)] flex-col">
-                    <div className="border-b border-border p-2">
-                      <Input
-                        value={peopleQuery}
-                        onChange={(event) => setPeopleQuery(event.target.value)}
-                        placeholder="搜索人物名"
-                      />
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto p-2">
-                      {isLoadingPeople && (
-                        <div className="px-2 py-3 text-sm text-muted-foreground">人物列表加载中...</div>
-                      )}
-                      {!isLoadingPeople && people.length === 0 && (
-                        <div className="px-2 py-3 text-sm text-muted-foreground">暂无人物数据</div>
-                      )}
-                      {people.map((person) => {
-                        const isActive = person.personId === selectedPersonId
-                        return (
-                          <button
-                            key={person.personId}
-                            type="button"
-                            className={cn(
-                              'mb-1 w-full rounded-md border px-3 py-2 text-left transition-colors',
-                              isActive ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent'
-                            )}
-                            onClick={() => handleSelectPerson(person.personId)}
-                          >
-                            <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
-                            {person.featureAssetPath && (
-                              <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
-                                {person.featureAssetPath}
-                              </div>
-                            )}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+                  <PeopleList
+                    people={people}
+                    query={peopleQuery}
+                    selectedPersonId={selectedPersonId}
+                    scope={scope}
+                    loading={isLoadingPeople}
+                    layout="wide"
+                    onQueryChange={setPeopleQuery}
+                    onSelectPerson={handleSelectPerson}
+                  />
                 )}
               </div>
 
@@ -1071,52 +960,14 @@ export function PeoplePanel({
                           placeholder="搜索目标人物"
                           disabled={isMerging}
                         />
-                        <div className="max-h-56 overflow-auto rounded-md border border-border bg-background p-2">
-                          {mergeTargetCandidates.length === 0 ? (
-                            <div className="px-2 py-4 text-sm text-muted-foreground">暂无可合并的目标人物</div>
-                          ) : (
-                            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
-                              {mergeTargetCandidates.map((person) => {
-                                const isSelected = person.personId === mergeTargetPersonId
-                                return (
-                                  <button
-                                    key={person.personId}
-                                    type="button"
-                                    className={cn(
-                                      'flex min-w-0 gap-3 rounded-md border p-2 text-left transition-colors',
-                                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/60'
-                                    )}
-                                    disabled={isMerging}
-                                    onClick={() => setMergeTargetPersonId(person.personId)}
-                                  >
-                                    {person.featureFaceId ? (
-                                      <GatewayFaceCropImage
-                                        faceId={person.featureFaceId}
-                                        size={80}
-                                        padding={0.35}
-                                        alt={getPersonDisplayName(person)}
-                                        className="h-14 w-14 shrink-0 rounded-md border border-border object-cover"
-                                      />
-                                    ) : (
-                                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-border bg-muted text-[11px] text-muted-foreground">
-                                        无代表脸
-                                      </div>
-                                    )}
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate text-sm font-medium">{getPersonDisplayName(person)}</div>
-                                      <div className="mt-1 text-xs text-muted-foreground">{faceCountText(person, scope)}</div>
-                                      {person.featureAssetPath && (
-                                        <div className="mt-1 truncate text-xs text-muted-foreground" title={person.featureAssetPath}>
-                                          {person.featureAssetPath}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
+                        <PersonMergeTargetList
+                          people={mergeTargetCandidates}
+                          selectedPersonId={mergeTargetPersonId}
+                          scope={scope}
+                          disabled={isMerging}
+                          layout="wide"
+                          onSelectPerson={setMergeTargetPersonId}
+                        />
                         <Button
                           variant="outline"
                           size="sm"
