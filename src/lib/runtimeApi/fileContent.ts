@@ -2,16 +2,17 @@ import type { FileItem, TextPreviewPayload } from '@/types'
 import {
   buildRuntimeUrl,
   callRuntimeJson,
-  isAbsolutePathLike,
   isObject,
-  normalizeRootRelativePath,
   RuntimeApiError,
   toFiniteNumber,
 } from './core'
+import {
+  normalizeRootRelativePath,
+  resolveRuntimeFileLocator,
+} from './fileLocator.ts'
 import { parseRuntimeTextPreviewPayload } from './textPreview'
 import type {
   RuntimeFileContentRequest,
-  RuntimeFileLocator,
   RuntimeFileMetadataRequest,
   RuntimeFileMetadataResponse,
   RuntimeTextPreviewRequest,
@@ -64,28 +65,6 @@ export function buildRuntimeFileContentUrlForItem(file: FileItem): string | null
   }
 
   return buildRuntimeFileContentUrl(locator)
-}
-
-export function resolveRuntimeFileLocator(
-  file: FileItem,
-  fallbackRootPath?: string | null,
-): RuntimeFileLocator | null {
-  const rootPath = typeof file.sourceRootPath === 'string' && file.sourceRootPath.trim()
-    ? file.sourceRootPath.trim()
-    : (typeof fallbackRootPath === 'string' && fallbackRootPath.trim() ? fallbackRootPath.trim() : '')
-  const rawRootRelativePath = typeof file.sourceRelativePath === 'string' && file.sourceRelativePath.trim()
-    ? file.sourceRelativePath
-    : file.path
-  const rootRelativePath = normalizeRootRelativePath(rawRootRelativePath)
-
-  if (!rootPath || !rootRelativePath || isAbsolutePathLike(rootRelativePath)) {
-    return null
-  }
-
-  return {
-    rootPath,
-    rootRelativePath,
-  }
 }
 
 function parseRuntimeFileMetadataResponse(payload: unknown): RuntimeFileMetadataResponse {

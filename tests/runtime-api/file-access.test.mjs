@@ -43,6 +43,38 @@ test('File Access client builds local Runtime and Remote Access thumbnail URLs f
   })
 })
 
+test('File Access client builds Root-relative Runtime content URLs for Local Root items', () => {
+  const client = createFileAccessClient({
+    buildLocalRuntimeUrl: (endpointPath) => `http://127.0.0.1:3211${endpointPath}`,
+  })
+
+  const runtimeUrl = client.buildFileContentUrlForItem({
+    kind: 'file',
+    name: 'local.txt',
+    path: 'docs/local.txt',
+    absolutePath: '/Users/example/root/docs/local.txt',
+    sourceRootPath: '/Users/example/root',
+    sourceRelativePath: 'docs/local.txt',
+  })
+  assert.equal(new URL(runtimeUrl).origin, 'http://127.0.0.1:3211')
+  assert.equal(new URL(runtimeUrl).pathname, '/v1/file-content')
+  assert.deepEqual(searchParamsOf(runtimeUrl), {
+    rootPath: '/Users/example/root',
+    rootRelativePath: 'docs/local.txt',
+  })
+
+  const fallbackUrl = client.buildFileContentUrlForItem({
+    kind: 'file',
+    name: 'legacy.txt',
+    path: '/Users/example/legacy.txt',
+    absolutePath: '/Users/example/legacy.txt',
+  })
+  assert.equal(new URL(fallbackUrl).pathname, '/v1/files/content')
+  assert.deepEqual(searchParamsOf(fallbackUrl), {
+    absolutePath: '/Users/example/legacy.txt',
+  })
+})
+
 test('File Access client loads text previews through local Runtime or Remote Access by file identity', async () => {
   const calls = []
   const client = createFileAccessClient({
@@ -59,10 +91,21 @@ test('File Access client loads text previews through local Runtime or Remote Acc
   assert.deepEqual(
     await client.loadTextPreviewForItem({
       kind: 'file',
-      name: 'local.txt',
-      path: 'local.txt',
-      absolutePath: '/Users/example/local.txt',
+      name: 'runtime-local.txt',
+      path: 'docs/runtime-local.txt',
+      absolutePath: '/Users/example/root/docs/runtime-local.txt',
+      sourceRootPath: '/Users/example/root',
+      sourceRelativePath: 'docs/runtime-local.txt',
     }, 1024),
+    { kind: 'text', content: 'local preview' },
+  )
+  assert.deepEqual(
+    await client.loadTextPreviewForItem({
+      kind: 'file',
+      name: 'legacy-local.txt',
+      path: 'legacy-local.txt',
+      absolutePath: '/Users/example/legacy-local.txt',
+    }, 1536),
     { kind: 'text', content: 'local preview' },
   )
   assert.deepEqual(
@@ -78,10 +121,17 @@ test('File Access client loads text previews through local Runtime or Remote Acc
   assert.deepEqual(calls, [
     {
       transport: 'local',
+      endpointPath: '/v1/text-preview?rootPath=%2FUsers%2Fexample%2Froot&rootRelativePath=docs%2Fruntime-local.txt&sizeLimitBytes=1024',
+      body: undefined,
+      timeoutMs: undefined,
+      method: 'GET',
+    },
+    {
+      transport: 'local',
       endpointPath: '/v1/files/text-preview',
       body: {
-        absolutePath: '/Users/example/local.txt',
-        sizeLimitBytes: 1024,
+        absolutePath: '/Users/example/legacy-local.txt',
+        sizeLimitBytes: 1536,
       },
       timeoutMs: undefined,
       method: undefined,

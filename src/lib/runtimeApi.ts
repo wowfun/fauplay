@@ -27,8 +27,10 @@ export {
   buildRuntimeFileContentUrlForItem,
   loadRuntimeFileMetadata,
   loadRuntimeTextPreview,
-  resolveRuntimeFileLocator,
 } from './runtimeApi/fileContent'
+export {
+  resolveRuntimeFileLocator,
+} from './runtimeApi/fileLocator'
 export {
   listRuntimeRootTrash,
   moveRuntimePathToRootTrash,

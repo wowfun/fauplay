@@ -11,9 +11,11 @@ import {
   getSameOriginRuntimeBaseUrl as defaultGetSameOriginRuntimeBaseUrl,
   normalizeEndpointPath,
 } from './runtimeApi/http.ts'
+import { resolveRuntimeFileLocator } from './runtimeApi/fileLocator.ts'
 import { RuntimeHttpError } from './runtimeApi/errors.ts'
 import { callRemoteAccessHttp as defaultCallRemoteAccessHttp } from './remoteAccess.ts'
 import type { FileItem, TextPreviewPayload } from '@/types'
+import type { RuntimeFileLocator } from './runtimeApi/types.ts'
 
 interface FaceCropUrlOptions {
   size?: number
@@ -120,6 +122,10 @@ export function createFileAccessClient(options: FileAccessClientOptions = {}): F
     if (remoteRootId) {
       return buildRemoteFileContentUrl(remoteRootId, file.path)
     }
+    const runtimeLocator = resolveRuntimeFileLocator(file)
+    if (runtimeLocator) {
+      return appendRootRelativeFileQuery('/v1/file-content', runtimeLocator)
+    }
     if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
       return buildFileContentUrl(file.absolutePath.trim())
     }
@@ -150,10 +156,28 @@ export function createFileAccessClient(options: FileAccessClientOptions = {}): F
     if (remoteRootId) {
       return loadRemoteTextPreview(remoteRootId, file.path, sizeLimitBytes)
     }
+    const runtimeLocator = resolveRuntimeFileLocator(file)
+    if (runtimeLocator) {
+      return loadRuntimeTextPreview(runtimeLocator, sizeLimitBytes)
+    }
     if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
       return loadTextPreview(file.absolutePath.trim(), sizeLimitBytes)
     }
     throw new RuntimeHttpError('File preview is unavailable', 'FILE_PREVIEW_UNAVAILABLE')
+  }
+
+  async function loadRuntimeTextPreview(
+    locator: RuntimeFileLocator,
+    sizeLimitBytes?: number,
+  ): Promise<TextPreviewPayload> {
+    const query = new URLSearchParams({
+      rootPath: locator.rootPath,
+      rootRelativePath: locator.rootRelativePath,
+    })
+    if (typeof sizeLimitBytes === 'number' && Number.isFinite(sizeLimitBytes) && sizeLimitBytes > 0) {
+      query.set('sizeLimitBytes', String(Math.trunc(sizeLimitBytes)))
+    }
+    return callLocalRuntimeHttp(`/v1/text-preview?${query.toString()}`, undefined, undefined, 'GET')
   }
 
   function buildFaceCropUrl(faceId: string, faceOptions: FaceCropUrlOptions = {}): string {
@@ -219,6 +243,16 @@ export function createFileAccessClient(options: FileAccessClientOptions = {}): F
     if (typeof fileOptions.sizePreset === 'string' && fileOptions.sizePreset.trim()) {
       endpoint.searchParams.set('sizePreset', fileOptions.sizePreset.trim())
     }
+    return endpoint.toString()
+  }
+
+  function appendRootRelativeFileQuery(
+    endpointPath: string,
+    locator: RuntimeFileLocator,
+  ): string {
+    const endpoint = new URL(buildLocalRuntimeUrl(normalizeEndpointPath(endpointPath)))
+    endpoint.searchParams.set('rootPath', locator.rootPath)
+    endpoint.searchParams.set('rootRelativePath', locator.rootRelativePath)
     return endpoint.toString()
   }
 

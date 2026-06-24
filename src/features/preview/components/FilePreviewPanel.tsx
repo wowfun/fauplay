@@ -39,6 +39,8 @@ import type { PreviewRenameResult } from './PreviewTitleRow'
 import { PreviewFaceCorrectionPanel } from '@/features/faces/components/PreviewFaceCorrectionPanel'
 import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
+import { readFileSystemTextPreview } from '@/features/preview/lib/fileSystemTextPreview'
+import { resolvePreviewFileAccessPlan } from '@/features/preview/lib/previewFileAccess'
 
 interface FilePreviewPanelProps {
   file: FileItem | null
@@ -110,19 +112,8 @@ const INITIAL_TEXT_PREVIEW: TextPreviewPayload = {
   error: null,
 }
 
-function containsNullByte(bytes: Uint8Array): boolean {
-  for (const byte of bytes) {
-    if (byte === 0) return true
-  }
-  return false
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isAbsolutePathLike(value: string): boolean {
-  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)
 }
 
 function splitFileName(fileName: string): { baseName: string; extension: string } {
@@ -262,10 +253,6 @@ export function FilePreviewPanel({
     () => (file && file.kind === 'file' ? resolveRuntimeFileLocator(file, boundRootPath) : null),
     [boundRootPath, file]
   )
-  const currentRootRelativePath = runtimeFileLocator && runtimeFileLocator.rootPath === boundRootPath
-    ? runtimeFileLocator.rootRelativePath
-    : (file?.path ?? '')
-  const hasRemoteFileLocator = Boolean(file && typeof file.remoteRootId === 'string' && file.remoteRootId.trim())
   const runtimeGlobalTrashRecycleId = useMemo(
     () => (file && file.kind === 'file' ? resolveRuntimeGlobalTrashRecycleId(file) : null),
     [file]
@@ -274,70 +261,33 @@ export function FilePreviewPanel({
     () => (file && file.kind === 'file' ? buildRuntimeGlobalTrashFileContentUrlForItem(file) : null),
     [file]
   )
-  const shouldUseRuntimeGlobalTrashFileContent = Boolean(
-    runtimeGlobalTrashFileContentUrl
-    && (previewKind === 'image' || previewKind === 'video')
-  )
-  const shouldUseRuntimeGlobalTrashTextPreview = Boolean(
-    runtimeGlobalTrashRecycleId
-    && previewKind === 'text'
-  )
-  const hasRuntimeFileLocator = Boolean(
-    runtimeFileLocator
-    && runtimeFileLocator.rootPath === boundRootPath
-  )
-  const canAccessThroughCurrentRoot = useMemo(() => {
-    if (!file || file.kind !== 'file') return false
-    if (hasRemoteFileLocator) return true
-    if (hasRuntimeFileLocator) return true
-    if (!rootHandle) return false
-    if (!file.path || isAbsolutePathLike(file.path)) return false
-    if (file.sourceRootPath && file.sourceRootPath !== boundRootPath) {
-      return false
-    }
-    return true
-  }, [boundRootPath, file, hasRemoteFileLocator, hasRuntimeFileLocator, rootHandle])
-  const shouldUseFileAccess = useMemo(() => (
-    Boolean(
-      file
-      && file.kind === 'file'
-      && (
-        hasRemoteFileLocator
-        || (
-          file.absolutePath
-          && !canAccessThroughCurrentRoot
-          && !shouldUseRuntimeGlobalTrashFileContent
-          && !shouldUseRuntimeGlobalTrashTextPreview
-        )
-      )
-    )
-  ), [
-    canAccessThroughCurrentRoot,
+  const previewAccessPlan = useMemo(() => resolvePreviewFileAccessPlan({
     file,
-    hasRemoteFileLocator,
+    previewKind,
+    rootHandleAvailable: Boolean(rootHandle),
+    boundRootPath,
+    runtimeFileLocator,
+    runtimeGlobalTrashRecycleId,
+    runtimeGlobalTrashFileContentUrl,
+  }), [
+    boundRootPath,
+    file,
+    previewKind,
+    rootHandle,
+    runtimeFileLocator,
+    runtimeGlobalTrashFileContentUrl,
+    runtimeGlobalTrashRecycleId,
+  ])
+  const {
+    currentRootRelativePath,
+    canAccessThroughCurrentRoot,
+    shouldUseFileAccess,
     shouldUseRuntimeGlobalTrashFileContent,
     shouldUseRuntimeGlobalTrashTextPreview,
-  ])
-  const shouldUseRuntimeTextPreview = useMemo(() => (
-    Boolean(
-      file
-      && file.kind === 'file'
-      && getFilePreviewKind(file.name) === 'text'
-      && boundRootPath
-      && canAccessThroughCurrentRoot
-      && !shouldUseFileAccess
-    )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, shouldUseFileAccess])
-  const shouldUseRuntimeFileContent = useMemo(() => (
-    Boolean(
-      file
-      && file.kind === 'file'
-      && (previewKind === 'image' || previewKind === 'video')
-      && boundRootPath
-      && canAccessThroughCurrentRoot
-      && !shouldUseFileAccess
-    )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, previewKind, shouldUseFileAccess])
+    shouldUseRuntimeTextPreview,
+    shouldUseRuntimeFileContent,
+    shouldUseFileSystemAccess,
+  } = previewAccessPlan
   const canUseAnnotationContext = useMemo(() => (
     Boolean(
       file
@@ -729,7 +679,7 @@ export function FilePreviewPanel({
           return
         }
 
-        if (!rootHandle) {
+        if (!shouldUseFileSystemAccess || !rootHandle) {
           throw new Error('当前文件无法通过工作区目录句柄读取')
         }
 
@@ -742,51 +692,9 @@ export function FilePreviewPanel({
 
         if (previewKind === 'text') {
           replacePreviewUrl(null)
-          if (fileObj.size > TEXT_PREVIEW_MAX_BYTES) {
-            if (cancelled) return
-            setTextPreview({
-              status: 'too_large',
-              content: null,
-              fileSizeBytes: fileObj.size,
-              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-              error: null,
-            })
-            return
-          }
-
-          try {
-            const bytes = new Uint8Array(await fileObj.arrayBuffer())
-            if (cancelled) return
-            if (containsNullByte(bytes)) {
-              setTextPreview({
-                status: 'binary',
-                content: null,
-                fileSizeBytes: fileObj.size,
-                sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-                error: null,
-              })
-              return
-            }
-
-            const content = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-            if (cancelled) return
-            setTextPreview({
-              status: 'ready',
-              content,
-              fileSizeBytes: fileObj.size,
-              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-              error: null,
-            })
-          } catch (textError) {
-            if (cancelled) return
-            setTextPreview({
-              status: 'error',
-              content: null,
-              fileSizeBytes: fileObj.size,
-              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-              error: (textError as Error).message,
-            })
-          }
+          const textResult = await readFileSystemTextPreview(fileObj, TEXT_PREVIEW_MAX_BYTES)
+          if (cancelled) return
+          setTextPreview(textResult)
           return
         }
 
@@ -829,6 +737,7 @@ export function FilePreviewPanel({
     runtimeGlobalTrashFileContentUrl,
     runtimeFileLocator,
     shouldUseFileAccess,
+    shouldUseFileSystemAccess,
     shouldUseRuntimeGlobalTrashFileContent,
     shouldUseRuntimeGlobalTrashTextPreview,
     shouldUseRuntimeFileContent,
