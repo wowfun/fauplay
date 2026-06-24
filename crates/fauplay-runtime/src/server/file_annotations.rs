@@ -2,21 +2,18 @@ use std::path::PathBuf;
 
 use crate::{
     AnnotationTagOptionsRequest, AnnotationTagOptionsResponse, FauplayRuntime,
-    FileAnnotationActionSource, FileAnnotationMatchMode, FileAnnotationMissingCleanupRequest,
-    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
+    FileAnnotationActionSource, FileAnnotationMatchMode, FileAnnotationMutationResponse,
     FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
-    FileAnnotationTagMutationResponse, FileIndexEnsureRequest, FileIndexEnsureResponse,
-    FileIndexFailureReason, RootRelativePath,
+    FileAnnotationTagMutationResponse, RootRelativePath,
 };
 
 use super::{
-    HttpResponse, error_json, escape_json_string, http_response, json_bool_field,
-    json_mapping_path_field, json_root_relative_path_values, json_string_array_field,
-    json_string_field, json_string_or_default, json_usize_or_default, optional_path_json,
-    optional_string_json, optional_u64_json, parse_json_body,
+    HttpResponse, error_json, escape_json_string, http_response, json_mapping_path_field,
+    json_string_array_field, json_string_field, json_string_or_default, json_usize_or_default,
+    optional_string_json, parse_json_body,
 };
 
 pub(super) fn handle_set_file_annotation_json(
@@ -225,71 +222,6 @@ pub(super) fn handle_rebind_file_annotation_paths_json(
     }
 }
 
-pub(super) fn handle_cleanup_missing_file_annotations_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-
-    match runtime.cleanup_missing_file_annotations(FileAnnotationMissingCleanupRequest {
-        root_path: PathBuf::from(root_path),
-        confirm: json_bool_field(&payload, "confirm"),
-    }) {
-        Ok(response) => http_response(
-            200,
-            "OK",
-            &file_annotation_missing_cleanup_response_json(response),
-        ),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
-pub(super) fn handle_ensure_file_index_entries_json(
-    runtime: &FauplayRuntime,
-    request: &str,
-) -> HttpResponse {
-    let payload = match parse_json_body(request) {
-        Ok(payload) => payload,
-        Err(response) => return response,
-    };
-    let Some(root_path) = json_string_field(&payload, "rootPath") else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-    let root_relative_paths = json_root_relative_path_values(&payload);
-    if root_relative_paths.is_empty() {
-        return http_response(
-            400,
-            "Bad Request",
-            "{\"error\":\"relativePaths is required\"}",
-        );
-    }
-
-    let mut parsed_root_relative_paths = Vec::with_capacity(root_relative_paths.len());
-    for root_relative_path in root_relative_paths {
-        let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-            Ok(path) => path,
-            Err(error) => {
-                return http_response(400, "Bad Request", &error_json(&error.to_string()));
-            }
-        };
-        parsed_root_relative_paths.push(root_relative_path);
-    }
-
-    match runtime.ensure_file_index_entries(FileIndexEnsureRequest {
-        root_path: PathBuf::from(root_path),
-        root_relative_paths: parsed_root_relative_paths,
-    }) {
-        Ok(response) => http_response(200, "OK", &file_index_ensure_response_json(response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 enum FileAnnotationTagBindingKind {
     Bind,
@@ -451,63 +383,6 @@ fn file_annotation_rebind_response_json(response: FileAnnotationPathRebindRespon
     )
 }
 
-fn file_annotation_missing_cleanup_response_json(
-    response: FileAnnotationMissingCleanupResponse,
-) -> String {
-    let missing_root_relative_paths = response
-        .missing_root_relative_paths
-        .iter()
-        .map(|path| format!("\"{}\"", escape_json_string(&path.to_string())))
-        .collect::<Vec<_>>()
-        .join(",");
-    let missing_absolute_paths = response
-        .missing_absolute_paths
-        .iter()
-        .map(|path| format!("\"{}\"", escape_json_string(&path.display().to_string())))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"dryRun\":{},\"missingRootRelativePaths\":[{missing_root_relative_paths}],\"missingAbsolutePaths\":[{missing_absolute_paths}],\"impact\":{{\"fileAnnotation\":{},\"annotationTag\":{},\"fileIndexEntry\":{}}},\"removed\":{}}}",
-        response.dry_run,
-        response.impact.file_annotations,
-        response.impact.annotation_tags,
-        response.impact.file_index_entries,
-        response.removed,
-    )
-}
-
-fn file_index_ensure_response_json(response: FileIndexEnsureResponse) -> String {
-    let items = response
-        .items
-        .into_iter()
-        .map(|item| {
-            let root_relative_path = item.root_relative_path.to_string();
-            let reason_code = item.reason.map(file_index_failure_reason_code);
-            format!(
-                "{{\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"ok\":{},\"skipped\":{},\"assetId\":null,\"absolutePath\":{},\"fileMtimeMs\":{},\"lastModifiedMs\":{},\"size\":{},\"reasonCode\":{},\"reason\":{},\"error\":{}}}",
-                escape_json_string(&root_relative_path),
-                escape_json_string(&root_relative_path),
-                item.ok,
-                item.skipped,
-                optional_path_json(item.absolute_path.as_ref()),
-                optional_u64_json(item.last_modified_ms),
-                optional_u64_json(item.last_modified_ms),
-                optional_u64_json(item.size),
-                optional_string_json(reason_code),
-                optional_string_json(reason_code),
-                optional_string_json(item.error.as_deref()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "{{\"ok\":true,\"total\":{},\"indexed\":{},\"skipped\":{},\"failed\":{},\"items\":[{items}]}}",
-        response.total, response.indexed, response.skipped, response.failed,
-    )
-}
-
 fn file_annotation_file_json(file: crate::FileAnnotationFile) -> String {
     let root_relative_path = file.root_relative_path.to_string();
     let tags = file
@@ -547,14 +422,5 @@ fn file_annotation_rebind_failure_reason_code(
         FileAnnotationPathRebindFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
         FileAnnotationPathRebindFailureReason::TargetNotFound => "TARGET_NOT_FOUND",
         FileAnnotationPathRebindFailureReason::NoChange => "NO_CHANGE",
-    }
-}
-
-fn file_index_failure_reason_code(value: FileIndexFailureReason) -> &'static str {
-    match value {
-        FileIndexFailureReason::IndexFresh => "INDEX_FRESH",
-        FileIndexFailureReason::SourceNotFound => "SOURCE_NOT_FOUND",
-        FileIndexFailureReason::NotFile => "NOT_FILE",
-        FileIndexFailureReason::IndexFailed => "INDEX_FAILED",
     }
 }

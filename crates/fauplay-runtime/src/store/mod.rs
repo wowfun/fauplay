@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 
 use crate::{GlobalShortcutConfigResponse, RootRelativePath, RuntimeError};
 
+mod file_annotation_records;
 mod file_annotations;
 mod file_index;
 mod global_trash;
+mod global_trash_records;
 mod local_root_bindings;
 
 pub(crate) use file_annotations::{
