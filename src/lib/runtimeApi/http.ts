@@ -2,8 +2,21 @@ import {
   clearRemoteSession,
   getCurrentOrigin,
 } from '@/lib/accessState'
+import { resolveLocalRuntimeBaseUrl } from './baseUrl'
+import {
+  RuntimeHttpError,
+  createRuntimeRequestTimeoutError,
+} from './errors'
 
-const LOCAL_RUNTIME_BASE_URL_CONFIG = (import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:3210'
+export {
+  GatewayHttpError,
+  GatewayMcpError,
+  RuntimeHttpError,
+  RuntimeMcpError,
+  createClientTimeoutError,
+  createRuntimeRequestTimeoutError,
+} from './errors'
+
 export const DEFAULT_RUNTIME_API_TIMEOUT_MS = 5000
 
 export type ToolCallResult = Record<string, unknown> | unknown[] | string | number | boolean | null
@@ -19,37 +32,15 @@ interface RuntimeHttpErrorPayload {
   code?: string
 }
 
-export class GatewayMcpError extends Error {
-  code?: string
-
-  constructor(message: string, code?: string) {
-    super(message)
-    this.name = 'GatewayMcpError'
-    this.code = code
-  }
-}
-
-export class GatewayHttpError extends Error {
-  code?: string
-  status?: number
-
-  constructor(message: string, code?: string, status?: number) {
-    super(message)
-    this.name = 'GatewayHttpError'
-    this.code = code
-    this.status = status
-  }
-}
-
 export function getSameOriginRuntimeBaseUrl(): string {
   return getCurrentOrigin()
 }
 
 export function getLocalRuntimeBaseUrl(): string {
-  if (LOCAL_RUNTIME_BASE_URL_CONFIG === '/' || LOCAL_RUNTIME_BASE_URL_CONFIG === 'same-origin') {
-    return getCurrentOrigin()
-  }
-  return LOCAL_RUNTIME_BASE_URL_CONFIG
+  return resolveLocalRuntimeBaseUrl({
+    VITE_FAUPLAY_RUNTIME_BASE_URL: import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL,
+    VITE_LOCAL_GATEWAY_BASE_URL: import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL,
+  }, getCurrentOrigin)
 }
 
 export function buildLocalRuntimeUrl(endpointPath: string): string {
@@ -69,7 +60,7 @@ export function appendQueryString(baseUrl: string, query: URLSearchParams): stri
 export function buildRemoteLoginHeaders(token: string): Record<string, string> {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
-    throw new GatewayHttpError('远程 token 不能为空', 'REMOTE_TOKEN_REQUIRED', 400)
+    throw new RuntimeHttpError('远程 token 不能为空', 'REMOTE_TOKEN_REQUIRED', 400)
   }
   return {
     Authorization: `Bearer ${normalizedToken}`,
@@ -78,11 +69,6 @@ export function buildRemoteLoginHeaders(token: string): Record<string, string> {
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
-}
-
-export function createClientTimeoutError(timeoutMs: number): GatewayMcpError {
-  const timeoutSec = Math.ceil(timeoutMs / 1000)
-  return new GatewayMcpError(`Gateway request timed out after ${timeoutSec}s`, 'MCP_CLIENT_TIMEOUT')
 }
 
 export async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
@@ -95,12 +81,12 @@ export async function fetchJsonWithTimeout(url: string, timeoutMs: number): Prom
       signal: controller.signal,
     })
     if (!response.ok) {
-      throw new Error(`Gateway request failed: ${response.status}`)
+      throw new RuntimeHttpError(`Runtime API request failed: ${response.status}`, undefined, response.status)
     }
     return response.json()
   } catch (error) {
     if (isAbortError(error)) {
-      throw createClientTimeoutError(timeoutMs)
+      throw createRuntimeRequestTimeoutError(timeoutMs)
     }
     throw error
   } finally {
@@ -140,9 +126,9 @@ export async function callLocalRuntimeHttp<T = ToolCallResult>(
     if (!response.ok) {
       const message = typeof payload?.error === 'string'
         ? payload.error
-        : `Gateway request failed: ${response.status}`
+        : `Runtime API request failed: ${response.status}`
       const code = typeof payload?.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
+      throw new RuntimeHttpError(message, code, response.status)
     }
 
     if (
@@ -151,15 +137,15 @@ export async function callLocalRuntimeHttp<T = ToolCallResult>(
       && 'ok' in payload
       && payload.ok === false
     ) {
-      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
+      const message = typeof payload.error === 'string' ? payload.error : 'Runtime API request failed'
       const code = typeof payload.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
+      throw new RuntimeHttpError(message, code, response.status)
     }
 
     return payload as T
   } catch (error) {
     if (isAbortError(error)) {
-      throw createClientTimeoutError(effectiveTimeoutMs)
+      throw createRuntimeRequestTimeoutError(effectiveTimeoutMs)
     }
     throw error
   } finally {
@@ -207,9 +193,9 @@ export async function callSameOriginRemoteHttp<T = ToolCallResult>(
       }
       const message = typeof payload?.error === 'string'
         ? payload.error
-        : `Gateway request failed: ${response.status}`
+        : `Runtime API request failed: ${response.status}`
       const code = typeof payload?.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
+      throw new RuntimeHttpError(message, code, response.status)
     }
 
     if (
@@ -218,15 +204,15 @@ export async function callSameOriginRemoteHttp<T = ToolCallResult>(
       && 'ok' in payload
       && payload.ok === false
     ) {
-      const message = typeof payload.error === 'string' ? payload.error : 'Gateway request failed'
+      const message = typeof payload.error === 'string' ? payload.error : 'Runtime API request failed'
       const code = typeof payload.code === 'string' ? payload.code : undefined
-      throw new GatewayHttpError(message, code, response.status)
+      throw new RuntimeHttpError(message, code, response.status)
     }
 
     return payload as T
   } catch (error) {
     if (isAbortError(error)) {
-      throw createClientTimeoutError(effectiveTimeoutMs)
+      throw createRuntimeRequestTimeoutError(effectiveTimeoutMs)
     }
     throw error
   } finally {
@@ -263,12 +249,12 @@ export async function fetchSameOriginJsonWithTimeout(
       if (response.status === 401) {
         handleRemoteUnauthorizedResponse(response.status, options)
       }
-      throw new GatewayHttpError(`Gateway request failed: ${response.status}`, undefined, response.status)
+      throw new RuntimeHttpError(`Runtime API request failed: ${response.status}`, undefined, response.status)
     }
     return response.json()
   } catch (error) {
     if (isAbortError(error)) {
-      throw createClientTimeoutError(timeoutMs)
+      throw createRuntimeRequestTimeoutError(timeoutMs)
     }
     throw error
   } finally {
@@ -283,5 +269,5 @@ function handleRemoteUnauthorizedResponse(
   if (clearSessionOnUnauthorized) {
     clearRemoteSession({ emitInvalidatedEvent: true })
   }
-  throw new GatewayHttpError('远程会话已失效，请重新连接', 'REMOTE_UNAUTHORIZED', status)
+  throw new RuntimeHttpError('远程会话已失效，请重新连接', 'REMOTE_UNAUTHORIZED', status)
 }

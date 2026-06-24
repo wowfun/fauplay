@@ -38,10 +38,10 @@ function main() {
       env: {
         ...process.env,
         FAUPLAY_DEV_HTTPS: '1',
-        FAUPLAY_DEV_PROXY_ALL_GATEWAY: '1',
+        FAUPLAY_DEV_PROXY_RUNTIME_API: '1',
         FAUPLAY_DEV_HTTPS_KEY: SERVER_KEY_PATH,
         FAUPLAY_DEV_HTTPS_CERT: SERVER_CERT_PATH,
-        VITE_LOCAL_GATEWAY_BASE_URL: '/',
+        VITE_FAUPLAY_RUNTIME_BASE_URL: '/',
       },
     }
   )

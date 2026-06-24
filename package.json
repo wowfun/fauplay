@@ -8,10 +8,13 @@
     "dev": "vite",
     "dev:https:setup": "node scripts/dev/setup-https-dev.mjs",
     "dev:https": "node scripts/dev/run-https-dev.mjs",
+    "runtime:cli": "cargo run -p fauplay-runtime --",
+    "runtime:serve": "cargo run -p fauplay-runtime -- serve 127.0.0.1:3211",
     "gateway": "node scripts/gateway/index.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test:gateway": "node --test tests/gateway/*.test.mjs",
+    "test:runtime-api": "node --test tests/runtime-api/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

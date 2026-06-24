@@ -1,6 +1,4 @@
-const LOCAL_RUNTIME_BASE_URL_CONFIG =
-  (import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL as string | undefined)?.trim()
-  || 'http://127.0.0.1:3211'
+import { resolveLocalRuntimeBaseUrl } from './baseUrl'
 
 export const DEFAULT_RUNTIME_TIMEOUT_MS = 120000
 
@@ -15,7 +13,10 @@ export class RuntimeApiError extends Error {
 }
 
 function getLocalRuntimeBaseUrl(): string {
-  return LOCAL_RUNTIME_BASE_URL_CONFIG
+  return resolveLocalRuntimeBaseUrl({
+    VITE_FAUPLAY_RUNTIME_BASE_URL: import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL,
+    VITE_LOCAL_GATEWAY_BASE_URL: import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL,
+  }, () => window.location.origin)
 }
 
 function normalizeEndpointPath(endpointPath: string): string {

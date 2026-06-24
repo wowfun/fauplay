@@ -2,11 +2,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolveRuntimeApiDevProxyConfig } from './src/lib/runtimeApi/devProxy'
 
 const DEV_HTTPS_DIRECTORY = path.resolve(__dirname, '.cache', 'dev-https')
 const DEFAULT_DEV_HTTPS_CERT_PATH = path.join(DEV_HTTPS_DIRECTORY, 'server-cert.pem')
 const DEFAULT_DEV_HTTPS_KEY_PATH = path.join(DEV_HTTPS_DIRECTORY, 'server-key.pem')
-const LOOPBACK_GATEWAY_TARGET = 'http://127.0.0.1:3210'
 
 function isTruthyEnv(value: string | undefined): boolean {
   if (typeof value !== 'string') return false
@@ -39,24 +39,6 @@ function resolveDevHttpsOptions() {
   }
 }
 
-function resolveProxyConfig() {
-  if (isTruthyEnv(process.env.FAUPLAY_DEV_PROXY_ALL_GATEWAY)) {
-    return {
-      '/v1': {
-        target: LOOPBACK_GATEWAY_TARGET,
-        changeOrigin: false,
-      },
-    }
-  }
-
-  return {
-    '/v1/remote': {
-      target: LOOPBACK_GATEWAY_TARGET,
-      changeOrigin: false,
-    },
-  }
-}
-
 export default defineConfig(() => {
   const https = resolveDevHttpsOptions()
 
@@ -64,7 +46,7 @@ export default defineConfig(() => {
     plugins: [react()],
     server: {
       https,
-      proxy: resolveProxyConfig(),
+      proxy: resolveRuntimeApiDevProxyConfig(process.env),
       warmup: {
         clientFiles: [
           './src/main.tsx',
