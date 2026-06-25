@@ -13,10 +13,13 @@ import type {
 } from '@/types'
 import {
   buildAddressBreadcrumbItems,
-  buildRootPathDisplayText,
+  resolveAddressCopyButtonView,
+  resolveAddressDraftChangeIntent,
+  resolveAddressSegmentDropdownToggleIntent,
   shouldShowAddressSuggestionPanel,
   sortAddressFavoriteFolders,
   sortAddressPathHistory,
+  type AddressCopyState,
 } from '@/features/explorer/lib/addressPathModel'
 import {
   type ExplorerToolbarDisclosureAction,
@@ -74,7 +77,7 @@ export function ExplorerToolbarAddressBar({
   onToggleCurrentPathFavorite,
   onNavigateUp,
 }: ExplorerToolbarAddressBarProps) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [copyState, setCopyState] = useState<AddressCopyState>('idle')
   const {
     addressBarMode,
     draftPath,
@@ -95,6 +98,11 @@ export function ExplorerToolbarAddressBar({
   const sortedFavorites = useMemo(() => {
     return sortAddressFavoriteFolders(favoriteFolders)
   }, [favoriteFolders])
+  const copyButtonView = resolveAddressCopyButtonView({
+    rootLabel,
+    currentPath,
+    copyState,
+  })
 
   const addressBarRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -184,13 +192,14 @@ export function ExplorerToolbarAddressBar({
   }
 
   const handleToggleSegmentDropdown = async (path: string) => {
-    if (openSegmentPath === path) {
-      onDisclosureAction({ type: 'toggle-segment', path })
-      return
+    const intent = resolveAddressSegmentDropdownToggleIntent({
+      openSegmentPath,
+      path,
+    })
+    onDisclosureAction({ type: 'toggle-segment', path: intent.path })
+    if (intent.shouldLoadDirectories) {
+      await loadSegmentDirectories(intent.path)
     }
-
-    onDisclosureAction({ type: 'toggle-segment', path })
-    await loadSegmentDirectories(path)
   }
 
   const handleSubmitEdit = async (event: FormEvent<HTMLFormElement>) => {
@@ -219,13 +228,12 @@ export function ExplorerToolbarAddressBar({
 
   const handleCopyPath = async (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    const copyText = buildRootPathDisplayText(rootLabel, currentPath)
 
     try {
       if (!navigator.clipboard?.writeText) {
         throw new Error('clipboard write not supported')
       }
-      await navigator.clipboard.writeText(copyText)
+      await navigator.clipboard.writeText(copyButtonView.copyText)
       setCopyState('copied')
     } catch {
       setCopyState('failed')
@@ -271,10 +279,14 @@ export function ExplorerToolbarAddressBar({
                 ref={inputRef}
                 value={draftPath}
                 onChange={(event) => {
-                  setDraftPathValue(event.target.value)
-                  setActiveSuggestionIndex(-1)
-                  if (editError) {
-                    setEditErrorValue(null)
+                  const intent = resolveAddressDraftChangeIntent({
+                    draftPath: event.target.value,
+                    hasEditError: Boolean(editError),
+                  })
+                  setDraftPathValue(intent.draftPath)
+                  setActiveSuggestionIndex(intent.activeSuggestionIndex)
+                  if (intent.editError !== undefined) {
+                    setEditErrorValue(intent.editError)
                   }
                 }}
                 onKeyDown={(event) => {
@@ -393,9 +405,11 @@ export function ExplorerToolbarAddressBar({
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              title={copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制当前路径'}
+              title={copyButtonView.title}
             >
-              {copyState === 'copied' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copyButtonView.icon === 'check'
+                ? <Check className="h-3.5 w-3.5" />
+                : <Copy className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>

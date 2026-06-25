@@ -10,7 +10,10 @@ import {
   getAddressSuggestionSourceLabel,
   moveAddressSuggestionIndex,
   parseDraftPathSuggestionContext,
+  resolveAddressCopyButtonView,
+  resolveAddressDraftChangeIntent,
   resolveAddressEditKeyboardIntent,
+  resolveAddressSegmentDropdownToggleIntent,
   resolveAddressSuggestionCompletionIndex,
   shouldShowAddressSuggestionPanel,
   sortAddressFavoriteFolders,
@@ -222,5 +225,73 @@ test('Address Path Model resolves address edit keyboard intents', () => {
     suggestionCount: 0,
   }), {
     kind: 'none',
+  })
+})
+
+test('Address Path Model resolves toolbar draft and segment disclosure intents', () => {
+  assert.deepEqual(resolveAddressDraftChangeIntent({
+    draftPath: 'albums/raw',
+    hasEditError: true,
+  }), {
+    draftPath: 'albums/raw',
+    activeSuggestionIndex: -1,
+    editError: null,
+  })
+
+  assert.deepEqual(resolveAddressDraftChangeIntent({
+    draftPath: 'albums/raw',
+    hasEditError: false,
+  }), {
+    draftPath: 'albums/raw',
+    activeSuggestionIndex: -1,
+    editError: undefined,
+  })
+
+  assert.deepEqual(resolveAddressSegmentDropdownToggleIntent({
+    openSegmentPath: 'albums',
+    path: 'albums',
+  }), {
+    path: 'albums',
+    shouldLoadDirectories: false,
+  })
+
+  assert.deepEqual(resolveAddressSegmentDropdownToggleIntent({
+    openSegmentPath: null,
+    path: 'albums',
+  }), {
+    path: 'albums',
+    shouldLoadDirectories: true,
+  })
+})
+
+test('Address Path Model resolves copy button view state', () => {
+  assert.deepEqual(resolveAddressCopyButtonView({
+    rootLabel: 'Photos',
+    currentPath: 'albums/raw',
+    copyState: 'idle',
+  }), {
+    copyText: 'Photos/albums/raw',
+    title: '复制当前路径',
+    icon: 'copy',
+  })
+
+  assert.deepEqual(resolveAddressCopyButtonView({
+    rootLabel: 'Photos',
+    currentPath: '',
+    copyState: 'copied',
+  }), {
+    copyText: 'Photos',
+    title: '已复制',
+    icon: 'check',
+  })
+
+  assert.deepEqual(resolveAddressCopyButtonView({
+    rootLabel: 'Photos',
+    currentPath: '',
+    copyState: 'failed',
+  }), {
+    copyText: 'Photos',
+    title: '复制失败',
+    icon: 'copy',
   })
 })

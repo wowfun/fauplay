@@ -5,6 +5,7 @@ export type AddressBarMode = 'breadcrumb' | 'edit'
 export type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type AddressSuggestionNavigationDirection = 'next' | 'previous'
 export type AddressEditKeyboardAction = 'cancel' | 'move-next' | 'move-previous' | 'complete'
+export type AddressCopyState = 'idle' | 'copied' | 'failed'
 
 export type AddressEditKeyboardIntent =
   | { kind: 'none' }
@@ -47,6 +48,39 @@ export interface ResolveAddressEditKeyboardIntentParams {
   action: AddressEditKeyboardAction
   activeIndex: number
   suggestionCount: number
+}
+
+export interface ResolveAddressDraftChangeIntentParams {
+  draftPath: string
+  hasEditError: boolean
+}
+
+export interface AddressDraftChangeIntent {
+  draftPath: string
+  activeSuggestionIndex: number
+  editError?: string | null
+}
+
+export interface ResolveAddressSegmentDropdownToggleIntentParams {
+  openSegmentPath: string | null
+  path: string
+}
+
+export interface AddressSegmentDropdownToggleIntent {
+  path: string
+  shouldLoadDirectories: boolean
+}
+
+export interface ResolveAddressCopyButtonViewParams {
+  rootLabel: string
+  currentPath: string
+  copyState: AddressCopyState
+}
+
+export interface AddressCopyButtonView {
+  copyText: string
+  title: string
+  icon: 'copy' | 'check'
 }
 
 export function segmentKey(path: string): string {
@@ -158,6 +192,45 @@ export function resolveAddressEditKeyboardIntent({
   return completionIndex === null
     ? { kind: 'none' }
     : { kind: 'complete-suggestion', index: completionIndex }
+}
+
+export function resolveAddressDraftChangeIntent({
+  draftPath,
+  hasEditError,
+}: ResolveAddressDraftChangeIntentParams): AddressDraftChangeIntent {
+  return {
+    draftPath,
+    activeSuggestionIndex: -1,
+    editError: hasEditError ? null : undefined,
+  }
+}
+
+export function resolveAddressSegmentDropdownToggleIntent({
+  openSegmentPath,
+  path,
+}: ResolveAddressSegmentDropdownToggleIntentParams): AddressSegmentDropdownToggleIntent {
+  return {
+    path,
+    shouldLoadDirectories: openSegmentPath !== path,
+  }
+}
+
+export function resolveAddressCopyButtonView({
+  rootLabel,
+  currentPath,
+  copyState,
+}: ResolveAddressCopyButtonViewParams): AddressCopyButtonView {
+  const title = copyState === 'copied'
+    ? '已复制'
+    : copyState === 'failed'
+      ? '复制失败'
+      : '复制当前路径'
+
+  return {
+    copyText: buildRootPathDisplayText(rootLabel, currentPath),
+    title,
+    icon: copyState === 'copied' ? 'check' : 'copy',
+  }
 }
 
 export function parseDraftPathSuggestionContext(path: string): DraftPathSuggestionContext {
