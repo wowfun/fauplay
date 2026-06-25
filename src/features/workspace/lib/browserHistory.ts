@@ -1,4 +1,5 @@
 import type { AccessProvider } from '@/lib/accessState'
+import type { FileItem } from '../../../types/index.ts'
 
 export type WorkspacePreviewSurface = 'pane' | 'lightbox'
 
@@ -8,6 +9,26 @@ export interface WorkspaceBrowserHistorySnapshot {
   path: string
   previewPath: string | null
   previewSurface: WorkspacePreviewSurface | null
+}
+
+export type WorkspaceBrowserHistoryRestorePlan =
+  | { kind: 'commit-current' }
+  | { kind: 'navigate'; path: string }
+  | { kind: 'close-previews' }
+  | { kind: 'close-previews-and-commit-current' }
+  | { kind: 'open-lightbox'; file: FileItem }
+  | { kind: 'open-pane'; file: FileItem }
+
+export interface ResolveWorkspaceBrowserHistoryRestorePlanParams {
+  currentSnapshot: WorkspaceBrowserHistorySnapshot
+  pendingSnapshot: WorkspaceBrowserHistorySnapshot
+  currentPath: string
+  filteredFiles: FileItem[]
+}
+
+export interface NormalizeWorkspaceBrowserHistoryRestoreSnapshotParams {
+  snapshot: WorkspaceBrowserHistorySnapshot
+  supportsPersistentPreviewPane: boolean
 }
 
 interface WorkspaceBrowserHistoryState extends WorkspaceBrowserHistorySnapshot {
@@ -78,6 +99,57 @@ export function areWorkspaceBrowserHistorySnapshotsEqual(
   right: WorkspaceBrowserHistorySnapshot,
 ): boolean {
   return serializeWorkspaceBrowserHistorySnapshot(left) === serializeWorkspaceBrowserHistorySnapshot(right)
+}
+
+export function normalizeWorkspaceBrowserHistoryRestoreSnapshot({
+  snapshot,
+  supportsPersistentPreviewPane,
+}: NormalizeWorkspaceBrowserHistoryRestoreSnapshotParams): WorkspaceBrowserHistorySnapshot {
+  if (
+    snapshot.previewPath
+    && snapshot.previewSurface === 'pane'
+    && !supportsPersistentPreviewPane
+  ) {
+    return {
+      ...snapshot,
+      previewSurface: 'lightbox',
+    }
+  }
+  return snapshot
+}
+
+export function resolveWorkspaceBrowserHistoryRestorePlan({
+  currentSnapshot,
+  pendingSnapshot,
+  currentPath,
+  filteredFiles,
+}: ResolveWorkspaceBrowserHistoryRestorePlanParams): WorkspaceBrowserHistoryRestorePlan {
+  if (areWorkspaceBrowserHistorySnapshotsEqual(currentSnapshot, pendingSnapshot)) {
+    return { kind: 'commit-current' }
+  }
+
+  if (normalizeRelativePath(currentPath) !== pendingSnapshot.path) {
+    return {
+      kind: 'navigate',
+      path: pendingSnapshot.path,
+    }
+  }
+
+  if (!pendingSnapshot.previewPath) {
+    return { kind: 'close-previews' }
+  }
+
+  const targetPreviewFile = filteredFiles.find(
+    (item): item is FileItem => item.kind === 'file' && item.path === pendingSnapshot.previewPath,
+  ) ?? null
+
+  if (!targetPreviewFile) {
+    return { kind: 'close-previews-and-commit-current' }
+  }
+
+  return pendingSnapshot.previewSurface === 'lightbox'
+    ? { kind: 'open-lightbox', file: targetPreviewFile }
+    : { kind: 'open-pane', file: targetPreviewFile }
 }
 
 export function createWorkspaceBrowserHistoryState(

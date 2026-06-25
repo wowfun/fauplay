@@ -4,15 +4,15 @@ import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import { ensureRootPath } from '@/lib/reveal'
 import { callRuntimeHttp } from '@/lib/runtimeApi'
 import {
-  buildAnnotationFileTagsRequest,
-  buildAnnotationTagQueryRequest,
-  buildGlobalAnnotationTagOptionsRequest,
-  createAnnotationTagQueryPageProgress,
   resolveAnnotationRequestTarget,
-  resolveNextAnnotationTagQueryPageProgress,
   type AnnotationHttpRequest,
   type AnnotationRequestTarget,
 } from '@/features/preview/lib/annotationRequestPlanModel'
+import {
+  loadAnnotationFileTags,
+  loadAnnotationTagViews,
+  loadGlobalAnnotationTagOptionRecords,
+} from '@/features/preview/lib/annotationTagQueryLoader'
 import {
   cloneGlobalAnnotationTagOptions,
   createGlobalAnnotationTagOptionsState,
@@ -34,18 +34,13 @@ import {
   buildLogicalAnnotationTags as buildLogicalTags,
   getAnnotationFilterTagIdentity as parseAnnotationFilterTagKey,
   normalizeAnnotationRelativePath as normalizeRelativePath,
-  readAnnotationTagViewsFromResult as readTagViewsFromResult,
 } from '@/features/preview/lib/annotationTagModel'
 import type {
-  AnnotationGatewayFileTagView,
-  AnnotationGatewayTagOptionRecord,
   AnnotationLogicalTag,
 } from '@/features/preview/lib/annotationTagModel'
 
 export type { AnnotationLogicalTag } from '@/features/preview/lib/annotationTagModel'
 export { toAnnotationFilterTagKey } from '@/features/preview/lib/annotationTagModel'
-
-const TAG_QUERY_PAGE_SIZE = 1000
 
 interface RootAnnotationDisplaySnapshot extends AnnotationDisplaySnapshotState {
   inflight: Promise<void> | null
@@ -95,20 +90,6 @@ export interface GlobalAnnotationTagOptionsState {
   error: string | null
 }
 
-interface GatewayTagQueryResult {
-  items?: AnnotationGatewayFileTagView[]
-  total?: number
-}
-
-interface GatewayFileTagResult {
-  file?: AnnotationGatewayFileTagView | null
-}
-
-interface GatewayTagOptionsResult {
-  items?: AnnotationGatewayTagOptionRecord[]
-  options?: AnnotationGatewayTagOptionRecord[]
-}
-
 const rootSnapshots = new Map<string, RootAnnotationDisplaySnapshot>()
 const fileInflightLoads = new Map<string, Promise<void>>()
 const listeners = new Set<() => void>()
@@ -117,10 +98,6 @@ const globalTagOptionsSnapshot: GlobalAnnotationTagOptionsStoreSnapshot = {
   inflight: null,
 }
 let storeVersion = 0
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
   const existing = rootSnapshots.get(rootId)
@@ -212,36 +189,6 @@ function callAnnotationHttp<T>(request: AnnotationHttpRequest): Promise<T> {
     : callRuntimeHttp<T>(request.path, request.body)
 }
 
-async function loadAllTagViews(target: AnnotationRequestTarget): Promise<AnnotationGatewayFileTagView[]> {
-  let progress = createAnnotationTagQueryPageProgress()
-  const items: AnnotationGatewayFileTagView[] = []
-
-  while (progress.shouldContinue) {
-    const request = buildAnnotationTagQueryRequest({
-      target,
-      page: progress.page,
-      pageSize: TAG_QUERY_PAGE_SIZE,
-    })
-    if (!request) return items
-
-    const result = await callAnnotationHttp<GatewayTagQueryResult>(request)
-
-    const batch = readTagViewsFromResult(result)
-    items.push(...batch)
-
-    progress = resolveNextAnnotationTagQueryPageProgress({
-      progress,
-      batchSize: batch.length,
-      itemsLoaded: items.length,
-      resultTotal: result.total,
-      pageSize: TAG_QUERY_PAGE_SIZE,
-      maxPage: 10000,
-    })
-  }
-
-  return items
-}
-
 function createFileLoadKey(rootId: string, relativePath: string): string {
   return `${rootId}:${relativePath}`
 }
@@ -291,7 +238,10 @@ export async function preloadAnnotationDisplaySnapshot({
     }
 
     try {
-      const views = await loadAllTagViews(targetDescriptor)
+      const views = await loadAnnotationTagViews({
+        target: targetDescriptor,
+        callAnnotationHttp,
+      })
       applyRootSnapshotAction(target, {
         type: 'apply-root-tag-views',
         tagViews: views,
@@ -344,15 +294,11 @@ export async function preloadFileAnnotationDisplaySnapshot({
   }
 
   const loadTask = (async () => {
-    const request = buildAnnotationFileTagsRequest({
+    const tags = await loadAnnotationFileTags({
       target: targetDescriptor,
       relativePath: normalizedPath,
+      callAnnotationHttp,
     })
-    if (!request) return
-
-    const result = await callAnnotationHttp<GatewayFileTagResult>(request)
-    const fileView = isRecord(result.file) ? result.file : null
-    const tags = fileView && Array.isArray(fileView.tags) ? fileView.tags : []
 
     const target = ensureRootSnapshot(rootId)
     applyRootSnapshotAction(target, {
@@ -391,16 +337,16 @@ export async function preloadGlobalAnnotationTagOptions({
 
   const loadTask = (async () => {
     try {
-      const request = buildGlobalAnnotationTagOptionsRequest({
+      const optionRecords = await loadGlobalAnnotationTagOptionRecords({
         remoteReadonlyActive: isRemoteReadonlyProviderActive(),
         activeRemoteWorkspace: getActiveRemoteWorkspace(),
+        callAnnotationHttp,
       })
-      const result = await callAnnotationHttp<GatewayTagOptionsResult>(request)
       assignGlobalTagOptionsState(
         globalTagOptionsSnapshot,
         reduceGlobalAnnotationTagOptions(globalTagOptionsSnapshot, {
-          type: 'apply-result',
-          result,
+          type: 'apply-option-records',
+          optionRecords,
           nowMs: Date.now(),
         }),
       )

@@ -3,9 +3,11 @@ import {
   areWorkspaceBrowserHistorySnapshotsEqual,
   buildWorkspaceBrowserHistoryUrl,
   createWorkspaceBrowserHistoryState,
+  normalizeWorkspaceBrowserHistoryRestoreSnapshot,
   normalizeWorkspaceBrowserHistorySnapshot,
   parseWorkspaceBrowserHistorySnapshotFromState,
   parseWorkspaceBrowserHistorySnapshotFromUrl,
+  resolveWorkspaceBrowserHistoryRestorePlan,
   serializeWorkspaceBrowserHistorySnapshot,
   type WorkspaceBrowserHistorySnapshot,
 } from '@/features/workspace/lib/browserHistory'
@@ -27,10 +29,6 @@ interface UseWorkspaceBrowserHistoryParams {
   closePreviewPane: () => void
   openFileInModal: (file: FileItem) => void
   openFileInPaneOrFullscreenFallback: (file: FileItem) => void
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
 }
 
 export function useWorkspaceBrowserHistory({
@@ -72,20 +70,6 @@ export function useWorkspaceBrowserHistory({
     [browserHistorySnapshot],
   )
 
-  const normalizeBrowserHistoryRestoreSnapshot = useCallback((snapshot: WorkspaceBrowserHistorySnapshot) => {
-    if (
-      snapshot.previewPath
-      && snapshot.previewSurface === 'pane'
-      && !supportsPersistentPreviewPane
-    ) {
-      return {
-        ...snapshot,
-        previewSurface: 'lightbox' as const,
-      }
-    }
-    return snapshot
-  }, [supportsPersistentPreviewPane])
-
   const commitBrowserHistorySnapshot = useCallback((snapshot: WorkspaceBrowserHistorySnapshot) => {
     if (typeof window === 'undefined') {
       return
@@ -115,7 +99,10 @@ export function useWorkspaceBrowserHistory({
       && initialSnapshot.accessProvider === accessProvider
       && initialSnapshot.rootId === rootId
     ) {
-      const normalizedInitialSnapshot = normalizeBrowserHistoryRestoreSnapshot(initialSnapshot)
+      const normalizedInitialSnapshot = normalizeWorkspaceBrowserHistoryRestoreSnapshot({
+        snapshot: initialSnapshot,
+        supportsPersistentPreviewPane,
+      })
       if (!areWorkspaceBrowserHistorySnapshotsEqual(normalizedInitialSnapshot, browserHistorySnapshot)) {
         setPendingBrowserHistoryRestore(normalizedInitialSnapshot)
         return
@@ -127,8 +114,8 @@ export function useWorkspaceBrowserHistory({
     accessProvider,
     browserHistorySnapshot,
     commitBrowserHistorySnapshot,
-    normalizeBrowserHistoryRestoreSnapshot,
     rootId,
+    supportsPersistentPreviewPane,
   ])
 
   useEffect(() => {
@@ -147,27 +134,37 @@ export function useWorkspaceBrowserHistory({
         return
       }
 
-      setPendingBrowserHistoryRestore(normalizeBrowserHistoryRestoreSnapshot(requestedSnapshot))
+      setPendingBrowserHistoryRestore(normalizeWorkspaceBrowserHistoryRestoreSnapshot({
+        snapshot: requestedSnapshot,
+        supportsPersistentPreviewPane,
+      }))
     }
 
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [accessProvider, normalizeBrowserHistoryRestoreSnapshot, rootId])
+  }, [accessProvider, rootId, supportsPersistentPreviewPane])
 
   useEffect(() => {
     if (!pendingBrowserHistoryRestore) {
       return
     }
-    if (areWorkspaceBrowserHistorySnapshotsEqual(browserHistorySnapshot, pendingBrowserHistoryRestore)) {
-      commitBrowserHistorySnapshot(browserHistorySnapshot)
-      setPendingBrowserHistoryRestore(null)
-      return
-    }
-
     let cancelled = false
     const applyRestore = async () => {
-      if (normalizeRelativePath(currentPath) !== pendingBrowserHistoryRestore.path) {
-        const navigated = await navigateToPath(pendingBrowserHistoryRestore.path)
+      const plan = resolveWorkspaceBrowserHistoryRestorePlan({
+        currentSnapshot: browserHistorySnapshot,
+        pendingSnapshot: pendingBrowserHistoryRestore,
+        currentPath,
+        filteredFiles,
+      })
+
+      if (plan.kind === 'commit-current') {
+        commitBrowserHistorySnapshot(browserHistorySnapshot)
+        setPendingBrowserHistoryRestore(null)
+        return
+      }
+
+      if (plan.kind === 'navigate') {
+        const navigated = await navigateToPath(plan.path)
         if (!cancelled && !navigated) {
           commitBrowserHistorySnapshot(browserHistorySnapshot)
           setPendingBrowserHistoryRestore(null)
@@ -175,17 +172,13 @@ export function useWorkspaceBrowserHistory({
         return
       }
 
-      if (!pendingBrowserHistoryRestore.previewPath) {
+      if (plan.kind === 'close-previews') {
         closePreviewModal()
         closePreviewPane()
         return
       }
 
-      const targetPreviewFile = filteredFiles.find(
-        (item): item is FileItem => item.kind === 'file' && item.path === pendingBrowserHistoryRestore.previewPath,
-      ) ?? null
-
-      if (!targetPreviewFile) {
+      if (plan.kind === 'close-previews-and-commit-current') {
         closePreviewModal()
         closePreviewPane()
         if (!cancelled) {
@@ -195,14 +188,14 @@ export function useWorkspaceBrowserHistory({
         return
       }
 
-      if (pendingBrowserHistoryRestore.previewSurface === 'lightbox') {
+      if (plan.kind === 'open-lightbox') {
         closePreviewPane()
-        openFileInModal(targetPreviewFile)
+        openFileInModal(plan.file)
         return
       }
 
       closePreviewModal()
-      openFileInPaneOrFullscreenFallback(targetPreviewFile)
+      openFileInPaneOrFullscreenFallback(plan.file)
     }
 
     void applyRestore()

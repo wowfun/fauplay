@@ -7,7 +7,7 @@ import {
   reduceGlobalAnnotationTagOptions,
 } from '../../src/features/preview/lib/annotationGlobalTagOptionsModel.ts'
 
-test('Annotation Global Tag Options Model loads normalized Runtime tag option results', () => {
+test('Annotation Global Tag Options Model loads normalized Annotation Tag option records', () => {
   const loading = reduceGlobalAnnotationTagOptions(
     createGlobalAnnotationTagOptionsState({
       options: [
@@ -30,25 +30,23 @@ test('Annotation Global Tag Options Model loads normalized Runtime tag option re
   assert.deepEqual(loading.options.map((option) => option.tagKey), ['old=value'])
 
   const loaded = reduceGlobalAnnotationTagOptions(loading, {
-    type: 'apply-result',
-    result: {
-      items: [
-        {
-          key: 'rating',
-          value: '5',
-          source: 'plugin.review',
-          appliedAt: 10,
-          fileCount: 3,
-        },
-        {
-          key: 'rating',
-          value: '5',
-          source: 'meta.annotation',
-          appliedAt: 12,
-          fileCount: 2,
-        },
-      ],
-    },
+    type: 'apply-option-records',
+    optionRecords: [
+      {
+        key: 'rating',
+        value: '5',
+        source: 'plugin.review',
+        appliedAt: 10,
+        fileCount: 3,
+      },
+      {
+        key: 'rating',
+        value: '5',
+        source: 'meta.annotation',
+        appliedAt: 12,
+        fileCount: 2,
+      },
+    ],
     nowMs: 100,
   })
 

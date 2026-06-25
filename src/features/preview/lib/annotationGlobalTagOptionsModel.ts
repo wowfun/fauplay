@@ -1,7 +1,7 @@
 import type { AnnotationFilterTagOption } from '../../../types/index.ts'
 import {
   buildGlobalAnnotationTagOptions,
-  readAnnotationTagOptionsFromResult,
+  type AnnotationGatewayTagOptionRecord,
 } from './annotationTagModel.ts'
 
 export type GlobalAnnotationTagOptionsStatus = 'idle' | 'loading' | 'ready'
@@ -15,7 +15,7 @@ export interface GlobalAnnotationTagOptionsSnapshot {
 
 export type GlobalAnnotationTagOptionsAction =
   | { type: 'mark-loading' }
-  | { type: 'apply-result'; result: unknown; nowMs: number }
+  | { type: 'apply-option-records'; optionRecords: AnnotationGatewayTagOptionRecord[]; nowMs: number }
   | { type: 'apply-error'; error: unknown; nowMs: number }
 
 export function createGlobalAnnotationTagOptionsState(
@@ -42,10 +42,10 @@ export function reduceGlobalAnnotationTagOptions(
         error: null,
       }
 
-    case 'apply-result':
+    case 'apply-option-records':
       return {
         status: 'ready',
-        options: buildGlobalAnnotationTagOptions(readAnnotationTagOptionsFromResult(action.result)),
+        options: buildGlobalAnnotationTagOptions(action.optionRecords),
         error: null,
         loadedAtMs: action.nowMs,
       }
