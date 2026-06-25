@@ -1,6 +1,9 @@
 import type { AddressPathHistoryEntry, FavoriteFolderEntry } from '../../../types/index.ts'
 
 export type AddressSuggestionSource = 'directory' | 'favorite' | 'history'
+export type AddressBarMode = 'breadcrumb' | 'edit'
+export type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
+export type AddressSuggestionNavigationDirection = 'next' | 'previous'
 
 export interface DraftPathSuggestionContext {
   basePath: string
@@ -28,6 +31,11 @@ export interface BuildAddressSuggestionsParams {
   maxItems: number
 }
 
+export interface AddressBreadcrumbItem {
+  label: string
+  path: string
+}
+
 export function segmentKey(path: string): string {
   return path || '__root__'
 }
@@ -44,6 +52,70 @@ export function getAddressSuggestionSourceLabel(source: AddressSuggestionSource)
 
 export function normalizeAddressRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+export function buildAddressBreadcrumbItems(rootLabel: string, currentPath: string): AddressBreadcrumbItem[] {
+  const resolvedRootLabel = rootLabel || '根目录'
+  const pathSegments = normalizeAddressRelativePath(currentPath).split('/').filter(Boolean)
+  return [
+    { label: resolvedRootLabel, path: '' },
+    ...pathSegments.map((segment, index) => ({
+      label: segment,
+      path: pathSegments.slice(0, index + 1).join('/'),
+    })),
+  ]
+}
+
+export function sortAddressPathHistory(entries: AddressPathHistoryEntry[]): AddressPathHistoryEntry[] {
+  return [...entries].sort((left, right) => right.visitedAt - left.visitedAt)
+}
+
+export function sortAddressFavoriteFolders(entries: FavoriteFolderEntry[]): FavoriteFolderEntry[] {
+  return [...entries].sort((left, right) => right.favoritedAt - left.favoritedAt)
+}
+
+export function createAddressChildPath(basePath: string, childName: string): string {
+  const normalizedBasePath = normalizeAddressRelativePath(basePath)
+  const normalizedChildName = normalizeAddressRelativePath(childName)
+  return normalizedBasePath ? `${normalizedBasePath}/${normalizedChildName}` : normalizedChildName
+}
+
+export function moveAddressSuggestionIndex(
+  currentIndex: number,
+  suggestionCount: number,
+  direction: AddressSuggestionNavigationDirection,
+): number {
+  if (suggestionCount <= 0) return currentIndex
+  if (direction === 'next') {
+    if (currentIndex < 0) return 0
+    return (currentIndex + 1) % suggestionCount
+  }
+  if (currentIndex < 0) return suggestionCount - 1
+  return (currentIndex - 1 + suggestionCount) % suggestionCount
+}
+
+export function resolveAddressSuggestionCompletionIndex(
+  activeIndex: number,
+  suggestionCount: number,
+): number | null {
+  if (suggestionCount <= 0) return null
+  if (activeIndex < 0) return 0
+  if (activeIndex >= suggestionCount) return null
+  return activeIndex
+}
+
+export function shouldShowAddressSuggestionPanel(
+  addressBarMode: AddressBarMode,
+  addressSuggestionStatus: AddressSuggestionStatus,
+  suggestionCount: number,
+): boolean {
+  if (addressBarMode !== 'edit') return false
+  return (
+    addressSuggestionStatus === 'ready'
+    || addressSuggestionStatus === 'loading'
+    || addressSuggestionStatus === 'error'
+    || suggestionCount > 0
+  )
 }
 
 export function parseDraftPathSuggestionContext(path: string): DraftPathSuggestionContext {

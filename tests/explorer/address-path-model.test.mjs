@@ -2,11 +2,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildAddressBreadcrumbItems,
   buildAddressSuggestionDisplayPath,
   buildAddressSuggestions,
   buildRootPathDisplayText,
+  createAddressChildPath,
   getAddressSuggestionSourceLabel,
+  moveAddressSuggestionIndex,
   parseDraftPathSuggestionContext,
+  resolveAddressSuggestionCompletionIndex,
+  shouldShowAddressSuggestionPanel,
+  sortAddressFavoriteFolders,
+  sortAddressPathHistory,
 } from '../../src/features/explorer/lib/addressPathModel.ts'
 
 test('Address Path Model parses draft paths into a lookup base and prefix', () => {
@@ -126,4 +133,57 @@ test('Address Path Model labels suggestion sources for the toolbar', () => {
   assert.equal(getAddressSuggestionSourceLabel('directory'), '目录')
   assert.equal(getAddressSuggestionSourceLabel('favorite'), '收藏')
   assert.equal(getAddressSuggestionSourceLabel('history'), '历史')
+})
+
+test('Address Path Model builds breadcrumb items from the current Root-relative Path', () => {
+  assert.deepEqual(buildAddressBreadcrumbItems('Photos', '/albums//raw/'), [
+    { label: 'Photos', path: '' },
+    { label: 'albums', path: 'albums' },
+    { label: 'raw', path: 'albums/raw' },
+  ])
+
+  assert.deepEqual(buildAddressBreadcrumbItems('', ''), [
+    { label: '根目录', path: '' },
+  ])
+})
+
+test('Address Path Model sorts recent history and favorites by newest first', () => {
+  assert.deepEqual(sortAddressPathHistory([
+    { rootId: 'root-a', rootName: 'Photos', path: 'old', visitedAt: 10 },
+    { rootId: 'root-a', rootName: 'Photos', path: 'new', visitedAt: 30 },
+    { rootId: 'root-a', rootName: 'Photos', path: 'middle', visitedAt: 20 },
+  ]).map((entry) => entry.path), ['new', 'middle', 'old'])
+
+  assert.deepEqual(sortAddressFavoriteFolders([
+    { rootId: 'root-a', rootName: 'Photos', path: 'old', favoritedAt: 10 },
+    { rootId: 'root-a', rootName: 'Photos', path: 'new', favoritedAt: 30 },
+    { rootId: 'root-a', rootName: 'Photos', path: 'middle', favoritedAt: 20 },
+  ]).map((entry) => entry.path), ['new', 'middle', 'old'])
+})
+
+test('Address Path Model creates child paths for segment dropdown navigation', () => {
+  assert.equal(createAddressChildPath('albums/2026', '/raw/'), 'albums/2026/raw')
+  assert.equal(createAddressChildPath('', 'raw'), 'raw')
+})
+
+test('Address Path Model moves the active suggestion index with wrapping keyboard navigation', () => {
+  assert.equal(moveAddressSuggestionIndex(-1, 3, 'next'), 0)
+  assert.equal(moveAddressSuggestionIndex(0, 3, 'next'), 1)
+  assert.equal(moveAddressSuggestionIndex(2, 3, 'next'), 0)
+  assert.equal(moveAddressSuggestionIndex(-1, 3, 'previous'), 2)
+  assert.equal(moveAddressSuggestionIndex(0, 3, 'previous'), 2)
+  assert.equal(moveAddressSuggestionIndex(1, 0, 'next'), 1)
+})
+
+test('Address Path Model resolves suggestion completion and panel visibility', () => {
+  assert.equal(resolveAddressSuggestionCompletionIndex(-1, 3), 0)
+  assert.equal(resolveAddressSuggestionCompletionIndex(2, 3), 2)
+  assert.equal(resolveAddressSuggestionCompletionIndex(3, 3), null)
+  assert.equal(resolveAddressSuggestionCompletionIndex(-1, 0), null)
+
+  assert.equal(shouldShowAddressSuggestionPanel('breadcrumb', 'ready', 2), false)
+  assert.equal(shouldShowAddressSuggestionPanel('edit', 'idle', 0), false)
+  assert.equal(shouldShowAddressSuggestionPanel('edit', 'idle', 1), true)
+  assert.equal(shouldShowAddressSuggestionPanel('edit', 'loading', 0), true)
+  assert.equal(shouldShowAddressSuggestionPanel('edit', 'error', 0), true)
 })

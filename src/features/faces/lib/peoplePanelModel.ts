@@ -29,6 +29,42 @@ export interface PeoplePanelSelectionModel {
   showCompactPeopleDetail: boolean
 }
 
+export interface PeoplePanelViewSwitch {
+  view: PanelView
+  compactPeopleStage: CompactPeopleStage | null
+  shouldClearSelection: boolean
+}
+
+export interface PeoplePanelPersonSelection {
+  selectedPersonId: string
+  compactPeopleStage: CompactPeopleStage | null
+}
+
+export interface PeoplePanelReadonlyMode {
+  scope: PersonScope
+  view: PanelView
+}
+
+export interface ResolvePeoplePanelPreferredPersonFocusParams {
+  open: boolean
+  preferredPersonId: string | null
+  isCompact: boolean
+}
+
+export interface PeoplePanelPreferredPersonFocus {
+  view: PanelView
+  selectedPersonId: string
+  compactPeopleStage: CompactPeopleStage | null
+  shouldClearSelection: boolean
+}
+
+export interface ResolvePeoplePanelCompactEmptySelectionStageParams {
+  isCompact: boolean
+  open: boolean
+  view: PanelView
+  selectedPersonId: string | null
+}
+
 export function resolvePeoplePanelSelectionModel({
   people,
   allPeople,
@@ -74,4 +110,58 @@ export function resolvePeoplePanelSelectionModel({
     showCompactPeopleList: isCompact && view === 'people' && compactPeopleStage === 'list',
     showCompactPeopleDetail: isCompact && view === 'people' && compactPeopleStage === 'detail',
   }
+}
+
+export function resolvePeoplePanelViewSwitch(nextView: PanelView, isCompact: boolean): PeoplePanelViewSwitch {
+  return {
+    view: nextView,
+    compactPeopleStage: isCompact ? (nextView === 'people' ? 'list' : 'detail') : null,
+    shouldClearSelection: true,
+  }
+}
+
+export function resolvePeoplePanelPersonSelection(
+  personId: string,
+  isCompact: boolean,
+): PeoplePanelPersonSelection {
+  return {
+    selectedPersonId: personId,
+    compactPeopleStage: isCompact ? 'detail' : null,
+  }
+}
+
+export function resolvePeoplePanelListStage(isCompact: boolean): CompactPeopleStage | null {
+  return isCompact ? 'list' : null
+}
+
+export function resolvePeoplePanelReadonlyMode(readonly: boolean): PeoplePanelReadonlyMode | null {
+  if (!readonly) return null
+  return {
+    scope: 'root',
+    view: 'people',
+  }
+}
+
+export function resolvePeoplePanelPreferredPersonFocus({
+  open,
+  preferredPersonId,
+  isCompact,
+}: ResolvePeoplePanelPreferredPersonFocusParams): PeoplePanelPreferredPersonFocus | null {
+  if (!open || !preferredPersonId) return null
+  return {
+    view: 'people',
+    selectedPersonId: preferredPersonId,
+    compactPeopleStage: isCompact ? 'detail' : null,
+    shouldClearSelection: true,
+  }
+}
+
+export function resolvePeoplePanelCompactEmptySelectionStage({
+  isCompact,
+  open,
+  view,
+  selectedPersonId,
+}: ResolvePeoplePanelCompactEmptySelectionStageParams): CompactPeopleStage | null {
+  if (!isCompact || !open || view !== 'people' || selectedPersonId) return null
+  return 'list'
 }

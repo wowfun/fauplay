@@ -24,12 +24,19 @@ import { ToolbarShortcutHelpPanel } from '@/features/explorer/components/Toolbar
 import { ExplorerToolbarListingControls } from '@/features/explorer/components/ExplorerToolbarListingControls'
 import {
   type AddressSuggestionItem,
+  buildAddressBreadcrumbItems,
   buildAddressSuggestionDisplayPath,
   buildAddressSuggestions,
   buildRootPathDisplayText,
+  createAddressChildPath,
   getAddressSuggestionSourceLabel,
+  moveAddressSuggestionIndex,
   parseDraftPathSuggestionContext,
+  resolveAddressSuggestionCompletionIndex,
   segmentKey,
+  shouldShowAddressSuggestionPanel,
+  sortAddressFavoriteFolders,
+  sortAddressPathHistory,
 } from '@/features/explorer/lib/addressPathModel'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
@@ -136,23 +143,17 @@ export function ExplorerToolbar({
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [isHelpOpen, setIsHelpOpen] = useState(false)
 
-  const pathSegments = currentPath.split('/').filter(Boolean)
   const rootLabel = rootName || '根目录'
-  const breadcrumbItems = useMemo(() => {
-    return [
-      { label: rootLabel, path: '' },
-      ...pathSegments.map((segment, index) => ({
-        label: segment,
-        path: pathSegments.slice(0, index + 1).join('/'),
-      })),
-    ]
-  }, [pathSegments, rootLabel])
+  const breadcrumbItems = useMemo(
+    () => buildAddressBreadcrumbItems(rootLabel, currentPath),
+    [currentPath, rootLabel],
+  )
 
   const sortedHistory = useMemo(() => {
-    return [...recentPathHistory].sort((left, right) => right.visitedAt - left.visitedAt)
+    return sortAddressPathHistory(recentPathHistory)
   }, [recentPathHistory])
   const sortedFavorites = useMemo(() => {
-    return [...favoriteFolders].sort((left, right) => right.favoritedAt - left.favoritedAt)
+    return sortAddressFavoriteFolders(favoriteFolders)
   }, [favoriteFolders])
 
   const addressBarRef = useRef<HTMLDivElement>(null)
@@ -349,7 +350,7 @@ export function ExplorerToolbar({
   }
 
   const handleSegmentNavigate = async (segmentPath: string, childName: string) => {
-    const nextPath = segmentPath ? `${segmentPath}/${childName}` : childName
+    const nextPath = createAddressChildPath(segmentPath, childName)
     const ok = await navigateByAddressBar(nextPath)
     if (!ok) return
     setAddressBarMode('breadcrumb')
@@ -518,11 +519,10 @@ export function ExplorerToolbar({
     )
   }
 
-  const shouldShowAddressSuggestionPanel = addressBarMode === 'edit' && (
-    addressSuggestionStatus === 'ready'
-    || addressSuggestionStatus === 'loading'
-    || addressSuggestionStatus === 'error'
-    || addressSuggestions.length > 0
+  const shouldShowAddressSuggestionPanelValue = shouldShowAddressSuggestionPanel(
+    addressBarMode,
+    addressSuggestionStatus,
+    addressSuggestions.length,
   )
 
   return (
@@ -568,25 +568,27 @@ export function ExplorerToolbar({
                   if (event.key === 'ArrowDown') {
                     if (addressSuggestions.length === 0) return
                     event.preventDefault()
-                    setActiveSuggestionIndex((previous) => {
-                      if (previous < 0) return 0
-                      return (previous + 1) % addressSuggestions.length
-                    })
+                    setActiveSuggestionIndex((previous) => (
+                      moveAddressSuggestionIndex(previous, addressSuggestions.length, 'next')
+                    ))
                     return
                   }
                   if (event.key === 'ArrowUp') {
                     if (addressSuggestions.length === 0) return
                     event.preventDefault()
-                    setActiveSuggestionIndex((previous) => {
-                      if (previous < 0) return addressSuggestions.length - 1
-                      return (previous - 1 + addressSuggestions.length) % addressSuggestions.length
-                    })
+                    setActiveSuggestionIndex((previous) => (
+                      moveAddressSuggestionIndex(previous, addressSuggestions.length, 'previous')
+                    ))
                     return
                   }
                   if (event.key === 'Tab') {
                     if (addressSuggestions.length === 0) return
                     event.preventDefault()
-                    const targetIndex = activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0
+                    const targetIndex = resolveAddressSuggestionCompletionIndex(
+                      activeSuggestionIndex,
+                      addressSuggestions.length,
+                    )
+                    if (targetIndex === null) return
                     const target = addressSuggestions[targetIndex]
                     if (!target) return
                     setDraftPath(target.path)
@@ -763,7 +765,7 @@ export function ExplorerToolbar({
             </Button>
           </div>
         </div>
-        {shouldShowAddressSuggestionPanel && (
+        {shouldShowAddressSuggestionPanelValue && (
           <div
             className="absolute left-0 top-full z-30 mt-1 w-full rounded-md border border-border bg-background p-1 shadow-md"
             onClick={(event) => event.stopPropagation()}

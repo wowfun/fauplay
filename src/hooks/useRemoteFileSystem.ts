@@ -9,6 +9,15 @@ import {
 } from '@/lib/remoteAccess'
 import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
 import { isFavoriteFolderActive } from '@/features/explorer/lib/favoriteFolderModel'
+import {
+  buildRemoteRootEntryMap,
+  createRemoteChildDirectoryPath,
+  normalizeRemoteRootRelativePath,
+  parseRemoteListingItems,
+  resolveRemoteParentPath,
+  toRemoteChildDirectoryNames,
+  toRemoteFavoriteFolderEntries,
+} from '@/features/explorer/lib/remoteFileSystemModel'
 import type {
   AddressPathHistoryEntry,
   FavoriteFolderEntry,
@@ -18,14 +27,6 @@ import type {
 const ROOT_LABEL_FALLBACK = '根目录'
 const REMOTE_VIRTUAL_TRASH_PATH = '@trash'
 
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
-}
-
-function buildRootEntryMap(roots: RemoteRootEntry[]): Map<string, RemoteRootEntry> {
-  return new Map(roots.map((root) => [root.id, root]))
-}
-
 function toUiRootId(configRootId: string): string {
   return toRemoteUiRootId(configRootId)
 }
@@ -34,54 +35,15 @@ function fromUiRootId(uiRootId: string): string {
   return fromRemoteUiRootId(uiRootId) || uiRootId
 }
 
-function parseRemoteFileItems(payload: unknown, configRootId: string): FileItem[] {
-  if (!payload || typeof payload !== 'object') return []
-  const rawItems = Array.isArray((payload as { items?: unknown[] }).items)
-    ? (payload as { items?: unknown[] }).items
-    : []
-
-  return (rawItems ?? []).flatMap((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
-    const candidate = item as Partial<FileItem>
-    const name = typeof candidate.name === 'string' ? candidate.name.trim() : ''
-    const filePath = typeof candidate.path === 'string' ? normalizeRelativePath(candidate.path) : ''
-    const kind = candidate.kind === 'directory' ? 'directory' : candidate.kind === 'file' ? 'file' : null
-    if (!name || !filePath || !kind) return []
-
-    const lastModifiedMs = Number.isFinite(Number(candidate.lastModifiedMs))
-      ? Number(candidate.lastModifiedMs)
-      : undefined
-
-    return [{
-      name,
-      path: filePath,
-      kind,
-      remoteRootId: configRootId,
-      isEmpty: typeof candidate.isEmpty === 'boolean' ? candidate.isEmpty : undefined,
-      size: Number.isFinite(Number(candidate.size)) ? Number(candidate.size) : undefined,
-      lastModifiedMs,
-      lastModified: typeof lastModifiedMs === 'number' ? new Date(lastModifiedMs) : undefined,
-      mimeType: typeof candidate.mimeType === 'string' ? candidate.mimeType : undefined,
-      previewKind: candidate.previewKind,
-      displayPath: typeof candidate.displayPath === 'string' ? candidate.displayPath : filePath,
-    }]
-  })
-}
-
 function toFavoriteFolderEntries(
   roots: RemoteRootEntry[],
   items: Array<{ rootId: string; path: string; favoritedAtMs: number }>,
 ): FavoriteFolderEntry[] {
-  const rootEntryById = buildRootEntryMap(roots)
-  return items.flatMap((item) => {
-    const rootEntry = rootEntryById.get(item.rootId)
-    if (!rootEntry) return []
-    return [{
-      rootId: toUiRootId(item.rootId),
-      rootName: rootEntry.label || ROOT_LABEL_FALLBACK,
-      path: normalizeRelativePath(item.path),
-      favoritedAt: item.favoritedAtMs,
-    }]
+  return toRemoteFavoriteFolderEntries({
+    roots,
+    items,
+    rootLabelFallback: ROOT_LABEL_FALLBACK,
+    toUiRootId,
   })
 }
 
@@ -94,7 +56,7 @@ export function useRemoteFileSystem({
   roots,
   initialConfigRootId,
 }: UseRemoteFileSystemOptions) {
-  const rootEntryByConfigId = useMemo(() => buildRootEntryMap(roots), [roots])
+  const rootEntryByConfigId = useMemo(() => buildRemoteRootEntryMap(roots), [roots])
   const hasRemoteRoots = roots.length > 0
   const serviceKey = useMemo(() => buildRemoteServiceKey(), [])
   const [currentConfigRootId, setCurrentConfigRootId] = useState(initialConfigRootId)
@@ -145,13 +107,13 @@ export function useRemoteFileSystem({
     targetPath: string,
     flattenView: boolean
   ) => {
-    const normalizedPath = normalizeRelativePath(targetPath)
+    const normalizedPath = normalizeRemoteRootRelativePath(targetPath)
     const result = await callRemoteAccessHttp('/v1/remote/files/list', {
       rootId: configRootId,
       path: normalizedPath,
       flattenView,
     }, 120000)
-    setFiles(parseRemoteFileItems(result, configRootId))
+    setFiles(parseRemoteListingItems(result, configRootId))
     setCurrentPath(normalizedPath)
     setIsFlattenView(flattenView)
     setCurrentConfigRootId(configRootId)
@@ -214,13 +176,13 @@ export function useRemoteFileSystem({
   }, [loadDirectory])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
-    const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
+    const nextPath = createRemoteChildDirectoryPath(currentPath, dirName)
     await navigateToPath(nextPath)
   }, [currentPath, navigateToPath])
 
   const navigateUp = useCallback(async () => {
-    if (!currentPath) return
-    const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+    const parentPath = resolveRemoteParentPath(currentPath)
+    if (parentPath === null) return
     await navigateToPath(parentPath)
   }, [currentPath, navigateToPath])
 
@@ -228,13 +190,10 @@ export function useRemoteFileSystem({
     if (!currentConfigRootId) return []
     const result = await callRemoteAccessHttp('/v1/remote/files/list', {
       rootId: currentConfigRootId,
-      path: normalizeRelativePath(targetPath),
+      path: normalizeRemoteRootRelativePath(targetPath),
       flattenView: false,
     }, 120000)
-    return parseRemoteFileItems(result, currentConfigRootId)
-      .filter((item) => item.kind === 'directory')
-      .map((item) => item.name)
-      .sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
+    return toRemoteChildDirectoryNames(result, currentConfigRootId)
   }, [currentConfigRootId])
 
   const setFlattenView = useCallback(async (flattenView: boolean) => {
@@ -262,7 +221,7 @@ export function useRemoteFileSystem({
     const run = async () => {
       const configRootId = fromUiRootId(entry.rootId)
       if (!configRootId) return
-      await removeRemoteAccessFavorite(configRootId, normalizeRelativePath(entry.path))
+      await removeRemoteAccessFavorite(configRootId, normalizeRemoteRootRelativePath(entry.path))
       const items = await loadRemoteAccessFavorites()
       setFavoriteFolders(toFavoriteFolderEntries(roots, items))
     }
@@ -274,7 +233,7 @@ export function useRemoteFileSystem({
 
   const toggleCurrentFolderFavorite = useCallback((): void => {
     if (!rootId) return
-    const normalizedPath = normalizeRelativePath(currentPath)
+    const normalizedPath = normalizeRemoteRootRelativePath(currentPath)
     const configRootId = fromUiRootId(rootId)
     if (!configRootId) return
 

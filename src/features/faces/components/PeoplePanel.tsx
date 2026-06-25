@@ -21,7 +21,13 @@ import {
 } from '@/features/faces/lib/peoplePanelText'
 import {
   type CompactPeopleStage,
+  resolvePeoplePanelCompactEmptySelectionStage,
+  resolvePeoplePanelListStage,
+  resolvePeoplePanelPersonSelection,
+  resolvePeoplePanelPreferredPersonFocus,
+  resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
+  resolvePeoplePanelViewSwitch,
 } from '@/features/faces/lib/peoplePanelModel'
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { FaceGrid } from '@/features/faces/components/FaceGrid'
@@ -214,9 +220,10 @@ export function PeoplePanel({
   }, [open])
 
   useEffect(() => {
-    if (!readonly) return
-    setScope('root')
-    setView('people')
+    const readonlyMode = resolvePeoplePanelReadonlyMode(readonly)
+    if (!readonlyMode) return
+    setScope(readonlyMode.scope)
+    setView(readonlyMode.view)
   }, [readonly])
 
   useEffect(() => {
@@ -254,21 +261,27 @@ export function PeoplePanel({
   }, [selectedPerson?.name, selectedPersonId])
 
   useEffect(() => {
-    if (!open || !preferredPersonId) return
-    setView('people')
-    clearSelection()
-    setSelectedPersonId(preferredPersonId)
-    if (isCompact) {
-      setCompactPeopleStage('detail')
-    }
+    const focus = resolvePeoplePanelPreferredPersonFocus({
+      open,
+      preferredPersonId,
+      isCompact,
+    })
+    if (!focus) return
+    setView(focus.view)
+    if (focus.shouldClearSelection) clearSelection()
+    setSelectedPersonId(focus.selectedPersonId)
+    if (focus.compactPeopleStage) setCompactPeopleStage(focus.compactPeopleStage)
   }, [clearSelection, isCompact, open, preferredPersonId])
 
   useEffect(() => {
-    if (!isCompact || !open) return
-    if (view !== 'people') return
-    if (!selectedPersonId) {
-      setCompactPeopleStage('list')
-    }
+    const nextStage = resolvePeoplePanelCompactEmptySelectionStage({
+      isCompact,
+      open,
+      view,
+      selectedPersonId,
+    })
+    if (!nextStage) return
+    setCompactPeopleStage(nextStage)
   }, [isCompact, open, selectedPersonId, view])
 
   useEffect(() => {
@@ -289,23 +302,22 @@ export function PeoplePanel({
   }, [])
 
   const handleSelectPerson = useCallback((personId: string) => {
-    setSelectedPersonId(personId)
-    if (isCompact) {
-      setCompactPeopleStage('detail')
-    }
+    const selection = resolvePeoplePanelPersonSelection(personId, isCompact)
+    setSelectedPersonId(selection.selectedPersonId)
+    if (selection.compactPeopleStage) setCompactPeopleStage(selection.compactPeopleStage)
   }, [isCompact])
 
   const handleShowPeopleList = useCallback(() => {
-    if (!isCompact) return
-    setCompactPeopleStage('list')
+    const nextStage = resolvePeoplePanelListStage(isCompact)
+    if (!nextStage) return
+    setCompactPeopleStage(nextStage)
   }, [isCompact])
 
   const handleSwitchView = useCallback((nextView: PanelView) => {
-    setView(nextView)
-    clearSelection()
-    if (isCompact) {
-      setCompactPeopleStage(nextView === 'people' ? 'list' : 'detail')
-    }
+    const transition = resolvePeoplePanelViewSwitch(nextView, isCompact)
+    setView(transition.view)
+    if (transition.shouldClearSelection) clearSelection()
+    if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
   }, [clearSelection, isCompact])
 
   const handleOpenFaceSource = useCallback(async (face: FaceRecord) => {

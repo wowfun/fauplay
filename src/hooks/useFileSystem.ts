@@ -48,6 +48,16 @@ import {
   toRuntimeListingQueryRequest,
 } from '@/features/explorer/lib/listingQueryModel'
 import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
+import {
+  createLocalChildDirectoryPath,
+  isLocalVirtualTrashPath,
+  mergeCachedLocalRootEntries,
+  normalizeLocalRootRelativePath,
+  resolveLocalNavigationTarget,
+  resolveLocalParentPath,
+  sortLocalChildDirectoryNames,
+  toLocalListingItems,
+} from '@/features/explorer/lib/localFileSystemModel'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
@@ -59,27 +69,6 @@ const RUNTIME_LISTING_PAGE_SIZE = 500
 const FAVORITE_FOLDER_MODEL_OPTIONS = {
   maxItems: FAVORITE_FOLDERS_MAX_ITEMS,
   rootLabelFallback: ROOT_LABEL_FALLBACK,
-}
-function withBasePath(items: FileItem[], basePath: string): FileItem[] {
-  if (!basePath) return items
-  return items.map((item) => ({
-    ...item,
-    path: `${basePath}/${item.path}`,
-  }))
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
-}
-
-function rootNameFromPath(path: string): string {
-  const normalized = path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
-  const segments = normalized.split('/').filter(Boolean)
-  return segments[segments.length - 1] || ROOT_LABEL_FALLBACK
-}
-
-function isVirtualTrashPath(path: string): boolean {
-  return normalizeRelativePath(path) === VIRTUAL_TRASH_PATH
 }
 
 function createSessionRootId(handle: FileSystemDirectoryHandle): string {
@@ -143,33 +132,11 @@ export function useFileSystem() {
     await syncLocalRootBindingsFromRuntime()
 
     const entries = await listCachedRoots()
-    const cachedEntriesByRootId = new Map<string, CachedRootEntry>()
-    for (const entry of entries) {
-      cachedEntriesByRootId.set(entry.rootId, {
-        ...entry,
-        boundRootPath: getBoundRootPath(entry.rootId) ?? undefined,
-      })
-    }
-
-    for (const binding of listLocalRootBindings()) {
-      const existing = cachedEntriesByRootId.get(binding.rootId)
-      if (existing) {
-        cachedEntriesByRootId.set(binding.rootId, {
-          ...existing,
-          boundRootPath: binding.rootPath,
-        })
-        continue
-      }
-
-      cachedEntriesByRootId.set(binding.rootId, {
-        rootId: binding.rootId,
-        rootName: rootNameFromPath(binding.rootPath),
-        lastUsedAt: 0,
-        boundRootPath: binding.rootPath,
-      })
-    }
-
-    setCachedRoots([...cachedEntriesByRootId.values()])
+    setCachedRoots(mergeCachedLocalRootEntries({
+      cachedRoots: entries,
+      bindings: listLocalRootBindings(),
+      rootLabelFallback: ROOT_LABEL_FALLBACK,
+    }))
     setIsCachedRootsReady(true)
   }, [])
 
@@ -228,7 +195,7 @@ export function useFileSystem() {
         setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
           ? {
               rootPath: boundRootPath,
-              rootRelativePath: normalizeRelativePath(basePath),
+              rootRelativePath: normalizeLocalRootRelativePath(basePath),
               flattened: flattenView,
               query: activeListingQuery,
               nextOffset: runtimeListing.nextOffset,
@@ -248,13 +215,10 @@ export function useFileSystem() {
     }
 
     const result = await readDirectory(fallbackHandle, flattenView)
-    if (flattenView) {
-      setFiles(withBasePath(result.files, basePath))
-      return
-    }
-
-    const allItems = [...result.directories, ...result.files]
-    setFiles(withBasePath(allItems, basePath))
+    setFiles(toLocalListingItems(result, {
+      basePath,
+      flattened: flattenView,
+    }))
   }, [])
 
   const loadNextListingPage = useCallback(async (): Promise<void> => {
@@ -338,7 +302,7 @@ export function useFileSystem() {
     targetPath: string
   ) => {
     let current: FileSystemDirectoryHandle = baseRoot
-    const normalizedPath = normalizeRelativePath(targetPath)
+    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
     if (!normalizedPath) return current
 
     const pathParts = normalizedPath.split('/').filter(Boolean)
@@ -365,8 +329,8 @@ export function useFileSystem() {
     nextRootId: string,
     targetPath: string
   ) => {
-    const normalizedPath = normalizeRelativePath(targetPath)
-    if (isVirtualTrashPath(normalizedPath)) {
+    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
+    if (isLocalVirtualTrashPath(normalizedPath, VIRTUAL_TRASH_PATH)) {
       await loadUnifiedTrashItems(nextRootId, nextRootHandle)
       return
     }
@@ -386,8 +350,8 @@ export function useFileSystem() {
     nextRootName: string,
     targetPath: string
   ) => {
-    const normalizedPath = normalizeRelativePath(targetPath)
-    if (isVirtualTrashPath(normalizedPath)) {
+    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
+    if (isLocalVirtualTrashPath(normalizedPath, VIRTUAL_TRASH_PATH)) {
       await loadUnifiedTrashItems(nextRootId, null)
       setRootHandle(null)
       setRootName(nextRootName || ROOT_LABEL_FALLBACK)
@@ -433,7 +397,7 @@ export function useFileSystem() {
     setListingQueryState(normalizedQuery)
     setRuntimeListingPageCursor(null)
 
-    if (!rootId || isVirtualTrashPath(currentPath)) return
+    if (!rootId || isLocalVirtualTrashPath(currentPath, VIRTUAL_TRASH_PATH)) return
     if (!getBoundRootPath(rootId)) return
 
     setIsLoading(true)
@@ -451,8 +415,8 @@ export function useFileSystem() {
   }, [currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems, rootId])
 
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
-    const normalizedPath = normalizeRelativePath(targetPath)
-    if (isVirtualTrashPath(normalizedPath)) {
+    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
+    if (isLocalVirtualTrashPath(normalizedPath, VIRTUAL_TRASH_PATH)) {
       return []
     }
 
@@ -463,10 +427,9 @@ export function useFileSystem() {
           rootPath: boundRootPath,
           rootRelativePath: normalizedPath,
         })
-        return runtimeListing.entries
+        return sortLocalChildDirectoryNames(runtimeListing.entries
           .filter((entry) => entry.kind === 'directory')
-          .map((entry) => entry.name)
-          .sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
+          .map((entry) => entry.name))
       } catch {
         // Fall back to File System Access while the runtime-backed Listing path is being adopted.
       }
@@ -484,8 +447,7 @@ export function useFileSystem() {
       directoryNames.push(name)
     }
 
-    directoryNames.sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
-    return directoryNames
+    return sortLocalChildDirectoryNames(directoryNames)
   }, [rootHandle, rootId, getDirectoryHandleByPath])
 
   const selectDirectory = useCallback(async () => {
@@ -580,24 +542,28 @@ export function useFileSystem() {
   ): Promise<boolean> => {
     if (!rootId) return false
 
-    const normalizedPath = normalizeRelativePath(targetPath)
-    const nextFlattenView = options.resetFlattenView ? false : isFlattenView
+    const navigationTarget = resolveLocalNavigationTarget({
+      targetPath,
+      currentFlattened: isFlattenView,
+      resetFlattened: options.resetFlattenView === true,
+      virtualTrashPath: VIRTUAL_TRASH_PATH,
+    })
 
     setIsLoading(true)
     setError(null)
 
     try {
-      if (isVirtualTrashPath(normalizedPath)) {
+      if (navigationTarget.isVirtualTrash) {
         await loadUnifiedTrashItems(rootId, rootHandle)
         return true
       }
-      await loadDirectoryItems(null, normalizedPath, nextFlattenView, {
+      await loadDirectoryItems(null, navigationTarget.path, navigationTarget.flattened, {
         rootId,
-        resolveDirectoryHandle: () => getDirectoryHandleByPath(normalizedPath),
+        resolveDirectoryHandle: () => getDirectoryHandleByPath(navigationTarget.path),
       })
-      setCurrentPath(normalizedPath)
-      if (options.resetFlattenView) {
-        setIsFlattenView(false)
+      setCurrentPath(navigationTarget.path)
+      if (navigationTarget.flattened !== isFlattenView) {
+        setIsFlattenView(navigationTarget.flattened)
       }
       return true
     } catch (err) {
@@ -611,7 +577,7 @@ export function useFileSystem() {
   const openPathInRoot = useCallback(async (targetRootId: string, targetPath: string): Promise<boolean> => {
     if (!targetRootId) return false
 
-    const normalizedPath = normalizeRelativePath(targetPath)
+    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
     if (rootId === targetRootId) {
       return navigateToPath(normalizedPath, { resetFlattenView: true })
     }
@@ -702,17 +668,13 @@ export function useFileSystem() {
   }, [rootId, rootName])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
-    const nextPath = currentPath ? `${currentPath}/${dirName}` : dirName
+    const nextPath = createLocalChildDirectoryPath(currentPath, dirName)
     await navigateToPath(nextPath)
   }, [currentPath, navigateToPath])
 
   const navigateUp = useCallback(async () => {
-    if (isVirtualTrashPath(currentPath)) {
-      await navigateToPath('')
-      return
-    }
-    if (!currentPath) return
-    const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+    const parentPath = resolveLocalParentPath(currentPath, VIRTUAL_TRASH_PATH)
+    if (parentPath === null) return
     await navigateToPath(parentPath)
   }, [currentPath, navigateToPath])
 

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolvePeoplePanelSelectionModel } from '../../src/features/faces/lib/peoplePanelModel.ts'
+import {
+  resolvePeoplePanelCompactEmptySelectionStage,
+  resolvePeoplePanelListStage,
+  resolvePeoplePanelPersonSelection,
+  resolvePeoplePanelPreferredPersonFocus,
+  resolvePeoplePanelReadonlyMode,
+  resolvePeoplePanelSelectionModel,
+  resolvePeoplePanelViewSwitch,
+} from '../../src/features/faces/lib/peoplePanelModel.ts'
 
 function person(overrides) {
   return {
@@ -184,4 +192,105 @@ test('People Panel Selection Model derives compact list stage only for people vi
   assert.equal(reviewModel.showCompactPeopleDetail, false)
   assert.deepEqual(reviewModel.assignmentExcludedPersonIds, [])
   assert.equal(reviewModel.assignmentInputKey, 'global:ignored:')
+})
+
+test('People Panel Model resolves view switches and compact stages', () => {
+  assert.deepEqual(resolvePeoplePanelViewSwitch('people', true), {
+    view: 'people',
+    compactPeopleStage: 'list',
+    shouldClearSelection: true,
+  })
+
+  assert.deepEqual(resolvePeoplePanelViewSwitch('ignored', true), {
+    view: 'ignored',
+    compactPeopleStage: 'detail',
+    shouldClearSelection: true,
+  })
+
+  assert.deepEqual(resolvePeoplePanelViewSwitch('unassigned', false), {
+    view: 'unassigned',
+    compactPeopleStage: null,
+    shouldClearSelection: true,
+  })
+})
+
+test('People Panel Model resolves compact person selection and list navigation', () => {
+  assert.deepEqual(resolvePeoplePanelPersonSelection('person-a', true), {
+    selectedPersonId: 'person-a',
+    compactPeopleStage: 'detail',
+  })
+
+  assert.deepEqual(resolvePeoplePanelPersonSelection('person-a', false), {
+    selectedPersonId: 'person-a',
+    compactPeopleStage: null,
+  })
+
+  assert.equal(resolvePeoplePanelListStage(true), 'list')
+  assert.equal(resolvePeoplePanelListStage(false), null)
+})
+
+test('People Panel Model resolves readonly and preferred-person state transitions', () => {
+  assert.deepEqual(resolvePeoplePanelReadonlyMode(true), {
+    scope: 'root',
+    view: 'people',
+  })
+  assert.equal(resolvePeoplePanelReadonlyMode(false), null)
+
+  assert.deepEqual(resolvePeoplePanelPreferredPersonFocus({
+    open: true,
+    preferredPersonId: 'person-a',
+    isCompact: true,
+  }), {
+    view: 'people',
+    selectedPersonId: 'person-a',
+    compactPeopleStage: 'detail',
+    shouldClearSelection: true,
+  })
+
+  assert.deepEqual(resolvePeoplePanelPreferredPersonFocus({
+    open: true,
+    preferredPersonId: 'person-a',
+    isCompact: false,
+  }), {
+    view: 'people',
+    selectedPersonId: 'person-a',
+    compactPeopleStage: null,
+    shouldClearSelection: true,
+  })
+
+  assert.equal(resolvePeoplePanelPreferredPersonFocus({
+    open: false,
+    preferredPersonId: 'person-a',
+    isCompact: true,
+  }), null)
+})
+
+test('People Panel Model keeps compact people view on the list when no person is selected', () => {
+  assert.equal(resolvePeoplePanelCompactEmptySelectionStage({
+    isCompact: true,
+    open: true,
+    view: 'people',
+    selectedPersonId: null,
+  }), 'list')
+
+  assert.equal(resolvePeoplePanelCompactEmptySelectionStage({
+    isCompact: true,
+    open: true,
+    view: 'people',
+    selectedPersonId: 'person-a',
+  }), null)
+
+  assert.equal(resolvePeoplePanelCompactEmptySelectionStage({
+    isCompact: false,
+    open: true,
+    view: 'people',
+    selectedPersonId: null,
+  }), null)
+
+  assert.equal(resolvePeoplePanelCompactEmptySelectionStage({
+    isCompact: true,
+    open: true,
+    view: 'ignored',
+    selectedPersonId: null,
+  }), null)
 })
