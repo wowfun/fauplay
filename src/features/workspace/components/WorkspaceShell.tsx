@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
-import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWorkspaceShell'
 import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
@@ -11,18 +10,17 @@ import {
   useWorkspaceAnnotationFilterOptions,
 } from '@/features/workspace/hooks/useWorkspaceAnnotationFilterOptions'
 import { useWorkspaceKeyboardShortcuts } from '@/features/workspace/hooks/useWorkspaceKeyboardShortcuts'
-import {
-  type WorkspaceProjectionInteraction,
-  useWorkspaceProjectionState,
-} from '@/features/workspace/hooks/useWorkspaceProjectionState'
+import { useWorkspaceProjectionState } from '@/features/workspace/hooks/useWorkspaceProjectionState'
 import { useWorkspaceResultPanelState } from '@/features/workspace/hooks/useWorkspaceResultPanelState'
 import { useWorkspaceSelectionFocusSync } from '@/features/workspace/hooks/useWorkspaceSelectionFocusSync'
 import { useWorkspacePreviewController } from '@/features/workspace/hooks/useWorkspacePreviewController'
+import type { WorkspaceProjectionInteraction } from '@/features/workspace/types/projectionInteraction'
 import { useWorkspacePeoplePanel } from '@/features/workspace/hooks/useWorkspacePeoplePanel'
 import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useWorkspacePresentationProfile'
 import { useWorkspacePluginTools } from '@/features/workspace/hooks/useWorkspacePluginTools'
 import { useWorkspaceTrashAvailability } from '@/features/workspace/hooks/useWorkspaceTrashAvailability'
 import { useWorkspaceDeleteUndoController } from '@/features/workspace/hooks/useWorkspaceDeleteUndoController'
+import { useWorkspaceMutationCommitController } from '@/features/workspace/hooks/useWorkspaceMutationCommitController'
 import { useWorkspaceShellInteractionHandlers } from '@/features/workspace/hooks/useWorkspaceShellInteractionHandlers'
 import {
   isAnnotationFilterAtDefault,
@@ -31,13 +29,6 @@ import {
 import { useWorkspaceFileSelectionSummary } from '@/features/workspace/hooks/useWorkspaceFileSelectionSummary'
 import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspacePathHistory'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
-import {
-  runWorkspaceMutationCommitEffects,
-  resolveWorkspaceMutationCommitEffects,
-  resolveWorkspacePreviewMutationCommitEffects,
-  type WorkspaceMutationCommitEffect,
-} from '@/features/workspace/lib/workspaceMutationCommitPlan'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
 import {
   type AddressPathHistoryEntry,
@@ -397,77 +388,26 @@ export function WorkspaceShell({
     forgetDeletedProjectionAbsolutePath,
   })
 
-  const runWorkspaceMutationCommitEffectPlan = useCallback(async (
-    effects: WorkspaceMutationCommitEffect[],
-    deleteUndoBatch: ReturnType<typeof createDeleteUndoBatchFromParams>
-  ) => {
-    await runWorkspaceMutationCommitEffects(effects, {
-      pruneDeletedProjectionTabs: pruneDeletedFilesFromProjectionTabs,
-      alignPreviewToPath,
-      navigateMediaNext: (target) => {
-        if (target === 'modal') {
-          navigateMediaFromModal('next')
-        } else {
-          navigateMediaFromPane('next')
-        }
-      },
-      openFile: (target, file) => {
-        if (target === 'modal') {
-          openFileInModal(file)
-        } else {
-          openFileInPrimaryTarget(file)
-        }
-      },
-      refreshCurrentPath: async () => {
-        await navigateToPath(currentPath)
-      },
-      refreshFilterTagSnapshots,
-      pushDeleteUndoBatch: () => pushDeleteUndoBatch(deleteUndoBatch),
-    })
-  }, [
-    alignPreviewToPath,
+  const {
+    handleWorkspaceMutationCommitted,
+    handlePreviewMutationCommitted,
+  } = useWorkspaceMutationCommitController({
     currentPath,
+    activeSurface,
+    activeSurfaceFileItems,
+    selectedFile,
+    previewFile,
+    createDeleteUndoBatchFromParams,
+    pushDeleteUndoBatch,
+    pruneDeletedFilesFromProjectionTabs,
+    alignPreviewToPath,
     navigateMediaFromModal,
     navigateMediaFromPane,
-    navigateToPath,
     openFileInModal,
     openFileInPrimaryTarget,
-    pruneDeletedFilesFromProjectionTabs,
-    pushDeleteUndoBatch,
+    navigateToPath,
     refreshFilterTagSnapshots,
-  ])
-
-  const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
-    await runWorkspaceMutationCommitEffectPlan(
-      resolveWorkspaceMutationCommitEffects(params),
-      createDeleteUndoBatchFromParams(params)
-    )
-  }, [
-    createDeleteUndoBatchFromParams,
-    runWorkspaceMutationCommitEffectPlan,
-  ])
-
-  const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
-    const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
-    const activePreviewFile = previewFile ?? selectedFile
-    await runWorkspaceMutationCommitEffectPlan(
-      resolveWorkspacePreviewMutationCommitEffects({
-        params,
-        activeSurface,
-        activeSurfaceFileItems,
-        activePreviewFile,
-        isPreviewModalOpen: Boolean(previewFile),
-      }),
-      deleteUndoBatch
-    )
-  }, [
-    activeSurface,
-    previewFile,
-    runWorkspaceMutationCommitEffectPlan,
-    selectedFile,
-    activeSurfaceFileItems,
-    createDeleteUndoBatchFromParams,
-  ])
+  })
 
   const handleOpenTrash = useCallback(() => {
     if (!hasTrashEntries) return
