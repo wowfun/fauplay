@@ -41,6 +41,70 @@ export interface PreviewMediaNavigationPlan {
   shuffleState: PreviewShuffleState | null
 }
 
+export interface ResolvePreviewPlaybackOrderTogglePlanParams {
+  collection: PreviewMediaCollection
+  currentPlaybackOrder: PlaybackOrder
+  activeMediaFile: FileItem | null
+  isPreviewModalOpen: boolean
+  shufflePaths?: (paths: string[]) => string[]
+}
+
+export interface PreviewPlaybackOrderToggleSelection {
+  selectedFile: FileItem
+  previewFile: FileItem | null
+  showPreviewPane: true
+}
+
+export interface PreviewPlaybackOrderTogglePlan {
+  playbackOrder: PlaybackOrder
+  shuffleState: PreviewShuffleState
+  lastShuffleMediaSetKey: string | null
+  selection: PreviewPlaybackOrderToggleSelection | null
+}
+
+export interface ResolvePreviewShuffleMediaSetSyncPlanParams {
+  collection: PreviewMediaCollection
+  playbackOrder: PlaybackOrder
+  activeMediaFile: FileItem | null
+  hasOpenPreview: boolean
+  shuffleState: PreviewShuffleState
+  lastShuffleMediaSetKey: string | null
+  shufflePaths?: (paths: string[]) => string[]
+}
+
+export type PreviewShuffleMediaSetSyncPlan =
+  | { kind: 'none' }
+  | { kind: 'clear-last-shuffle-media-set'; lastShuffleMediaSetKey: null }
+  | { kind: 'clear-shuffle-state'; shuffleState: PreviewShuffleState; lastShuffleMediaSetKey: string }
+  | { kind: 'repair-shuffle-state'; shuffleState: PreviewShuffleState; lastShuffleMediaSetKey: string }
+  | { kind: 'mark-current-media-set'; lastShuffleMediaSetKey: string }
+
+export interface ResolvePreviewFilteredFilesChangePlanParams {
+  files: FileItem[]
+  collection: PreviewMediaCollection
+  preferredPreviewPath: string | null
+  selectedFile: FileItem | null
+  previewFile: FileItem | null
+  showPreviewPane: boolean
+  playbackOrder: PlaybackOrder
+  shuffleState: PreviewShuffleState
+}
+
+export interface PreviewFileSelectionPlan {
+  selectedFile: FileItem | null
+  previewFile: FileItem | null
+  showPreviewPane: boolean
+}
+
+export type PreviewFilteredFilesChangePlan =
+  | { kind: 'none' }
+  | {
+    kind: 'apply-selection'
+    clearPreferredPreviewPath: boolean
+    selection: PreviewFileSelectionPlan
+    shuffleState?: PreviewShuffleState
+  }
+
 export function buildPreviewMediaCollection(files: FileItem[]): PreviewMediaCollection {
   const mediaFiles = files.filter((file): file is FileItem => {
     if (file.kind !== 'file') return false
@@ -143,6 +207,205 @@ export function resolvePreviewMediaNavigation({
   }
 }
 
+export function resolvePreviewPlaybackOrderTogglePlan({
+  collection,
+  currentPlaybackOrder,
+  activeMediaFile,
+  isPreviewModalOpen,
+  shufflePaths = shufflePreviewPaths,
+}: ResolvePreviewPlaybackOrderTogglePlanParams): PreviewPlaybackOrderTogglePlan {
+  const nextPlaybackOrder = currentPlaybackOrder === 'sequential' ? 'shuffle' : 'sequential'
+  if (nextPlaybackOrder === 'sequential') {
+    return {
+      playbackOrder: nextPlaybackOrder,
+      shuffleState: { queue: [], history: [] },
+      lastShuffleMediaSetKey: null,
+      selection: null,
+    }
+  }
+
+  const anchorPath =
+    activeMediaFile?.kind === 'file' && collection.mediaIndexByPath.has(activeMediaFile.path)
+      ? activeMediaFile.path
+      : null
+  if (anchorPath) {
+    return {
+      playbackOrder: nextPlaybackOrder,
+      shuffleState: createInitialPreviewShuffleState(collection, anchorPath, shufflePaths),
+      lastShuffleMediaSetKey: collection.mediaSetKey,
+      selection: null,
+    }
+  }
+
+  const fallbackFile = collection.mediaFiles[0] ?? null
+  if (!fallbackFile) {
+    return {
+      playbackOrder: nextPlaybackOrder,
+      shuffleState: { queue: [], history: [] },
+      lastShuffleMediaSetKey: null,
+      selection: null,
+    }
+  }
+
+  return {
+    playbackOrder: nextPlaybackOrder,
+    shuffleState: createInitialPreviewShuffleState(collection, fallbackFile.path, shufflePaths),
+    lastShuffleMediaSetKey: collection.mediaSetKey,
+    selection: {
+      selectedFile: fallbackFile,
+      previewFile: isPreviewModalOpen ? fallbackFile : null,
+      showPreviewPane: true,
+    },
+  }
+}
+
+export function resolvePreviewShuffleMediaSetSyncPlan({
+  collection,
+  playbackOrder,
+  activeMediaFile,
+  hasOpenPreview,
+  shuffleState,
+  lastShuffleMediaSetKey,
+  shufflePaths = shufflePreviewPaths,
+}: ResolvePreviewShuffleMediaSetSyncPlanParams): PreviewShuffleMediaSetSyncPlan {
+  if (playbackOrder !== 'shuffle') {
+    if (lastShuffleMediaSetKey === null) return { kind: 'none' }
+    return { kind: 'clear-last-shuffle-media-set', lastShuffleMediaSetKey: null }
+  }
+
+  if (collection.mediaFiles.length === 0) {
+    if (
+      shuffleState.queue.length === 0
+      && shuffleState.history.length === 0
+      && lastShuffleMediaSetKey === collection.mediaSetKey
+    ) {
+      return { kind: 'none' }
+    }
+
+    return {
+      kind: 'clear-shuffle-state',
+      shuffleState: { queue: [], history: [] },
+      lastShuffleMediaSetKey: collection.mediaSetKey,
+    }
+  }
+
+  if (!hasOpenPreview) return { kind: 'none' }
+
+  const activePath =
+    activeMediaFile?.kind === 'file' && collection.mediaIndexByPath.has(activeMediaFile.path)
+      ? activeMediaFile.path
+      : null
+  if (!activePath) return { kind: 'none' }
+
+  const hasInvalidQueueEntry = shuffleState.queue.some((path) => !collection.mediaIndexByPath.has(path))
+  const hasInvalidHistoryEntry = shuffleState.history.some((path) => !collection.mediaIndexByPath.has(path))
+  const tailPath = shuffleState.history[shuffleState.history.length - 1]
+  const hasMediaSetChanged = lastShuffleMediaSetKey !== collection.mediaSetKey
+
+  if (hasMediaSetChanged || hasInvalidQueueEntry || hasInvalidHistoryEntry || tailPath !== activePath) {
+    return {
+      kind: 'repair-shuffle-state',
+      shuffleState: createInitialPreviewShuffleState(collection, activePath, shufflePaths),
+      lastShuffleMediaSetKey: collection.mediaSetKey,
+    }
+  }
+
+  return {
+    kind: 'mark-current-media-set',
+    lastShuffleMediaSetKey: collection.mediaSetKey,
+  }
+}
+
+export function resolvePreviewFilteredFilesChangePlan({
+  files,
+  collection,
+  preferredPreviewPath,
+  selectedFile,
+  previewFile,
+  showPreviewPane,
+  playbackOrder,
+  shuffleState,
+}: ResolvePreviewFilteredFilesChangePlanParams): PreviewFilteredFilesChangePlan {
+  if (files.length === 0) {
+    return {
+      kind: 'apply-selection',
+      clearPreferredPreviewPath: true,
+      selection: {
+        selectedFile: null,
+        previewFile: null,
+        showPreviewPane: false,
+      },
+    }
+  }
+
+  if (preferredPreviewPath) {
+    const preferredFile = findPreviewFileByPath(files, preferredPreviewPath)
+    if (preferredFile) {
+      return {
+        kind: 'apply-selection',
+        clearPreferredPreviewPath: true,
+        selection: {
+          selectedFile: preferredFile,
+          previewFile: previewFile ? preferredFile : null,
+          showPreviewPane,
+        },
+      }
+    }
+  }
+
+  if (!selectedFile) return { kind: 'none' }
+  const selectedFileStillExists = files.some((file) => file.path === selectedFile.path)
+  if (selectedFileStillExists) return { kind: 'none' }
+
+  if (playbackOrder === 'shuffle' && selectedFile.kind === 'file') {
+    const nextShufflePath = shuffleState.queue.find((path) => collection.mediaIndexByPath.has(path))
+    const nextShuffleFile = nextShufflePath ? collection.mediaFileByPath.get(nextShufflePath) ?? null : null
+    if (nextShuffleFile) {
+      return {
+        kind: 'apply-selection',
+        clearPreferredPreviewPath: false,
+        selection: createPreviewSelectionPlan({
+          nextFile: nextShuffleFile,
+          previewFile,
+          showPreviewPane,
+        }),
+        shuffleState: {
+          queue: shuffleState.queue.filter((path) => (
+            collection.mediaIndexByPath.has(path) && path !== nextShuffleFile.path
+          )),
+          history: appendPreviewShuffleHistory(
+            shuffleState.history.filter((path) => collection.mediaIndexByPath.has(path)),
+            nextShuffleFile.path
+          ),
+        },
+      }
+    }
+  }
+
+  const fallbackFile = files.find((file): file is FileItem => file.kind === 'file') ?? null
+  if (fallbackFile) {
+    return {
+      kind: 'apply-selection',
+      clearPreferredPreviewPath: false,
+      selection: createPreviewSelectionPlan({
+        nextFile: fallbackFile,
+        previewFile,
+        showPreviewPane,
+      }),
+    }
+  }
+
+  return {
+    kind: 'apply-selection',
+    clearPreferredPreviewPath: false,
+    selection: {
+      selectedFile: files[0],
+      previewFile: null,
+      showPreviewPane: false,
+    },
+  }
+}
+
 export function clampAutoPlayIntervalSec(value: number): number {
   return Math.min(
     MAX_AUTOPLAY_INTERVAL_SEC,
@@ -234,4 +497,29 @@ function resolveShufflePreviewMediaNavigation({
         : [currentPath, nextPath],
     },
   }
+}
+
+function findPreviewFileByPath(files: FileItem[], path: string): FileItem | null {
+  return files.find((file): file is FileItem => file.kind === 'file' && file.path === path) ?? null
+}
+
+function createPreviewSelectionPlan({
+  nextFile,
+  previewFile,
+  showPreviewPane,
+}: {
+  nextFile: FileItem
+  previewFile: FileItem | null
+  showPreviewPane: boolean
+}): PreviewFileSelectionPlan {
+  return {
+    selectedFile: nextFile,
+    previewFile: previewFile ? nextFile : null,
+    showPreviewPane,
+  }
+}
+
+function appendPreviewShuffleHistory(history: string[], nextPath: string): string[] {
+  if (history[history.length - 1] === nextPath) return history
+  return [...history, nextPath]
 }

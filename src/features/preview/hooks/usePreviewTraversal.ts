@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getFilePreviewKind } from '@/lib/filePreview'
 import {
   buildPreviewMediaCollection,
   canNavigatePreviewMedia,
   clampAutoPlayIntervalSec,
-  createInitialPreviewShuffleState,
   DEFAULT_AUTOPLAY_INTERVAL_SEC,
   getPreviewMediaIndex,
-  normalizePreviewPath,
   normalizeVideoPlaybackRate,
   normalizeVideoSeekStepSec,
   nextVideoPlaybackRate,
+  resolvePreviewFilteredFilesChangePlan,
   resolvePreviewMediaNavigation,
+  resolvePreviewPlaybackOrderTogglePlan,
+  resolvePreviewShuffleMediaSetSyncPlan,
   type PreviewNavigateDirection,
 } from '@/features/preview/lib/previewTraversalModel'
 import {
@@ -19,6 +19,20 @@ import {
   savePreviewPlaybackPreferences,
   type PreviewPlaybackPreferencesStorage,
 } from '@/features/preview/lib/previewPlaybackPreferences'
+import {
+  resolvePreviewAutoPlayAdvanceIntent,
+  resolvePreviewAutoPlayEligibility,
+  resolvePreviewAutoPlayGateIntent,
+  resolvePreviewAutoPlayTimerPlan,
+} from '@/features/preview/lib/previewAutoPlayModel'
+import {
+  resolvePreviewFullscreenFromPaneIntent,
+  resolvePreviewModalOpenIntent,
+  resolvePreviewPaneOpenIntent,
+  resolvePreviewPathAlignmentIntent,
+  type PreviewModalOpenIntent,
+  type PreviewSurfaceSelectionIntent,
+} from '@/features/preview/lib/previewSurfaceActionModel'
 import type { FileItem } from '@/types'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 
@@ -73,9 +87,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   )
   const {
     mediaFiles,
-    mediaIndexByPath,
-    mediaFileByPath,
-    mediaSetKey,
   } = mediaCollection
   const lastShuffleMediaSetKeyRef = useRef<string | null>(null)
 
@@ -84,11 +95,24 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     [mediaCollection]
   )
 
-  const initializeShuffleState = useCallback((currentPath: string) => {
-    const nextShuffleState = createInitialPreviewShuffleState(mediaCollection, currentPath)
-    setShuffleHistory(nextShuffleState.history)
-    setShuffleQueue(nextShuffleState.queue)
-  }, [mediaCollection])
+  const applySurfaceSelectionIntent = useCallback((intent: PreviewSurfaceSelectionIntent) => {
+    if (intent.kind === 'none') return
+    if (intent.kind === 'clear-preferred-path' || intent.kind === 'store-preferred-path') {
+      preferredPreviewPathRef.current = intent.preferredPreviewPath
+      return
+    }
+
+    preferredPreviewPathRef.current = intent.preferredPreviewPath
+    setSelectedFile(intent.selectedFile)
+    setPreviewFile(intent.previewFile)
+    setShowPreviewPane(intent.showPreviewPane)
+  }, [])
+
+  const applyModalOpenIntent = useCallback((intent: PreviewModalOpenIntent) => {
+    if (intent.kind === 'none') return
+    setPreviewAutoPlayOnOpen(intent.previewAutoPlayOnOpen)
+    setPreviewFile(intent.previewFile)
+  }, [])
 
   const applyMediaSelection = useCallback((
     nextFile: FileItem,
@@ -158,48 +182,32 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
   const activeMediaIndex = getMediaIndex(activeMediaFile)
   const hasActiveMediaPreview = activeMediaIndex >= 0
-  const isAutoPlayEligible =
-    autoPlayEnabled &&
-    !autoPlayPausedByVisibility &&
-    hasActiveMediaPreview &&
-    mediaFiles.length > 1
+  const isAutoPlayEligible = resolvePreviewAutoPlayEligibility({
+    autoPlayEnabled,
+    pausedByVisibility: autoPlayPausedByVisibility,
+    hasActiveMediaPreview,
+    mediaCount: mediaFiles.length,
+  })
 
   const showFileInPane = useCallback((file: FileItem) => {
-    if (file.kind !== 'file') return
-    preferredPreviewPathRef.current = null
-    setSelectedFile(file)
-    setShowPreviewPane(true)
-    setPreviewFile((current) => (current ? file : current))
-  }, [])
+    applySurfaceSelectionIntent(resolvePreviewPaneOpenIntent({
+      file,
+      currentPreviewFile: previewFile,
+    }))
+  }, [applySurfaceSelectionIntent, previewFile])
 
   const alignPreviewToPath = useCallback((path: string | null) => {
-    const normalizedPath = normalizePreviewPath(path)
-    if (!normalizedPath) {
-      preferredPreviewPathRef.current = null
-      return
-    }
-
-    preferredPreviewPathRef.current = normalizedPath
-    const preferredFile = filteredFiles.find((item): item is FileItem => item.kind === 'file' && item.path === normalizedPath) ?? null
-    if (!preferredFile) {
-      return
-    }
-
-    setSelectedFile(preferredFile)
-    if (previewFile) {
-      setPreviewFile(preferredFile)
-    }
-    if (previewFile || showPreviewPane) {
-      setShowPreviewPane(true)
-    }
-    preferredPreviewPathRef.current = null
-  }, [filteredFiles, previewFile, showPreviewPane])
+    applySurfaceSelectionIntent(resolvePreviewPathAlignmentIntent({
+      path,
+      files: filteredFiles,
+      currentPreviewFile: previewFile,
+      showPreviewPane,
+    }))
+  }, [applySurfaceSelectionIntent, filteredFiles, previewFile, showPreviewPane])
 
   const openFileInModal = useCallback((file: FileItem) => {
-    if (file.kind !== 'file') return
-    setPreviewAutoPlayOnOpen(getFilePreviewKind(file.name) === 'video')
-    setPreviewFile(file)
-  }, [])
+    applyModalOpenIntent(resolvePreviewModalOpenIntent({ file }))
+  }, [applyModalOpenIntent])
 
   const closePreviewModal = useCallback(() => {
     setPreviewFile(null)
@@ -211,60 +219,35 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [])
 
   const openFullscreenFromPane = useCallback(() => {
-    if (selectedFile?.kind !== 'file') return
-    setPreviewAutoPlayOnOpen(getFilePreviewKind(selectedFile.name) === 'video')
-    setPreviewFile(selectedFile)
-  }, [selectedFile])
+    applyModalOpenIntent(resolvePreviewFullscreenFromPaneIntent({ selectedFile }))
+  }, [applyModalOpenIntent, selectedFile])
 
   const toggleAutoPlay = useCallback(() => {
     setAutoPlayEnabled((previous) => !previous)
   }, [])
 
   const togglePlaybackOrder = useCallback(() => {
-    const next = playbackOrder === 'sequential' ? 'shuffle' : 'sequential'
-    setPlaybackOrder(next)
+    const togglePlan = resolvePreviewPlaybackOrderTogglePlan({
+      collection: mediaCollection,
+      currentPlaybackOrder: playbackOrder,
+      activeMediaFile,
+      isPreviewModalOpen: !!previewFile,
+    })
 
-    if (next === 'sequential') {
-      setShuffleQueue([])
-      setShuffleHistory([])
-      lastShuffleMediaSetKeyRef.current = null
-      return
-    }
+    setPlaybackOrder(togglePlan.playbackOrder)
+    setShuffleQueue(togglePlan.shuffleState.queue)
+    setShuffleHistory(togglePlan.shuffleState.history)
+    lastShuffleMediaSetKeyRef.current = togglePlan.lastShuffleMediaSetKey
 
-    const anchor =
-      activeMediaFile?.kind === 'file' && mediaIndexByPath.has(activeMediaFile.path)
-        ? activeMediaFile.path
-        : null
-
-    if (anchor) {
-      initializeShuffleState(anchor)
-      lastShuffleMediaSetKeyRef.current = mediaSetKey
-      return
-    }
-
-    if (mediaFiles.length > 0) {
-      const fallback = mediaFiles[0]
-      setSelectedFile(fallback)
-      if (previewFile) {
-        setPreviewFile(fallback)
-      }
-      setShowPreviewPane(true)
-      initializeShuffleState(fallback.path)
-      lastShuffleMediaSetKeyRef.current = mediaSetKey
-      return
-    }
-
-    setShuffleQueue([])
-    setShuffleHistory([])
-    lastShuffleMediaSetKeyRef.current = null
+    if (!togglePlan.selection) return
+    setSelectedFile(togglePlan.selection.selectedFile)
+    setPreviewFile(togglePlan.selection.previewFile)
+    setShowPreviewPane(togglePlan.selection.showPreviewPane)
   }, [
     playbackOrder,
     activeMediaFile,
-    mediaIndexByPath,
-    mediaFiles,
-    mediaSetKey,
+    mediaCollection,
     previewFile,
-    initializeShuffleState,
   ])
 
   const setAutoPlayInterval = useCallback((value: number) => {
@@ -288,154 +271,107 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [])
 
   const handleAutoPlayVideoEnded = useCallback(() => {
-    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
-    if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
+    const intent = resolvePreviewAutoPlayAdvanceIntent({
+      isAutoPlayEligible,
+      activeFile: activeMediaFile,
+    })
+    if (intent.kind === 'none') return
     navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   const handleAutoPlayVideoPlaybackError = useCallback(() => {
-    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') return
-    if (getFilePreviewKind(activeMediaFile.name) !== 'video') return
+    const intent = resolvePreviewAutoPlayAdvanceIntent({
+      isAutoPlayEligible,
+      activeFile: activeMediaFile,
+    })
+    if (intent.kind === 'none') return
     navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
   }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   useEffect(() => {
-    if (filteredFiles.length === 0) {
+    const changePlan = resolvePreviewFilteredFilesChangePlan({
+      files: filteredFiles,
+      collection: mediaCollection,
+      preferredPreviewPath: preferredPreviewPathRef.current,
+      selectedFile,
+      previewFile,
+      showPreviewPane,
+      playbackOrder,
+      shuffleState: {
+        queue: shuffleQueue,
+        history: shuffleHistory,
+      },
+    })
+
+    if (changePlan.kind === 'none') return
+    if (changePlan.clearPreferredPreviewPath) {
       preferredPreviewPathRef.current = null
-      setSelectedFile(null)
-      setShowPreviewPane(false)
-      setPreviewFile(null)
-      return
     }
 
-    const preferredPreviewPath = preferredPreviewPathRef.current
-    if (preferredPreviewPath) {
-      const preferredFile = filteredFiles.find((item): item is FileItem => item.kind === 'file' && item.path === preferredPreviewPath) ?? null
-      if (preferredFile) {
-        setSelectedFile(preferredFile)
-        if (showPreviewPane) {
-          setShowPreviewPane(true)
-        }
-        if (previewFile) {
-          setPreviewFile(preferredFile)
-        }
-        preferredPreviewPathRef.current = null
-        return
-      }
-    }
-
-    if (!selectedFile) return
-    const stillExists = filteredFiles.some((item) => item.path === selectedFile.path)
-    if (!stillExists) {
-      if (playbackOrder === 'shuffle' && selectedFile.kind === 'file') {
-        const nextShufflePath = shuffleQueue.find((path) => mediaIndexByPath.has(path))
-        const nextShuffleFile = nextShufflePath ? mediaFileByPath.get(nextShufflePath) ?? null : null
-
-        if (nextShuffleFile) {
-          setSelectedFile(nextShuffleFile)
-          if (showPreviewPane) {
-            setShowPreviewPane(true)
-          }
-          if (previewFile) {
-            setPreviewFile(nextShuffleFile)
-          }
-          setShuffleQueue((previous) => {
-            return previous.filter((path) => mediaIndexByPath.has(path) && path !== nextShuffleFile.path)
-          })
-          setShuffleHistory((previous) => {
-            const validHistory = previous.filter((path) => mediaIndexByPath.has(path))
-            if (validHistory[validHistory.length - 1] === nextShuffleFile.path) {
-              return validHistory
-            }
-            return [...validHistory, nextShuffleFile.path]
-          })
-          return
-        }
-      }
-
-      const fallbackFile = filteredFiles.find((item): item is FileItem => item.kind === 'file') ?? null
-
-      if (fallbackFile) {
-        setSelectedFile(fallbackFile)
-        if (showPreviewPane) {
-          setShowPreviewPane(true)
-        }
-        if (previewFile) {
-          setPreviewFile(fallbackFile)
-        }
-        return
-      }
-
-      setSelectedFile(filteredFiles[0])
-      setShowPreviewPane(false)
-      if (previewFile) {
-        setPreviewFile(null)
-      }
+    setSelectedFile(changePlan.selection.selectedFile)
+    setShowPreviewPane(changePlan.selection.showPreviewPane)
+    setPreviewFile(changePlan.selection.previewFile)
+    if (changePlan.shuffleState) {
+      setShuffleQueue(changePlan.shuffleState.queue)
+      setShuffleHistory(changePlan.shuffleState.history)
     }
   }, [
     filteredFiles,
-    mediaFileByPath,
-    mediaIndexByPath,
+    mediaCollection,
     playbackOrder,
     previewFile,
     selectedFile,
     showPreviewPane,
     shuffleQueue,
+    shuffleHistory,
   ])
 
   useEffect(() => {
-    if (playbackOrder !== 'shuffle') {
-      lastShuffleMediaSetKeyRef.current = null
+    const syncPlan = resolvePreviewShuffleMediaSetSyncPlan({
+      collection: mediaCollection,
+      playbackOrder,
+      activeMediaFile,
+      hasOpenPreview: !!previewFile || showPreviewPane,
+      shuffleState: {
+        queue: shuffleQueue,
+        history: shuffleHistory,
+      },
+      lastShuffleMediaSetKey: lastShuffleMediaSetKeyRef.current,
+    })
+
+    if (syncPlan.kind === 'none') return
+    if (syncPlan.kind === 'clear-last-shuffle-media-set') {
+      lastShuffleMediaSetKeyRef.current = syncPlan.lastShuffleMediaSetKey
       return
     }
-    if (mediaFiles.length === 0) {
-      setShuffleQueue([])
-      setShuffleHistory([])
-      lastShuffleMediaSetKeyRef.current = mediaSetKey
-      return
-    }
-    if (!previewFile && !showPreviewPane) {
+    if (syncPlan.kind === 'mark-current-media-set') {
+      lastShuffleMediaSetKeyRef.current = syncPlan.lastShuffleMediaSetKey
       return
     }
 
-    const activePath =
-      activeMediaFile?.kind === 'file' && mediaIndexByPath.has(activeMediaFile.path)
-        ? activeMediaFile.path
-        : null
-
-    const hasInvalidQueueEntry = shuffleQueue.some((path) => !mediaIndexByPath.has(path))
-    const hasInvalidHistoryEntry = shuffleHistory.some((path) => !mediaIndexByPath.has(path))
-    const tailPath = shuffleHistory[shuffleHistory.length - 1]
-    const hasMediaSetChanged = lastShuffleMediaSetKeyRef.current !== mediaSetKey
-
-    if (!activePath) {
-      return
-    }
-
-    if (hasMediaSetChanged || hasInvalidQueueEntry || hasInvalidHistoryEntry || tailPath !== activePath) {
-      initializeShuffleState(activePath)
-      lastShuffleMediaSetKeyRef.current = mediaSetKey
-      return
-    }
-    lastShuffleMediaSetKeyRef.current = mediaSetKey
+    setShuffleQueue(syncPlan.shuffleState.queue)
+    setShuffleHistory(syncPlan.shuffleState.history)
+    lastShuffleMediaSetKeyRef.current = syncPlan.lastShuffleMediaSetKey
   }, [
     playbackOrder,
-    mediaFiles,
-    mediaSetKey,
+    mediaCollection,
     activeMediaFile,
-    mediaIndexByPath,
     shuffleQueue,
     shuffleHistory,
     previewFile,
     showPreviewPane,
-    initializeShuffleState,
   ])
 
   useEffect(() => {
-    if (!previewFile && !showPreviewPane) {
+    const gateIntent = resolvePreviewAutoPlayGateIntent({
+      autoPlayEnabled,
+      hasOpenPreview,
+      hasActiveMediaPreview,
+    })
+    if (gateIntent.kind === 'disable-autoplay') {
       setAutoPlayEnabled(false)
     }
-  }, [previewFile, showPreviewPane])
+  }, [autoPlayEnabled, hasActiveMediaPreview, hasOpenPreview])
 
   useEffect(() => {
     savePersistedPreviewPlaybackPreferences({
@@ -445,13 +381,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
       faceBboxVisible,
     })
   }, [faceBboxVisible, playbackOrder, videoPlaybackRate, videoSeekStepSec])
-
-  useEffect(() => {
-    if (!hasOpenPreview) return
-    if (!hasActiveMediaPreview && autoPlayEnabled) {
-      setAutoPlayEnabled(false)
-    }
-  }, [autoPlayEnabled, hasActiveMediaPreview, hasOpenPreview])
 
   useEffect(() => {
     const syncVisibilityState = () => {
@@ -488,16 +417,16 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   useEffect(() => {
     clearAutoPlayTimer()
 
-    if (!isAutoPlayEligible || !activeMediaFile || activeMediaFile.kind !== 'file') {
-      return
-    }
-    if (getFilePreviewKind(activeMediaFile.name) === 'video') {
-      return
-    }
+    const timerPlan = resolvePreviewAutoPlayTimerPlan({
+      isAutoPlayEligible,
+      activeFile: activeMediaFile,
+      intervalSec: autoPlayIntervalSec,
+    })
+    if (timerPlan.kind === 'none') return
 
     autoPlayTimerRef.current = window.setTimeout(() => {
       navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
-    }, autoPlayIntervalSec * 1000)
+    }, timerPlan.delayMs)
 
     return clearAutoPlayTimer
   }, [
