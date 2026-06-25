@@ -14,7 +14,10 @@ export type ExplorerToolbarDisclosureAction =
   | { type: 'current-path-changed' }
   | { type: 'enter-edit' }
   | { type: 'cancel-edit' }
+  | { type: 'set-draft-path'; draftPath: string }
+  | { type: 'set-edit-error'; editError: string | null }
   | { type: 'outside-address-click' }
+  | { type: 'close-address-disclosures' }
   | { type: 'toggle-segment'; path: string }
   | { type: 'toggle-history' }
   | { type: 'toggle-favorites' }
@@ -81,6 +84,20 @@ export function resolveExplorerToolbarDisclosureState({
     }
   }
 
+  if (action.type === 'set-draft-path') {
+    return {
+      ...state,
+      draftPath: action.draftPath,
+    }
+  }
+
+  if (action.type === 'set-edit-error') {
+    return {
+      ...state,
+      editError: action.editError,
+    }
+  }
+
   if (action.type === 'outside-address-click') {
     return {
       ...closeAddressDisclosures(state),
@@ -92,6 +109,10 @@ export function resolveExplorerToolbarDisclosureState({
         }
         : {}),
     }
+  }
+
+  if (action.type === 'close-address-disclosures') {
+    return closeAddressDisclosures(state)
   }
 
   if (action.type === 'toggle-segment') {

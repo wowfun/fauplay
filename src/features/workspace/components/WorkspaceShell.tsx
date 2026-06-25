@@ -6,10 +6,6 @@ import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useReso
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWorkspaceShell'
 import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
-import {
-  type PendingDeleteUndoRestoreState,
-  usePendingDeleteUndoRestore,
-} from '@/features/workspace/hooks/usePendingDeleteUndoRestore'
 import { useInputMode } from '@/features/workspace/hooks/useInputMode'
 import { useActivePreviewVideoControls } from '@/features/workspace/hooks/useActivePreviewVideoControls'
 import { useViewportMode } from '@/features/workspace/hooks/useViewportMode'
@@ -34,40 +30,19 @@ import { useWorkspacePeoplePanel } from '@/features/workspace/hooks/useWorkspace
 import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useWorkspacePresentationProfile'
 import { useWorkspacePluginTools } from '@/features/workspace/hooks/useWorkspacePluginTools'
 import { useWorkspaceTrashAvailability } from '@/features/workspace/hooks/useWorkspaceTrashAvailability'
+import { useWorkspaceDeleteUndoController } from '@/features/workspace/hooks/useWorkspaceDeleteUndoController'
 import {
-  cloneFilterState,
   isAnnotationFilterAtDefault,
   useWorkspaceFilterState,
 } from '@/features/workspace/hooks/useWorkspaceFilterState'
 import { useWorkspaceFileSelectionSummary } from '@/features/workspace/hooks/useWorkspaceFileSelectionSummary'
 import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspacePathHistory'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import { normalizeRootRelativePath as normalizeRelativePath } from '@/features/workspace/lib/projectionTabs'
 import { resolveWorkspacePreviewCapabilityModel } from '@/features/workspace/lib/workspacePreviewCapabilityModel'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
-import {
-  type DeleteUndoBatch,
-  type DeleteUndoPreviewSnapshot,
-  type DeleteUndoRestoreItem,
-  type DeleteUndoSnapshot,
-} from '@/features/workspace/lib/deleteUndo'
-import {
-  createDeleteUndoId,
-  restoreDeleteUndoItemsThroughRuntime,
-} from '@/features/workspace/lib/deleteUndoRuntime'
-import {
-  cloneDuplicateSelectionRuleRecord,
-  cloneNullableStringRecord,
-  cloneResultProjection,
-  cloneStringArrayRecord,
-  createDeleteUndoBatch,
-  createDeleteUndoPreviewSnapshot,
-  createDeleteUndoSnapshot,
-} from '@/features/workspace/lib/deleteUndoSnapshot'
-import { resolveDeleteUndoRestoreResult } from '@/features/workspace/lib/deleteUndoRestorePlan'
+import { resolveWorkspaceMutationDeleteUndoPlan } from '@/features/workspace/lib/deleteUndoMutationPlan'
 import { resolveWorkspacePreviewMutationPlan } from '@/features/workspace/lib/previewMutationPlan'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
-import { getBoundRootPath } from '@/lib/reveal'
 import {
   type AddressPathHistoryEntry,
   type FavoriteFolderEntry,
@@ -78,7 +53,6 @@ import {
   type ThumbnailSizePreset,
 } from '@/types'
 const TRASH_ROUTE_PATH = '@trash'
-const DELETE_UNDO_NOTICE_TIMEOUT_MS = 6000
 
 interface WorkspaceShellProps {
   accessProvider: 'local-browser' | 'remote-readonly'
@@ -112,14 +86,6 @@ interface WorkspaceShellProps {
   filterFiles: (files: FileItem[], filter: FilterState) => FileItem[]
   onSwitchWorkspace?: () => void
   onForgetRemoteDevice?: () => void
-}
-
-type DeleteUndoNoticeTone = 'default' | 'error'
-
-interface DeleteUndoNoticeState {
-  id: string
-  message: string
-  tone: DeleteUndoNoticeTone
 }
 
 export function WorkspaceShell({
@@ -207,10 +173,6 @@ export function WorkspaceShell({
     lastNormalResultPanelHeightRef,
     handleResultPanelResizeStart,
   } = useWorkspaceResultPanelState()
-  const [deleteUndoBatches, setDeleteUndoBatches] = useState<DeleteUndoBatch[]>([])
-  const [isUndoingDelete, setIsUndoingDelete] = useState(false)
-  const [deleteUndoNotice, setDeleteUndoNotice] = useState<DeleteUndoNoticeState | null>(null)
-  const [pendingDeleteUndoRestore, setPendingDeleteUndoRestore] = useState<PendingDeleteUndoRestoreState | null>(null)
   const hasTrashEntries = useWorkspaceTrashAvailability({
     accessProvider,
     rootId,
@@ -376,21 +338,6 @@ export function WorkspaceShell({
     relativePath: activePreviewFileForTagShortcuts?.kind === 'file' ? activePreviewFileForTagShortcuts.path : null,
     enabled: canRunPreviewTagShortcuts,
   })
-  const shortcutHelpEntries = useShortcutHelpEntries({
-    rootId,
-    currentPath,
-    canUndoDelete: deleteUndoBatches.length > 0,
-    visibleItemCount: activeSurfaceFiles.length,
-    selectedGridCount: selectedGridItems.length,
-    hasOpenPreview,
-    hasActivePreviewFile: Boolean(
-      activePreviewFileForTagShortcuts && activePreviewFileForTagShortcuts.kind === 'file'
-    ),
-    hasActiveMediaPreview,
-    hasActiveVideoPreview,
-    canManagePreviewTags: canRunPreviewTagShortcuts,
-    canSoftDeletePreview: canSoftDeleteActivePreview,
-  })
   const {
     toggleActivePreviewVideoPlayback,
     seekActivePreviewVideo,
@@ -485,175 +432,63 @@ export function WorkspaceShell({
     return openHistoryEntry(entry)
   }, [openHistoryEntry])
 
-  const showDeleteUndoNoticeMessage = useCallback((message: string, tone: DeleteUndoNoticeTone = 'default') => {
-    setDeleteUndoNotice({
-      id: createDeleteUndoId('delete-undo-notice'),
-      message,
-      tone,
-    })
-  }, [])
-
-  const captureDeleteUndoPreviewSnapshot = useCallback((): DeleteUndoPreviewSnapshot => (
-    createDeleteUndoPreviewSnapshot({
-      showPreviewPane,
-      selectedFile,
-      previewFile,
-    })
-  ), [previewFile, selectedFile, showPreviewPane])
-
-  const captureDeleteUndoSnapshot = useCallback((): DeleteUndoSnapshot | null => {
-    return createDeleteUndoSnapshot({
-      rootId,
-      rootName,
-      rootPath: rootId ? getBoundRootPath(rootId) : null,
-      currentPath,
-      visitedAt: Date.now(),
-      filter,
-      isFlattenView,
-      activeSurface,
-      directorySelectedPaths,
-      directoryFocusedPath,
-      isResultPanelOpen,
-      resultPanelDisplayMode,
-      resultPanelHeightPx,
-      lastNormalResultPanelHeightPx: lastNormalResultPanelHeightRef.current,
-      projectionTabs,
-      activeProjectionTabId,
-      projectionSelectedPathsById,
-      projectionFocusedPathById,
-      duplicateSelectionRuleByProjectionId,
-      preview: captureDeleteUndoPreviewSnapshot(),
-    })
-  }, [
-    activeProjectionTabId,
-    activeSurface,
-    captureDeleteUndoPreviewSnapshot,
-    currentPath,
-    directoryFocusedPath,
-    directorySelectedPaths,
-    duplicateSelectionRuleByProjectionId,
-	    filter,
-	    isFlattenView,
-	    isResultPanelOpen,
-	    lastNormalResultPanelHeightRef,
-	    projectionFocusedPathById,
-    projectionSelectedPathsById,
-    projectionTabs,
-    resultPanelDisplayMode,
-    resultPanelHeightPx,
-    rootName,
+  const {
+    deleteUndoNoticeMessage,
+    deleteUndoNoticeTone,
+    canUndoDelete,
+    isUndoingDelete,
+    createDeleteUndoBatchFromParams,
+    pushDeleteUndoBatch,
+    handleUndoDelete,
+  } = useWorkspaceDeleteUndoController({
     rootId,
-  ])
-
-  const buildDeleteUndoBatch = useCallback((
-    restoreItems: DeleteUndoRestoreItem[] | undefined,
-    snapshot: DeleteUndoSnapshot | null
-  ): DeleteUndoBatch | null => {
-    return createDeleteUndoBatch({
-      id: createDeleteUndoId('delete-undo-batch'),
-      createdAt: Date.now(),
-      restoreItems,
-      snapshot,
-    })
-  }, [])
-
-  const pushDeleteUndoBatch = useCallback((batch: DeleteUndoBatch | null) => {
-    if (!batch) {
-      return
-    }
-
-    setDeleteUndoBatches((previous) => [batch, ...previous])
-    showDeleteUndoNoticeMessage(`已删除 ${batch.deletedCount} 项`, 'default')
-  }, [showDeleteUndoNoticeMessage])
-
-  const restoreDeleteUndoPreviewSnapshot = useCallback((previewSnapshot: DeleteUndoPreviewSnapshot) => {
-    if (previewSnapshot.showPreviewPane && previewSnapshot.selectedFile?.kind === 'file') {
-      openFileInPaneOrFullscreenFallback(previewSnapshot.selectedFile)
-    } else {
-      closePreviewPane()
-    }
-
-    if (previewSnapshot.previewFile?.kind === 'file') {
-      openFileInModal(previewSnapshot.previewFile)
-    } else {
-      closePreviewModal()
-    }
-  }, [
-    closePreviewModal,
+    rootName,
+    currentPath,
+    filter,
+    setFilter,
+    isFlattenView,
+    setFlattenView,
+    activeSurface,
+    setActiveSurface,
+    directorySelectedPaths,
+    setDirectorySelectedPaths,
+    directoryFocusedPath,
+    setDirectoryFocusedPath,
+    isResultPanelOpen,
+    setIsResultPanelOpen,
+    resultPanelDisplayMode,
+    setResultPanelDisplayMode,
+    resultPanelHeightPx,
+    setResultPanelHeightPx,
+    lastNormalResultPanelHeightRef,
+    projectionTabs,
+    setProjectionTabs,
+    activeProjectionTabId,
+    setActiveProjectionTabId,
+    setLastProjectionTabId,
+    projectionSelectedPathsById,
+    setProjectionSelectedPathsById,
+    projectionFocusedPathById,
+    setProjectionFocusedPathById,
+    duplicateSelectionRuleByProjectionId,
+    setDuplicateSelectionRuleByProjectionId,
+    showPreviewPane,
+    selectedFile,
+    previewFile,
+    openFileInPaneOrFullscreenFallback,
     closePreviewPane,
     openFileInModal,
-    openFileInPaneOrFullscreenFallback,
-  ])
-
-  const applyDeleteUndoSnapshot = useCallback(async (snapshot: DeleteUndoSnapshot) => {
-    setFilter(cloneFilterState(snapshot.filter))
-
-    if (isFlattenView !== snapshot.isFlattenView) {
-      await setFlattenView(snapshot.isFlattenView)
-    }
-
-    lastNormalResultPanelHeightRef.current = snapshot.lastNormalResultPanelHeightPx
-    setResultPanelHeightPx(snapshot.resultPanelHeightPx)
-    setResultPanelDisplayMode(snapshot.resultPanelDisplayMode)
-    setProjectionTabs(snapshot.projectionTabs.map((projection) => cloneResultProjection(projection)))
-    setActiveProjectionTabId(snapshot.activeProjectionTabId)
-    setLastProjectionTabId(snapshot.activeProjectionTabId)
-    setProjectionSelectedPathsById(cloneStringArrayRecord(snapshot.projectionSelectedPathsById))
-    setDuplicateSelectionRuleByProjectionId(cloneDuplicateSelectionRuleRecord(snapshot.duplicateSelectionRuleByProjectionId))
-    setProjectionFocusedPathById(cloneNullableStringRecord(snapshot.projectionFocusedPathById))
-    setDirectorySelectedPaths([...snapshot.directorySelectedPaths])
-    setDirectoryFocusedPath(snapshot.directoryFocusedPath)
-    setIsResultPanelOpen(snapshot.isResultPanelOpen)
-    setActiveSurface(
-      snapshot.activeSurface.kind === 'projection' && snapshot.activeProjectionTabId
-        ? { kind: 'projection', tabId: snapshot.activeProjectionTabId }
-        : { kind: 'directory' }
-    )
-
-    restoreDeleteUndoPreviewSnapshot(snapshot.preview)
-    await refreshFilterTagSnapshots()
-	  }, [
-	    isFlattenView,
-	    lastNormalResultPanelHeightRef,
-	    refreshFilterTagSnapshots,
-	    restoreDeleteUndoPreviewSnapshot,
-		    setFilter,
-		    setFlattenView,
-		    setActiveProjectionTabId,
-		    setActiveSurface,
-		    setDuplicateSelectionRuleByProjectionId,
-		    setIsResultPanelOpen,
-		    setLastProjectionTabId,
-		    setProjectionFocusedPathById,
-		    setProjectionSelectedPathsById,
-		    setProjectionTabs,
-		    setResultPanelDisplayMode,
-		    setResultPanelHeightPx,
-		  ])
-
-  const createDeleteUndoBatchFromParams = useCallback((
-    params: WorkspaceMutationCommitParams | PreviewMutationCommitParams | undefined
-  ): DeleteUndoBatch | null => {
-    if (params?.mutationToolName !== 'fs.softDelete') {
-      return null
-    }
-    return buildDeleteUndoBatch(params.undoRestoreItems, captureDeleteUndoSnapshot())
-  }, [buildDeleteUndoBatch, captureDeleteUndoSnapshot])
+    closePreviewModal,
+    refreshFilterTagSnapshots,
+    openHistoryEntry,
+    forgetDeletedProjectionAbsolutePath,
+  })
 
   const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
     const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
-    if (
-      params?.mutationToolName === 'fs.softDelete'
-      && (
-        (Array.isArray(params.deletedAbsolutePaths) && params.deletedAbsolutePaths.length > 0)
-        || (Array.isArray(params.deletedProjectionPaths) && params.deletedProjectionPaths.length > 0)
-      )
-    ) {
-      pruneDeletedFilesFromProjectionTabs({
-        deletedAbsolutePaths: params.deletedAbsolutePaths,
-        deletedProjectionPaths: params.deletedProjectionPaths,
-        projectionTabId: params.projectionTabId,
-      })
+    const deleteUndoPlan = resolveWorkspaceMutationDeleteUndoPlan(params)
+    if (deleteUndoPlan.shouldPruneDeletedProjectionTabs && deleteUndoPlan.pruneDeletedProjectionTabsParams) {
+      pruneDeletedFilesFromProjectionTabs(deleteUndoPlan.pruneDeletedProjectionTabsParams)
     }
     await navigateToPath(currentPath)
     await refreshFilterTagSnapshots()
@@ -727,84 +562,6 @@ export function WorkspaceShell({
     activeSurfaceFileItems,
   ])
 
-  const handleUndoDelete = useCallback(async () => {
-    const batch = deleteUndoBatches[0]
-    if (!batch || isUndoingDelete) {
-      return
-    }
-
-    setIsUndoingDelete(true)
-
-    try {
-      const response = await restoreDeleteUndoItemsThroughRuntime(
-        batch.restoreItems,
-        batch.snapshot.rootPath,
-      )
-      const restoreResult = resolveDeleteUndoRestoreResult({
-        batch,
-        remainingUndoBatches: deleteUndoBatches.slice(1),
-        response,
-        retryBatchMetadata: {
-          id: createDeleteUndoId('delete-undo-batch'),
-          createdAt: Date.now(),
-        },
-      })
-      setDeleteUndoBatches(restoreResult.undoBatches)
-
-      if (restoreResult.restoredCount === 0) {
-        showDeleteUndoNoticeMessage('撤销删除失败，请重试', 'error')
-        setIsUndoingDelete(false)
-        return
-      }
-
-      for (const restoredAbsolutePath of restoreResult.restoredAbsolutePaths) {
-        forgetDeletedProjectionAbsolutePath(restoredAbsolutePath)
-      }
-
-      const shouldNavigateBack = (
-        rootId !== restoreResult.restoredSnapshot.historyEntry.rootId
-        || normalizeRelativePath(currentPath) !== normalizeRelativePath(restoreResult.restoredSnapshot.historyEntry.path)
-      )
-      if (shouldNavigateBack) {
-        const reopened = await openHistoryEntry(restoreResult.restoredSnapshot.historyEntry)
-        if (!reopened) {
-          showDeleteUndoNoticeMessage(
-            restoreResult.failedRetryBatch
-              ? `已恢复 ${restoreResult.restoredCount} 项，但仍有 ${restoreResult.failedRetryBatch.deletedCount} 项待重试，且无法自动跳回原目录`
-              : `已恢复 ${restoreResult.restoredCount} 项，但无法自动跳回原目录`,
-            'error'
-          )
-          setIsUndoingDelete(false)
-          return
-        }
-      }
-
-      setPendingDeleteUndoRestore({ snapshot: restoreResult.restoredSnapshot })
-      if (restoreResult.failedRetryBatch) {
-        showDeleteUndoNoticeMessage(
-          `已恢复 ${restoreResult.restoredCount} 项，仍有 ${restoreResult.failedRetryBatch.deletedCount} 项撤销失败`,
-          'error'
-        )
-      } else {
-        setDeleteUndoNotice(null)
-      }
-    } catch (error) {
-      showDeleteUndoNoticeMessage(
-        error instanceof Error ? error.message : '撤销删除失败',
-        'error'
-      )
-      setIsUndoingDelete(false)
-    }
-  }, [
-	    currentPath,
-	    deleteUndoBatches,
-	    forgetDeletedProjectionAbsolutePath,
-	    isUndoingDelete,
-    openHistoryEntry,
-    rootId,
-    showDeleteUndoNoticeMessage,
-  ])
-
   const handleOpenTrash = useCallback(() => {
     if (!hasTrashEntries) return
     void navigateToPath(TRASH_ROUTE_PATH, { resetFlattenView: true })
@@ -832,34 +589,6 @@ export function WorkspaceShell({
     setDirectoryFocusedPath,
     openFileInPrimaryTarget,
     activateProjection: handleActivateProjection,
-  })
-
-  useEffect(() => {
-    if (!deleteUndoNotice) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setDeleteUndoNotice((previous) => (
-        previous?.id === deleteUndoNotice.id
-          ? null
-          : previous
-      ))
-    }, DELETE_UNDO_NOTICE_TIMEOUT_MS)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [deleteUndoNotice])
-
-  usePendingDeleteUndoRestore({
-    pendingDeleteUndoRestore,
-    setPendingDeleteUndoRestore,
-    rootId,
-    currentPath,
-    applyDeleteUndoSnapshot,
-    showDeleteUndoNoticeMessage,
-    setIsUndoingDelete,
   })
 
   useEffect(() => {
@@ -907,6 +636,22 @@ export function WorkspaceShell({
     setDirectoryFocusedPath,
     directoryFileGridRef,
     projectionFileGridRef,
+  })
+
+  const shortcutHelpEntries = useShortcutHelpEntries({
+    rootId,
+    currentPath,
+    canUndoDelete,
+    visibleItemCount: activeSurfaceFiles.length,
+    selectedGridCount: selectedGridItems.length,
+    hasOpenPreview,
+    hasActivePreviewFile: Boolean(
+      activePreviewFileForTagShortcuts && activePreviewFileForTagShortcuts.kind === 'file'
+    ),
+    hasActiveMediaPreview,
+    hasActiveVideoPreview,
+    canManagePreviewTags: canRunPreviewTagShortcuts,
+    canSoftDeletePreview: canSoftDeleteActivePreview,
   })
 
   useWorkspaceKeyboardShortcuts({
@@ -1041,9 +786,9 @@ export function WorkspaceShell({
       activeProjection: activeSurfaceProjection,
       onActivateProjection: handleActivateProjection,
       onDismissProjectionTool: handleDismissProjectionTool,
-      deleteUndoNoticeMessage: deleteUndoNotice?.message ?? null,
-      deleteUndoNoticeTone: deleteUndoNotice?.tone ?? 'default',
-      canUndoDelete: deleteUndoBatches.length > 0,
+      deleteUndoNoticeMessage,
+      deleteUndoNoticeTone,
+      canUndoDelete,
       isUndoingDelete,
       onUndoDelete: () => {
         void handleUndoDelete()

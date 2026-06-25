@@ -32,10 +32,9 @@ import {
   resolvePeoplePanelViewSwitch,
 } from '@/features/faces/lib/peoplePanelModel'
 import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
-import { FaceGrid } from '@/features/faces/components/FaceGrid'
-import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionActions'
 import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
+import { PeoplePanelFaceSection } from '@/features/faces/components/PeoplePanelFaceSection'
 import { PeoplePanelHeader } from '@/features/faces/components/PeoplePanelHeader'
 import { PeoplePanelNotice } from '@/features/faces/components/PeoplePanelNotice'
 import { PeoplePanelPersonTools } from '@/features/faces/components/PeoplePanelPersonTools'
@@ -631,87 +630,24 @@ export function PeoplePanel({
                       />
                     )}
 
-                    <div className="rounded-xl border border-border bg-card p-4">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold">人物详情</div>
-                          <div className="text-xs text-muted-foreground">
-                            {readonly ? '双击人脸可打开来源文件' : `已选 ${selectedFaceIds.size} / 当前 ${faces.length}`}
-                          </div>
-                        </div>
-                        {selectedFaceIds.size > 0 && (
-                          <Button variant="ghost" size="sm" onClick={clearSelection}>
-                            清空选择
-                          </Button>
-                        )}
-                      </div>
-
-                      {!readonly && (
-                        <FaceSelectionActions
-                          className="mb-4"
-                          layout="stacked"
-                          assignmentInputKey={`compact-detail:${assignmentInputKey}`}
-                          context={context}
-                          scope={scope}
-                          selectedFaceIds={selectedIds}
-                          selectedFaces={selectedFaces}
-                          excludedPersonIds={assignmentExcludedPersonIds}
-                          isMutatingFaces={isMutatingFaces}
-                          isProjectingSources={isProjectingSources}
-                          onAssign={handleAssignSelectedFaces}
-                          onCreate={handleCreatePersonForSelectedFaces}
-                          onUnassign={handleUnassignSelectedFaces}
-                          onIgnore={handleIgnoreSelectedFaces}
-                          onRestoreIgnored={handleRestoreIgnoredFaces}
-                          onRequeue={handleRequeueSelectedFaces}
-                          onProjectSources={handleProjectFaceSources}
-                        />
-                      )}
-
-                      {isLoadingFaces ? (
-                        <div className="py-8 text-sm text-muted-foreground">人脸数据加载中...</div>
-                      ) : (
-                        <FaceGrid
-                          compact
-                          faces={faces}
-                          selectedFaceIds={selectedFaceIds}
-                          onSelectionChange={handleFaceSelectionChange}
-                          onOpenFaceSource={handleOpenFaceSource}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {isCompact && view !== 'people' && (
-                  <div className="rounded-xl border border-border bg-card p-4">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold">
-                          {view === 'ignored' ? '误检 / 忽略池' : '未归属池'}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          已选 {selectedFaceIds.size} / 当前 {faces.length}
-                        </div>
-                      </div>
-                      {selectedFaceIds.size > 0 && (
-                        <Button variant="ghost" size="sm" onClick={clearSelection}>
-                          清空选择
-                        </Button>
-                      )}
-                    </div>
-
-                    <FaceSelectionActions
-                      className="mb-4"
-                      layout="stacked"
-                      assignmentInputKey={`compact-review:${assignmentInputKey}`}
+                    <PeoplePanelFaceSection
+                      layout="compact-detail"
+                      view={view}
+                      readonly={readonly}
                       context={context}
                       scope={scope}
-                      selectedFaceIds={selectedIds}
+                      faces={faces}
+                      selectedFaceIds={selectedFaceIds}
+                      selectedIds={selectedIds}
                       selectedFaces={selectedFaces}
                       excludedPersonIds={assignmentExcludedPersonIds}
+                      assignmentInputKey={assignmentInputKey}
+                      isLoadingFaces={isLoadingFaces}
                       isMutatingFaces={isMutatingFaces}
                       isProjectingSources={isProjectingSources}
+                      onClearSelection={clearSelection}
+                      onSelectionChange={handleFaceSelectionChange}
+                      onOpenFaceSource={handleOpenFaceSource}
                       onAssign={handleAssignSelectedFaces}
                       onCreate={handleCreatePersonForSelectedFaces}
                       onUnassign={handleUnassignSelectedFaces}
@@ -720,19 +656,36 @@ export function PeoplePanel({
                       onRequeue={handleRequeueSelectedFaces}
                       onProjectSources={handleProjectFaceSources}
                     />
-
-                    {isLoadingFaces ? (
-                      <div className="py-8 text-sm text-muted-foreground">人脸数据加载中...</div>
-                    ) : (
-                      <FaceGrid
-                        compact
-                        faces={faces}
-                        selectedFaceIds={selectedFaceIds}
-                        onSelectionChange={handleFaceSelectionChange}
-                        onOpenFaceSource={handleOpenFaceSource}
-                      />
-                    )}
                   </div>
+                )}
+
+                {isCompact && view !== 'people' && (
+                  <PeoplePanelFaceSection
+                    layout="compact-review"
+                    view={view}
+                    readonly={readonly}
+                    context={context}
+                    scope={scope}
+                    faces={faces}
+                    selectedFaceIds={selectedFaceIds}
+                    selectedIds={selectedIds}
+                    selectedFaces={selectedFaces}
+                    excludedPersonIds={assignmentExcludedPersonIds}
+                    assignmentInputKey={assignmentInputKey}
+                    isLoadingFaces={isLoadingFaces}
+                    isMutatingFaces={isMutatingFaces}
+                    isProjectingSources={isProjectingSources}
+                    onClearSelection={clearSelection}
+                    onSelectionChange={handleFaceSelectionChange}
+                    onOpenFaceSource={handleOpenFaceSource}
+                    onAssign={handleAssignSelectedFaces}
+                    onCreate={handleCreatePersonForSelectedFaces}
+                    onUnassign={handleUnassignSelectedFaces}
+                    onIgnore={handleIgnoreSelectedFaces}
+                    onRestoreIgnored={handleRestoreIgnoredFaces}
+                    onRequeue={handleRequeueSelectedFaces}
+                    onProjectSources={handleProjectFaceSources}
+                  />
                 )}
               </div>
             </div>
@@ -801,60 +754,32 @@ export function PeoplePanel({
                   </div>
                 )}
 
-                <div className="mb-4 rounded-md border border-border p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">
-                        {view === 'people'
-                          ? '人物详情'
-                          : view === 'ignored'
-                            ? '误检 / 忽略池'
-                            : '未归属池'}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {readonly ? '双击人脸可打开来源文件' : `已选 ${selectedFaceIds.size} / 当前 ${faces.length}`}
-                      </div>
-                    </div>
-                    {selectedFaceIds.size > 0 && (
-                      <Button variant="ghost" size="sm" onClick={clearSelection}>
-                        清空选择
-                      </Button>
-                    )}
-                  </div>
-
-                  {!readonly && (
-                    <FaceSelectionActions
-                      className="mb-4"
-                      assignmentClassName="max-w-[560px]"
-                      assignmentInputKey={`wide:${assignmentInputKey}`}
-                      context={context}
-                      scope={scope}
-                      selectedFaceIds={selectedIds}
-                      selectedFaces={selectedFaces}
-                      excludedPersonIds={assignmentExcludedPersonIds}
-                      isMutatingFaces={isMutatingFaces}
-                      isProjectingSources={isProjectingSources}
-                      onAssign={handleAssignSelectedFaces}
-                      onCreate={handleCreatePersonForSelectedFaces}
-                      onUnassign={handleUnassignSelectedFaces}
-                      onIgnore={handleIgnoreSelectedFaces}
-                      onRestoreIgnored={handleRestoreIgnoredFaces}
-                      onRequeue={handleRequeueSelectedFaces}
-                      onProjectSources={handleProjectFaceSources}
-                    />
-                  )}
-
-                  {isLoadingFaces ? (
-                    <div className="py-8 text-sm text-muted-foreground">人脸数据加载中...</div>
-                  ) : (
-                    <FaceGrid
-                      faces={faces}
-                      selectedFaceIds={selectedFaceIds}
-                      onSelectionChange={handleFaceSelectionChange}
-                      onOpenFaceSource={handleOpenFaceSource}
-                    />
-                  )}
-                </div>
+                <PeoplePanelFaceSection
+                  layout="wide"
+                  view={view}
+                  readonly={readonly}
+                  context={context}
+                  scope={scope}
+                  faces={faces}
+                  selectedFaceIds={selectedFaceIds}
+                  selectedIds={selectedIds}
+                  selectedFaces={selectedFaces}
+                  excludedPersonIds={assignmentExcludedPersonIds}
+                  assignmentInputKey={assignmentInputKey}
+                  isLoadingFaces={isLoadingFaces}
+                  isMutatingFaces={isMutatingFaces}
+                  isProjectingSources={isProjectingSources}
+                  onClearSelection={clearSelection}
+                  onSelectionChange={handleFaceSelectionChange}
+                  onOpenFaceSource={handleOpenFaceSource}
+                  onAssign={handleAssignSelectedFaces}
+                  onCreate={handleCreatePersonForSelectedFaces}
+                  onUnassign={handleUnassignSelectedFaces}
+                  onIgnore={handleIgnoreSelectedFaces}
+                  onRestoreIgnored={handleRestoreIgnoredFaces}
+                  onRequeue={handleRequeueSelectedFaces}
+                  onProjectSources={handleProjectFaceSources}
+                />
               </div>
             </div>
           )}

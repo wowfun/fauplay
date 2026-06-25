@@ -4,11 +4,16 @@ import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
 import { callRuntimeHttp, type RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { withToolScopedProjection } from '@/lib/projection'
 import { ensureRootPath } from '@/lib/reveal'
-import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
+import {
+  resolveWorkspaceAbsoluteDeletePayload,
+  resolveWorkspaceMutationCommitParams,
+  resolveWorkspaceRecycleRestoreItems,
+  resolveWorkspaceRelativeToolPayload,
+} from '@/features/explorer/lib/workspacePluginHostModel'
 import {
   hasWorkbenchMetadata,
   usePluginRuntime,
@@ -41,97 +46,6 @@ interface WorkspacePluginHostProps {
   onToggleToolPanelCollapsed: () => void
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
-}
-
-function isAbsolutePathLike(value: string): boolean {
-  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)
-}
-
-function resolveRelativeToolPayload(files: FileItem[]): { relativePaths: string[]; rootPath?: string } | null {
-  if (files.length === 0) return null
-
-  const relativePaths: string[] = []
-  let sharedRootPath: string | null = null
-  for (const file of files) {
-    const relativePath = typeof file.sourceRelativePath === 'string' && file.sourceRelativePath.trim()
-      ? file.sourceRelativePath.trim()
-      : (!isAbsolutePathLike(file.path) ? file.path : '')
-    if (!relativePath) {
-      return null
-    }
-
-    if (typeof file.sourceRootPath === 'string' && file.sourceRootPath.trim()) {
-      if (sharedRootPath === null) {
-        sharedRootPath = file.sourceRootPath.trim()
-      } else if (sharedRootPath !== file.sourceRootPath.trim()) {
-        return null
-      }
-    }
-
-    relativePaths.push(relativePath)
-  }
-
-  return {
-    relativePaths,
-    ...(sharedRootPath ? { rootPath: sharedRootPath } : {}),
-  }
-}
-
-function resolveRecycleRestoreItems(files: FileItem[]): Array<Record<string, unknown>> | null {
-  if (files.length === 0) return null
-
-  const items: Array<Record<string, unknown>> = []
-  for (const file of files) {
-    if (file.sourceType !== 'root_trash' && file.sourceType !== 'global_recycle') {
-      return null
-    }
-
-    const nextItem: Record<string, unknown> = {
-      sourceType: file.sourceType,
-    }
-    if (typeof file.recycleId === 'string' && file.recycleId.trim()) {
-      nextItem.recycleId = file.recycleId.trim()
-    }
-    if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
-      nextItem.absolutePath = file.absolutePath.trim()
-    }
-    items.push(nextItem)
-  }
-
-  return items
-}
-
-function resolveAbsoluteDeletePayload(files: FileItem[]): { absolutePaths: string[] } | null {
-  if (files.length === 0) return null
-  const absolutePaths = files
-    .map((file) => (typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''))
-    .filter((item) => item)
-  if (absolutePaths.length !== files.length) {
-    return null
-  }
-  return { absolutePaths }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
-  if (!isRecord(result) || !Array.isArray(result.items)) {
-    return []
-  }
-
-  const unique = new Set<string>()
-  for (const item of result.items) {
-    if (!isRecord(item) || item.ok !== true || typeof item.absolutePath !== 'string') {
-      continue
-    }
-    const absolutePath = item.absolutePath.trim()
-    if (!absolutePath) continue
-    unique.add(absolutePath)
-  }
-
-  return [...unique]
 }
 
 const WORKSPACE_FACE_SCAN_ACTION = {
@@ -311,15 +225,15 @@ export function WorkspacePluginHost({
     [selectedFileEntries, visibleFileEntries]
   )
   const relativeTargetArgs = useMemo(
-    () => resolveRelativeToolPayload(targetFileEntries),
+    () => resolveWorkspaceRelativeToolPayload(targetFileEntries),
     [targetFileEntries]
   )
   const selectedRestoreItems = useMemo(
-    () => resolveRecycleRestoreItems(selectedFileEntries),
+    () => resolveWorkspaceRecycleRestoreItems(selectedFileEntries),
     [selectedFileEntries]
   )
   const selectedDeleteAbsoluteArgs = useMemo(
-    () => (activeProjection ? resolveAbsoluteDeletePayload(selectedFileEntries) : null),
+    () => (activeProjection ? resolveWorkspaceAbsoluteDeletePayload(selectedFileEntries) : null),
     [activeProjection, selectedFileEntries]
   )
   const hasTargets = targetFileEntries.length > 0
@@ -377,34 +291,15 @@ export function WorkspacePluginHost({
       return
     }
 
-    const mutationParams: WorkspaceMutationCommitParams = {
-      mutationToolName: tool.name,
-    }
-    if (tool.name === 'fs.softDelete') {
-      mutationParams.undoRestoreItems = readDeleteUndoRestoreItems(result.result)
-      const successfulAbsolutePaths = readSuccessfulResultAbsolutePaths(result.result)
-      const requestedAbsolutePaths = selectedDeleteAbsoluteArgs?.absolutePaths ?? []
-      const deletedAbsolutePathSet = new Set<string>()
-      for (const absolutePath of successfulAbsolutePaths) {
-        if (absolutePath) {
-          deletedAbsolutePathSet.add(absolutePath)
-        }
-      }
-      for (const absolutePath of requestedAbsolutePaths) {
-        if (absolutePath) {
-          deletedAbsolutePathSet.add(absolutePath)
-        }
-      }
-      if (deletedAbsolutePathSet.size > 0) {
-        mutationParams.deletedAbsolutePaths = [...deletedAbsolutePathSet]
-      }
-      if (activeProjection?.id) {
-        mutationParams.projectionTabId = activeProjection.id
-        mutationParams.deletedProjectionPaths = selectedFileEntries.map((file) => file.path)
-      }
-    }
+    const mutationParams = resolveWorkspaceMutationCommitParams({
+      toolName: tool.name,
+      result,
+      selectedDeleteAbsoluteArgs,
+      activeProjectionId: activeProjection?.id,
+      selectedFileEntries,
+    })
     await onMutationCommitted(mutationParams)
-  }, [activeProjection?.id, onMutationCommitted, selectedDeleteAbsoluteArgs?.absolutePaths, selectedFileEntries])
+  }, [activeProjection?.id, onMutationCommitted, selectedDeleteAbsoluteArgs, selectedFileEntries])
 
   const runtime = usePluginRuntime({
     scope: 'workspace',

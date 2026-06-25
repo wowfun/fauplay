@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   resolvePeoplePanelCompactEmptySelectionStage,
   resolvePeoplePanelFacesLoadPlan,
+  resolvePeoplePanelFaceSectionModel,
   resolvePeoplePanelListStage,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPreferredPersonFocus,
@@ -346,6 +347,56 @@ test('People Panel Model resolves the current faces load plan', () => {
     readonly: true,
     scope: 'root',
   }), { kind: 'empty' })
+})
+
+test('People Panel Model resolves face section display for layout and view state', () => {
+  assert.deepEqual(resolvePeoplePanelFaceSectionModel({
+    layout: 'wide',
+    view: 'people',
+    readonly: false,
+    selectedFaceCount: 2,
+    faceCount: 9,
+    assignmentInputKey: 'root:people:person-a',
+  }), {
+    title: '人物详情',
+    subtitle: '已选 2 / 当前 9',
+    assignmentInputKey: 'wide:root:people:person-a',
+    actionLayout: 'inline',
+    assignmentClassName: 'max-w-[560px]',
+    compactGrid: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFaceSectionModel({
+    layout: 'compact-review',
+    view: 'ignored',
+    readonly: false,
+    selectedFaceCount: 1,
+    faceCount: 3,
+    assignmentInputKey: 'global:ignored:',
+  }), {
+    title: '误检 / 忽略池',
+    subtitle: '已选 1 / 当前 3',
+    assignmentInputKey: 'compact-review:global:ignored:',
+    actionLayout: 'stacked',
+    assignmentClassName: null,
+    compactGrid: true,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFaceSectionModel({
+    layout: 'compact-detail',
+    view: 'unassigned',
+    readonly: true,
+    selectedFaceCount: 0,
+    faceCount: 5,
+    assignmentInputKey: 'root:unassigned:',
+  }), {
+    title: '未归属池',
+    subtitle: '双击人脸可打开来源文件',
+    assignmentInputKey: 'compact-detail:root:unassigned:',
+    actionLayout: 'stacked',
+    assignmentClassName: null,
+    compactGrid: true,
+  })
 })
 
 test('People Panel Model preserves selected people when refreshed list still contains them', () => {

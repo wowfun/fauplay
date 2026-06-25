@@ -3,6 +3,8 @@ import { getPersonDisplayName } from '../utils/personDisplayName.ts'
 import type { PanelView } from './peoplePanelText.ts'
 
 export type CompactPeopleStage = 'list' | 'detail'
+export type PeoplePanelFaceSectionLayout = 'wide' | 'compact-detail' | 'compact-review'
+export type PeoplePanelFaceSectionActionLayout = 'inline' | 'stacked'
 
 export interface ResolvePeoplePanelSelectionModelParams {
   people: PersonSummary[]
@@ -80,6 +82,24 @@ export type PeoplePanelFacesLoadPlan =
 export interface ResolvePeoplePanelRefreshedPeopleSelectionParams {
   previousSelectedPersonId: string | null
   people: PersonSummary[]
+}
+
+export interface ResolvePeoplePanelFaceSectionModelParams {
+  layout: PeoplePanelFaceSectionLayout
+  view: PanelView
+  readonly: boolean
+  selectedFaceCount: number
+  faceCount: number
+  assignmentInputKey: string
+}
+
+export interface PeoplePanelFaceSectionModel {
+  title: string
+  subtitle: string
+  assignmentInputKey: string
+  actionLayout: PeoplePanelFaceSectionActionLayout
+  assignmentClassName: string | null
+  compactGrid: boolean
 }
 
 export function resolvePeoplePanelSelectionModel({
@@ -216,4 +236,31 @@ export function resolvePeoplePanelRefreshedPeopleSelection({
     return previousSelectedPersonId
   }
   return people[0]?.personId ?? null
+}
+
+export function resolvePeoplePanelFaceSectionModel({
+  layout,
+  view,
+  readonly,
+  selectedFaceCount,
+  faceCount,
+  assignmentInputKey,
+}: ResolvePeoplePanelFaceSectionModelParams): PeoplePanelFaceSectionModel {
+  const isWide = layout === 'wide'
+  return {
+    title: faceSectionTitle(view),
+    subtitle: readonly
+      ? '双击人脸可打开来源文件'
+      : `已选 ${selectedFaceCount} / 当前 ${faceCount}`,
+    assignmentInputKey: `${layout}:${assignmentInputKey}`,
+    actionLayout: isWide ? 'inline' : 'stacked',
+    assignmentClassName: isWide ? 'max-w-[560px]' : null,
+    compactGrid: !isWide,
+  }
+}
+
+function faceSectionTitle(view: PanelView): string {
+  if (view === 'people') return '人物详情'
+  if (view === 'ignored') return '误检 / 忽略池'
+  return '未归属池'
 }

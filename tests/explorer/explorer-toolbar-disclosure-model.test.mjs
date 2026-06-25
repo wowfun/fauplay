@@ -126,6 +126,27 @@ test('Explorer Toolbar Disclosure Model resolves path changes and outside clicks
     ...createExplorerToolbarDisclosureState('albums'),
     isHelpOpen: true,
   })
+
+  assert.deepEqual(resolveExplorerToolbarDisclosureState({
+    state: {
+      ...createExplorerToolbarDisclosureState('albums'),
+      addressBarMode: 'edit',
+      draftPath: 'draft',
+      editError: '路径无效',
+      openSegmentPath: 'albums',
+      isHistoryOpen: true,
+      isFavoritesOpen: true,
+      isHelpOpen: true,
+    },
+    currentPath: 'albums',
+    action: { type: 'close-address-disclosures' },
+  }), {
+    ...createExplorerToolbarDisclosureState('albums'),
+    addressBarMode: 'edit',
+    draftPath: 'draft',
+    editError: '路径无效',
+    isHelpOpen: true,
+  })
 })
 
 test('Explorer Toolbar Disclosure Model closes committed navigation disclosures', () => {
@@ -168,5 +189,27 @@ test('Explorer Toolbar Disclosure Model closes committed navigation disclosures'
   }), {
     ...state,
     isFavoritesOpen: false,
+  })
+})
+
+test('Explorer Toolbar Disclosure Model updates the address edit draft and error', () => {
+  const state = createExplorerToolbarDisclosureState('albums')
+
+  assert.deepEqual(resolveExplorerToolbarDisclosureState({
+    state,
+    currentPath: 'albums',
+    action: { type: 'set-draft-path', draftPath: 'albums/raw' },
+  }), {
+    ...state,
+    draftPath: 'albums/raw',
+  })
+
+  assert.deepEqual(resolveExplorerToolbarDisclosureState({
+    state,
+    currentPath: 'albums',
+    action: { type: 'set-edit-error', editError: '路径无效' },
+  }), {
+    ...state,
+    editError: '路径无效',
   })
 })
