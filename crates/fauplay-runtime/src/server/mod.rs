@@ -1,19 +1,17 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::{
-    FauplayRuntime, GlobalShortcutConfigResponse, LocalRootBinding, LocalRootBindingUpsertRequest,
-    LocalRootBindingsResponse, TextPreviewStatus,
-};
+use crate::{FauplayRuntime, TextPreviewStatus};
 
 mod file_annotations;
 mod file_index;
 mod global_trash;
 mod http;
 mod local_files;
+mod local_root_bindings;
 mod missing_files;
 mod request;
 mod root_operations;
+mod runtime_config;
 
 pub use http::{serve_http, serve_one_http_request};
 
@@ -35,16 +33,18 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             "OK",
             "{\"status\":\"ok\",\"runtime\":\"fauplay-runtime\"}",
         ),
-        Some(("GET", "/v1/config/shortcuts")) => handle_global_shortcut_config(runtime),
+        Some(("GET", "/v1/config/shortcuts")) => {
+            runtime_config::handle_global_shortcut_config(runtime)
+        }
         Some(("GET", target))
             if target == "/v1/local-root-bindings"
                 || target.starts_with("/v1/local-root-bindings?") =>
         {
-            handle_list_local_root_bindings(runtime)
+            local_root_bindings::handle_list_local_root_bindings(runtime)
         }
         Some(("PUT", target)) if target.starts_with("/v1/local-root-bindings?") => {
             let query = parse_query_string(&target["/v1/local-root-bindings?".len()..]);
-            handle_upsert_local_root_binding(runtime, &query)
+            local_root_bindings::handle_upsert_local_root_binding(runtime, &query)
         }
         Some(("OPTIONS", target)) if is_preflight_target(target) => {
             http_response(204, "No Content", "")
@@ -205,48 +205,6 @@ fn is_preflight_target(target: &str) -> bool {
     )
 }
 
-fn handle_global_shortcut_config(runtime: &FauplayRuntime) -> HttpResponse {
-    match runtime.load_global_shortcut_config() {
-        Ok(response) => http_response(200, "OK", &global_shortcut_config_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_list_local_root_bindings(runtime: &FauplayRuntime) -> HttpResponse {
-    match runtime.list_local_root_bindings() {
-        Ok(response) => http_response(200, "OK", &local_root_bindings_response_json(response)),
-        Err(error) => http_response(
-            500,
-            "Internal Server Error",
-            &error_json(&error.to_string()),
-        ),
-    }
-}
-
-fn handle_upsert_local_root_binding(
-    runtime: &FauplayRuntime,
-    query: &HashMap<String, String>,
-) -> HttpResponse {
-    let Some(root_id) = query.get("rootId").map(String::as_str) else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
-    };
-    let Some(root_path) = query.get("rootPath").map(String::as_str) else {
-        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
-    };
-
-    match runtime.upsert_local_root_binding(LocalRootBindingUpsertRequest {
-        root_id: root_id.to_owned(),
-        root_path: PathBuf::from(root_path),
-    }) {
-        Ok(response) => http_response(200, "OK", &local_root_binding_json(&response)),
-        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
-    }
-}
-
 fn parse_entry_limit(value: Option<&str>) -> Option<usize> {
     let limit = value?.parse::<usize>().ok()?;
     (limit > 0).then_some(limit)
@@ -278,44 +236,6 @@ fn text_preview_response_json(response: crate::TextPreviewResponse) -> String {
         response.file_size_bytes,
         response.size_limit_bytes,
         optional_string_json(response.error.as_deref()),
-    )
-}
-
-fn global_shortcut_config_response_json(response: GlobalShortcutConfigResponse) -> String {
-    let mut json = format!(
-        "{{\"ok\":true,\"loaded\":{},\"path\":\"{}\"",
-        response.loaded,
-        escape_json_string(&response.path.display().to_string()),
-    );
-    if response.loaded {
-        let config_json = response
-            .config_json
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("null");
-        json.push_str(&format!(",\"config\":{config_json}"));
-    }
-    json.push('}');
-    json
-}
-
-fn local_root_bindings_response_json(response: LocalRootBindingsResponse) -> String {
-    let items = response
-        .items
-        .iter()
-        .map(local_root_binding_json)
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!("{{\"items\":[{items}]}}")
-}
-
-fn local_root_binding_json(binding: &LocalRootBinding) -> String {
-    format!(
-        "{{\"rootId\":\"{}\",\"rootPath\":\"{}\"}}",
-        escape_json_string(&binding.root_id),
-        escape_json_string(&binding.root_path.display().to_string()),
     )
 }
 
