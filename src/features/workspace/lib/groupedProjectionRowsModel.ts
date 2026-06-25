@@ -47,6 +47,35 @@ export type GroupedProjectionKeyboardIntent =
   | { kind: 'open-selected' }
   | { kind: 'focus-item'; index: number }
 
+export type GroupedProjectionItemInteraction =
+  | {
+    kind: 'toggle-checked'
+    file: FileItem
+    index: number
+    shiftKey: boolean
+  }
+  | {
+    kind: 'item-click'
+    file: FileItem
+    index: number
+    shiftKey: boolean
+    toggleModifier: boolean
+  }
+  | {
+    kind: 'item-double-click'
+    file: FileItem
+    index: number
+    canOpenFileInSecondaryTarget: boolean
+  }
+
+export type GroupedProjectionItemInteractionIntent =
+  | { kind: 'none' }
+  | { kind: 'range-select'; index: number; markedPath: string }
+  | { kind: 'toggle-check'; path: string; anchorPath: string; markedIndex: number }
+  | { kind: 'open-directory'; dirName: string; anchorPath: string; markedIndex: number }
+  | { kind: 'open-file'; file: FileItem; anchorPath: string; markedIndex: number }
+  | { kind: 'open-file-secondary'; file: FileItem; markedIndex: number }
+
 export interface ResolveGroupedProjectionKeyboardIntentParams {
   model: GroupedProjectionRowsModel
   action: GroupedProjectionKeyboardAction
@@ -167,6 +196,55 @@ export function resolveGroupedProjectionKeyboardIntent({
         kind: 'focus-item',
         index: resolveGroupedProjectionVerticalNeighborIndex(model, currentIndex, -pageRowCount),
       }
+  }
+}
+
+export function resolveGroupedProjectionItemInteraction(
+  interaction: GroupedProjectionItemInteraction
+): GroupedProjectionItemInteractionIntent {
+  if (interaction.kind === 'item-double-click') {
+    if (interaction.file.kind !== 'file' || !interaction.canOpenFileInSecondaryTarget) {
+      return { kind: 'none' }
+    }
+
+    return {
+      kind: 'open-file-secondary',
+      file: interaction.file,
+      markedIndex: interaction.index,
+    }
+  }
+
+  if (interaction.shiftKey) {
+    return {
+      kind: 'range-select',
+      index: interaction.index,
+      markedPath: interaction.file.path,
+    }
+  }
+
+  if (interaction.kind === 'toggle-checked' || interaction.toggleModifier) {
+    return {
+      kind: 'toggle-check',
+      path: interaction.file.path,
+      anchorPath: interaction.file.path,
+      markedIndex: interaction.index,
+    }
+  }
+
+  if (interaction.file.kind === 'directory') {
+    return {
+      kind: 'open-directory',
+      dirName: interaction.file.name,
+      anchorPath: interaction.file.path,
+      markedIndex: interaction.index,
+    }
+  }
+
+  return {
+    kind: 'open-file',
+    file: interaction.file,
+    anchorPath: interaction.file.path,
+    markedIndex: interaction.index,
   }
 }
 

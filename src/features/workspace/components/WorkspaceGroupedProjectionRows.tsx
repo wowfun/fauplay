@@ -16,6 +16,7 @@ import {
   resolveGroupedProjectionRangeSelection,
 } from '@/features/workspace/lib/groupedProjectionRowsModel'
 import { useGroupedProjectionKeyboardNavigation } from '@/features/workspace/hooks/useGroupedProjectionKeyboardNavigation'
+import { useGroupedProjectionItemInteractionHandlers } from '@/features/workspace/hooks/useGroupedProjectionItemInteractionHandlers'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
@@ -236,6 +237,21 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
       setCheckedPathSet(() => new Set(files.map((file) => file.path)))
     }, [files, setCheckedPathSet])
 
+    const {
+      handleToggleCheckedInteraction,
+      handleClickInteraction,
+      handleDoubleClickInteraction,
+    } = useGroupedProjectionItemInteractionHandlers({
+      applyRangeSelection,
+      markSelectedElement,
+      selectionAnchorPathRef,
+      pendingPreviewPathDuringRangeRef,
+      toggleCheckedPath,
+      onDirectoryClick,
+      onFileClick,
+      onFileDoubleClick,
+    })
+
     const syncSelectedPath = useCallback((
       path: string | null,
       options?: { scroll?: boolean; focus?: boolean }
@@ -429,44 +445,25 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
                             isChecked={selectedPathSet.has(file.path)}
                             onToggleChecked={(event: ReactMouseEvent<HTMLInputElement>) => {
                               event.stopPropagation()
-                              markSelectedElement(index, file.path)
-
-                              if (event.shiftKey) {
-                                applyRangeSelection(index)
-                                return
-                              }
-
-                              selectionAnchorPathRef.current = file.path
-                              pendingPreviewPathDuringRangeRef.current = null
-                              toggleCheckedPath(file.path)
+                              handleToggleCheckedInteraction({
+                                file,
+                                index,
+                                shiftKey: event.shiftKey,
+                              })
                             }}
                             onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                              markSelectedElement(index, file.path)
-
-                              if (event.shiftKey) {
-                                applyRangeSelection(index)
-                                return
-                              }
-
-                              if (event.ctrlKey || event.metaKey) {
-                                selectionAnchorPathRef.current = file.path
-                                pendingPreviewPathDuringRangeRef.current = null
-                                toggleCheckedPath(file.path)
-                                return
-                              }
-
-                              selectionAnchorPathRef.current = file.path
-                              pendingPreviewPathDuringRangeRef.current = null
-                              if (file.kind === 'directory') {
-                                onDirectoryClick(file.name)
-                              } else {
-                                onFileClick(file)
-                              }
+                              handleClickInteraction({
+                                file,
+                                index,
+                                shiftKey: event.shiftKey,
+                                toggleModifier: event.ctrlKey || event.metaKey,
+                              })
                             }}
                             onDoubleClick={() => {
-                              if (file.kind === 'file' && onFileDoubleClick) {
-                                onFileDoubleClick(file)
-                              }
+                              handleDoubleClickInteraction({
+                                file,
+                                index,
+                              })
                             }}
                           />
                         </div>

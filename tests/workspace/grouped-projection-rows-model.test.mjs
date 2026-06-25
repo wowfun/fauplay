@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildGroupedProjectionRowsModel,
+  resolveGroupedProjectionItemInteraction,
   resolveGroupedProjectionKeyboardIntent,
   resolveGroupedProjectionRangeSelection,
   resolveGroupedProjectionVerticalNeighborIndex,
@@ -13,6 +14,15 @@ function file(path, groupId) {
     name: path.split('/').at(-1) ?? path,
     path,
     kind: 'file',
+    groupId,
+  }
+}
+
+function directory(path, groupId) {
+  return {
+    name: path.split('/').at(-1) ?? path,
+    path,
+    kind: 'directory',
     groupId,
   }
 }
@@ -112,6 +122,68 @@ test('Grouped Projection Rows Model resolves keyboard intents across Duplicate S
     pageRowCount: 2,
     selectedCount: 0,
     canClearSelectionWithEscape: true,
+  }), {
+    kind: 'none',
+  })
+})
+
+test('Grouped Projection Rows Model resolves item interaction intents before UI effects', () => {
+  const photo = file('set-a/photo.jpg', 'set-a')
+  const folder = directory('set-a/folder', 'set-a')
+
+  assert.deepEqual(resolveGroupedProjectionItemInteraction({
+    kind: 'toggle-checked',
+    file: photo,
+    index: 2,
+    shiftKey: true,
+  }), {
+    kind: 'range-select',
+    index: 2,
+    markedPath: 'set-a/photo.jpg',
+  })
+
+  assert.deepEqual(resolveGroupedProjectionItemInteraction({
+    kind: 'item-click',
+    file: photo,
+    index: 2,
+    shiftKey: false,
+    toggleModifier: true,
+  }), {
+    kind: 'toggle-check',
+    path: 'set-a/photo.jpg',
+    anchorPath: 'set-a/photo.jpg',
+    markedIndex: 2,
+  })
+
+  assert.deepEqual(resolveGroupedProjectionItemInteraction({
+    kind: 'item-click',
+    file: folder,
+    index: 3,
+    shiftKey: false,
+    toggleModifier: false,
+  }), {
+    kind: 'open-directory',
+    dirName: 'folder',
+    anchorPath: 'set-a/folder',
+    markedIndex: 3,
+  })
+
+  assert.deepEqual(resolveGroupedProjectionItemInteraction({
+    kind: 'item-double-click',
+    file: photo,
+    index: 2,
+    canOpenFileInSecondaryTarget: true,
+  }), {
+    kind: 'open-file-secondary',
+    file: photo,
+    markedIndex: 2,
+  })
+
+  assert.deepEqual(resolveGroupedProjectionItemInteraction({
+    kind: 'item-double-click',
+    file: folder,
+    index: 3,
+    canOpenFileInSecondaryTarget: true,
   }), {
     kind: 'none',
   })
