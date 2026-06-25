@@ -10,6 +10,8 @@ import {
   resolveLocalWorkspaceIdentity,
   resolveRemoteAccessConnectionCommitPlan,
   resolveRemoteAccessResetPlan,
+  resolveRemoteRememberedDeviceDraftChangePlan,
+  resolveRemoteRootSelectionCommitPlan,
   resolveRemoteRootsConnectionPlan,
   resolveRemoteWorkspaceRestorePlan,
 } from '../../src/lib/appAccessModel.ts'
@@ -164,6 +166,38 @@ test('App Access Model resolves Remote Access connection commits from available 
   })
 })
 
+test('App Access Model commits a manually selected Remote Root', () => {
+  assert.deepEqual(resolveRemoteRootSelectionCommitPlan({
+    id: 'root-b',
+    label: 'Clips',
+  }), {
+    remoteError: null,
+    activeRemoteRoot: {
+      id: 'root-b',
+      label: 'Clips',
+    },
+    nextAccessProvider: 'remote-readonly',
+  })
+})
+
+test('App Access Model resolves Remembered Device draft changes', () => {
+  assert.deepEqual(resolveRemoteRememberedDeviceDraftChangePlan({
+    nextRememberDevice: true,
+    currentDeviceLabel: 'Desktop',
+  }), {
+    rememberRemoteDevice: true,
+    rememberRemoteDeviceLabel: 'Desktop',
+  })
+
+  assert.deepEqual(resolveRemoteRememberedDeviceDraftChangePlan({
+    nextRememberDevice: false,
+    currentDeviceLabel: 'Desktop',
+  }), {
+    rememberRemoteDevice: false,
+    rememberRemoteDeviceLabel: '',
+  })
+})
+
 test('App Access Model restores stored Remote Access workspaces only when the Remote Root is available', () => {
   assert.deepEqual(resolveRemoteWorkspaceRestorePlan({
     activeRemoteWorkspace: activeRemoteWorkspace({
@@ -220,6 +254,20 @@ test('App Access Model resolves Remote Access reset plans for connection and ses
     rememberRemoteDeviceLabel: '',
     remoteStep: 'token',
     remoteError: '远程会话已失效，请重新连接',
+    nextAccessProvider: 'local-browser',
+  })
+
+  assert.deepEqual(resolveRemoteAccessResetPlan({
+    reason: 'restore-failed',
+    remoteError: '远程会话恢复失败',
+  }), {
+    clearActiveRemoteWorkspace: true,
+    remoteRoots: [],
+    remoteToken: '',
+    rememberRemoteDevice: false,
+    rememberRemoteDeviceLabel: '',
+    remoteStep: 'token',
+    remoteError: '远程会话恢复失败',
     nextAccessProvider: 'local-browser',
   })
 

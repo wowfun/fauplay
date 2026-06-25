@@ -64,9 +64,19 @@ export type RemoteStep = 'idle' | 'token' | 'roots'
 export type RemoteAccessResetReason =
   | 'open-connect'
   | 'cancel-connect'
+  | 'restore-failed'
   | 'session-invalidated'
   | 'disconnect-workspace'
   | 'forget-device'
+
+export type ResolveRemoteAccessResetPlanParams =
+  | {
+    reason: Exclude<RemoteAccessResetReason, 'restore-failed'>
+  }
+  | {
+    reason: 'restore-failed'
+    remoteError: string
+  }
 
 export interface RemoteAccessResetPlan {
   clearActiveRemoteWorkspace: boolean
@@ -118,6 +128,22 @@ export type RemoteAccessConnectionCommitPlan =
     activeRemoteRoot?: RemoteRootEntry
     nextAccessProvider?: Extract<AccessProvider, 'remote-readonly'>
   }
+
+export interface RemoteRootSelectionCommitPlan {
+  remoteError: null
+  activeRemoteRoot: RemoteRootEntry
+  nextAccessProvider: Extract<AccessProvider, 'remote-readonly'>
+}
+
+export interface ResolveRemoteRememberedDeviceDraftChangePlanParams {
+  nextRememberDevice: boolean
+  currentDeviceLabel: string
+}
+
+export interface RemoteRememberedDeviceDraftChangePlan {
+  rememberRemoteDevice: boolean
+  rememberRemoteDeviceLabel: string
+}
 
 export function resolveInitialAccessProvider({
   storedProvider,
@@ -204,6 +230,24 @@ export function resolveRemoteAccessConnectionCommitPlan({
   return base
 }
 
+export function resolveRemoteRootSelectionCommitPlan(root: RemoteRootEntry): RemoteRootSelectionCommitPlan {
+  return {
+    remoteError: null,
+    activeRemoteRoot: root,
+    nextAccessProvider: 'remote-readonly',
+  }
+}
+
+export function resolveRemoteRememberedDeviceDraftChangePlan({
+  nextRememberDevice,
+  currentDeviceLabel,
+}: ResolveRemoteRememberedDeviceDraftChangePlanParams): RemoteRememberedDeviceDraftChangePlan {
+  return {
+    rememberRemoteDevice: nextRememberDevice,
+    rememberRemoteDeviceLabel: nextRememberDevice ? currentDeviceLabel : '',
+  }
+}
+
 export function resolveRemoteWorkspaceRestorePlan({
   activeRemoteWorkspace,
   roots,
@@ -225,11 +269,8 @@ export function resolveRemoteWorkspaceRestorePlan({
   }
 }
 
-export function resolveRemoteAccessResetPlan({
-  reason,
-}: {
-  reason: RemoteAccessResetReason
-}): RemoteAccessResetPlan {
+export function resolveRemoteAccessResetPlan(params: ResolveRemoteAccessResetPlanParams): RemoteAccessResetPlan {
+  const { reason } = params
   const base = {
     remoteRoots: [],
     remoteToken: '',
@@ -261,6 +302,16 @@ export function resolveRemoteAccessResetPlan({
       clearActiveRemoteWorkspace: true,
       remoteStep: 'token',
       remoteError: '远程会话已失效，请重新连接',
+      nextAccessProvider: 'local-browser',
+    }
+  }
+
+  if (reason === 'restore-failed') {
+    return {
+      ...base,
+      clearActiveRemoteWorkspace: true,
+      remoteStep: 'token',
+      remoteError: params.remoteError,
       nextAccessProvider: 'local-browser',
     }
   }

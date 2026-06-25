@@ -1,46 +1,25 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useKeyboardShortcuts, useKeyboardShortcutsRuntime } from '@/config/shortcutStore'
 import { useFileSystem } from '@/hooks/useFileSystem'
-import { useRemoteFileSystem } from '@/hooks/useRemoteFileSystem'
 import { matchesAnyShortcut, type ShortcutBinding } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
 import {
-  readRemoteConnectErrorMessage,
-  resolveAppWorkspaceVisibility,
   resolveInitialAccessProvider,
   resolveLocalPublishedRootSyncPlan,
   resolveLocalWorkspaceIdentity,
-  resolveRemoteAccessConnectionCommitPlan,
-  resolveRemoteAccessResetPlan,
-  resolveRemoteWorkspaceRestorePlan,
-  type RemoteAccessConnectionCommitPlan,
-  type RemoteAccessResetPlan,
 } from '@/lib/appAccessModel'
 import {
-  clearRemoteSession,
   getActiveRemoteWorkspace,
-  getRemoteSessionInvalidatedEventName,
   getStoredAccessProvider,
   isLoopbackOrigin,
-  setActiveRemoteWorkspace,
   setStoredAccessProvider,
   type AccessProvider,
 } from '@/lib/accessState'
 import {
-  clearRemoteAccessSession,
-  createRemoteAccessSession,
-  loadRememberedDevicesAdmin,
-  loadRemoteAccessCapabilities,
-  loadRemoteAccessRoots,
   syncRemotePublishedRootsFromLocalBrowser,
-  renameRememberedDeviceAdmin,
-  revokeAllRememberedDevicesAdmin,
-  revokeRememberedDeviceAdmin,
-  type RememberedDeviceAdminEntry,
-  type RemoteRootEntry,
 } from '@/lib/remoteAccess'
-import { loadRuntimeCapabilities } from '@/lib/runtimeApi'
 import { RememberedDevicesAdminPanel } from '@/features/remote-access/components/RememberedDevicesAdminPanel'
+import { useRemoteAccessController } from '@/features/remote-access/hooks/useRemoteAccessController'
 import { clearWorkspaceBrowserHistoryUrl } from '@/features/workspace/lib/browserHistory'
 
 const WorkspaceShell = lazy(async () => {
@@ -100,23 +79,49 @@ function App() {
     storedProvider: getStoredAccessProvider(),
     activeRemoteWorkspace: getActiveRemoteWorkspace(),
   }))
-  const [remoteStep, setRemoteStep] = useState<'idle' | 'token' | 'roots'>('idle')
-  const [remoteToken, setRemoteToken] = useState('')
-  const [rememberRemoteDevice, setRememberRemoteDevice] = useState(false)
-  const [rememberRemoteDeviceLabel, setRememberRemoteDeviceLabel] = useState('')
-  const [remoteRoots, setRemoteRoots] = useState<RemoteRootEntry[]>([])
-  const [remoteError, setRemoteError] = useState<string | null>(null)
-  const [isRemoteLoading, setIsRemoteLoading] = useState(false)
-  const [activeRemoteWorkspace, setActiveRemoteWorkspaceState] = useState(() => getActiveRemoteWorkspace())
-  const [isLocalRuntimeOnline, setIsLocalRuntimeOnline] = useState(false)
-  const [isRememberedDevicesAdminOpen, setIsRememberedDevicesAdminOpen] = useState(false)
-  const [rememberedDevices, setRememberedDevices] = useState<RememberedDeviceAdminEntry[]>([])
-  const [rememberedDevicesError, setRememberedDevicesError] = useState<string | null>(null)
-  const [isRememberedDevicesLoading, setIsRememberedDevicesLoading] = useState(false)
-  const [isRememberedDevicesMutating, setIsRememberedDevicesMutating] = useState(false)
-  const remoteFileSystem = useRemoteFileSystem({
-    roots: remoteRoots,
-    initialConfigRootId: activeRemoteWorkspace?.configRootId ?? '',
+  const updateAccessProvider = useCallback((nextProvider: AccessProvider) => {
+    setAccessProvider(nextProvider)
+    setStoredAccessProvider(nextProvider)
+  }, [])
+  const isLoopbackUi = isLoopbackOrigin()
+  const {
+    activeRemoteWorkspace,
+    remoteFileSystem,
+    remoteStep,
+    remoteToken,
+    remoteError,
+    remoteRoots,
+    rememberRemoteDevice,
+    rememberRemoteDeviceLabel,
+    isRemoteLoading,
+    isRememberedDevicesAdminOpen,
+    rememberedDevices,
+    rememberedDevicesError,
+    isRememberedDevicesLoading,
+    isRememberedDevicesMutating,
+    shouldShowRemoteWorkspace,
+    shouldShowStartupScreen,
+    showRememberedDevicesAdminEntry,
+    setRemoteToken,
+    setRememberRemoteDeviceLabel,
+    handleRememberRemoteDeviceChange,
+    handleOpenRemoteConnect,
+    handleCancelRemoteConnect,
+    handleSubmitRemoteToken,
+    handleSelectRemoteRoot,
+    handleDisconnectRemoteWorkspace,
+    handleForgetRemoteDevice,
+    handleOpenRememberedDevicesAdmin,
+    handleCloseRememberedDevicesAdmin,
+    handleRenameRememberedDevice,
+    handleRevokeRememberedDevice,
+    handleRevokeAllRememberedDevices,
+    refreshRememberedDevices,
+  } = useRemoteAccessController({
+    accessProvider,
+    updateAccessProvider,
+    localRootId: localFileSystem.rootId,
+    isLoopbackUi,
   })
 
   const activeRootHandle = accessProvider === 'remote-readonly'
@@ -125,141 +130,21 @@ function App() {
   const activeRootId = accessProvider === 'remote-readonly'
     ? remoteFileSystem.rootId
     : localFileSystem.rootId
-  const {
-    shouldShowRemoteWorkspace,
-    shouldShowStartupScreen,
-  } = resolveAppWorkspaceVisibility({
-    accessProvider,
-    activeRemoteWorkspace,
-    localRootId: localFileSystem.rootId,
-  })
-  const isLoopbackUi = isLoopbackOrigin()
   const lastPublishedRootSyncSignatureRef = useRef<string | null>(null)
 
   useKeyboardShortcutsRuntime(activeRootHandle, activeRootId)
   const keyboardShortcuts = useKeyboardShortcuts()
-
-  const updateAccessProvider = useCallback((nextProvider: AccessProvider) => {
-    setAccessProvider(nextProvider)
-    setStoredAccessProvider(nextProvider)
-  }, [])
-
-  const handleRememberRemoteDeviceChange = useCallback((value: boolean) => {
-    setRememberRemoteDevice(value)
-    if (!value) {
-      setRememberRemoteDeviceLabel('')
-    }
-  }, [])
 
   const handleSelectLocalDirectory = useCallback(async () => {
     updateAccessProvider('local-browser')
     await localFileSystem.selectDirectory()
   }, [localFileSystem, updateAccessProvider])
 
-  const applyRemoteAccessResetPlan = useCallback((plan: RemoteAccessResetPlan) => {
-    if (plan.clearActiveRemoteWorkspace) {
-      setActiveRemoteWorkspaceState(null)
-    }
-    setRemoteRoots(plan.remoteRoots)
-    setRemoteToken(plan.remoteToken)
-    setRememberRemoteDevice(plan.rememberRemoteDevice)
-    setRememberRemoteDeviceLabel(plan.rememberRemoteDeviceLabel)
-    setRemoteStep(plan.remoteStep)
-    if ('remoteError' in plan) {
-      setRemoteError(plan.remoteError ?? null)
-    }
-    if (plan.nextAccessProvider) {
-      updateAccessProvider(plan.nextAccessProvider)
-    }
-  }, [updateAccessProvider])
-
-  const applyRemoteAccessConnectionCommitPlan = useCallback((
-    plan: Extract<RemoteAccessConnectionCommitPlan, { kind: 'commit' }>
-  ) => {
-    if (plan.clearConnectionDraft) {
-      setRemoteToken('')
-      setRememberRemoteDevice(false)
-      setRememberRemoteDeviceLabel('')
-    }
-    setRemoteRoots(plan.remoteRoots)
-    if (plan.activeRemoteRoot) {
-      setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(
-        plan.activeRemoteRoot.id,
-        plan.activeRemoteRoot.label,
-      ))
-    }
-    setRemoteStep(plan.remoteStep)
-    if (plan.nextAccessProvider) {
-      updateAccessProvider(plan.nextAccessProvider)
-    }
-  }, [updateAccessProvider])
-
   useDirectorySelectionShortcut(
     accessProvider !== 'remote-readonly' && localFileSystem.rootId === null && !activeRemoteWorkspace,
     keyboardShortcuts.app.openDirectory,
     handleSelectLocalDirectory
   )
-
-  useEffect(() => {
-    const storedWorkspace = getActiveRemoteWorkspace()
-    if (accessProvider !== 'remote-readonly' || !storedWorkspace) {
-      return
-    }
-
-    let cancelled = false
-    const restoreRemoteWorkspace = async () => {
-      setIsRemoteLoading(true)
-      setRemoteError(null)
-      setRemoteStep('token')
-      try {
-        const capabilities = await loadRemoteAccessCapabilities()
-        if (!capabilities.enabled) {
-          throw new Error('当前站点未启用远程只读访问')
-        }
-        const roots = await loadRemoteAccessRoots()
-        if (cancelled) return
-        setRemoteRoots(roots)
-        const restorePlan = resolveRemoteWorkspaceRestorePlan({
-          activeRemoteWorkspace: storedWorkspace,
-          roots,
-        })
-        if (restorePlan.kind === 'error') {
-          throw new Error(restorePlan.message)
-        }
-        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(
-          restorePlan.root.id,
-          restorePlan.root.label,
-        ))
-      } catch (error) {
-        if (cancelled) return
-        clearRemoteSession()
-        setActiveRemoteWorkspaceState(null)
-        setRemoteRoots([])
-        setRemoteStep('token')
-        setRemoteError(readRemoteConnectErrorMessage(error, '远程会话恢复失败'))
-        updateAccessProvider('local-browser')
-      } finally {
-        if (!cancelled) {
-          setIsRemoteLoading(false)
-        }
-      }
-    }
-
-    void restoreRemoteWorkspace()
-    return () => {
-      cancelled = true
-    }
-  }, [accessProvider, updateAccessProvider])
-
-  useEffect(() => {
-    const eventName = getRemoteSessionInvalidatedEventName()
-    const handleRemoteSessionInvalidated = () => {
-      applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'session-invalidated' }))
-    }
-
-    window.addEventListener(eventName, handleRemoteSessionInvalidated)
-    return () => window.removeEventListener(eventName, handleRemoteSessionInvalidated)
-  }, [applyRemoteAccessResetPlan])
 
   useEffect(() => {
     if (!shouldShowStartupScreen || typeof window === 'undefined') {
@@ -299,213 +184,6 @@ function App() {
     localFileSystem.favoriteFolders,
   ])
 
-  const refreshRememberedDevices = useCallback(async () => {
-    setIsRememberedDevicesLoading(true)
-    setRememberedDevicesError(null)
-    try {
-      const items = await loadRememberedDevicesAdmin()
-      setRememberedDevices(items)
-    } catch (error) {
-      setRememberedDevicesError(error instanceof Error ? error.message : '读取已记住设备失败')
-    } finally {
-      setIsRememberedDevicesLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!isLoopbackUi || !shouldShowStartupScreen) {
-      setIsLocalRuntimeOnline(false)
-      setIsRememberedDevicesAdminOpen(false)
-      return
-    }
-
-    let cancelled = false
-    const refreshLocalRuntimeStatus = async () => {
-      const snapshot = await loadRuntimeCapabilities()
-      if (!cancelled) {
-        setIsLocalRuntimeOnline(snapshot.online)
-      }
-    }
-
-    void refreshLocalRuntimeStatus()
-    return () => {
-      cancelled = true
-    }
-  }, [isLoopbackUi, shouldShowStartupScreen])
-
-  const handleOpenRememberedDevicesAdmin = useCallback(() => {
-    if (!isLoopbackUi) return
-    setIsRememberedDevicesAdminOpen(true)
-    void refreshRememberedDevices()
-  }, [isLoopbackUi, refreshRememberedDevices])
-
-  const handleCloseRememberedDevicesAdmin = useCallback(() => {
-    setIsRememberedDevicesAdminOpen(false)
-    setRememberedDevicesError(null)
-  }, [])
-
-  const handleRenameRememberedDevice = useCallback((deviceId: string, label: string) => {
-    const run = async () => {
-      setIsRememberedDevicesMutating(true)
-      setRememberedDevicesError(null)
-      try {
-        await renameRememberedDeviceAdmin(deviceId, label)
-        await refreshRememberedDevices()
-      } catch (error) {
-        setRememberedDevicesError(error instanceof Error ? error.message : '重命名设备失败')
-      } finally {
-        setIsRememberedDevicesMutating(false)
-      }
-    }
-
-    void run()
-  }, [refreshRememberedDevices])
-
-  const handleRevokeRememberedDevice = useCallback((deviceId: string) => {
-    const run = async () => {
-      setIsRememberedDevicesMutating(true)
-      setRememberedDevicesError(null)
-      try {
-        await revokeRememberedDeviceAdmin(deviceId)
-        await refreshRememberedDevices()
-      } catch (error) {
-        setRememberedDevicesError(error instanceof Error ? error.message : '撤销设备失败')
-      } finally {
-        setIsRememberedDevicesMutating(false)
-      }
-    }
-
-    void run()
-  }, [refreshRememberedDevices])
-
-  const handleRevokeAllRememberedDevices = useCallback(() => {
-    const run = async () => {
-      setIsRememberedDevicesMutating(true)
-      setRememberedDevicesError(null)
-      try {
-        await revokeAllRememberedDevicesAdmin()
-        await refreshRememberedDevices()
-      } catch (error) {
-        setRememberedDevicesError(error instanceof Error ? error.message : '全部撤销失败')
-      } finally {
-        setIsRememberedDevicesMutating(false)
-      }
-    }
-
-    void run()
-  }, [refreshRememberedDevices])
-
-  const handleOpenRemoteConnect = useCallback(() => {
-    const openRemoteConnect = async () => {
-      setIsRemoteLoading(true)
-      applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'open-connect' }))
-
-      try {
-        const capabilities = await loadRemoteAccessCapabilities()
-        if (!capabilities.enabled) {
-          throw new Error('当前站点未启用远程只读访问')
-        }
-
-        const roots = await loadRemoteAccessRoots(2000, {
-          clearSessionOnUnauthorized: false,
-        })
-        const plan = resolveRemoteAccessConnectionCommitPlan({
-          roots,
-          clearConnectionDraft: false,
-        })
-        if (plan.kind === 'error') {
-          throw new Error(plan.message)
-        }
-        applyRemoteAccessConnectionCommitPlan(plan)
-      } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'REMOTE_UNAUTHORIZED') {
-          setRemoteStep('token')
-          return
-        }
-        setRemoteError(readRemoteConnectErrorMessage(error, '远程连接失败'))
-      } finally {
-        setIsRemoteLoading(false)
-      }
-    }
-
-    void openRemoteConnect()
-  }, [applyRemoteAccessConnectionCommitPlan, applyRemoteAccessResetPlan])
-
-  const handleCancelRemoteConnect = useCallback(() => {
-    applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'cancel-connect' }))
-  }, [applyRemoteAccessResetPlan])
-
-  const handleSubmitRemoteToken = useCallback(async () => {
-    const normalizedToken = remoteToken.trim()
-    if (!normalizedToken) return
-
-    setIsRemoteLoading(true)
-    setRemoteError(null)
-    try {
-      const capabilities = await loadRemoteAccessCapabilities()
-      if (!capabilities.enabled) {
-        throw new Error('当前站点未启用远程只读访问')
-      }
-
-      await createRemoteAccessSession(normalizedToken, {
-        rememberDevice: rememberRemoteDevice,
-        rememberDeviceLabel: rememberRemoteDeviceLabel,
-      })
-      const roots = await loadRemoteAccessRoots()
-      const plan = resolveRemoteAccessConnectionCommitPlan({
-        roots,
-        clearConnectionDraft: true,
-      })
-      if (plan.kind === 'error') {
-        throw new Error(plan.message)
-      }
-
-      applyRemoteAccessConnectionCommitPlan(plan)
-    } catch (error) {
-      setRemoteError(readRemoteConnectErrorMessage(
-        error,
-        '远程连接失败',
-        '远程 token 无效，或当前站点未启用远程只读访问'
-      ))
-    } finally {
-      setIsRemoteLoading(false)
-    }
-  }, [
-    applyRemoteAccessConnectionCommitPlan,
-    rememberRemoteDevice,
-    rememberRemoteDeviceLabel,
-    remoteToken,
-  ])
-
-  const handleSelectRemoteRoot = useCallback((root: RemoteRootEntry) => {
-    setRemoteError(null)
-    setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(root.id, root.label))
-    updateAccessProvider('remote-readonly')
-  }, [updateAccessProvider])
-
-  const handleDisconnectRemoteWorkspace = useCallback(() => {
-    void clearRemoteAccessSession().catch(() => undefined)
-    clearRemoteSession()
-    applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'disconnect-workspace' }))
-  }, [applyRemoteAccessResetPlan])
-
-  const handleForgetRemoteDevice = useCallback(() => {
-    const forgetRemoteDevice = async () => {
-      try {
-        await clearRemoteAccessSession({
-          forgetDevice: true,
-        })
-      } catch (error) {
-        setRemoteError(readRemoteConnectErrorMessage(error, '忘记此设备失败'))
-      } finally {
-        clearRemoteSession()
-        applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'forget-device' }))
-      }
-    }
-
-    void forgetRemoteDevice()
-  }, [applyRemoteAccessResetPlan])
-
   if (shouldShowStartupScreen && isRememberedDevicesAdminOpen) {
     return (
       <RememberedDevicesAdminPanel
@@ -541,7 +219,7 @@ function App() {
         onRemoteTokenChange={setRemoteToken}
         rememberRemoteDevice={rememberRemoteDevice}
         rememberRemoteDeviceLabel={rememberRemoteDeviceLabel}
-        showRememberedDevicesAdminEntry={isLoopbackUi && isLocalRuntimeOnline}
+        showRememberedDevicesAdminEntry={showRememberedDevicesAdminEntry}
         onRememberRemoteDeviceChange={handleRememberRemoteDeviceChange}
         onRememberRemoteDeviceLabelChange={setRememberRemoteDeviceLabel}
         onOpenRemoteConnect={handleOpenRemoteConnect}
