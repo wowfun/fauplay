@@ -11,7 +11,7 @@ import {
   resolveWorkspaceShellPresentationTransition,
   type WorkspaceDirectoryEntryInteractionIntent,
 } from '@/features/workspace/lib/workspaceShellInteractionModel'
-import type { WorkspaceActiveSurface } from '@/features/workspace/lib/projectionTabs'
+import type { WorkspaceActiveSurface } from '@/features/workspace/lib/projectionTabRecords'
 import type { WorkspacePresentationProfile } from '@/features/workspace/types/presentation'
 
 interface UseWorkspaceShellInteractionHandlersOptions {

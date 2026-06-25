@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react'
-import { normalizeRootRelativePath } from '@/features/workspace/lib/projectionTabs'
+import { normalizeRootRelativePath } from '@/features/workspace/lib/projectionTabRecords'
 import type { DeleteUndoSnapshot } from '@/features/workspace/lib/deleteUndo'
 
 export interface PendingDeleteUndoRestoreState {

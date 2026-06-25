@@ -80,6 +80,10 @@ _Avoid_: batch rename job, rename script
 Two or more files in a Local Root that have the same File Content and are presented together for review.
 _Avoid_: duplicate group, duplicate results
 
+**Result Projection**:
+A temporary workspace view that presents selected Root-relative Paths as a focused result set without changing the current Listing or Local Root.
+_Avoid_: projection tab, plugin result list, search result
+
 **Global Trash**:
 User-scoped trash storage for files that are tracked outside a specific Local Root.
 _Avoid_: global recycle, recycle bin

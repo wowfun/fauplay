@@ -1,7 +1,7 @@
 import type { PreviewMutationCommitParams } from '../../preview/types/mutation.ts'
 import { getFilePreviewKind, isMediaPreviewKind } from '../../../lib/filePreview.ts'
 import type { FileItem } from '../../../types/index.ts'
-import { normalizeRootRelativePath } from './projectionTabs.ts'
+import { normalizeRootRelativePath } from './projectionTabRecords.ts'
 
 export type WorkspacePreviewMutationSurface =
   | { kind: 'directory' }

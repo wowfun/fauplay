@@ -3,14 +3,18 @@ import test from 'node:test'
 
 import {
   pruneProjectionAfterDeletedAbsolutePaths,
-  resolveProjectionActivationPlan,
   resolveProjectionFocusedPathByIdUpdate,
-  resolveProjectionFileInteractionPlan,
-  resolveProjectionPanelDisplayTogglePlan,
   resolveProjectionRuleByIdUpdate,
   resolveProjectionSelectedPathsByIdUpdate,
+} from '../../src/features/workspace/lib/projectionTabRecords.ts'
+import {
+  resolveProjectionActivationPlan,
+  resolveProjectionFileInteractionPlan,
+  resolveProjectionPanelDisplayTogglePlan,
+} from '../../src/features/workspace/lib/projectionTabActivation.ts'
+import {
   resolveProjectionTabCloseState,
-} from '../../src/features/workspace/lib/projectionTabs.ts'
+} from '../../src/features/workspace/lib/projectionTabClosure.ts'
 
 function file(path, overrides = {}) {
   return {

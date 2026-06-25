@@ -9,7 +9,7 @@ import {
   remapFileItemAfterRestore,
   remapPathForRoot,
 } from './deleteUndo.ts'
-import type { WorkspaceActiveSurface } from './projectionTabs.ts'
+import type { WorkspaceActiveSurface } from './projectionTabRecords.ts'
 import type { FileItem, FilterState, ResultPanelDisplayMode, ResultProjection } from '@/types'
 
 export interface CreateDeleteUndoPreviewSnapshotParams {

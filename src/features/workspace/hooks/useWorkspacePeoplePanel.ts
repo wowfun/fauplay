@@ -8,7 +8,7 @@ import {
 import {
   normalizeRootRelativePath,
   type WorkspaceActiveSurface,
-} from '@/features/workspace/lib/projectionTabs'
+} from '@/features/workspace/lib/projectionTabRecords'
 import { fromRemoteUiRootId } from '@/lib/accessState'
 import { getBoundRootPath } from '@/lib/reveal'
 import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'

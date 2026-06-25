@@ -15,19 +15,28 @@ import {
   type DuplicateSelectionPlanAction,
 } from '@/features/workspace/lib/duplicateSelection'
 import {
-  pruneProjectionTabsAfterDeletedFiles,
   resolveProjectionActivationPlan,
-  resolveProjectionFocusedPathByIdUpdate,
   resolveProjectionFileInteractionPlan,
   resolveProjectionPanelDisplayTogglePlan,
+  type ProjectionFileInteractionPlan,
+  type ProjectionActivationPlan,
+} from '@/features/workspace/lib/projectionTabActivation'
+import {
+  pruneProjectionTabsAfterDeletedFiles,
+  resolveProjectionTabCloseState,
+} from '@/features/workspace/lib/projectionTabClosure'
+import {
+  resolveProjectionFocusedPathByIdUpdate,
   resolveProjectionPreferredPath,
   resolveProjectionRuleByIdUpdate,
   resolveProjectionSelectedPathsByIdUpdate,
-  resolveProjectionTabCloseState,
-  type ProjectionFileInteractionPlan,
-  type ProjectionActivationPlan,
   type WorkspaceActiveSurface,
-} from '@/features/workspace/lib/projectionTabs'
+} from '@/features/workspace/lib/projectionTabRecords'
+import { resolveWorkspaceProjectionViewModel } from '@/features/workspace/lib/workspaceProjectionViewModel'
+import {
+  resolveWorkspaceProjectionSurfaceRecoveryPlan,
+  resolveWorkspaceProjectionTabConsistencyPlan,
+} from '@/features/workspace/lib/workspaceProjectionConsistency'
 import { toToolScopedProjectionId } from '@/lib/projection'
 import type {
   FileItem,
@@ -123,37 +132,32 @@ export function useWorkspaceProjectionState({
   const lastProjectionTabIdRef = useRef<string | null>(null)
   const deletedProjectionAbsolutePathSetRef = useRef<Set<string>>(new Set())
 
-  const activeProjectionTab = useMemo(
-    () => projectionTabs.find((projection) => projection.id === activeProjectionTabId) ?? projectionTabs[0] ?? null,
-    [activeProjectionTabId, projectionTabs]
-  )
-  const activeSurfaceProjection = useMemo(() => {
-    if (activeSurface.kind !== 'projection') return null
-    return projectionTabs.find((projection) => projection.id === activeSurface.tabId) ?? null
-  }, [activeSurface, projectionTabs])
-  const activeSurfaceFiles = useMemo(
-    () => activeSurfaceProjection?.files ?? filteredFiles,
-    [activeSurfaceProjection, filteredFiles]
-  )
-  const activeSurfaceFileItems = useMemo(
-    () => activeSurfaceFiles.filter((file): file is FileItem => file.kind === 'file'),
-    [activeSurfaceFiles]
-  )
-  const isDirectorySurfaceActive = activeSurface.kind === 'directory'
-  const projectionGridSelectedPaths = useMemo(
-    () => (activeProjectionTab?.id ? projectionSelectedPathsById[activeProjectionTab.id] ?? [] : []),
-    [activeProjectionTab?.id, projectionSelectedPathsById]
-  )
-  const activeDuplicateSelectionRule = useMemo(
-    () => (activeProjectionTab?.id ? duplicateSelectionRuleByProjectionId[activeProjectionTab.id] ?? null : null),
-    [activeProjectionTab?.id, duplicateSelectionRuleByProjectionId]
-  )
-  const activeSurfaceSelectedPaths = useMemo(
-    () => (activeSurface.kind === 'projection'
-      ? projectionSelectedPathsById[activeSurface.tabId] ?? []
-      : directorySelectedPaths),
-    [activeSurface, directorySelectedPaths, projectionSelectedPathsById]
-  )
+  const {
+    activeProjectionTab,
+    activeSurfaceProjection,
+    activeSurfaceFiles,
+    activeSurfaceFileItems,
+    isDirectorySurfaceActive,
+    projectionGridSelectedPaths,
+    activeDuplicateSelectionRule,
+    activeSurfaceSelectedPaths,
+  } = useMemo(() => resolveWorkspaceProjectionViewModel({
+    projectionTabs,
+    activeProjectionTabId,
+    activeSurface,
+    filteredFiles,
+    directorySelectedPaths,
+    projectionSelectedPathsById,
+    duplicateSelectionRuleByProjectionId,
+  }), [
+    activeProjectionTabId,
+    activeSurface,
+    directorySelectedPaths,
+    duplicateSelectionRuleByProjectionId,
+    filteredFiles,
+    projectionSelectedPathsById,
+    projectionTabs,
+  ])
 
   const alignPreviewToProjection = useCallback((projection: ResultProjection | null, preferredPath?: string | null) => {
     interactionRef.current?.alignPreviewToPath(resolveProjectionPreferredPath(projection, preferredPath))
@@ -490,25 +494,28 @@ export function useWorkspaceProjectionState({
   }, [])
 
   useEffect(() => {
-    if (projectionTabs.length === 0) {
-      if (activeProjectionTabId !== null) {
-        setActiveProjectionTabId(null)
+    const plan = resolveWorkspaceProjectionTabConsistencyPlan({
+      projectionTabs,
+      activeProjectionTabId,
+    })
+    if (plan.kind === 'set-active-tab') {
+      setActiveProjectionTabId(plan.activeProjectionTabId)
+      if (plan.lastProjectionTabId !== undefined) {
+        lastProjectionTabIdRef.current = plan.lastProjectionTabId
       }
-      return
-    }
-
-    if (!activeProjectionTabId || !projectionTabs.some((projection) => projection.id === activeProjectionTabId)) {
-      const fallbackTabId = projectionTabs[0]?.id ?? null
-      setActiveProjectionTabId(fallbackTabId)
-      lastProjectionTabIdRef.current = fallbackTabId
     }
   }, [activeProjectionTabId, projectionTabs])
 
   useEffect(() => {
-    if (activeSurface.kind !== 'projection') return
-    if (projectionTabs.some((projection) => projection.id === activeSurface.tabId)) return
-    setActiveSurface({ kind: 'directory' })
-    interactionRef.current?.alignPreviewToPath(directoryFocusedPath)
+    const plan = resolveWorkspaceProjectionSurfaceRecoveryPlan({
+      projectionTabs,
+      activeSurface,
+      directoryFocusedPath,
+    })
+    if (plan.kind === 'return-to-directory') {
+      setActiveSurface({ kind: 'directory' })
+      interactionRef.current?.alignPreviewToPath(plan.previewAlignmentPath)
+    }
   }, [activeSurface, directoryFocusedPath, interactionRef, projectionTabs])
 
   return {

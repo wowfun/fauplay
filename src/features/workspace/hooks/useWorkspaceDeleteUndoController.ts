@@ -27,8 +27,10 @@ import {
   createDeleteUndoPreviewSnapshot,
   createDeleteUndoSnapshot,
 } from '@/features/workspace/lib/deleteUndoSnapshot'
-import { normalizeRootRelativePath } from '@/features/workspace/lib/projectionTabs'
-import type { WorkspaceActiveSurface } from '@/features/workspace/lib/projectionTabs'
+import {
+  normalizeRootRelativePath,
+  type WorkspaceActiveSurface,
+} from '@/features/workspace/lib/projectionTabRecords'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import { getBoundRootPath } from '@/lib/reveal'
 import type {

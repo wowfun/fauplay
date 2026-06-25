@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
-import type { WorkspaceActiveSurface } from '@/features/workspace/lib/projectionTabs'
+import type { WorkspaceActiveSurface } from '@/features/workspace/lib/projectionTabRecords'
 import type { FileItem, ResultProjection } from '@/types'
 
 interface UseWorkspaceSelectionFocusSyncParams {
