@@ -3,29 +3,17 @@ import { appConfig } from '@/config/appConfig'
 import type {
   AddressPathHistoryEntry,
   FavoriteFolderEntry,
-  FileItem,
 } from '@/types'
-import { openDirectory, isHiddenSystemDirectory } from '@/lib/fileSystem'
-import {
-  listRuntimeGlobalTrash,
-  listRuntimeLocalDirectory,
-  listRuntimeRootTrash,
-  toRuntimeGlobalTrashFileItems,
-  toRuntimeRootTrashFileItems,
-} from '@/lib/runtimeApi'
-import { upsertCachedRootHandle } from '@/lib/rootHandleCache'
-import {
-  ensureRootPath,
-  getBoundRootPath,
-} from '@/lib/reveal'
 import {
   FAVORITE_FOLDERS_STORAGE_KEY,
 } from '@/features/explorer/lib/favoriteFolderStore'
 import { useCachedLocalRootsController } from '@/features/explorer/hooks/useCachedLocalRootsController'
 import { useFavoriteFolderController } from '@/features/explorer/hooks/useFavoriteFolderController'
+import { useLocalDirectoryAccessController } from '@/features/explorer/hooks/useLocalDirectoryAccessController'
 import { useLocalListingController } from '@/features/explorer/hooks/useLocalListingController'
 import { useLocalRootActivationController } from '@/features/explorer/hooks/useLocalRootActivationController'
-import { sortTrashFileItems } from '@/features/explorer/lib/listingQueryModel'
+import { useLocalRootCommandController } from '@/features/explorer/hooks/useLocalRootCommandController'
+import { useTrashListingController } from '@/features/explorer/hooks/useTrashListingController'
 import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
 import {
   createLocalChildDirectoryPath,
@@ -34,7 +22,6 @@ import {
   resolveLocalRootActivationTarget,
   resolveLocalNavigationTarget,
   resolveLocalParentPath,
-  sortLocalChildDirectoryNames,
 } from '@/features/explorer/lib/localFileSystemModel'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
@@ -43,14 +30,10 @@ const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
 const ROOT_LABEL_FALLBACK = '根目录'
 const VIRTUAL_TRASH_PATH = '@trash'
 const RUNTIME_LISTING_PAGE_SIZE = 500
+const RUNTIME_TRASH_LISTING_TIMEOUT_MS = 120000
 const FAVORITE_FOLDER_MODEL_OPTIONS = {
   maxItems: FAVORITE_FOLDERS_MAX_ITEMS,
   rootLabelFallback: ROOT_LABEL_FALLBACK,
-}
-
-function createSessionRootId(handle: FileSystemDirectoryHandle): string {
-  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  return `session:${handle.name}:${suffix}`
 }
 
 interface NavigateToPathOptions {
@@ -88,41 +71,18 @@ export function useFileSystem() {
     ...FAVORITE_FOLDER_MODEL_OPTIONS,
   })
 
-  const getDirectoryHandleByPathFromRoot = useCallback(async (
-    baseRoot: FileSystemDirectoryHandle,
-    targetPath: string
-  ) => {
-    let current: FileSystemDirectoryHandle = baseRoot
-    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
-    if (!normalizedPath) return current
-
-    const pathParts = normalizedPath.split('/').filter(Boolean)
-    for (const part of pathParts) {
-      const opts: FileSystemPermissionDescriptor = { mode: 'read' }
-      const permission = await current.queryPermission(opts)
-      if (permission === 'denied') {
-        throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
-      }
-      if (permission === 'prompt') {
-        const requested = await current.requestPermission(opts)
-        if (requested !== 'granted') {
-          throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
-        }
-      }
-      current = await current.getDirectoryHandle(part)
-    }
-
-    return current
-  }, [])
-
-  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
-    if (!rootHandle) return null
-    return getDirectoryHandleByPathFromRoot(rootHandle, targetPath)
-  }, [rootHandle, getDirectoryHandleByPathFromRoot])
-
-  const getCurrentDirectoryHandle = useCallback(async () => {
-    return getDirectoryHandleByPath(currentPath)
-  }, [getDirectoryHandleByPath, currentPath])
+  const {
+    getDirectoryHandleByPathFromRoot,
+    getDirectoryHandleByPath,
+    getCurrentDirectoryHandle,
+    listChildDirectories,
+  } = useLocalDirectoryAccessController({
+    rootHandle,
+    rootId,
+    currentPath,
+    virtualTrashPath: VIRTUAL_TRASH_PATH,
+    permissionDeniedMessage: ROOT_PERMISSION_DENIED_MESSAGE,
+  })
 
   const {
     files,
@@ -143,29 +103,17 @@ export function useFileSystem() {
     setError,
   })
 
-  const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
-    const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
-    let rootTrashFiles: FileItem[] = []
-
-    if (boundRootPath) {
-      const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
-      rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
-    }
-
-    const globalTrash = await listRuntimeGlobalTrash({}, 120000)
-    const globalTrashFiles = toRuntimeGlobalTrashFileItems(globalTrash.entries)
-    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...globalTrashFiles])
-
-    replaceListingItems(nextFiles)
-    setCurrentPath(VIRTUAL_TRASH_PATH)
-    setIsFlattenView(false)
-    if (targetRootHandle) {
-      setRootHandle(targetRootHandle)
-    }
-    if (targetRootId) {
-      setRootId(targetRootId)
-    }
-  }, [replaceListingItems])
+  const {
+    loadUnifiedTrashItems,
+  } = useTrashListingController({
+    virtualTrashPath: VIRTUAL_TRASH_PATH,
+    timeoutMs: RUNTIME_TRASH_LISTING_TIMEOUT_MS,
+    replaceListingItems,
+    setCurrentPath,
+    setIsFlattenView,
+    setRootHandle,
+    setRootId,
+  })
 
   const activateRootHandle = useCallback(async (
     nextRootHandle: FileSystemDirectoryHandle,
@@ -211,42 +159,6 @@ export function useFileSystem() {
     setIsFlattenView(false)
   }, [loadDirectoryItems, loadUnifiedTrashItems])
 
-  const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
-    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
-    if (isLocalVirtualTrashPath(normalizedPath, VIRTUAL_TRASH_PATH)) {
-      return []
-    }
-
-    const boundRootPath = rootId ? getBoundRootPath(rootId) : null
-    if (boundRootPath) {
-      try {
-        const runtimeListing = await listRuntimeLocalDirectory({
-          rootPath: boundRootPath,
-          rootRelativePath: normalizedPath,
-        })
-        return sortLocalChildDirectoryNames(runtimeListing.entries
-          .filter((entry) => entry.kind === 'directory')
-          .map((entry) => entry.name))
-      } catch {
-        // Fall back to File System Access while the runtime-backed Listing path is being adopted.
-      }
-    }
-
-    if (!rootHandle) return []
-
-    const directory = await getDirectoryHandleByPath(normalizedPath)
-    if (!directory) return []
-
-    const directoryNames: string[] = []
-    for await (const [name, handle] of directory.entries()) {
-      if (handle.kind !== 'directory') continue
-      if (isHiddenSystemDirectory(name)) continue
-      directoryNames.push(name)
-    }
-
-    return sortLocalChildDirectoryNames(directoryNames)
-  }, [rootHandle, rootId, getDirectoryHandleByPath])
-
   const {
     activateInactiveLocalRootTarget,
     warmupRootPathBinding,
@@ -261,66 +173,20 @@ export function useFileSystem() {
     setError,
   })
 
-  const selectDirectory = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const handle = await openDirectory()
-      if (!handle) return
-
-      const cached = await upsertCachedRootHandle(handle).catch(() => null)
-      const resolvedRootId = cached?.rootId ?? createSessionRootId(handle)
-
-      warmupRootPathBinding(resolvedRootId, handle.name)
-      await activateRootHandle(handle, resolvedRootId, '')
-      await refreshCachedRoots()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [activateRootHandle, refreshCachedRoots, warmupRootPathBinding])
-
-  const openCachedRoot = useCallback(async (targetRootId: string): Promise<boolean> => {
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      return await activateInactiveLocalRootTarget({
-        targetRootId,
-        targetPath: '',
-      })
-    } catch (err) {
-      setError((err as Error).message)
-      return false
-    } finally {
-      setIsLoading(false)
-    }
-  }, [activateInactiveLocalRootTarget])
-
-  const rebindCachedRootPath = useCallback(async (targetRootId: string): Promise<boolean> => {
-    if (!targetRootId) return false
-
-    const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
-    const rootLabel = targetRoot?.rootName || ROOT_LABEL_FALLBACK
-
-    try {
-      const nextPath = ensureRootPath({
-        rootId: targetRootId,
-        rootLabel,
-        promptIfMissing: true,
-        forcePrompt: true,
-      })
-      if (!nextPath) return false
-
-      await refreshCachedRoots()
-      return true
-    } catch (err) {
-      setError((err as Error).message)
-      return false
-    }
-  }, [cachedRoots, refreshCachedRoots])
+  const {
+    selectDirectory,
+    openCachedRoot,
+    rebindCachedRootPath,
+  } = useLocalRootCommandController({
+    cachedRoots,
+    rootLabelFallback: ROOT_LABEL_FALLBACK,
+    activateRootHandle,
+    activateInactiveLocalRootTarget,
+    warmupRootPathBinding,
+    refreshCachedRoots,
+    setIsLoading,
+    setError,
+  })
 
   const navigateToPath = useCallback(async (
     targetPath: string,

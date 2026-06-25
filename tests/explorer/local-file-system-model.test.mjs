@@ -11,6 +11,7 @@ import {
   readLocalRootNameFromPath,
   shouldRefreshCachedLocalRootsForStorageKey,
   sortLocalChildDirectoryNames,
+  toLocalChildDirectoryNames,
   toLocalListingItems,
 } from '../../src/features/explorer/lib/localFileSystemModel.ts'
 
@@ -72,6 +73,20 @@ test('Local File System Model recognizes the virtual Root Trash path after norma
 
 test('Local File System Model sorts child directory names for address suggestions', () => {
   assert.deepEqual(sortLocalChildDirectoryNames(['第10组', 'alpha', '第2组']), [
+    '第2组',
+    '第10组',
+    'alpha',
+  ])
+})
+
+test('Local File System Model extracts child directory names from a Listing', () => {
+  assert.deepEqual(toLocalChildDirectoryNames([
+    file('cover.jpg'),
+    directory('第10组'),
+    directory('alpha'),
+    file('notes.md'),
+    directory('第2组'),
+  ]), [
     '第2组',
     '第10组',
     'alpha',

@@ -1,24 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import {
-  assignFaces,
-  createPersonFromFaces,
-  ignoreFaces,
   listPeople,
   listPersonFaces,
   listReviewFaces,
   mergePeople,
   renamePerson,
-  requeueFaces,
-  restoreIgnoredFaces,
-  unassignFaces,
 } from '@/features/faces/api'
 import {
   faceCountText,
-  readFaceMutationResultMessage,
   type NoticeTone,
   type PanelView,
 } from '@/features/faces/lib/peoplePanelText'
+import { usePeoplePanelFaceMutationController } from '@/features/faces/hooks/usePeoplePanelFaceMutationController'
+import { usePeoplePanelSourceActions } from '@/features/faces/hooks/usePeoplePanelSourceActions'
 import {
   type CompactPeopleStage,
   resolvePeoplePanelCompactEmptySelectionStage,
@@ -31,7 +26,7 @@ import {
   resolvePeoplePanelSelectionModel,
   resolvePeoplePanelViewSwitch,
 } from '@/features/faces/lib/peoplePanelModel'
-import type { FaceMutationResult, FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
+import type { FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
 import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
 import { PeoplePanelFaceSection } from '@/features/faces/components/PeoplePanelFaceSection'
@@ -86,8 +81,6 @@ export function PeoplePanel({
   const [isLoadingFaces, setIsLoadingFaces] = useState(false)
   const [isSavingRename, setIsSavingRename] = useState(false)
   const [isMerging, setIsMerging] = useState(false)
-  const [isMutatingFaces, setIsMutatingFaces] = useState(false)
-  const [isProjectingSources, setIsProjectingSources] = useState(false)
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null)
   const [compactPeopleStage, setCompactPeopleStage] = useState<CompactPeopleStage>('list')
   const previousFaceSelectionScopeKeyRef = useRef<string | null>(null)
@@ -129,6 +122,17 @@ export function PeoplePanel({
   const clearSelection = useCallback(() => {
     setSelectedFaceIds(new Set())
   }, [])
+
+  const {
+    isProjectingSources,
+    openFaceSource,
+    projectFaceSources,
+  } = usePeoplePanelSourceActions({
+    selectedFaces,
+    onOpenFaceSource,
+    onProjectFaceSources,
+    setNotice,
+  })
 
   const loadAllPeople = useCallback(async () => {
     const items = await listPeople(context, {
@@ -212,6 +216,23 @@ export function PeoplePanel({
       loadCurrentFaces(),
     ])
   }, [loadAllPeople, loadCurrentFaces, loadPeopleList, peopleQuery])
+
+  const {
+    isMutatingFaces,
+    assignSelectedFaces,
+    createPersonForSelectedFaces,
+    unassignSelectedFaces,
+    ignoreSelectedFaces,
+    restoreIgnoredFacesForSelection,
+    requeueSelectedFaces,
+  } = usePeoplePanelFaceMutationController({
+    context,
+    selectedFaceIds,
+    selectedIds,
+    clearSelection,
+    refreshAll,
+    setNotice,
+  })
 
   useEffect(() => {
     if (!open) return
@@ -319,63 +340,6 @@ export function PeoplePanel({
     if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
   }, [clearSelection, isCompact])
 
-  const handleOpenFaceSource = useCallback(async (face: FaceRecord) => {
-    if (!onOpenFaceSource) {
-      setNotice({
-        tone: 'error',
-        message: '当前上下文不支持打开来源文件',
-      })
-      return false
-    }
-
-    try {
-      const opened = await onOpenFaceSource(face)
-      if (!opened) {
-        setNotice({
-          tone: 'error',
-          message: '该人脸来源不在当前 Root 内，暂不支持跳转',
-        })
-      }
-      return opened
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '来源文件打开失败',
-      })
-      return false
-    }
-  }, [onOpenFaceSource])
-
-  const handleProjectFaceSources = useCallback(async () => {
-    if (selectedFaces.length === 0) return
-    if (!onProjectFaceSources) {
-      setNotice({
-        tone: 'error',
-        message: '当前上下文不支持投射源文件',
-      })
-      return
-    }
-
-    setIsProjectingSources(true)
-    setNotice(null)
-    try {
-      const projected = await onProjectFaceSources(selectedFaces)
-      if (!projected) {
-        setNotice({
-          tone: 'error',
-          message: '没有可投射的源文件',
-        })
-      }
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '源文件投射失败',
-      })
-    } finally {
-      setIsProjectingSources(false)
-    }
-  }, [onProjectFaceSources, selectedFaces])
-
   const handleSaveRename = useCallback(async () => {
     if (!selectedPerson) return
     const nextName = renameDraft.trim()
@@ -457,61 +421,6 @@ export function PeoplePanel({
     }
   }, [context, loadAllPeople, loadPeopleList, mergeTargetPersonId, scope, selectedPerson])
 
-  const runFaceMutation = useCallback(async (task: () => Promise<FaceMutationResult>) => {
-    if (selectedFaceIds.size === 0) return false
-    setIsMutatingFaces(true)
-    setNotice(null)
-    try {
-      const result = await task()
-      setNotice(readFaceMutationResultMessage(result))
-      clearSelection()
-      await refreshAll()
-      return true
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '人脸纠错失败',
-      })
-      return false
-    } finally {
-      setIsMutatingFaces(false)
-    }
-  }, [clearSelection, refreshAll, selectedFaceIds.size])
-
-  const handleAssignSelectedFaces = useCallback(async (personId: string) => {
-    if (selectedIds.length === 0) return false
-    return runFaceMutation(() => assignFaces(context, {
-      faceIds: selectedIds,
-      targetPersonId: personId,
-    }))
-  }, [context, runFaceMutation, selectedIds])
-  const handleCreatePersonForSelectedFaces = useCallback(async (name: string) => {
-    if (selectedIds.length === 0) return false
-    return runFaceMutation(() => createPersonFromFaces(context, {
-      faceIds: selectedIds,
-      name,
-    }))
-  }, [context, runFaceMutation, selectedIds])
-  const handleUnassignSelectedFaces = useCallback(async () => {
-    return runFaceMutation(() => unassignFaces(context, {
-      faceIds: selectedIds,
-    }))
-  }, [context, runFaceMutation, selectedIds])
-  const handleIgnoreSelectedFaces = useCallback(async () => {
-    return runFaceMutation(() => ignoreFaces(context, {
-      faceIds: selectedIds,
-    }))
-  }, [context, runFaceMutation, selectedIds])
-  const handleRestoreIgnoredFaces = useCallback(async () => {
-    return runFaceMutation(() => restoreIgnoredFaces(context, {
-      faceIds: selectedIds,
-    }))
-  }, [context, runFaceMutation, selectedIds])
-  const handleRequeueSelectedFaces = useCallback(async () => {
-    return runFaceMutation(() => requeueFaces(context, {
-      faceIds: selectedIds,
-    }))
-  }, [context, runFaceMutation, selectedIds])
   if (!open) return null
 
   return (
@@ -647,14 +556,14 @@ export function PeoplePanel({
                       isProjectingSources={isProjectingSources}
                       onClearSelection={clearSelection}
                       onSelectionChange={handleFaceSelectionChange}
-                      onOpenFaceSource={handleOpenFaceSource}
-                      onAssign={handleAssignSelectedFaces}
-                      onCreate={handleCreatePersonForSelectedFaces}
-                      onUnassign={handleUnassignSelectedFaces}
-                      onIgnore={handleIgnoreSelectedFaces}
-                      onRestoreIgnored={handleRestoreIgnoredFaces}
-                      onRequeue={handleRequeueSelectedFaces}
-                      onProjectSources={handleProjectFaceSources}
+                      onOpenFaceSource={openFaceSource}
+                      onAssign={assignSelectedFaces}
+                      onCreate={createPersonForSelectedFaces}
+                      onUnassign={unassignSelectedFaces}
+                      onIgnore={ignoreSelectedFaces}
+                      onRestoreIgnored={restoreIgnoredFacesForSelection}
+                      onRequeue={requeueSelectedFaces}
+                      onProjectSources={projectFaceSources}
                     />
                   </div>
                 )}
@@ -677,14 +586,14 @@ export function PeoplePanel({
                     isProjectingSources={isProjectingSources}
                     onClearSelection={clearSelection}
                     onSelectionChange={handleFaceSelectionChange}
-                    onOpenFaceSource={handleOpenFaceSource}
-                    onAssign={handleAssignSelectedFaces}
-                    onCreate={handleCreatePersonForSelectedFaces}
-                    onUnassign={handleUnassignSelectedFaces}
-                    onIgnore={handleIgnoreSelectedFaces}
-                    onRestoreIgnored={handleRestoreIgnoredFaces}
-                    onRequeue={handleRequeueSelectedFaces}
-                    onProjectSources={handleProjectFaceSources}
+                    onOpenFaceSource={openFaceSource}
+                    onAssign={assignSelectedFaces}
+                    onCreate={createPersonForSelectedFaces}
+                    onUnassign={unassignSelectedFaces}
+                    onIgnore={ignoreSelectedFaces}
+                    onRestoreIgnored={restoreIgnoredFacesForSelection}
+                    onRequeue={requeueSelectedFaces}
+                    onProjectSources={projectFaceSources}
                   />
                 )}
               </div>
@@ -771,14 +680,14 @@ export function PeoplePanel({
                   isProjectingSources={isProjectingSources}
                   onClearSelection={clearSelection}
                   onSelectionChange={handleFaceSelectionChange}
-                  onOpenFaceSource={handleOpenFaceSource}
-                  onAssign={handleAssignSelectedFaces}
-                  onCreate={handleCreatePersonForSelectedFaces}
-                  onUnassign={handleUnassignSelectedFaces}
-                  onIgnore={handleIgnoreSelectedFaces}
-                  onRestoreIgnored={handleRestoreIgnoredFaces}
-                  onRequeue={handleRequeueSelectedFaces}
-                  onProjectSources={handleProjectFaceSources}
+                  onOpenFaceSource={openFaceSource}
+                  onAssign={assignSelectedFaces}
+                  onCreate={createPersonForSelectedFaces}
+                  onUnassign={unassignSelectedFaces}
+                  onIgnore={ignoreSelectedFaces}
+                  onRestoreIgnored={restoreIgnoredFacesForSelection}
+                  onRequeue={requeueSelectedFaces}
+                  onProjectSources={projectFaceSources}
                 />
               </div>
             </div>

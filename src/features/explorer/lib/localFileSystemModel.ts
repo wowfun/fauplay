@@ -15,6 +15,11 @@ export interface LocalRootBindingEntry {
   rootPath: string
 }
 
+export interface LocalChildDirectoryEntry {
+  kind: string
+  name: string
+}
+
 export interface MergeCachedLocalRootEntriesParams {
   cachedRoots: CachedRootEntry[]
   bindings: LocalRootBindingEntry[]
@@ -154,6 +159,12 @@ export function resolveLocalRootActivationTarget({
 
 export function sortLocalChildDirectoryNames(names: string[]): string[] {
   return [...names].sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
+}
+
+export function toLocalChildDirectoryNames(entries: LocalChildDirectoryEntry[]): string[] {
+  return sortLocalChildDirectoryNames(entries
+    .filter((entry) => entry.kind === 'directory')
+    .map((entry) => entry.name))
 }
 
 export function mergeCachedLocalRootEntries({
