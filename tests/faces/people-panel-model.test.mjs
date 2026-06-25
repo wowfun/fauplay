@@ -5,10 +5,14 @@ import {
   resolvePeoplePanelCompactEmptySelectionStage,
   resolvePeoplePanelFacesLoadPlan,
   resolvePeoplePanelFaceSectionModel,
+  resolvePeoplePanelFaceSelectionScopeCommit,
   resolvePeoplePanelListStage,
   resolvePeoplePanelPersonSelection,
+  resolvePeoplePanelPersonEditDraftCommit,
   resolvePeoplePanelPreferredPersonFocus,
+  resolvePeoplePanelPeopleListRefreshPlan,
   resolvePeoplePanelRefreshedPeopleSelection,
+  resolvePeoplePanelRenderPlan,
   resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
   resolvePeoplePanelViewSwitch,
@@ -58,8 +62,6 @@ test('People Panel Selection Model resolves selected person from visible or cach
       mergeTargetQuery: '',
       scope: 'global',
       view: 'people',
-      isCompact: false,
-      compactPeopleStage: 'list',
     }).selectedPerson?.personId,
     'visible',
   )
@@ -74,8 +76,6 @@ test('People Panel Selection Model resolves selected person from visible or cach
       mergeTargetQuery: '',
       scope: 'global',
       view: 'people',
-      isCompact: false,
-      compactPeopleStage: 'list',
     }).selectedPerson?.personId,
     'cached',
   )
@@ -97,8 +97,6 @@ test('People Panel Selection Model filters merge targets by display name, person
     mergeTargetQuery: 'match',
     scope: 'root',
     view: 'people',
-    isCompact: true,
-    compactPeopleStage: 'detail',
   })
 
   assert.deepEqual(
@@ -116,8 +114,6 @@ test('People Panel Selection Model filters merge targets by display name, person
       mergeTargetQuery: 'archived',
       scope: 'root',
       view: 'people',
-      isCompact: true,
-      compactPeopleStage: 'detail',
     }).mergeTargetCandidates.map((item) => item.personId),
     ['archived-person'],
   )
@@ -132,8 +128,6 @@ test('People Panel Selection Model filters merge targets by display name, person
       mergeTargetQuery: 'mina',
       scope: 'root',
       view: 'people',
-      isCompact: true,
-      compactPeopleStage: 'detail',
     }).mergeTargetCandidates.map((item) => item.personId),
     ['by-name'],
   )
@@ -149,8 +143,6 @@ test('People Panel Selection Model derives selected faces and assignment state',
     mergeTargetQuery: '',
     scope: 'root',
     view: 'people',
-    isCompact: true,
-    compactPeopleStage: 'detail',
   })
 
   assert.deepEqual(model.selectedFaces.map((item) => item.faceId), ['face-1', 'face-3'])
@@ -158,11 +150,9 @@ test('People Panel Selection Model derives selected faces and assignment state',
   assert.deepEqual(model.assignmentExcludedPersonIds, ['person-1'])
   assert.equal(model.assignmentInputKey, 'root:people:person-1')
   assert.equal(model.faceSelectionScopeKey, 'root:people:person-1')
-  assert.equal(model.showCompactPeopleList, false)
-  assert.equal(model.showCompactPeopleDetail, true)
 })
 
-test('People Panel Selection Model derives compact list stage only for people view', () => {
+test('People Panel Selection Model derives assignment state only for people view', () => {
   const peopleListModel = resolvePeoplePanelSelectionModel({
     people: [],
     allPeople: [],
@@ -172,8 +162,6 @@ test('People Panel Selection Model derives compact list stage only for people vi
     mergeTargetQuery: '',
     scope: 'global',
     view: 'people',
-    isCompact: true,
-    compactPeopleStage: 'list',
   })
 
   const reviewModel = resolvePeoplePanelSelectionModel({
@@ -185,16 +173,11 @@ test('People Panel Selection Model derives compact list stage only for people vi
     mergeTargetQuery: '',
     scope: 'global',
     view: 'ignored',
-    isCompact: true,
-    compactPeopleStage: 'list',
   })
 
-  assert.equal(peopleListModel.showCompactPeopleList, true)
-  assert.equal(peopleListModel.showCompactPeopleDetail, false)
-  assert.equal(reviewModel.showCompactPeopleList, false)
-  assert.equal(reviewModel.showCompactPeopleDetail, false)
   assert.deepEqual(reviewModel.assignmentExcludedPersonIds, [])
   assert.equal(reviewModel.assignmentInputKey, 'global:ignored:')
+  assert.equal(peopleListModel.assignmentInputKey, 'global:people:')
 })
 
 test('People Panel Model resolves view switches and compact stages', () => {
@@ -266,6 +249,32 @@ test('People Panel Model resolves readonly and preferred-person state transition
     preferredPersonId: 'person-a',
     isCompact: true,
   }), null)
+})
+
+test('People Panel Model resolves person edit draft reset commits', () => {
+  assert.deepEqual(resolvePeoplePanelPersonEditDraftCommit({
+    selectedPersonName: 'Ada Lovelace',
+  }), {
+    renameDraft: 'Ada Lovelace',
+    mergeTargetPersonId: '',
+    mergeTargetQuery: '',
+  })
+
+  assert.deepEqual(resolvePeoplePanelPersonEditDraftCommit({
+    selectedPersonName: '',
+  }), {
+    renameDraft: '',
+    mergeTargetPersonId: '',
+    mergeTargetQuery: '',
+  })
+
+  assert.deepEqual(resolvePeoplePanelPersonEditDraftCommit({
+    selectedPersonName: null,
+  }), {
+    renameDraft: '',
+    mergeTargetPersonId: '',
+    mergeTargetQuery: '',
+  })
 })
 
 test('People Panel Model keeps compact people view on the list when no person is selected', () => {
@@ -347,6 +356,148 @@ test('People Panel Model resolves the current faces load plan', () => {
     readonly: true,
     scope: 'root',
   }), { kind: 'empty' })
+})
+
+test('People Panel Model resolves face selection scope commits', () => {
+  assert.deepEqual(resolvePeoplePanelFaceSelectionScopeCommit({
+    open: false,
+    previousScopeKey: 'root:people:person-a',
+    nextScopeKey: 'root:ignored:',
+  }), {
+    nextPreviousScopeKey: 'root:people:person-a',
+    shouldClearSelection: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFaceSelectionScopeCommit({
+    open: true,
+    previousScopeKey: 'root:people:person-a',
+    nextScopeKey: 'root:people:person-a',
+  }), {
+    nextPreviousScopeKey: 'root:people:person-a',
+    shouldClearSelection: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFaceSelectionScopeCommit({
+    open: true,
+    previousScopeKey: null,
+    nextScopeKey: 'root:people:person-a',
+  }), {
+    nextPreviousScopeKey: 'root:people:person-a',
+    shouldClearSelection: true,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFaceSelectionScopeCommit({
+    open: true,
+    previousScopeKey: 'root:people:person-a',
+    nextScopeKey: 'root:ignored:',
+  }), {
+    nextPreviousScopeKey: 'root:ignored:',
+    shouldClearSelection: true,
+  })
+})
+
+test('People Panel Model resolves People list refresh plans', () => {
+  assert.equal(resolvePeoplePanelPeopleListRefreshPlan({
+    open: false,
+    view: 'people',
+    query: '',
+  }), null)
+
+  assert.equal(resolvePeoplePanelPeopleListRefreshPlan({
+    open: true,
+    view: 'ignored',
+    query: '',
+  }), null)
+
+  assert.deepEqual(resolvePeoplePanelPeopleListRefreshPlan({
+    open: true,
+    view: 'people',
+    query: '   ',
+  }), {
+    delayMs: 0,
+  })
+
+  assert.deepEqual(resolvePeoplePanelPeopleListRefreshPlan({
+    open: true,
+    view: 'people',
+    query: ' ada ',
+  }), {
+    delayMs: 180,
+  })
+})
+
+test('People Panel Model resolves layout render plans', () => {
+  assert.deepEqual(resolvePeoplePanelRenderPlan({
+    isCompact: true,
+    view: 'people',
+    compactPeopleStage: 'list',
+    hasSelectedPerson: false,
+    readonly: false,
+  }), {
+    panelLayout: 'compact',
+    viewTabsLayout: 'compact',
+    showCompactPeopleList: true,
+    showCompactPeopleDetail: false,
+    showCompactReviewFaces: false,
+    showWidePeopleList: false,
+    showWidePersonTools: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelRenderPlan({
+    isCompact: true,
+    view: 'people',
+    compactPeopleStage: 'detail',
+    hasSelectedPerson: true,
+    readonly: false,
+  }), {
+    panelLayout: 'compact',
+    viewTabsLayout: 'compact',
+    showCompactPeopleList: false,
+    showCompactPeopleDetail: true,
+    showCompactReviewFaces: false,
+    showWidePeopleList: false,
+    showWidePersonTools: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelRenderPlan({
+    isCompact: true,
+    view: 'ignored',
+    compactPeopleStage: 'detail',
+    hasSelectedPerson: false,
+    readonly: false,
+  }), {
+    panelLayout: 'compact',
+    viewTabsLayout: 'compact',
+    showCompactPeopleList: false,
+    showCompactPeopleDetail: false,
+    showCompactReviewFaces: true,
+    showWidePeopleList: false,
+    showWidePersonTools: false,
+  })
+
+  assert.deepEqual(resolvePeoplePanelRenderPlan({
+    isCompact: false,
+    view: 'people',
+    compactPeopleStage: 'detail',
+    hasSelectedPerson: true,
+    readonly: false,
+  }), {
+    panelLayout: 'wide',
+    viewTabsLayout: 'wide',
+    showCompactPeopleList: false,
+    showCompactPeopleDetail: false,
+    showCompactReviewFaces: false,
+    showWidePeopleList: true,
+    showWidePersonTools: true,
+  })
+
+  assert.equal(resolvePeoplePanelRenderPlan({
+    isCompact: false,
+    view: 'people',
+    compactPeopleStage: 'detail',
+    hasSelectedPerson: true,
+    readonly: true,
+  }).showWidePersonTools, false)
 })
 
 test('People Panel Model resolves face section display for layout and view state', () => {

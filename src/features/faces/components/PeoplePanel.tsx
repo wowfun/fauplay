@@ -6,7 +6,6 @@ import {
   listReviewFaces,
 } from '@/features/faces/api'
 import {
-  faceCountText,
   type NoticeTone,
   type PanelView,
 } from '@/features/faces/lib/peoplePanelText'
@@ -16,24 +15,36 @@ import { usePeoplePanelSourceActions } from '@/features/faces/hooks/usePeoplePan
 import {
   type CompactPeopleStage,
   resolvePeoplePanelCompactEmptySelectionStage,
-  resolvePeoplePanelFacesLoadPlan,
+  resolvePeoplePanelFaceSelectionScopeCommit,
   resolvePeoplePanelListStage,
+  resolvePeoplePanelPersonEditDraftCommit,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPreferredPersonFocus,
-  resolvePeoplePanelRefreshedPeopleSelection,
+  resolvePeoplePanelPeopleListRefreshPlan,
+  resolvePeoplePanelRenderPlan,
   resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
   resolvePeoplePanelViewSwitch,
 } from '@/features/faces/lib/peoplePanelModel'
+import {
+  loadPeoplePanelFaces,
+  resolvePeoplePanelFacesLoadCommit,
+  type PeoplePanelFacesLoaders,
+} from '@/features/faces/lib/peoplePanelFacesLoad'
+import {
+  loadPeoplePanelAllPeople,
+  loadPeoplePanelPeopleList,
+  resolvePeoplePanelAllPeopleLoadCommit,
+  resolvePeoplePanelPeopleListLoadCommit,
+} from '@/features/faces/lib/peoplePanelPeopleLoad'
 import type { FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
-import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
 import { PeoplePanelFaceSection } from '@/features/faces/components/PeoplePanelFaceSection'
 import { PeoplePanelHeader } from '@/features/faces/components/PeoplePanelHeader'
 import { PeoplePanelNotice } from '@/features/faces/components/PeoplePanelNotice'
+import { PeoplePanelPersonSummaryCard } from '@/features/faces/components/PeoplePanelPersonSummaryCard'
 import { PeoplePanelPersonTools } from '@/features/faces/components/PeoplePanelPersonTools'
 import { PeoplePanelViewTabs } from '@/features/faces/components/PeoplePanelViewTabs'
-import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/Button'
 
@@ -48,6 +59,11 @@ interface PeoplePanelProps {
   onOpenFaceSource?: (face: FaceRecord) => boolean | Promise<boolean>
   onProjectFaceSources?: (faces: FaceRecord[]) => boolean | Promise<boolean>
 }
+
+const peoplePanelFacesLoaders = {
+  listPersonFaces,
+  listReviewFaces,
+} satisfies PeoplePanelFacesLoaders
 
 export function PeoplePanel({
   open,
@@ -90,8 +106,6 @@ export function PeoplePanel({
     assignmentExcludedPersonIds,
     assignmentInputKey,
     faceSelectionScopeKey,
-    showCompactPeopleList,
-    showCompactPeopleDetail,
   } = useMemo(() => resolvePeoplePanelSelectionModel({
     people,
     allPeople,
@@ -101,13 +115,9 @@ export function PeoplePanel({
     mergeTargetQuery,
     scope,
     view,
-    isCompact,
-    compactPeopleStage,
   }), [
     allPeople,
-    compactPeopleStage,
     faces,
-    isCompact,
     mergeTargetQuery,
     people,
     scope,
@@ -115,6 +125,13 @@ export function PeoplePanel({
     selectedPersonId,
     view,
   ])
+  const renderPlan = useMemo(() => resolvePeoplePanelRenderPlan({
+    isCompact,
+    view,
+    compactPeopleStage,
+    hasSelectedPerson: Boolean(selectedPerson),
+    readonly,
+  }), [compactPeopleStage, isCompact, readonly, selectedPerson, view])
 
   const clearSelection = useCallback(() => {
     setSelectedFaceIds(new Set())
@@ -132,78 +149,65 @@ export function PeoplePanel({
   })
 
   const loadAllPeople = useCallback(async () => {
-    const items = await listPeople(context, {
+    const result = await loadPeoplePanelAllPeople({
+      context,
       scope,
-      size: 400,
+      listPeople,
     })
-    setAllPeople(items)
+    const commit = resolvePeoplePanelAllPeopleLoadCommit(result)
+    if (commit.allPeople) {
+      setAllPeople(commit.allPeople)
+    }
+    if (commit.notice) {
+      setNotice(commit.notice)
+    }
   }, [context, scope])
 
   const loadPeopleList = useCallback(async (query = '') => {
     const requestId = ++peopleListRequestIdRef.current
-    const trimmedQuery = query.trim()
     setIsLoadingPeople(true)
-    try {
-      const items = await listPeople(context, {
-        scope,
-        query: trimmedQuery || undefined,
-        size: 300,
-      })
-      if (requestId !== peopleListRequestIdRef.current) return
-      setPeople(items)
-      setSelectedPersonId((previous) => resolvePeoplePanelRefreshedPeopleSelection({
-        previousSelectedPersonId: previous,
-        people: items,
-      }))
-    } catch (error) {
-      if (requestId !== peopleListRequestIdRef.current) return
-      setPeople([])
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '人物列表读取失败',
-      })
-    } finally {
-      if (requestId === peopleListRequestIdRef.current) {
-        setIsLoadingPeople(false)
-      }
+    const result = await loadPeoplePanelPeopleList({
+      context,
+      scope,
+      query,
+      listPeople,
+    })
+    if (requestId !== peopleListRequestIdRef.current) return
+
+    const commit = resolvePeoplePanelPeopleListLoadCommit(result, {
+      previousSelectedPersonId: null,
+    })
+    setPeople(commit.people)
+    if (commit.notice) {
+      setNotice(commit.notice)
     }
+    setSelectedPersonId((previous) => {
+      const selectionCommit = resolvePeoplePanelPeopleListLoadCommit(result, {
+        previousSelectedPersonId: previous,
+      })
+      return selectionCommit.nextSelectedPersonId === undefined
+        ? previous
+        : selectionCommit.nextSelectedPersonId
+    })
+    setIsLoadingPeople(false)
   }, [context, scope])
 
   const loadCurrentFaces = useCallback(async () => {
     setIsLoadingFaces(true)
-    try {
-      const plan = resolvePeoplePanelFacesLoadPlan({
-        view,
-        selectedPersonId,
-        readonly,
-        scope,
-      })
-      if (plan.kind === 'empty') {
-        setFaces([])
-        return
-      }
-      if (plan.kind === 'person') {
-        setFaces(await listPersonFaces(context, {
-          personId: plan.personId,
-          scope: plan.scope,
-        }))
-        return
-      }
-
-      setFaces(await listReviewFaces(context, {
-        scope: plan.scope,
-        bucket: plan.bucket,
-        size: plan.size,
-      }))
-    } catch (error) {
-      setFaces([])
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '人脸列表读取失败',
-      })
-    } finally {
-      setIsLoadingFaces(false)
+    const result = await loadPeoplePanelFaces({
+      context,
+      view,
+      selectedPersonId,
+      readonly,
+      scope,
+      loaders: peoplePanelFacesLoaders,
+    })
+    const commit = resolvePeoplePanelFacesLoadCommit(result)
+    setFaces(commit.faces)
+    if (commit.notice) {
+      setNotice(commit.notice)
     }
+    setIsLoadingFaces(false)
   }, [context, readonly, scope, selectedPersonId, view])
 
   const refreshAll = useCallback(async () => {
@@ -266,10 +270,15 @@ export function PeoplePanel({
   }, [readonly])
 
   useEffect(() => {
-    if (!open || view !== 'people') return
+    const plan = resolvePeoplePanelPeopleListRefreshPlan({
+      open,
+      view,
+      query: peopleQuery,
+    })
+    if (!plan) return
     const timeoutId = window.setTimeout(() => {
       void loadPeopleList(peopleQuery)
-    }, peopleQuery.trim() ? 180 : 0)
+    }, plan.delayMs)
 
     return () => {
       window.clearTimeout(timeoutId)
@@ -287,16 +296,24 @@ export function PeoplePanel({
   }, [loadCurrentFaces, open])
 
   useEffect(() => {
-    if (!open) return
-    if (previousFaceSelectionScopeKeyRef.current === faceSelectionScopeKey) return
-    previousFaceSelectionScopeKeyRef.current = faceSelectionScopeKey
-    clearSelection()
+    const commit = resolvePeoplePanelFaceSelectionScopeCommit({
+      open,
+      previousScopeKey: previousFaceSelectionScopeKeyRef.current,
+      nextScopeKey: faceSelectionScopeKey,
+    })
+    previousFaceSelectionScopeKeyRef.current = commit.nextPreviousScopeKey
+    if (commit.shouldClearSelection) {
+      clearSelection()
+    }
   }, [clearSelection, faceSelectionScopeKey, open])
 
   useEffect(() => {
-    setRenameDraft(selectedPerson?.name || '')
-    setMergeTargetPersonId('')
-    setMergeTargetQuery('')
+    const commit = resolvePeoplePanelPersonEditDraftCommit({
+      selectedPersonName: selectedPerson?.name,
+    })
+    setRenameDraft(commit.renameDraft)
+    setMergeTargetPersonId(commit.mergeTargetPersonId)
+    setMergeTargetQuery(commit.mergeTargetQuery)
   }, [selectedPerson?.name, selectedPersonId])
 
   useEffect(() => {
@@ -359,6 +376,54 @@ export function PeoplePanel({
     if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
   }, [clearSelection, isCompact])
 
+  const faceSectionState = {
+    view,
+    readonly,
+    context,
+    scope,
+    faces,
+    selectedFaceIds,
+    selectedIds,
+    selectedFaces,
+    excludedPersonIds: assignmentExcludedPersonIds,
+    assignmentInputKey,
+    isLoadingFaces,
+    isMutatingFaces,
+    isProjectingSources,
+  }
+  const faceSectionActions = {
+    onClearSelection: clearSelection,
+    onSelectionChange: handleFaceSelectionChange,
+    onOpenFaceSource: openFaceSource,
+    onAssign: assignSelectedFaces,
+    onCreate: createPersonForSelectedFaces,
+    onUnassign: unassignSelectedFaces,
+    onIgnore: ignoreSelectedFaces,
+    onRestoreIgnored: restoreIgnoredFacesForSelection,
+    onRequeue: requeueSelectedFaces,
+    onProjectSources: projectFaceSources,
+  }
+  const personToolsState = {
+    scope,
+    renameDraft,
+    mergeTargetQuery,
+    mergeTargetCandidates,
+    mergeTargetPersonId,
+    isSavingRename,
+    isMerging,
+  }
+  const personToolsActions = {
+    onRenameDraftChange: setRenameDraft,
+    onSaveRename: () => {
+      void saveRename()
+    },
+    onMergeTargetQueryChange: setMergeTargetQuery,
+    onMergeTargetPersonChange: setMergeTargetPersonId,
+    onMerge: () => {
+      void mergeSelectedPerson()
+    },
+  }
+
   if (!open) return null
 
   return (
@@ -387,17 +452,17 @@ export function PeoplePanel({
 
           <PeoplePanelNotice isCompact={isCompact} notice={notice} />
 
-          {isCompact ? (
+          {renderPlan.panelLayout === 'compact' ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <PeoplePanelViewTabs
                 readonly={readonly}
                 view={view}
-                layout="compact"
+                layout={renderPlan.viewTabsLayout}
                 onSwitchView={handleSwitchView}
               />
 
               <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
-                {showCompactPeopleList && (
+                {renderPlan.showCompactPeopleList && (
                   <PeopleList
                     people={people}
                     query={peopleQuery}
@@ -410,7 +475,7 @@ export function PeoplePanel({
                   />
                 )}
 
-                {showCompactPeopleDetail && (
+                {renderPlan.showCompactPeopleDetail && (
                   <div className="space-y-3">
                     <Button
                       variant="ghost"
@@ -422,116 +487,33 @@ export function PeoplePanel({
                       返回人物列表
                     </Button>
 
-                    {selectedPerson ? (
-                      <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="flex items-start gap-3">
-                          {selectedPerson.featureFaceId ? (
-                            <FaceCropImage
-                              faceId={selectedPerson.featureFaceId}
-                              size={88}
-                              padding={0.35}
-                              alt={getPersonDisplayName(selectedPerson)}
-                              className="h-[88px] w-[88px] shrink-0 rounded-lg border border-border object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-[88px] w-[88px] shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted text-[11px] text-muted-foreground">
-                              无代表脸
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-base font-semibold">{getPersonDisplayName(selectedPerson)}</div>
-                            <div className="mt-1 text-sm text-muted-foreground">{faceCountText(selectedPerson, scope)}</div>
-                            {selectedPerson.featureAssetPath && (
-                              <div className="mt-2 truncate text-xs text-muted-foreground" title={selectedPerson.featureAssetPath}>
-                                {selectedPerson.featureAssetPath}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed border-border px-3 py-5 text-sm text-muted-foreground">
-                        尚未选择人物
-                      </div>
-                    )}
+                    <PeoplePanelPersonSummaryCard
+                      person={selectedPerson}
+                      scope={scope}
+                      layout="compact"
+                    />
 
                     {!readonly && selectedPerson && (
                       <PeoplePanelPersonTools
                         layout="compact"
-                        scope={scope}
-                        renameDraft={renameDraft}
-                        mergeTargetQuery={mergeTargetQuery}
-                        mergeTargetCandidates={mergeTargetCandidates}
-                        mergeTargetPersonId={mergeTargetPersonId}
-                        isSavingRename={isSavingRename}
-                        isMerging={isMerging}
-                        onRenameDraftChange={setRenameDraft}
-                        onSaveRename={() => {
-                          void saveRename()
-                        }}
-                        onMergeTargetQueryChange={setMergeTargetQuery}
-                        onMergeTargetPersonChange={setMergeTargetPersonId}
-                        onMerge={() => {
-                          void mergeSelectedPerson()
-                        }}
+                        state={personToolsState}
+                        actions={personToolsActions}
                       />
                     )}
 
                     <PeoplePanelFaceSection
                       layout="compact-detail"
-                      view={view}
-                      readonly={readonly}
-                      context={context}
-                      scope={scope}
-                      faces={faces}
-                      selectedFaceIds={selectedFaceIds}
-                      selectedIds={selectedIds}
-                      selectedFaces={selectedFaces}
-                      excludedPersonIds={assignmentExcludedPersonIds}
-                      assignmentInputKey={assignmentInputKey}
-                      isLoadingFaces={isLoadingFaces}
-                      isMutatingFaces={isMutatingFaces}
-                      isProjectingSources={isProjectingSources}
-                      onClearSelection={clearSelection}
-                      onSelectionChange={handleFaceSelectionChange}
-                      onOpenFaceSource={openFaceSource}
-                      onAssign={assignSelectedFaces}
-                      onCreate={createPersonForSelectedFaces}
-                      onUnassign={unassignSelectedFaces}
-                      onIgnore={ignoreSelectedFaces}
-                      onRestoreIgnored={restoreIgnoredFacesForSelection}
-                      onRequeue={requeueSelectedFaces}
-                      onProjectSources={projectFaceSources}
+                      state={faceSectionState}
+                      actions={faceSectionActions}
                     />
                   </div>
                 )}
 
-                {isCompact && view !== 'people' && (
+                {renderPlan.showCompactReviewFaces && (
                   <PeoplePanelFaceSection
                     layout="compact-review"
-                    view={view}
-                    readonly={readonly}
-                    context={context}
-                    scope={scope}
-                    faces={faces}
-                    selectedFaceIds={selectedFaceIds}
-                    selectedIds={selectedIds}
-                    selectedFaces={selectedFaces}
-                    excludedPersonIds={assignmentExcludedPersonIds}
-                    assignmentInputKey={assignmentInputKey}
-                    isLoadingFaces={isLoadingFaces}
-                    isMutatingFaces={isMutatingFaces}
-                    isProjectingSources={isProjectingSources}
-                    onClearSelection={clearSelection}
-                    onSelectionChange={handleFaceSelectionChange}
-                    onOpenFaceSource={openFaceSource}
-                    onAssign={assignSelectedFaces}
-                    onCreate={createPersonForSelectedFaces}
-                    onUnassign={unassignSelectedFaces}
-                    onIgnore={ignoreSelectedFaces}
-                    onRestoreIgnored={restoreIgnoredFacesForSelection}
-                    onRequeue={requeueSelectedFaces}
-                    onProjectSources={projectFaceSources}
+                    state={faceSectionState}
+                    actions={faceSectionActions}
                   />
                 )}
               </div>
@@ -542,11 +524,11 @@ export function PeoplePanel({
                 <PeoplePanelViewTabs
                   readonly={readonly}
                   view={view}
-                  layout="wide"
+                  layout={renderPlan.viewTabsLayout}
                   onSwitchView={handleSwitchView}
                 />
 
-                {view === 'people' && (
+                {renderPlan.showWidePeopleList && (
                   <PeopleList
                     people={people}
                     query={peopleQuery}
@@ -561,71 +543,26 @@ export function PeoplePanel({
               </div>
 
               <div className="min-w-0 flex-1 overflow-auto p-4">
-                {view === 'people' && selectedPerson && !readonly && (
+                {renderPlan.showWidePersonTools && selectedPerson && (
                   <div className="mb-4 space-y-4 rounded-md border border-border p-4">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-lg font-semibold">{getPersonDisplayName(selectedPerson)}</div>
-                        <div className="text-sm text-muted-foreground">{faceCountText(selectedPerson, scope)}</div>
-                      </div>
-                      {selectedPerson.featureFaceId && (
-                        <FaceCropImage
-                          faceId={selectedPerson.featureFaceId}
-                          size={112}
-                          padding={0.35}
-                          alt={getPersonDisplayName(selectedPerson)}
-                          className="h-20 w-20 rounded-md border border-border object-cover"
-                        />
-                      )}
-                    </div>
+                    <PeoplePanelPersonSummaryCard
+                      person={selectedPerson}
+                      scope={scope}
+                      layout="wide"
+                    />
 
                     <PeoplePanelPersonTools
                       layout="wide"
-                      scope={scope}
-                      renameDraft={renameDraft}
-                      mergeTargetQuery={mergeTargetQuery}
-                      mergeTargetCandidates={mergeTargetCandidates}
-                      mergeTargetPersonId={mergeTargetPersonId}
-                      isSavingRename={isSavingRename}
-                      isMerging={isMerging}
-                      onRenameDraftChange={setRenameDraft}
-                      onSaveRename={() => {
-                        void saveRename()
-                      }}
-                      onMergeTargetQueryChange={setMergeTargetQuery}
-                      onMergeTargetPersonChange={setMergeTargetPersonId}
-                      onMerge={() => {
-                        void mergeSelectedPerson()
-                      }}
+                      state={personToolsState}
+                      actions={personToolsActions}
                     />
                   </div>
                 )}
 
                 <PeoplePanelFaceSection
                   layout="wide"
-                  view={view}
-                  readonly={readonly}
-                  context={context}
-                  scope={scope}
-                  faces={faces}
-                  selectedFaceIds={selectedFaceIds}
-                  selectedIds={selectedIds}
-                  selectedFaces={selectedFaces}
-                  excludedPersonIds={assignmentExcludedPersonIds}
-                  assignmentInputKey={assignmentInputKey}
-                  isLoadingFaces={isLoadingFaces}
-                  isMutatingFaces={isMutatingFaces}
-                  isProjectingSources={isProjectingSources}
-                  onClearSelection={clearSelection}
-                  onSelectionChange={handleFaceSelectionChange}
-                  onOpenFaceSource={openFaceSource}
-                  onAssign={assignSelectedFaces}
-                  onCreate={createPersonForSelectedFaces}
-                  onUnassign={unassignSelectedFaces}
-                  onIgnore={ignoreSelectedFaces}
-                  onRestoreIgnored={restoreIgnoredFacesForSelection}
-                  onRequeue={requeueSelectedFaces}
-                  onProjectSources={projectFaceSources}
+                  state={faceSectionState}
+                  actions={faceSectionActions}
                 />
               </div>
             </div>

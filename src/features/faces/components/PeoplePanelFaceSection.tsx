@@ -11,8 +11,7 @@ import { Button } from '@/ui/Button'
 
 type FaceActionHandler = () => Promise<boolean | void> | boolean | void
 
-interface PeoplePanelFaceSectionProps {
-  layout: PeoplePanelFaceSectionLayout
+export interface PeoplePanelFaceSectionState {
   view: PanelView
   readonly: boolean
   context: FaceApiContext
@@ -26,6 +25,9 @@ interface PeoplePanelFaceSectionProps {
   isLoadingFaces: boolean
   isMutatingFaces: boolean
   isProjectingSources: boolean
+}
+
+export interface PeoplePanelFaceSectionActions {
   onClearSelection: () => void
   onSelectionChange: (faceIds: string[]) => void
   onOpenFaceSource: (face: FaceRecord) => boolean | Promise<boolean>
@@ -38,32 +40,45 @@ interface PeoplePanelFaceSectionProps {
   onProjectSources: FaceActionHandler
 }
 
+interface PeoplePanelFaceSectionProps {
+  layout: PeoplePanelFaceSectionLayout
+  state: PeoplePanelFaceSectionState
+  actions: PeoplePanelFaceSectionActions
+}
+
 export function PeoplePanelFaceSection({
   layout,
-  view,
-  readonly,
-  context,
-  scope,
-  faces,
-  selectedFaceIds,
-  selectedIds,
-  selectedFaces,
-  excludedPersonIds,
-  assignmentInputKey,
-  isLoadingFaces,
-  isMutatingFaces,
-  isProjectingSources,
-  onClearSelection,
-  onSelectionChange,
-  onOpenFaceSource,
-  onAssign,
-  onCreate,
-  onUnassign,
-  onIgnore,
-  onRestoreIgnored,
-  onRequeue,
-  onProjectSources,
+  state,
+  actions,
 }: PeoplePanelFaceSectionProps) {
+  const {
+    view,
+    readonly,
+    context,
+    scope,
+    faces,
+    selectedFaceIds,
+    selectedIds,
+    selectedFaces,
+    excludedPersonIds,
+    assignmentInputKey,
+    isLoadingFaces,
+    isMutatingFaces,
+    isProjectingSources,
+  } = state
+  const {
+    onClearSelection,
+    onSelectionChange,
+    onOpenFaceSource,
+    onAssign,
+    onCreate,
+    onUnassign,
+    onIgnore,
+    onRestoreIgnored,
+    onRequeue,
+    onProjectSources,
+  } = actions
+
   const section = resolvePeoplePanelFaceSectionModel({
     layout,
     view,

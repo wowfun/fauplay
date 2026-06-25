@@ -3,8 +3,7 @@ import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTa
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
-interface PeoplePanelPersonToolsProps {
-  layout: 'compact' | 'wide'
+export interface PeoplePanelPersonToolsState {
   scope: PersonScope
   renameDraft: string
   mergeTargetQuery: string
@@ -12,6 +11,9 @@ interface PeoplePanelPersonToolsProps {
   mergeTargetPersonId: string
   isSavingRename: boolean
   isMerging: boolean
+}
+
+export interface PeoplePanelPersonToolsActions {
   onRenameDraftChange: (value: string) => void
   onSaveRename: () => void
   onMergeTargetQueryChange: (value: string) => void
@@ -19,21 +21,33 @@ interface PeoplePanelPersonToolsProps {
   onMerge: () => void
 }
 
+interface PeoplePanelPersonToolsProps {
+  layout: 'compact' | 'wide'
+  state: PeoplePanelPersonToolsState
+  actions: PeoplePanelPersonToolsActions
+}
+
 export function PeoplePanelPersonTools({
   layout,
-  scope,
-  renameDraft,
-  mergeTargetQuery,
-  mergeTargetCandidates,
-  mergeTargetPersonId,
-  isSavingRename,
-  isMerging,
-  onRenameDraftChange,
-  onSaveRename,
-  onMergeTargetQueryChange,
-  onMergeTargetPersonChange,
-  onMerge,
+  state,
+  actions,
 }: PeoplePanelPersonToolsProps) {
+  const {
+    scope,
+    renameDraft,
+    mergeTargetQuery,
+    mergeTargetCandidates,
+    mergeTargetPersonId,
+    isSavingRename,
+    isMerging,
+  } = state
+  const {
+    onRenameDraftChange,
+    onSaveRename,
+    onMergeTargetQueryChange,
+    onMergeTargetPersonChange,
+    onMerge,
+  } = actions
   const mergeDescription = '当前人物会被合并到目标人物，当前人物将消失。'
 
   if (layout === 'compact') {

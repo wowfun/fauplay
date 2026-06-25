@@ -15,8 +15,6 @@ export interface ResolvePeoplePanelSelectionModelParams {
   mergeTargetQuery: string
   scope: PersonScope
   view: PanelView
-  isCompact: boolean
-  compactPeopleStage: CompactPeopleStage
 }
 
 export interface PeoplePanelSelectionModel {
@@ -27,8 +25,6 @@ export interface PeoplePanelSelectionModel {
   assignmentExcludedPersonIds: string[]
   assignmentInputKey: string
   faceSelectionScopeKey: string
-  showCompactPeopleList: boolean
-  showCompactPeopleDetail: boolean
 }
 
 export interface PeoplePanelViewSwitch {
@@ -40,6 +36,16 @@ export interface PeoplePanelViewSwitch {
 export interface PeoplePanelPersonSelection {
   selectedPersonId: string
   compactPeopleStage: CompactPeopleStage | null
+}
+
+export interface ResolvePeoplePanelPersonEditDraftCommitParams {
+  selectedPersonName: string | null | undefined
+}
+
+export interface PeoplePanelPersonEditDraftCommit {
+  renameDraft: string
+  mergeTargetPersonId: string
+  mergeTargetQuery: string
 }
 
 export interface PeoplePanelReadonlyMode {
@@ -72,6 +78,45 @@ export interface ResolvePeoplePanelFacesLoadPlanParams {
   selectedPersonId: string | null
   readonly: boolean
   scope: PersonScope
+}
+
+export interface ResolvePeoplePanelFaceSelectionScopeCommitParams {
+  open: boolean
+  previousScopeKey: string | null
+  nextScopeKey: string
+}
+
+export interface PeoplePanelFaceSelectionScopeCommit {
+  nextPreviousScopeKey: string | null
+  shouldClearSelection: boolean
+}
+
+export interface ResolvePeoplePanelPeopleListRefreshPlanParams {
+  open: boolean
+  view: PanelView
+  query: string
+}
+
+export interface PeoplePanelPeopleListRefreshPlan {
+  delayMs: number
+}
+
+export interface ResolvePeoplePanelRenderPlanParams {
+  isCompact: boolean
+  view: PanelView
+  compactPeopleStage: CompactPeopleStage
+  hasSelectedPerson: boolean
+  readonly: boolean
+}
+
+export interface PeoplePanelRenderPlan {
+  panelLayout: 'compact' | 'wide'
+  viewTabsLayout: 'compact' | 'wide'
+  showCompactPeopleList: boolean
+  showCompactPeopleDetail: boolean
+  showCompactReviewFaces: boolean
+  showWidePeopleList: boolean
+  showWidePersonTools: boolean
 }
 
 export type PeoplePanelFacesLoadPlan =
@@ -111,8 +156,6 @@ export function resolvePeoplePanelSelectionModel({
   mergeTargetQuery,
   scope,
   view,
-  isCompact,
-  compactPeopleStage,
 }: ResolvePeoplePanelSelectionModelParams): PeoplePanelSelectionModel {
   const selectedPerson = (
     people.find((person) => person.personId === selectedPersonId)
@@ -144,8 +187,27 @@ export function resolvePeoplePanelSelectionModel({
     assignmentExcludedPersonIds: view === 'people' && selectedPersonId ? [selectedPersonId] : [],
     assignmentInputKey,
     faceSelectionScopeKey,
-    showCompactPeopleList: isCompact && view === 'people' && compactPeopleStage === 'list',
-    showCompactPeopleDetail: isCompact && view === 'people' && compactPeopleStage === 'detail',
+  }
+}
+
+export function resolvePeoplePanelRenderPlan({
+  isCompact,
+  view,
+  compactPeopleStage,
+  hasSelectedPerson,
+  readonly,
+}: ResolvePeoplePanelRenderPlanParams): PeoplePanelRenderPlan {
+  const showCompactPeopleList = isCompact && view === 'people' && compactPeopleStage === 'list'
+  const showCompactPeopleDetail = isCompact && view === 'people' && compactPeopleStage === 'detail'
+
+  return {
+    panelLayout: isCompact ? 'compact' : 'wide',
+    viewTabsLayout: isCompact ? 'compact' : 'wide',
+    showCompactPeopleList,
+    showCompactPeopleDetail,
+    showCompactReviewFaces: isCompact && view !== 'people',
+    showWidePeopleList: !isCompact && view === 'people',
+    showWidePersonTools: !isCompact && view === 'people' && hasSelectedPerson && !readonly,
   }
 }
 
@@ -169,6 +231,16 @@ export function resolvePeoplePanelPersonSelection(
 
 export function resolvePeoplePanelListStage(isCompact: boolean): CompactPeopleStage | null {
   return isCompact ? 'list' : null
+}
+
+export function resolvePeoplePanelPersonEditDraftCommit({
+  selectedPersonName,
+}: ResolvePeoplePanelPersonEditDraftCommitParams): PeoplePanelPersonEditDraftCommit {
+  return {
+    renameDraft: selectedPersonName || '',
+    mergeTargetPersonId: '',
+    mergeTargetQuery: '',
+  }
 }
 
 export function resolvePeoplePanelReadonlyMode(readonly: boolean): PeoplePanelReadonlyMode | null {
@@ -225,6 +297,35 @@ export function resolvePeoplePanelFacesLoadPlan({
     bucket: view === 'ignored' ? 'ignored' : 'unassigned',
     scope,
     size: 500,
+  }
+}
+
+export function resolvePeoplePanelFaceSelectionScopeCommit({
+  open,
+  previousScopeKey,
+  nextScopeKey,
+}: ResolvePeoplePanelFaceSelectionScopeCommitParams): PeoplePanelFaceSelectionScopeCommit {
+  if (!open || previousScopeKey === nextScopeKey) {
+    return {
+      nextPreviousScopeKey: previousScopeKey,
+      shouldClearSelection: false,
+    }
+  }
+
+  return {
+    nextPreviousScopeKey: nextScopeKey,
+    shouldClearSelection: true,
+  }
+}
+
+export function resolvePeoplePanelPeopleListRefreshPlan({
+  open,
+  view,
+  query,
+}: ResolvePeoplePanelPeopleListRefreshPlanParams): PeoplePanelPeopleListRefreshPlan | null {
+  if (!open || view !== 'people') return null
+  return {
+    delayMs: query.trim() ? 180 : 0,
   }
 }
 
