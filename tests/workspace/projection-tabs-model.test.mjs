@@ -4,8 +4,11 @@ import test from 'node:test'
 import {
   pruneProjectionAfterDeletedAbsolutePaths,
   resolveProjectionActivationPlan,
+  resolveProjectionFocusedPathByIdUpdate,
   resolveProjectionFileInteractionPlan,
   resolveProjectionPanelDisplayTogglePlan,
+  resolveProjectionRuleByIdUpdate,
+  resolveProjectionSelectedPathsByIdUpdate,
   resolveProjectionTabCloseState,
 } from '../../src/features/workspace/lib/projectionTabs.ts'
 
@@ -50,6 +53,67 @@ test('Projection Tabs Model filters deleted absolute paths before activating a p
       '/root/albums/b.jpg',
     ])),
     null,
+  )
+})
+
+test('Projection Tabs Model updates tab-scoped records without unnecessary churn', () => {
+  const selectedPathsById = {
+    first: ['a.jpg'],
+    second: ['b.jpg'],
+  }
+  assert.equal(
+    resolveProjectionSelectedPathsByIdUpdate(selectedPathsById, 'first', ['a.jpg']),
+    selectedPathsById,
+  )
+  assert.deepEqual(
+    resolveProjectionSelectedPathsByIdUpdate(selectedPathsById, 'first', []),
+    { second: ['b.jpg'] },
+  )
+  assert.deepEqual(
+    resolveProjectionSelectedPathsByIdUpdate(selectedPathsById, 'third', ['c.jpg']),
+    {
+      first: ['a.jpg'],
+      second: ['b.jpg'],
+      third: ['c.jpg'],
+    },
+  )
+
+  const duplicateRuleById = {
+    first: 'keep_newest',
+  }
+  assert.equal(
+    resolveProjectionRuleByIdUpdate(duplicateRuleById, 'first', 'keep_newest'),
+    duplicateRuleById,
+  )
+  assert.deepEqual(
+    resolveProjectionRuleByIdUpdate(duplicateRuleById, 'first', null),
+    {},
+  )
+  assert.deepEqual(
+    resolveProjectionRuleByIdUpdate(duplicateRuleById, 'second', 'keep_oldest'),
+    {
+      first: 'keep_newest',
+      second: 'keep_oldest',
+    },
+  )
+
+  const focusedPathById = {
+    first: 'a.jpg',
+  }
+  assert.equal(
+    resolveProjectionFocusedPathByIdUpdate(focusedPathById, 'first', 'a.jpg'),
+    focusedPathById,
+  )
+  assert.deepEqual(
+    resolveProjectionFocusedPathByIdUpdate(focusedPathById, 'first', null),
+    {},
+  )
+  assert.deepEqual(
+    resolveProjectionFocusedPathByIdUpdate(focusedPathById, 'second', 'b.jpg'),
+    {
+      first: 'a.jpg',
+      second: 'b.jpg',
+    },
   )
 })
 

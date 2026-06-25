@@ -15,12 +15,14 @@ import {
   type DuplicateSelectionPlanAction,
 } from '@/features/workspace/lib/duplicateSelection'
 import {
-  areStringArraysEqual,
   pruneProjectionTabsAfterDeletedFiles,
   resolveProjectionActivationPlan,
+  resolveProjectionFocusedPathByIdUpdate,
   resolveProjectionFileInteractionPlan,
   resolveProjectionPanelDisplayTogglePlan,
   resolveProjectionPreferredPath,
+  resolveProjectionRuleByIdUpdate,
+  resolveProjectionSelectedPathsByIdUpdate,
   resolveProjectionTabCloseState,
   type ProjectionFileInteractionPlan,
   type ProjectionActivationPlan,
@@ -158,45 +160,15 @@ export function useWorkspaceProjectionState({
   }, [interactionRef])
 
   const setProjectionSelectedPathsForTab = useCallback((tabId: string, selectedPaths: string[]) => {
-    setProjectionSelectedPathsById((previous) => {
-      const currentSelectedPaths = previous[tabId] ?? []
-      if (areStringArraysEqual(currentSelectedPaths, selectedPaths)) {
-        return previous
-      }
-      if (selectedPaths.length === 0) {
-        if (!(tabId in previous)) {
-          return previous
-        }
-        const next = { ...previous }
-        delete next[tabId]
-        return next
-      }
-      return {
-        ...previous,
-        [tabId]: selectedPaths,
-      }
-    })
+    setProjectionSelectedPathsById((previous) => (
+      resolveProjectionSelectedPathsByIdUpdate(previous, tabId, selectedPaths)
+    ))
   }, [])
 
   const setDuplicateSelectionRuleForTab = useCallback((tabId: string, rule: DuplicateSelectionRule | null) => {
-    setDuplicateSelectionRuleByProjectionId((previous) => {
-      const currentRule = previous[tabId] ?? null
-      if (currentRule === rule) {
-        return previous
-      }
-      if (rule === null) {
-        if (!(tabId in previous)) {
-          return previous
-        }
-        const next = { ...previous }
-        delete next[tabId]
-        return next
-      }
-      return {
-        ...previous,
-        [tabId]: rule,
-      }
-    })
+    setDuplicateSelectionRuleByProjectionId((previous) => (
+      resolveProjectionRuleByIdUpdate(previous, tabId, rule)
+    ))
   }, [])
 
   const applyProjectionActivationPlan = useCallback((plan: ProjectionActivationPlan) => {
@@ -423,12 +395,7 @@ export function useWorkspaceProjectionState({
     setActiveSurface(plan.activeSurface)
     if (plan.focusedPath) {
       setProjectionFocusedPathById((previous) => (
-        previous[plan.activeProjectionTabId] === plan.focusedPath
-          ? previous
-          : {
-            ...previous,
-            [plan.activeProjectionTabId]: plan.focusedPath,
-          }
+        resolveProjectionFocusedPathByIdUpdate(previous, plan.activeProjectionTabId, plan.focusedPath)
       ))
     }
     if (plan.openFile?.target === 'primary') {

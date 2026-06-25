@@ -130,6 +130,60 @@ export function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
 }
 
+export function resolveProjectionSelectedPathsByIdUpdate(
+  previous: Record<string, string[]>,
+  tabId: string,
+  selectedPaths: string[],
+): Record<string, string[]> {
+  const currentSelectedPaths = previous[tabId] ?? []
+  if (areStringArraysEqual(currentSelectedPaths, selectedPaths)) {
+    return previous
+  }
+  if (selectedPaths.length === 0) {
+    return omitRecordKey(previous, tabId)
+  }
+  return {
+    ...previous,
+    [tabId]: selectedPaths,
+  }
+}
+
+export function resolveProjectionRuleByIdUpdate(
+  previous: Record<string, DuplicateSelectionRule | null>,
+  tabId: string,
+  rule: DuplicateSelectionRule | null,
+): Record<string, DuplicateSelectionRule | null> {
+  const currentRule = previous[tabId] ?? null
+  if (currentRule === rule) {
+    return previous
+  }
+  if (rule === null) {
+    return omitRecordKey(previous, tabId)
+  }
+  return {
+    ...previous,
+    [tabId]: rule,
+  }
+}
+
+export function resolveProjectionFocusedPathByIdUpdate(
+  previous: Record<string, string | null>,
+  tabId: string,
+  focusedPath: string | null,
+): Record<string, string | null> {
+  const currentFocusedPath = previous[tabId] ?? null
+  if (currentFocusedPath === focusedPath) {
+    return previous
+  }
+  if (!focusedPath) {
+    return omitRecordKey(previous, tabId)
+  }
+  return {
+    ...previous,
+    [tabId]: focusedPath,
+  }
+}
+
 export function normalizeRootRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
 }
