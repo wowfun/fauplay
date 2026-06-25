@@ -120,6 +120,34 @@ fn restores_root_trash_items_to_their_original_paths() {
 }
 
 #[test]
+fn plans_root_trash_restore_without_mutating_when_dry_run() {
+    let fixture = Fixture::new("plans_root_trash_restore_without_mutating_when_dry_run");
+    fixture.write_file(".trash/albums/photo.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .restore_from_root_trash(RootTrashRequest {
+            root_path: fixture.root.clone(),
+            root_relative_paths: vec![root_relative_path(".trash/albums/photo.jpg")],
+            dry_run: true,
+        })
+        .expect("Root Trash restore dry run should run");
+
+    assert_eq!(response.dry_run, true);
+    assert_eq!(response.completed, 1);
+    assert_eq!(response.failed, 0);
+    assert_eq!(
+        response.items[0]
+            .next_root_relative_path
+            .as_ref()
+            .map(ToString::to_string),
+        Some("albums/photo.jpg".to_owned()),
+    );
+    fixture.assert_file(".trash/albums/photo.jpg", "image");
+    fixture.assert_missing("albums/photo.jpg");
+}
+
+#[test]
 fn allocates_deduped_restore_path_when_original_path_exists() {
     let fixture = Fixture::new("allocates_deduped_restore_path_when_original_path_exists");
     fixture.write_file("photo.jpg", "current image");

@@ -302,6 +302,65 @@ fn rebinds_file_annotations_after_root_move() {
 }
 
 #[test]
+fn rebinds_file_annotations_by_merging_target_tags() {
+    let fixture = Fixture::new("rebinds_file_annotations_by_merging_target_tags");
+    fixture.write_file("root/albums/source.jpg", "source");
+    fixture.write_file("root/albums/target.jpg", "target");
+    let runtime = FauplayRuntime::with_runtime_home_path(fixture.runtime_home());
+    bind_tag(
+        &runtime,
+        fixture.local_root(),
+        "albums/source.jpg",
+        "status",
+        "favorite",
+    );
+    bind_tag(
+        &runtime,
+        fixture.local_root(),
+        "albums/target.jpg",
+        "rating",
+        "5",
+    );
+
+    let response = runtime
+        .rebind_file_annotation_paths(FileAnnotationPathRebindRequest {
+            root_path: fixture.local_root(),
+            mappings: vec![FileAnnotationPathMapping {
+                from_root_relative_path: root_relative_path("albums/source.jpg"),
+                to_root_relative_path: root_relative_path("albums/target.jpg"),
+            }],
+        })
+        .expect("File Annotation paths should be rebound");
+
+    assert_eq!(response.updated, 1);
+    assert_eq!(response.failed, 0);
+
+    let old_response = runtime
+        .read_file_annotation(FileAnnotationReadRequest {
+            root_path: fixture.local_root(),
+            root_relative_path: root_relative_path("albums/source.jpg"),
+        })
+        .expect("old File Annotation path should be readable");
+    assert!(old_response.file.is_none());
+
+    let new_response = runtime
+        .read_file_annotation(FileAnnotationReadRequest {
+            root_path: fixture.local_root(),
+            root_relative_path: root_relative_path("albums/target.jpg"),
+        })
+        .expect("target File Annotation should be readable");
+    let file = new_response
+        .file
+        .expect("target path should keep merged Annotation Tags");
+    let tags = file
+        .tags
+        .iter()
+        .map(|tag| (tag.key.as_str(), tag.value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(tags, vec![("rating", "5"), ("status", "favorite")]);
+}
+
+#[test]
 fn cleans_up_file_annotations_for_missing_files_after_confirmation() {
     let fixture = Fixture::new("cleans_up_file_annotations_for_missing_files_after_confirmation");
     fixture.write_file("root/albums/photo.jpg", "image");

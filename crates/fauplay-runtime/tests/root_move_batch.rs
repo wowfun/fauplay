@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fauplay_runtime::{
-    FauplayRuntime, RootMoveBatchRequest, RootMoveRule, RootMoveSearchMode, RootRelativePath,
+    FauplayRuntime, RootMoveBatchFailureReason, RootMoveBatchRequest, RootMoveRule,
+    RootMoveSearchMode, RootRelativePath,
 };
 
 #[test]
@@ -148,6 +149,50 @@ fn applies_root_move_batch_regex_search_replace() {
     );
     fixture.assert_missing("albums/IMG_001.jpg");
     fixture.assert_file("albums/photo-001.jpg", "image");
+}
+
+#[test]
+fn skips_root_move_batch_items_that_keep_the_same_path() {
+    let fixture = Fixture::new("skips_root_move_batch_items_that_keep_the_same_path");
+    fixture.write_file("albums/photo.jpg", "image");
+
+    let runtime = FauplayRuntime::new();
+    let response = runtime
+        .move_root_path_batch(RootMoveBatchRequest {
+            root_path: fixture.root.clone(),
+            source_root_relative_paths: vec![root_relative_path("albums/photo.jpg")],
+            rule: RootMoveRule {
+                name_mask: "[N]".to_owned(),
+                find_text: "photo".to_owned(),
+                replace_text: "photo".to_owned(),
+                search_mode: RootMoveSearchMode::Plain,
+                regex_flags: "g".to_owned(),
+                counter_start: 1,
+                counter_step: 1,
+                counter_pad: 0,
+            },
+            dry_run: false,
+        })
+        .expect("Root Move Batch should run");
+
+    assert_eq!(response.total, 1);
+    assert_eq!(response.moved, 0);
+    assert_eq!(response.skipped, 1);
+    assert_eq!(response.failed, 0);
+    assert!(response.items[0].ok);
+    assert!(response.items[0].skipped);
+    assert_eq!(
+        response.items[0].reason,
+        Some(RootMoveBatchFailureReason::NoChange)
+    );
+    assert_eq!(
+        response.items[0]
+            .next_root_relative_path
+            .as_ref()
+            .map(ToString::to_string),
+        Some("albums/photo.jpg".to_owned())
+    );
+    fixture.assert_file("albums/photo.jpg", "image");
 }
 
 fn root_relative_path(path: &str) -> RootRelativePath {

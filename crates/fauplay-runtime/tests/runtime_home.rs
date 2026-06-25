@@ -159,6 +159,45 @@ fn moves_file_to_global_trash_and_lists_entry() {
 }
 
 #[test]
+fn plans_global_trash_move_without_mutating_when_dry_run() {
+    let fixture = Fixture::new("plans_global_trash_move_without_mutating_when_dry_run");
+    fixture.write_file("source/original.jpg", "image");
+    let source_path = fixture.root.join("source/original.jpg");
+
+    let runtime = FauplayRuntime::with_runtime_home_path(fixture.root.clone());
+    let response = runtime
+        .move_to_global_trash(GlobalTrashMoveRequest {
+            absolute_paths: vec![source_path.clone()],
+            dry_run: true,
+        })
+        .expect("Global Trash dry-run should run");
+
+    assert_eq!(response.dry_run, true);
+    assert_eq!(response.total, 1);
+    assert_eq!(response.moved, 1);
+    assert_eq!(response.failed, 0);
+    assert_eq!(response.items[0].absolute_path, source_path);
+    assert!(!response.items[0].recycle_id.is_empty());
+    let planned_path = response.items[0]
+        .next_absolute_path
+        .as_ref()
+        .expect("Global Trash dry-run should return the planned path");
+    assert_eq!(fixture.read_file("source/original.jpg"), "image");
+    assert!(
+        !planned_path.exists(),
+        "dry-run should not create the stored file"
+    );
+
+    let listing = runtime
+        .list_global_trash(GlobalTrashListRequest {
+            entry_limit: None,
+            entry_offset: 0,
+        })
+        .expect("Global Trash Listing should still be empty");
+    assert!(listing.entries.is_empty());
+}
+
+#[test]
 fn restores_global_trash_entry_to_original_path_and_updates_metadata() {
     let fixture = Fixture::new("restores_global_trash_entry_to_original_path_and_updates_metadata");
     fixture.write_file("global/recycle/files/item-1.jpg", "image");
