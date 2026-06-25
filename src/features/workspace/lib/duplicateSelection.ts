@@ -9,6 +9,30 @@ export interface DuplicateProjectionGroup {
   items: FileItem[]
 }
 
+export type DuplicateSelectionPlanAction =
+  | { kind: 'apply-rule'; rule: DuplicateSelectionRule }
+  | { kind: 'clear-all' }
+  | { kind: 'reapply-group'; groupId: string }
+  | { kind: 'clear-group'; groupId: string }
+
+export type DuplicateSelectionPlan =
+  | { kind: 'none' }
+  | {
+    kind: 'update'
+    activeProjectionTabId: string
+    activeSurface: { kind: 'projection'; tabId: string }
+    lastProjectionTabId: string
+    selectedPaths: string[]
+    nextRule: DuplicateSelectionRule | null | undefined
+  }
+
+interface ResolveDuplicateSelectionPlanParams {
+  projection: ResultProjection | null | undefined
+  currentSelectedPaths: string[]
+  currentRule: DuplicateSelectionRule | null
+  action: DuplicateSelectionPlanAction
+}
+
 const DUPLICATE_FILES_TOOL_NAME = 'data.findDuplicateFiles'
 const DUPLICATE_FILES_PROJECTION_ID = toToolScopedProjectionId(DUPLICATE_FILES_TOOL_NAME)
 
@@ -131,4 +155,80 @@ export function replaceDuplicateGroupSelection(
     }
     return nextGroupSelectedPathSet.has(file.path) ? [file.path] : []
   })
+}
+
+export function resolveDuplicateSelectionPlan({
+  projection,
+  currentSelectedPaths,
+  currentRule,
+  action,
+}: ResolveDuplicateSelectionPlanParams): DuplicateSelectionPlan {
+  if (!isDuplicateProjection(projection)) {
+    return { kind: 'none' }
+  }
+
+  if (action.kind === 'apply-rule') {
+    return {
+      kind: 'update',
+      activeProjectionTabId: projection.id,
+      activeSurface: { kind: 'projection', tabId: projection.id },
+      lastProjectionTabId: projection.id,
+      selectedPaths: buildDuplicateSelectionForProjection(projection.files, action.rule),
+      nextRule: action.rule,
+    }
+  }
+
+  if (action.kind === 'clear-all') {
+    return {
+      kind: 'update',
+      activeProjectionTabId: projection.id,
+      activeSurface: { kind: 'projection', tabId: projection.id },
+      lastProjectionTabId: projection.id,
+      selectedPaths: [],
+      nextRule: null,
+    }
+  }
+
+  if (action.kind === 'reapply-group') {
+    if (!currentRule) {
+      return { kind: 'none' }
+    }
+    const targetGroup = groupDuplicateProjectionFiles(projection.files)
+      .find((group) => group.groupId === action.groupId)
+    if (!targetGroup) {
+      return { kind: 'none' }
+    }
+
+    return {
+      kind: 'update',
+      activeProjectionTabId: projection.id,
+      activeSurface: { kind: 'projection', tabId: projection.id },
+      lastProjectionTabId: projection.id,
+      selectedPaths: replaceDuplicateGroupSelection(
+        projection.files,
+        currentSelectedPaths,
+        action.groupId,
+        buildDuplicateSelectionForGroup(targetGroup.items, currentRule)
+      ),
+      nextRule: undefined,
+    }
+  }
+
+  if (action.kind === 'clear-group') {
+    return {
+      kind: 'update',
+      activeProjectionTabId: projection.id,
+      activeSurface: { kind: 'projection', tabId: projection.id },
+      lastProjectionTabId: projection.id,
+      selectedPaths: replaceDuplicateGroupSelection(
+        projection.files,
+        currentSelectedPaths,
+        action.groupId,
+        []
+      ),
+      nextRule: undefined,
+    }
+  }
+
+  return { kind: 'none' }
 }

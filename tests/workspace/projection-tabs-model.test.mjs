@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   pruneProjectionAfterDeletedAbsolutePaths,
+  resolveProjectionActivationPlan,
+  resolveProjectionFileInteractionPlan,
   resolveProjectionTabCloseState,
 } from '../../src/features/workspace/lib/projectionTabs.ts'
 
@@ -123,5 +125,182 @@ test('Projection Tabs Model returns to the directory surface when the last proje
     previewAlignment: {
       kind: 'directory',
     },
+  })
+})
+
+test('Projection Tabs Model activates a sanitized projection with preferred preview alignment', () => {
+  const existing = projection('existing', [file('existing/a.jpg')])
+  const nextProjection = projection('duplicates', [
+    file('albums/a.jpg', { absolutePath: '/root/albums/a.jpg' }),
+    file('albums/b.jpg', { absolutePath: '/root/albums/b.jpg' }),
+  ])
+
+  assert.deepEqual(resolveProjectionActivationPlan({
+    projectionTabs: [existing],
+    target: {
+      kind: 'projection',
+      projection: nextProjection,
+    },
+    projectionFocusedPathById: {
+      duplicates: 'albums/b.jpg',
+    },
+    deletedAbsolutePaths: new Set(['/root/albums/a.jpg']),
+  }), {
+    kind: 'activate',
+    projectionTabs: [
+      existing,
+      projection('duplicates', [
+        file('albums/b.jpg', { absolutePath: '/root/albums/b.jpg' }),
+      ]),
+    ],
+    activeProjectionTabId: 'duplicates',
+    activeSurface: { kind: 'projection', tabId: 'duplicates' },
+    lastProjectionTabId: 'duplicates',
+    shouldOpenResultPanel: true,
+    previewAlignment: {
+      kind: 'projection',
+      path: 'albums/b.jpg',
+    },
+  })
+})
+
+test('Projection Tabs Model activates fallback tabs when reopening the result panel', () => {
+  const first = projection('first', [file('first/a.jpg')])
+  const last = projection('last', [file('last/a.jpg'), file('last/b.jpg')])
+
+  assert.deepEqual(resolveProjectionActivationPlan({
+    projectionTabs: [first, last],
+    target: {
+      kind: 'fallback',
+      activeProjectionTabId: null,
+      lastProjectionTabId: 'last',
+    },
+    projectionFocusedPathById: {
+      last: 'last/b.jpg',
+    },
+  }), {
+    kind: 'activate',
+    projectionTabs: [first, last],
+    activeProjectionTabId: 'last',
+    activeSurface: { kind: 'projection', tabId: 'last' },
+    lastProjectionTabId: 'last',
+    shouldOpenResultPanel: true,
+    previewAlignment: {
+      kind: 'projection',
+      path: 'last/b.jpg',
+    },
+  })
+
+  assert.deepEqual(resolveProjectionActivationPlan({
+    projectionTabs: [first, last],
+    target: {
+      kind: 'fallback',
+      activeProjectionTabId: 'missing',
+      lastProjectionTabId: 'also-missing',
+    },
+    projectionFocusedPathById: {},
+  }), {
+    kind: 'activate',
+    projectionTabs: [first, last],
+    activeProjectionTabId: 'first',
+    activeSurface: { kind: 'projection', tabId: 'first' },
+    lastProjectionTabId: 'first',
+    shouldOpenResultPanel: true,
+    previewAlignment: {
+      kind: 'projection',
+      path: 'first/a.jpg',
+    },
+  })
+})
+
+test('Projection Tabs Model ignores missing explicit tab activation', () => {
+  const first = projection('first', [file('first/a.jpg')])
+
+  assert.deepEqual(resolveProjectionActivationPlan({
+    projectionTabs: [first],
+    target: {
+      kind: 'tab',
+      tabId: 'missing',
+    },
+    projectionFocusedPathById: {},
+  }), {
+    kind: 'none',
+  })
+})
+
+test('Projection Tabs Model resolves projection item click interactions', () => {
+  const clickedFile = file('albums/a.jpg')
+
+  assert.deepEqual(resolveProjectionFileInteractionPlan({
+    activeProjectionTabId: 'projection-1',
+    item: clickedFile,
+    trigger: 'click',
+  }), {
+    kind: 'activate-item',
+    activeProjectionTabId: 'projection-1',
+    activeSurface: { kind: 'projection', tabId: 'projection-1' },
+    lastProjectionTabId: 'projection-1',
+    focusedPath: 'albums/a.jpg',
+    openFile: {
+      target: 'primary',
+      file: clickedFile,
+    },
+  })
+
+  assert.deepEqual(resolveProjectionFileInteractionPlan({
+    activeProjectionTabId: 'projection-1',
+    item: {
+      name: 'albums',
+      path: 'albums',
+      kind: 'directory',
+    },
+    trigger: 'click',
+  }), {
+    kind: 'activate-item',
+    activeProjectionTabId: 'projection-1',
+    activeSurface: { kind: 'projection', tabId: 'projection-1' },
+    lastProjectionTabId: 'projection-1',
+    focusedPath: null,
+    openFile: null,
+  })
+})
+
+test('Projection Tabs Model resolves projection item double-click interactions', () => {
+  const targetFile = file('albums/a.jpg')
+
+  assert.deepEqual(resolveProjectionFileInteractionPlan({
+    activeProjectionTabId: 'projection-1',
+    item: targetFile,
+    trigger: 'double-click',
+  }), {
+    kind: 'activate-item',
+    activeProjectionTabId: 'projection-1',
+    activeSurface: { kind: 'projection', tabId: 'projection-1' },
+    lastProjectionTabId: 'projection-1',
+    focusedPath: 'albums/a.jpg',
+    openFile: {
+      target: 'secondary',
+      file: targetFile,
+    },
+  })
+
+  assert.deepEqual(resolveProjectionFileInteractionPlan({
+    activeProjectionTabId: 'projection-1',
+    item: {
+      name: 'albums',
+      path: 'albums',
+      kind: 'directory',
+    },
+    trigger: 'double-click',
+  }), {
+    kind: 'none',
+  })
+
+  assert.deepEqual(resolveProjectionFileInteractionPlan({
+    activeProjectionTabId: null,
+    item: targetFile,
+    trigger: 'click',
+  }), {
+    kind: 'none',
   })
 })

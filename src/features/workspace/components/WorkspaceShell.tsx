@@ -41,8 +41,12 @@ import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspace
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { resolveWorkspacePreviewCapabilityModel } from '@/features/workspace/lib/workspacePreviewCapabilityModel'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
-import { resolveWorkspaceMutationDeleteUndoPlan } from '@/features/workspace/lib/deleteUndoMutationPlan'
-import { resolveWorkspacePreviewMutationPlan } from '@/features/workspace/lib/previewMutationPlan'
+import {
+  runWorkspaceMutationCommitEffects,
+  resolveWorkspaceMutationCommitEffects,
+  resolveWorkspacePreviewMutationCommitEffects,
+  type WorkspaceMutationCommitEffect,
+} from '@/features/workspace/lib/workspaceMutationCommitPlan'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
 import {
   type AddressPathHistoryEntry,
@@ -458,82 +462,76 @@ export function WorkspaceShell({
     forgetDeletedProjectionAbsolutePath,
   })
 
-  const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
-    const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
-    const deleteUndoPlan = resolveWorkspaceMutationDeleteUndoPlan(params)
-    if (deleteUndoPlan.shouldPruneDeletedProjectionTabs && deleteUndoPlan.pruneDeletedProjectionTabsParams) {
-      pruneDeletedFilesFromProjectionTabs(deleteUndoPlan.pruneDeletedProjectionTabsParams)
-    }
-    await navigateToPath(currentPath)
-    await refreshFilterTagSnapshots()
-    pushDeleteUndoBatch(deleteUndoBatch)
+  const runWorkspaceMutationCommitEffectPlan = useCallback(async (
+    effects: WorkspaceMutationCommitEffect[],
+    deleteUndoBatch: ReturnType<typeof createDeleteUndoBatchFromParams>
+  ) => {
+    await runWorkspaceMutationCommitEffects(effects, {
+      pruneDeletedProjectionTabs: pruneDeletedFilesFromProjectionTabs,
+      alignPreviewToPath,
+      navigateMediaNext: (target) => {
+        if (target === 'modal') {
+          navigateMediaFromModal('next')
+        } else {
+          navigateMediaFromPane('next')
+        }
+      },
+      openFile: (target, file) => {
+        if (target === 'modal') {
+          openFileInModal(file)
+        } else {
+          openFileInPrimaryTarget(file)
+        }
+      },
+      refreshCurrentPath: async () => {
+        await navigateToPath(currentPath)
+      },
+      refreshFilterTagSnapshots,
+      pushDeleteUndoBatch: () => pushDeleteUndoBatch(deleteUndoBatch),
+    })
   }, [
-    createDeleteUndoBatchFromParams,
+    alignPreviewToPath,
     currentPath,
+    navigateMediaFromModal,
+    navigateMediaFromPane,
     navigateToPath,
+    openFileInModal,
+    openFileInPrimaryTarget,
     pruneDeletedFilesFromProjectionTabs,
     pushDeleteUndoBatch,
     refreshFilterTagSnapshots,
   ])
 
+  const handleWorkspaceMutationCommitted = useCallback(async (params?: WorkspaceMutationCommitParams) => {
+    await runWorkspaceMutationCommitEffectPlan(
+      resolveWorkspaceMutationCommitEffects(params),
+      createDeleteUndoBatchFromParams(params)
+    )
+  }, [
+    createDeleteUndoBatchFromParams,
+    runWorkspaceMutationCommitEffectPlan,
+  ])
+
   const handlePreviewMutationCommitted = useCallback(async (params?: PreviewMutationCommitParams) => {
     const deleteUndoBatch = createDeleteUndoBatchFromParams(params)
     const activePreviewFile = previewFile ?? selectedFile
-    const mutationPlan = resolveWorkspacePreviewMutationPlan({
-      params,
-      activeSurface,
-      activeSurfaceFileItems,
-      activePreviewFile,
-      isPreviewModalOpen: Boolean(previewFile),
-    })
-
-    if (mutationPlan.preferredPreviewPath) {
-      alignPreviewToPath(mutationPlan.preferredPreviewPath)
-      await navigateToPath(currentPath)
-      await refreshFilterTagSnapshots()
-      pushDeleteUndoBatch(deleteUndoBatch)
-      return
-    }
-
-    if (mutationPlan.shouldPruneDeletedProjectionTabs) {
-      pruneDeletedFilesFromProjectionTabs(mutationPlan.pruneDeletedProjectionTabsParams)
-    }
-
-    if (mutationPlan.previewContinuation.kind === 'navigate-media-next') {
-      if (mutationPlan.previewContinuation.target === 'modal') {
-        navigateMediaFromModal('next')
-      } else {
-        navigateMediaFromPane('next')
-      }
-    }
-
-    if (mutationPlan.previewContinuation.kind === 'open-file') {
-      if (mutationPlan.previewContinuation.target === 'modal') {
-        openFileInModal(mutationPlan.previewContinuation.file)
-      } else {
-        openFileInPrimaryTarget(mutationPlan.previewContinuation.file)
-      }
-    }
-
-    await navigateToPath(currentPath)
-    await refreshFilterTagSnapshots()
-    pushDeleteUndoBatch(deleteUndoBatch)
+    await runWorkspaceMutationCommitEffectPlan(
+      resolveWorkspacePreviewMutationCommitEffects({
+        params,
+        activeSurface,
+        activeSurfaceFileItems,
+        activePreviewFile,
+        isPreviewModalOpen: Boolean(previewFile),
+      }),
+      deleteUndoBatch
+    )
   }, [
     activeSurface,
-    alignPreviewToPath,
-    createDeleteUndoBatchFromParams,
-    currentPath,
-    navigateMediaFromModal,
-    navigateMediaFromPane,
-    navigateToPath,
     previewFile,
-    pushDeleteUndoBatch,
-    pruneDeletedFilesFromProjectionTabs,
-    refreshFilterTagSnapshots,
+    runWorkspaceMutationCommitEffectPlan,
     selectedFile,
-    openFileInPrimaryTarget,
-    openFileInModal,
     activeSurfaceFileItems,
+    createDeleteUndoBatchFromParams,
   ])
 
   const handleOpenTrash = useCallback(() => {
