@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
 import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
-import { callRuntimeHttp, type RuntimeToolDescriptor } from '@/lib/runtimeApi'
+import { callRuntimeHttp, type RuntimeToolActionAnnotation, type RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { withToolScopedProjection } from '@/lib/projection'
 import { ensureRootPath } from '@/lib/reveal'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
@@ -9,12 +9,14 @@ import { PluginToolResultPanel } from '@/features/plugin-runtime/components/Plug
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import {
-  resolveWorkspaceAbsoluteDeletePayload,
+  resolveWorkspaceContextualTools,
   resolveWorkspaceMutationCommitParams,
   resolveWorkspacePluginDuplicateProjectionDismissIntent,
   resolveWorkspacePluginProjectionActivationIntent,
-  resolveWorkspaceRecycleRestoreItems,
-  resolveWorkspaceRelativeToolPayload,
+  resolveWorkspaceToolArguments,
+  resolveWorkspaceToolTargetState,
+  resolveWorkspaceToolRunPlan,
+  type WorkspaceToolRunPlan,
 } from '@/features/explorer/lib/workspacePluginHostModel'
 import {
   FACE_SCAN_JOB_CANCEL_TIMEOUT_MS,
@@ -24,16 +26,20 @@ import {
   type FaceScanJobSnapshot,
   WORKSPACE_FACE_SCAN_ACTION,
   isWorkspaceFaceScanJobTerminal,
+  readWorkspaceFaceScanProvidedRootPath,
+  resolveWorkspaceFaceScanJobCancelPlan,
+  resolveWorkspaceFaceScanJobErrorPlan,
+  resolveWorkspaceFaceScanJobFinishPlan,
+  resolveWorkspaceFaceScanJobPollPath,
+  resolveWorkspaceFaceScanJobStartPlan,
   shouldRefreshAfterWorkspaceFaceScanJob,
   toWorkspaceFaceScanJobErrorMessage,
   toWorkspaceFaceScanJobProgress,
-  toWorkspaceFaceScanJobResult,
 } from '@/features/explorer/lib/workspaceFaceScanJobModel'
 import {
   hasWorkbenchMetadata,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
-import { orderToolsWithSoftDeleteLast } from '@/features/plugin-runtime/utils/toolOrdering'
 import type { PluginResultProgress, PluginResultQueueItem, PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import {
   createQueueItemId,
@@ -91,96 +97,36 @@ export function WorkspacePluginHost({
 }: WorkspacePluginHostProps) {
   const handledDuplicateProjectionDismissResultIdRef = useRef<string | null>(null)
   const faceScanJobIdByQueueItemIdRef = useRef(new Map<string, string>())
-  const normalizedCurrentPath = useMemo(
-    () => currentPath.split('/').filter(Boolean).join('/'),
-    [currentPath]
-  )
-  const isTrashContext = useMemo(
-    () => normalizedCurrentPath === '@trash' || normalizedCurrentPath === '.trash' || normalizedCurrentPath.startsWith('.trash/'),
-    [normalizedCurrentPath]
-  )
-  const contextualTools = useMemo(() => {
-    const filteredTools = isTrashContext
-      ? tools.filter((tool) => tool.name === 'fs.restore')
-      : tools.filter((tool) => tool.name !== 'fs.restore')
-    return orderToolsWithSoftDeleteLast(filteredTools)
-  }, [isTrashContext, tools])
-  const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
-
-  const selectedEntries = useMemo(
-    () => visibleFiles.filter((file) => selectedPathSet.has(file.path)),
-    [selectedPathSet, visibleFiles]
-  )
-  const selectedEntryPaths = useMemo(
-    () => selectedEntries.map((file) => file.path),
-    [selectedEntries]
-  )
-  const selectedFileEntries = useMemo(
-    () => selectedEntries.filter((file): file is FileItem => file.kind === 'file'),
-    [selectedEntries]
-  )
-  const visibleFileEntries = useMemo(
-    () => visibleFiles.filter((file): file is FileItem => file.kind === 'file'),
-    [visibleFiles]
-  )
-  const targetFileEntries = useMemo(
-    () => (selectedFileEntries.length > 0 ? selectedFileEntries : visibleFileEntries),
-    [selectedFileEntries, visibleFileEntries]
-  )
-  const relativeTargetArgs = useMemo(
-    () => resolveWorkspaceRelativeToolPayload(targetFileEntries),
-    [targetFileEntries]
-  )
-  const selectedRestoreItems = useMemo(
-    () => resolveWorkspaceRecycleRestoreItems(selectedFileEntries),
-    [selectedFileEntries]
-  )
-  const selectedDeleteAbsoluteArgs = useMemo(
-    () => (activeProjection ? resolveWorkspaceAbsoluteDeletePayload(selectedFileEntries) : null),
-    [activeProjection, selectedFileEntries]
-  )
-  const hasTargets = targetFileEntries.length > 0
-  const hasSelectedEntries = selectedEntries.length > 0
-  const hasRenderableTargets = hasTargets || hasSelectedEntries
+  const contextualTools = useMemo(() => resolveWorkspaceContextualTools({
+    currentPath,
+    tools,
+  }), [currentPath, tools])
+  const {
+    selectedEntryPaths,
+    selectedFileEntries,
+    relativeTargetArgs,
+    selectedRestoreItems,
+    selectedDeleteAbsoluteArgs,
+    hasTargets,
+    hasSelectedEntries,
+    hasRenderableTargets,
+  } = useMemo(() => resolveWorkspaceToolTargetState({
+    visibleFiles,
+    selectedPaths,
+    hasActiveProjection: Boolean(activeProjection),
+  }), [activeProjection, selectedPaths, visibleFiles])
   const contextKey = currentPath || '/'
 
   const resolveToolArguments = useCallback((tool: RuntimeToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
-    if (tool.name === 'fs.softDelete') {
-      if (!hasSelectedEntries) return null
-      if (selectedDeleteAbsoluteArgs) {
-        return {
-          ...selectedDeleteAbsoluteArgs,
-          ...(extraArgs ?? {}),
-        }
-      }
-      return {
-        relativePaths: selectedEntryPaths,
-        ...(extraArgs ?? {}),
-      }
-    }
-
-    if (tool.name === 'fs.restore') {
-      if (!hasSelectedEntries) return null
-      if (selectedRestoreItems) {
-        return {
-          items: selectedRestoreItems,
-          ...(extraArgs ?? {}),
-        }
-      }
-      return {
-        relativePaths: selectedEntryPaths,
-        ...(extraArgs ?? {}),
-      }
-    }
-
-    if (!relativeTargetArgs) {
-      return null
-    }
-
-    return {
-      ...relativeTargetArgs,
-      ...(extraArgs ?? {}),
-    }
+    return resolveWorkspaceToolArguments({
+      toolName: tool.name,
+      hasSelectedEntries,
+      selectedEntryPaths,
+      selectedDeleteAbsoluteArgs,
+      selectedRestoreItems,
+      relativeTargetArgs,
+      extraArgs,
+    })
   }, [
     hasSelectedEntries,
     relativeTargetArgs,
@@ -235,50 +181,49 @@ export function WorkspacePluginHost({
   const runWorkspaceFaceScanJob = useCallback(async (tool: RuntimeToolDescriptor, additionalArgs: Record<string, unknown>) => {
     if (!rootHandle || !rootId) return
 
-    const providedRootPath = typeof additionalArgs.rootPath === 'string' && additionalArgs.rootPath.trim()
-      ? additionalArgs.rootPath.trim()
-      : ''
+    const providedRootPath = readWorkspaceFaceScanProvidedRootPath(additionalArgs)
     const resolvedRootPath = providedRootPath || ensureRootPath({
       rootLabel: rootHandle.name || 'current-folder',
       rootId,
       promptIfMissing: true,
     })
-    const requestArgs = resolvedRootPath
-      ? { ...additionalArgs, rootPath: resolvedRootPath }
-      : additionalArgs
     const queueItemId = createQueueItemId(tool.name)
     const startedAt = Date.now()
-    const title = `${tool.title || tool.name} · ${WORKSPACE_FACE_SCAN_ACTION.label}`
+    const startPlan = resolveWorkspaceFaceScanJobStartPlan({
+      toolName: tool.name,
+      toolTitle: tool.title,
+      actionLabel: WORKSPACE_FACE_SCAN_ACTION.label,
+      additionalArgs,
+      resolvedRootPath: resolvedRootPath ?? '',
+      queueItemId,
+      startedAt,
+      requestSignature: null,
+    })
     const requestSignature = runtime.getRequestSignature(tool, {
       actionKey: WORKSPACE_FACE_SCAN_ACTION.key,
-      additionalArgs: requestArgs,
-    }) ?? `${queueItemId}:face-scan-job`
+      additionalArgs: startPlan.requestArgs,
+    }) ?? startPlan.requestSignature
 
     setResultQueueState((prev) => enqueueLoadingResult(prev, {
-      queueItemId,
+      queueItemId: startPlan.queueItemId,
       contextKey,
       toolName: tool.name,
-      title,
+      title: startPlan.title,
       trigger: 'manual',
       actionKey: WORKSPACE_FACE_SCAN_ACTION.key,
       requestSignature,
-      startedAt,
-      progress: {
-        current: 0,
-        total: Array.isArray(requestArgs.relativePaths) ? requestArgs.relativePaths.length : 0,
-        message: '提交人脸扫描任务...',
-        cancelable: false,
-      },
+      startedAt: startPlan.startedAt,
+      progress: startPlan.initialProgress,
     }))
 
     let latestSnapshot: FaceScanJobSnapshot | null = null
     try {
-      if (!resolvedRootPath) {
-        throw new Error('未设置有效 rootPath')
+      if (startPlan.missingRootPathError) {
+        throw new Error(startPlan.missingRootPathError)
       }
       latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
         '/v1/faces/detect-assets/jobs',
-        requestArgs,
+        startPlan.requestArgs,
         FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS
       )
       if (!latestSnapshot.jobId) {
@@ -291,7 +236,7 @@ export function WorkspacePluginHost({
       while (!isWorkspaceFaceScanJobTerminal(latestSnapshot.status)) {
         await delay(FACE_SCAN_JOB_POLL_INTERVAL_MS)
         latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
-          `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}`,
+          resolveWorkspaceFaceScanJobPollPath(jobId),
           {},
           FACE_SCAN_JOB_POLL_TIMEOUT_MS,
           'GET'
@@ -301,36 +246,24 @@ export function WorkspacePluginHost({
 
       const finishedAt = Date.now()
       const snapshot = latestSnapshot
-      setResultQueueState((prev) => finalizeQueueItem(prev, snapshot.status === 'failed'
-        ? {
-          contextKey,
-          queueItemId,
-          status: 'error',
-          error: snapshot.error || '人脸扫描任务失败',
-          errorCode: 'FACE_SCAN_JOB_FAILED',
-          finishedAt,
-        }
-        : {
-          contextKey,
-          queueItemId,
-          status: 'success',
-          result: toWorkspaceFaceScanJobResult(snapshot),
-          finishedAt,
-        }))
+      setResultQueueState((prev) => finalizeQueueItem(prev, resolveWorkspaceFaceScanJobFinishPlan({
+        contextKey,
+        queueItemId,
+        snapshot,
+        finishedAt,
+      })))
 
       if (onMutationCommitted && shouldRefreshAfterWorkspaceFaceScanJob(snapshot)) {
         await onMutationCommitted({ mutationToolName: tool.name })
       }
     } catch (error) {
       const finishedAt = Date.now()
-      setResultQueueState((prev) => finalizeQueueItem(prev, {
+      setResultQueueState((prev) => finalizeQueueItem(prev, resolveWorkspaceFaceScanJobErrorPlan({
         contextKey,
         queueItemId,
-        status: 'error',
-        error: toWorkspaceFaceScanJobErrorMessage(error),
-        errorCode: 'FACE_SCAN_JOB_ERROR',
+        error,
         finishedAt,
-      }))
+      })))
     } finally {
       faceScanJobIdByQueueItemIdRef.current.delete(queueItemId)
     }
@@ -344,17 +277,30 @@ export function WorkspacePluginHost({
     updateFaceScanQueueProgress,
   ])
 
-  const handleCancelResultItem = useCallback(({ item }: { item: PluginResultQueueItem }) => {
-    const jobId = item.progress?.jobId || faceScanJobIdByQueueItemIdRef.current.get(item.id)
-    if (!jobId) return
-    updateFaceScanQueueProgress(item.id, {
-      jobId,
-      cancelRequested: true,
-      cancelable: false,
-      message: '正在取消人脸扫描任务...',
+  const runWorkspaceToolPlan = useCallback((tool: RuntimeToolDescriptor, plan: WorkspaceToolRunPlan) => {
+    if (plan.kind === 'none') return
+    runtime.handleWorkbenchContextChange(tool.name)
+    if (plan.kind === 'face-scan-job') {
+      void runWorkspaceFaceScanJob(tool, plan.additionalArgs)
+      return
+    }
+    void runtime.runToolCall(tool, {
+      trigger: 'manual',
+      actionKey: plan.actionKey,
+      actionLabel: plan.actionLabel,
+      additionalArgs: plan.additionalArgs,
     })
+  }, [runWorkspaceFaceScanJob, runtime])
+
+  const handleCancelResultItem = useCallback(({ item }: { item: PluginResultQueueItem }) => {
+    const cancelPlan = resolveWorkspaceFaceScanJobCancelPlan({
+      item,
+      trackedJobId: faceScanJobIdByQueueItemIdRef.current.get(item.id),
+    })
+    if (!cancelPlan) return
+    updateFaceScanQueueProgress(item.id, cancelPlan.cancelProgress)
     void callRuntimeHttp<FaceScanJobSnapshot>(
-      `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}/cancel`,
+      cancelPlan.endpointPath,
       {},
       FACE_SCAN_JOB_CANCEL_TIMEOUT_MS
     )
@@ -365,7 +311,7 @@ export function WorkspacePluginHost({
       })
       .catch((error) => {
         updateFaceScanQueueProgress(item.id, {
-          jobId,
+          jobId: cancelPlan.jobId,
           cancelRequested: false,
           cancelable: true,
           message: `取消失败：${toWorkspaceFaceScanJobErrorMessage(error)}`,
@@ -409,21 +355,16 @@ export function WorkspacePluginHost({
     onDismissProjectionTool(intent.toolName)
   }, [onDismissProjectionTool, runtime.currentQueue])
 
-  const handleWorkbenchRunAction = useCallback((tool: RuntimeToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {
+  const handleWorkbenchRunAction = useCallback((tool: RuntimeToolDescriptor, action: RuntimeToolActionAnnotation) => {
     const additionalArgs = resolveToolArguments(tool, action.arguments)
-    if (!additionalArgs) return
-    runtime.handleWorkbenchContextChange(tool.name)
-    if (tool.name === 'vision.face' && action.key === WORKSPACE_FACE_SCAN_ACTION.key) {
-      void runWorkspaceFaceScanJob(tool, additionalArgs)
-      return
-    }
-    void runtime.runToolCall(tool, {
-      trigger: 'manual',
+    runWorkspaceToolPlan(tool, resolveWorkspaceToolRunPlan({
+      source: 'workbench-action',
+      toolName: tool.name,
       actionKey: action.key,
       actionLabel: action.label,
       additionalArgs,
-    })
-  }, [resolveToolArguments, runWorkspaceFaceScanJob, runtime])
+    }))
+  }, [resolveToolArguments, runWorkspaceToolPlan])
 
   const railActions = useMemo(() => (
     runtime.railActions.map((action) => ({
@@ -435,19 +376,14 @@ export function WorkspacePluginHost({
           tool,
           tool.name === 'vision.face' ? WORKSPACE_FACE_SCAN_ACTION.arguments : undefined
         )
-        if (!additionalArgs) return
-        runtime.handleWorkbenchContextChange(tool.name)
-        if (tool.name === 'vision.face') {
-          void runWorkspaceFaceScanJob(tool, additionalArgs)
-          return
-        }
-        void runtime.runToolCall(tool, {
-          trigger: 'manual',
+        runWorkspaceToolPlan(tool, resolveWorkspaceToolRunPlan({
+          source: 'rail',
+          toolName: tool.name,
           additionalArgs,
-        })
+        }))
       },
     }))
-  ), [resolveToolArguments, runWorkspaceFaceScanJob, runtime, toolByName])
+  ), [resolveToolArguments, runWorkspaceToolPlan, runtime.railActions, toolByName])
 
   const activeTool = useMemo(() => {
     const tool = runtime.activeWorkbenchTool
@@ -475,17 +411,12 @@ export function WorkspacePluginHost({
         onRunAction={handleWorkbenchRunAction}
         onRunCustomToolCall={(toolItem, params) => {
           const additionalArgs = resolveToolArguments(toolItem, params.additionalArgs)
-          if (!additionalArgs) return
-          runtime.handleWorkbenchContextChange(toolItem.name)
-          if (toolItem.name === 'vision.face' && additionalArgs.operation === 'detectAssets') {
-            void runWorkspaceFaceScanJob(toolItem, additionalArgs)
-            return
-          }
-          void runtime.runToolCall(toolItem, {
-            trigger: 'manual',
+          runWorkspaceToolPlan(toolItem, resolveWorkspaceToolRunPlan({
+            source: 'custom-tool-call',
+            toolName: toolItem.name,
             actionLabel: params.actionLabel,
             additionalArgs,
-          })
+          }))
         }}
         rootId={rootId}
         annotationTargetPath={null}

@@ -4,11 +4,15 @@ import test from 'node:test'
 import {
   readSuccessfulResultAbsolutePaths,
   resolveWorkspaceAbsoluteDeletePayload,
+  resolveWorkspaceContextualTools,
   resolveWorkspaceMutationCommitParams,
   resolveWorkspacePluginDuplicateProjectionDismissIntent,
   resolveWorkspacePluginProjectionActivationIntent,
   resolveWorkspaceRecycleRestoreItems,
   resolveWorkspaceRelativeToolPayload,
+  resolveWorkspaceToolArguments,
+  resolveWorkspaceToolTargetState,
+  resolveWorkspaceToolRunPlan,
 } from '../../src/features/explorer/lib/workspacePluginHostModel.ts'
 
 function file(path, overrides = {}) {
@@ -44,6 +48,15 @@ function queueItem(id, overrides = {}) {
   }
 }
 
+function tool(name, overrides = {}) {
+  return {
+    name,
+    title: name,
+    inputSchema: {},
+    ...overrides,
+  }
+}
+
 test('Workspace Plugin Host Model resolves shared Root-relative targets for Runtime tools', () => {
   assert.deepEqual(resolveWorkspaceRelativeToolPayload([
     file('albums/a.jpg', {
@@ -73,6 +86,247 @@ test('Workspace Plugin Host Model resolves shared Root-relative targets for Runt
     file('a.jpg', { sourceRootPath: '/root-a', sourceRelativePath: 'a.jpg' }),
     file('b.jpg', { sourceRootPath: '/root-b', sourceRelativePath: 'b.jpg' }),
   ]), null)
+})
+
+test('Workspace Plugin Host Model narrows Runtime tools by workspace context', () => {
+  const tools = [
+    tool('data.findDuplicateFiles'),
+    tool('fs.restore'),
+    tool('fs.softDelete'),
+  ]
+
+  assert.deepEqual(resolveWorkspaceContextualTools({
+    currentPath: 'albums',
+    tools,
+  }).map((item) => item.name), [
+    'data.findDuplicateFiles',
+    'fs.softDelete',
+  ])
+
+  assert.deepEqual(resolveWorkspaceContextualTools({
+    currentPath: '.trash/2026',
+    tools,
+  }).map((item) => item.name), [
+    'fs.restore',
+  ])
+})
+
+test('Workspace Plugin Host Model resolves Runtime tool arguments from selected workspace targets', () => {
+  assert.deepEqual(resolveWorkspaceToolArguments({
+    toolName: 'fs.softDelete',
+    hasSelectedEntries: true,
+    selectedEntryPaths: ['albums/a.jpg'],
+    selectedDeleteAbsoluteArgs: {
+      absolutePaths: ['/media/root/albums/a.jpg'],
+    },
+    selectedRestoreItems: null,
+    relativeTargetArgs: {
+      rootPath: '/media/root',
+      relativePaths: ['albums/a.jpg'],
+    },
+    extraArgs: {
+      dryRun: true,
+    },
+  }), {
+    absolutePaths: ['/media/root/albums/a.jpg'],
+    dryRun: true,
+  })
+
+  assert.deepEqual(resolveWorkspaceToolArguments({
+    toolName: 'fs.restore',
+    hasSelectedEntries: true,
+    selectedEntryPaths: ['.trash/a.jpg'],
+    selectedDeleteAbsoluteArgs: null,
+    selectedRestoreItems: [
+      {
+        sourceType: 'root_trash',
+        absolutePath: '/media/root/.trash/a.jpg',
+      },
+    ],
+    relativeTargetArgs: null,
+  }), {
+    items: [
+      {
+        sourceType: 'root_trash',
+        absolutePath: '/media/root/.trash/a.jpg',
+      },
+    ],
+  })
+
+  assert.deepEqual(resolveWorkspaceToolArguments({
+    toolName: 'vision.face',
+    hasSelectedEntries: false,
+    selectedEntryPaths: [],
+    selectedDeleteAbsoluteArgs: null,
+    selectedRestoreItems: null,
+    relativeTargetArgs: {
+      rootPath: '/media/root',
+      relativePaths: ['albums/a.jpg', 'albums/b.jpg'],
+    },
+    extraArgs: {
+      operation: 'detectAssets',
+    },
+  }), {
+    rootPath: '/media/root',
+    relativePaths: ['albums/a.jpg', 'albums/b.jpg'],
+    operation: 'detectAssets',
+  })
+
+  assert.equal(resolveWorkspaceToolArguments({
+    toolName: 'fs.restore',
+    hasSelectedEntries: false,
+    selectedEntryPaths: [],
+    selectedDeleteAbsoluteArgs: null,
+    selectedRestoreItems: null,
+    relativeTargetArgs: null,
+  }), null)
+})
+
+test('Workspace Plugin Host Model derives tool target state from selection and visible files', () => {
+  assert.deepEqual(resolveWorkspaceToolTargetState({
+    visibleFiles: [
+      file('albums/a.jpg', {
+        sourceRootPath: '/media/root',
+        sourceRelativePath: 'albums/a.jpg',
+      }),
+      file('albums/b', {
+        kind: 'directory',
+        sourceRootPath: '/media/root',
+        sourceRelativePath: 'albums/b',
+      }),
+      file('albums/c.jpg', {
+        sourceRootPath: '/media/root',
+        sourceRelativePath: 'albums/c.jpg',
+      }),
+    ],
+    selectedPaths: [],
+    hasActiveProjection: false,
+  }), {
+    selectedEntries: [],
+    selectedEntryPaths: [],
+    selectedFileEntries: [],
+    targetFileEntries: [
+      file('albums/a.jpg', {
+        sourceRootPath: '/media/root',
+        sourceRelativePath: 'albums/a.jpg',
+      }),
+      file('albums/c.jpg', {
+        sourceRootPath: '/media/root',
+        sourceRelativePath: 'albums/c.jpg',
+      }),
+    ],
+    relativeTargetArgs: {
+      rootPath: '/media/root',
+      relativePaths: ['albums/a.jpg', 'albums/c.jpg'],
+    },
+    selectedRestoreItems: null,
+    selectedDeleteAbsoluteArgs: null,
+    hasTargets: true,
+    hasSelectedEntries: false,
+    hasRenderableTargets: true,
+  })
+
+  assert.deepEqual(resolveWorkspaceToolTargetState({
+    visibleFiles: [
+      file('albums/a.jpg', {
+        absolutePath: '/media/root/albums/a.jpg',
+      }),
+      file('albums/b.jpg', {
+        absolutePath: '/media/root/albums/b.jpg',
+      }),
+    ],
+    selectedPaths: ['albums/b.jpg'],
+    hasActiveProjection: true,
+  }), {
+    selectedEntries: [
+      file('albums/b.jpg', {
+        absolutePath: '/media/root/albums/b.jpg',
+      }),
+    ],
+    selectedEntryPaths: ['albums/b.jpg'],
+    selectedFileEntries: [
+      file('albums/b.jpg', {
+        absolutePath: '/media/root/albums/b.jpg',
+      }),
+    ],
+    targetFileEntries: [
+      file('albums/b.jpg', {
+        absolutePath: '/media/root/albums/b.jpg',
+      }),
+    ],
+    relativeTargetArgs: {
+      relativePaths: ['albums/b.jpg'],
+    },
+    selectedRestoreItems: null,
+    selectedDeleteAbsoluteArgs: {
+      absolutePaths: ['/media/root/albums/b.jpg'],
+    },
+    hasTargets: true,
+    hasSelectedEntries: true,
+    hasRenderableTargets: true,
+  })
+})
+
+test('Workspace Plugin Host Model resolves tool run plans for Runtime and Face Scan Job execution', () => {
+  const faceScanArgs = {
+    operation: 'detectAssets',
+    relativePaths: ['albums/a.jpg'],
+  }
+
+  assert.deepEqual(resolveWorkspaceToolRunPlan({
+    source: 'rail',
+    toolName: 'vision.face',
+    additionalArgs: faceScanArgs,
+  }), {
+    kind: 'face-scan-job',
+    additionalArgs: faceScanArgs,
+  })
+
+  assert.deepEqual(resolveWorkspaceToolRunPlan({
+    source: 'workbench-action',
+    toolName: 'vision.face',
+    actionKey: 'detectVisibleAssets',
+    actionLabel: '扫描当前目标媒体',
+    additionalArgs: faceScanArgs,
+  }), {
+    kind: 'face-scan-job',
+    additionalArgs: faceScanArgs,
+  })
+
+  assert.deepEqual(resolveWorkspaceToolRunPlan({
+    source: 'custom-tool-call',
+    toolName: 'vision.face',
+    actionLabel: '重新扫描',
+    additionalArgs: faceScanArgs,
+  }), {
+    kind: 'face-scan-job',
+    additionalArgs: faceScanArgs,
+  })
+
+  assert.deepEqual(resolveWorkspaceToolRunPlan({
+    source: 'workbench-action',
+    toolName: 'data.findDuplicateFiles',
+    actionKey: 'run',
+    actionLabel: 'Find duplicates',
+    additionalArgs: {
+      relativePaths: ['albums/a.jpg'],
+    },
+  }), {
+    kind: 'runtime-tool-call',
+    actionKey: 'run',
+    actionLabel: 'Find duplicates',
+    additionalArgs: {
+      relativePaths: ['albums/a.jpg'],
+    },
+  })
+
+  assert.deepEqual(resolveWorkspaceToolRunPlan({
+    source: 'rail',
+    toolName: 'data.findDuplicateFiles',
+    additionalArgs: null,
+  }), {
+    kind: 'none',
+  })
 })
 
 test('Workspace Plugin Host Model activates the first unhandled auto Result Projection', () => {

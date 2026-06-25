@@ -21,6 +21,71 @@ export const FACE_SCAN_JOB_POLL_INTERVAL_MS = 1000
 
 export type FaceScanJobStatus = 'queued' | 'running' | 'canceling' | 'canceled' | 'succeeded' | 'failed'
 
+interface ResolveWorkspaceFaceScanJobStartPlanParams {
+  toolName: string
+  toolTitle?: string | null
+  actionLabel: string
+  additionalArgs: Record<string, unknown>
+  resolvedRootPath: string
+  queueItemId: string
+  startedAt: number
+  requestSignature: string | null | undefined
+}
+
+interface ResolveWorkspaceFaceScanJobCancelPlanParams {
+  item: {
+    progress?: Pick<PluginResultProgress, 'jobId'> | null
+  }
+  trackedJobId?: string | null
+}
+
+interface ResolveWorkspaceFaceScanJobFinishPlanParams {
+  contextKey: string
+  queueItemId: string
+  snapshot: FaceScanJobSnapshot
+  finishedAt: number
+}
+
+interface ResolveWorkspaceFaceScanJobErrorPlanParams {
+  contextKey: string
+  queueItemId: string
+  error: unknown
+  finishedAt: number
+}
+
+export interface WorkspaceFaceScanJobStartPlan {
+  queueItemId: string
+  title: string
+  requestArgs: Record<string, unknown>
+  requestSignature: string
+  startedAt: number
+  missingRootPathError: string | null
+  initialProgress: Pick<PluginResultProgress, 'current' | 'total' | 'message' | 'cancelable'>
+}
+
+export interface WorkspaceFaceScanJobCancelPlan {
+  jobId: string
+  endpointPath: string
+  cancelProgress: Pick<PluginResultProgress, 'jobId' | 'cancelRequested' | 'cancelable' | 'message'>
+}
+
+export type WorkspaceFaceScanJobFinalizePlan =
+  | {
+    contextKey: string
+    queueItemId: string
+    status: 'success'
+    result: Record<string, unknown>
+    finishedAt: number
+  }
+  | {
+    contextKey: string
+    queueItemId: string
+    status: 'error'
+    error: string
+    errorCode: 'FACE_SCAN_JOB_FAILED' | 'FACE_SCAN_JOB_ERROR'
+    finishedAt: number
+  }
+
 export interface FaceScanJobSnapshot {
   ok?: boolean
   jobId?: string
@@ -54,6 +119,109 @@ function toStatusLabel(status: FaceScanJobStatus): string {
   if (status === 'canceled') return '已取消'
   if (status === 'failed') return '失败'
   return '已完成'
+}
+
+export function readWorkspaceFaceScanProvidedRootPath(additionalArgs: Record<string, unknown>): string {
+  return typeof additionalArgs.rootPath === 'string' && additionalArgs.rootPath.trim()
+    ? additionalArgs.rootPath.trim()
+    : ''
+}
+
+export function resolveWorkspaceFaceScanJobStartPlan({
+  toolName,
+  toolTitle,
+  actionLabel,
+  additionalArgs,
+  resolvedRootPath,
+  queueItemId,
+  startedAt,
+  requestSignature,
+}: ResolveWorkspaceFaceScanJobStartPlanParams): WorkspaceFaceScanJobStartPlan {
+  const providedRootPath = readWorkspaceFaceScanProvidedRootPath(additionalArgs)
+  const rootPath = providedRootPath || resolvedRootPath
+  const requestArgs = rootPath
+    ? { ...additionalArgs, rootPath }
+    : additionalArgs
+
+  return {
+    queueItemId,
+    title: `${toolTitle || toolName} · ${actionLabel}`,
+    requestArgs,
+    requestSignature: requestSignature ?? `${queueItemId}:face-scan-job`,
+    startedAt,
+    missingRootPathError: rootPath ? null : '未设置有效 rootPath',
+    initialProgress: {
+      current: 0,
+      total: Array.isArray(requestArgs.relativePaths) ? requestArgs.relativePaths.length : 0,
+      message: '提交人脸扫描任务...',
+      cancelable: false,
+    },
+  }
+}
+
+export function resolveWorkspaceFaceScanJobCancelPlan({
+  item,
+  trackedJobId,
+}: ResolveWorkspaceFaceScanJobCancelPlanParams): WorkspaceFaceScanJobCancelPlan | null {
+  const jobId = item.progress?.jobId || trackedJobId
+  if (!jobId) return null
+
+  return {
+    jobId,
+    endpointPath: `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}/cancel`,
+    cancelProgress: {
+      jobId,
+      cancelRequested: true,
+      cancelable: false,
+      message: '正在取消人脸扫描任务...',
+    },
+  }
+}
+
+export function resolveWorkspaceFaceScanJobPollPath(jobId: string): string {
+  return `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}`
+}
+
+export function resolveWorkspaceFaceScanJobFinishPlan({
+  contextKey,
+  queueItemId,
+  snapshot,
+  finishedAt,
+}: ResolveWorkspaceFaceScanJobFinishPlanParams): WorkspaceFaceScanJobFinalizePlan {
+  if (snapshot.status === 'failed') {
+    return {
+      contextKey,
+      queueItemId,
+      status: 'error',
+      error: snapshot.error || '人脸扫描任务失败',
+      errorCode: 'FACE_SCAN_JOB_FAILED',
+      finishedAt,
+    }
+  }
+
+  return {
+    contextKey,
+    queueItemId,
+    status: 'success',
+    result: toWorkspaceFaceScanJobResult(snapshot),
+    finishedAt,
+  }
+}
+
+export function resolveWorkspaceFaceScanJobErrorPlan({
+  contextKey,
+  queueItemId,
+  error,
+  finishedAt,
+}: ResolveWorkspaceFaceScanJobErrorPlanParams): WorkspaceFaceScanJobFinalizePlan {
+  return {
+    contextKey,
+    queueItemId,
+    status: 'error',
+    error: toWorkspaceFaceScanJobErrorMessage(error),
+    errorCode: 'FACE_SCAN_JOB_ERROR',
+    finishedAt,
+  }
 }
 
 export function isWorkspaceFaceScanJobTerminal(status?: string): boolean {
