@@ -15,6 +15,19 @@ import {
   resolveWorkspaceRelativeToolPayload,
 } from '@/features/explorer/lib/workspacePluginHostModel'
 import {
+  FACE_SCAN_JOB_CANCEL_TIMEOUT_MS,
+  FACE_SCAN_JOB_POLL_INTERVAL_MS,
+  FACE_SCAN_JOB_POLL_TIMEOUT_MS,
+  FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS,
+  type FaceScanJobSnapshot,
+  WORKSPACE_FACE_SCAN_ACTION,
+  isWorkspaceFaceScanJobTerminal,
+  shouldRefreshAfterWorkspaceFaceScanJob,
+  toWorkspaceFaceScanJobErrorMessage,
+  toWorkspaceFaceScanJobProgress,
+  toWorkspaceFaceScanJobResult,
+} from '@/features/explorer/lib/workspaceFaceScanJobModel'
+import {
   hasWorkbenchMetadata,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
@@ -48,122 +61,10 @@ interface WorkspacePluginHostProps {
   onToolPanelWidthChange: (nextWidthPx: number) => void
 }
 
-const WORKSPACE_FACE_SCAN_ACTION = {
-  key: 'detectVisibleAssets',
-  label: '扫描当前目标媒体',
-  description: '选中优先，否则扫描当前可见图片/视频；仅处理未检测资产，并执行识别聚类',
-  intent: 'primary',
-  arguments: {
-    operation: 'detectAssets',
-    onlyUndetected: true,
-    runCluster: true,
-    preCluster: true,
-  },
-}
-
-const FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS = 30000
-const FACE_SCAN_JOB_POLL_TIMEOUT_MS = 15000
-const FACE_SCAN_JOB_CANCEL_TIMEOUT_MS = 15000
-const FACE_SCAN_JOB_POLL_INTERVAL_MS = 1000
-
-type FaceScanJobStatus = 'queued' | 'running' | 'canceling' | 'canceled' | 'succeeded' | 'failed'
-
-interface FaceScanJobSnapshot {
-  ok?: boolean
-  jobId?: string
-  status?: FaceScanJobStatus
-  total?: number
-  unique?: number
-  processed?: number
-  scanned?: number
-  skipped?: number
-  failed?: number
-  detectedFaces?: number
-  currentPath?: string | null
-  batchIndex?: number
-  batchCount?: number
-  preCluster?: unknown
-  postCluster?: unknown
-  recentItems?: unknown[]
-  failureSummary?: unknown[]
-  error?: string | null
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms)
   })
-}
-
-function isFaceScanJobTerminal(status?: string): boolean {
-  return status === 'canceled' || status === 'succeeded' || status === 'failed'
-}
-
-function toFaceScanJobProgress(snapshot: FaceScanJobSnapshot, overrides: Partial<PluginResultProgress> = {}): PluginResultProgress {
-  const status = snapshot.status ?? 'queued'
-  const current = Math.max(0, Number(snapshot.processed ?? 0))
-  const total = Math.max(0, Number(snapshot.total ?? 0))
-  const statusLabel = status === 'queued'
-    ? '排队中'
-    : status === 'running'
-      ? '扫描中'
-      : status === 'canceling'
-        ? '取消中'
-        : status === 'canceled'
-          ? '已取消'
-          : status === 'failed'
-            ? '失败'
-            : '已完成'
-
-  return {
-    jobId: snapshot.jobId,
-    status,
-    current,
-    total,
-    currentPath: typeof snapshot.currentPath === 'string' ? snapshot.currentPath : null,
-    batchIndex: typeof snapshot.batchIndex === 'number' ? snapshot.batchIndex : undefined,
-    batchCount: typeof snapshot.batchCount === 'number' ? snapshot.batchCount : undefined,
-    scanned: Math.max(0, Number(snapshot.scanned ?? 0)),
-    skipped: Math.max(0, Number(snapshot.skipped ?? 0)),
-    failed: Math.max(0, Number(snapshot.failed ?? 0)),
-    detectedFaces: Math.max(0, Number(snapshot.detectedFaces ?? 0)),
-    cancelable: status === 'queued' || status === 'running',
-    cancelRequested: status === 'canceling',
-    message: `人脸扫描${statusLabel}: ${current}/${total}`,
-    ...overrides,
-  }
-}
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '工具调用失败'
-}
-
-function shouldRefreshAfterFaceScanJob(snapshot: FaceScanJobSnapshot): boolean {
-  return (
-    Number(snapshot.processed ?? 0) > 0
-    || Number(snapshot.scanned ?? 0) > 0
-    || Number(snapshot.detectedFaces ?? 0) > 0
-  )
-}
-
-function toFaceScanJobResult(snapshot: FaceScanJobSnapshot): Record<string, unknown> {
-  return {
-    ok: snapshot.status !== 'failed',
-    jobId: snapshot.jobId,
-    status: snapshot.status,
-    total: snapshot.total ?? 0,
-    unique: snapshot.unique ?? 0,
-    processed: snapshot.processed ?? 0,
-    scanned: snapshot.scanned ?? 0,
-    skipped: snapshot.skipped ?? 0,
-    failed: snapshot.failed ?? 0,
-    detectedFaces: snapshot.detectedFaces ?? 0,
-    preCluster: snapshot.preCluster ?? null,
-    postCluster: snapshot.postCluster ?? null,
-    recentItems: snapshot.recentItems ?? [],
-    failureSummary: snapshot.failureSummary ?? [],
-    error: snapshot.error ?? null,
-  }
 }
 
 export function WorkspacePluginHost({
@@ -383,9 +284,9 @@ export function WorkspacePluginHost({
       }
       const jobId = latestSnapshot.jobId
       faceScanJobIdByQueueItemIdRef.current.set(queueItemId, jobId)
-      updateFaceScanQueueProgress(queueItemId, toFaceScanJobProgress(latestSnapshot))
+      updateFaceScanQueueProgress(queueItemId, toWorkspaceFaceScanJobProgress(latestSnapshot))
 
-      while (!isFaceScanJobTerminal(latestSnapshot.status)) {
+      while (!isWorkspaceFaceScanJobTerminal(latestSnapshot.status)) {
         await delay(FACE_SCAN_JOB_POLL_INTERVAL_MS)
         latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
           `/v1/faces/detect-assets/jobs/${encodeURIComponent(jobId)}`,
@@ -393,7 +294,7 @@ export function WorkspacePluginHost({
           FACE_SCAN_JOB_POLL_TIMEOUT_MS,
           'GET'
         )
-        updateFaceScanQueueProgress(queueItemId, toFaceScanJobProgress(latestSnapshot))
+        updateFaceScanQueueProgress(queueItemId, toWorkspaceFaceScanJobProgress(latestSnapshot))
       }
 
       const finishedAt = Date.now()
@@ -411,11 +312,11 @@ export function WorkspacePluginHost({
           contextKey,
           queueItemId,
           status: 'success',
-          result: toFaceScanJobResult(snapshot),
+          result: toWorkspaceFaceScanJobResult(snapshot),
           finishedAt,
         }))
 
-      if (onMutationCommitted && shouldRefreshAfterFaceScanJob(snapshot)) {
+      if (onMutationCommitted && shouldRefreshAfterWorkspaceFaceScanJob(snapshot)) {
         await onMutationCommitted({ mutationToolName: tool.name })
       }
     } catch (error) {
@@ -424,7 +325,7 @@ export function WorkspacePluginHost({
         contextKey,
         queueItemId,
         status: 'error',
-        error: toErrorMessage(error),
+        error: toWorkspaceFaceScanJobErrorMessage(error),
         errorCode: 'FACE_SCAN_JOB_ERROR',
         finishedAt,
       }))
@@ -456,7 +357,7 @@ export function WorkspacePluginHost({
       FACE_SCAN_JOB_CANCEL_TIMEOUT_MS
     )
       .then((snapshot) => {
-        updateFaceScanQueueProgress(item.id, toFaceScanJobProgress(snapshot, {
+        updateFaceScanQueueProgress(item.id, toWorkspaceFaceScanJobProgress(snapshot, {
           cancelRequested: snapshot.status === 'canceling',
         }))
       })
@@ -465,7 +366,7 @@ export function WorkspacePluginHost({
           jobId,
           cancelRequested: false,
           cancelable: true,
-          message: `取消失败：${toErrorMessage(error)}`,
+          message: `取消失败：${toWorkspaceFaceScanJobErrorMessage(error)}`,
         })
       })
   }, [updateFaceScanQueueProgress])

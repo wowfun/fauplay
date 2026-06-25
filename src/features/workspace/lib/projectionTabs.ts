@@ -29,6 +29,33 @@ interface PrunedProjectionTabsState {
   shouldCloseResultPanel: boolean
 }
 
+interface ResolveProjectionTabCloseStateParams {
+  projectionTabs: ResultProjection[]
+  projectionSelectedPathsById: Record<string, string[]>
+  duplicateSelectionRuleByProjectionId: Record<string, DuplicateSelectionRule | null>
+  projectionFocusedPathById: Record<string, string | null>
+  activeSurface: WorkspaceActiveSurface
+  lastProjectionTabId: string | null
+  closingTabId: string
+}
+
+export type ProjectionTabClosePreviewAlignment =
+  | { kind: 'none' }
+  | { kind: 'directory' }
+  | { kind: 'projection'; path: string | null }
+
+export interface ProjectionTabCloseState {
+  projectionTabs: ResultProjection[]
+  projectionSelectedPathsById: Record<string, string[]>
+  duplicateSelectionRuleByProjectionId: Record<string, DuplicateSelectionRule | null>
+  projectionFocusedPathById: Record<string, string | null>
+  activeProjectionTabId: string | null
+  activeSurface: WorkspaceActiveSurface
+  lastProjectionTabId: string | null
+  shouldCloseResultPanel: boolean
+  previewAlignment: ProjectionTabClosePreviewAlignment
+}
+
 export function areStringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
 }
@@ -50,6 +77,91 @@ export function resolveProjectionPreferredPath(
     return normalizedPreferredPath
   }
   return projection.files[0]?.path ?? null
+}
+
+export function pruneProjectionAfterDeletedAbsolutePaths(
+  projection: ResultProjection,
+  deletedAbsolutePaths: ReadonlySet<string>
+): ResultProjection | null {
+  if (deletedAbsolutePaths.size === 0) {
+    return projection
+  }
+
+  const nextFiles = projection.files.filter((file) => {
+    const absolutePath = typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''
+    return !absolutePath || !deletedAbsolutePaths.has(absolutePath)
+  })
+  if (nextFiles.length === 0) {
+    return null
+  }
+  if (nextFiles.length === projection.files.length) {
+    return projection
+  }
+  return {
+    ...projection,
+    files: nextFiles,
+  }
+}
+
+export function resolveProjectionTabCloseState({
+  projectionTabs,
+  projectionSelectedPathsById,
+  duplicateSelectionRuleByProjectionId,
+  projectionFocusedPathById,
+  activeSurface,
+  lastProjectionTabId,
+  closingTabId,
+}: ResolveProjectionTabCloseStateParams): ProjectionTabCloseState {
+  const closingIndex = projectionTabs.findIndex((projection) => projection.id === closingTabId)
+  const remainingTabs = projectionTabs.filter((projection) => projection.id !== closingTabId)
+  const nextActiveTabId = (() => {
+    if (remainingTabs.length === 0) return null
+    if (closingIndex < 0) return remainingTabs[0]?.id ?? null
+    return remainingTabs[closingIndex]?.id ?? remainingTabs[closingIndex - 1]?.id ?? remainingTabs[0]?.id ?? null
+  })()
+  const nextProjectionSelectedPathsById = omitRecordKey(projectionSelectedPathsById, closingTabId)
+  const nextDuplicateSelectionRuleByProjectionId = omitRecordKey(duplicateSelectionRuleByProjectionId, closingTabId)
+  const nextProjectionFocusedPathById = omitRecordKey(projectionFocusedPathById, closingTabId)
+
+  if (!nextActiveTabId) {
+    return {
+      projectionTabs: remainingTabs,
+      projectionSelectedPathsById: nextProjectionSelectedPathsById,
+      duplicateSelectionRuleByProjectionId: nextDuplicateSelectionRuleByProjectionId,
+      projectionFocusedPathById: nextProjectionFocusedPathById,
+      activeProjectionTabId: null,
+      activeSurface: { kind: 'directory' },
+      lastProjectionTabId: null,
+      shouldCloseResultPanel: true,
+      previewAlignment: { kind: 'directory' },
+    }
+  }
+
+  const shouldMoveActiveSurface = activeSurface.kind === 'projection' && activeSurface.tabId === closingTabId
+  const nextActiveSurface = shouldMoveActiveSurface
+    ? { kind: 'projection' as const, tabId: nextActiveTabId }
+    : activeSurface
+  const nextLastProjectionTabId = lastProjectionTabId === closingTabId
+    ? nextActiveTabId
+    : lastProjectionTabId
+  const nextProjection = remainingTabs.find((projection) => projection.id === nextActiveTabId) ?? null
+
+  return {
+    projectionTabs: remainingTabs,
+    projectionSelectedPathsById: nextProjectionSelectedPathsById,
+    duplicateSelectionRuleByProjectionId: nextDuplicateSelectionRuleByProjectionId,
+    projectionFocusedPathById: nextProjectionFocusedPathById,
+    activeProjectionTabId: nextActiveTabId,
+    activeSurface: nextActiveSurface,
+    lastProjectionTabId: nextLastProjectionTabId,
+    shouldCloseResultPanel: false,
+    previewAlignment: shouldMoveActiveSurface
+      ? {
+        kind: 'projection',
+        path: resolveProjectionPreferredPath(nextProjection, projectionFocusedPathById[nextActiveTabId]),
+      }
+      : { kind: 'none' },
+  }
 }
 
 export function pruneProjectionTabsAfterDeletedFiles({
@@ -182,4 +294,13 @@ export function pruneProjectionTabsAfterDeletedFiles({
     lastProjectionTabId: nextLastProjectionTabId,
     shouldCloseResultPanel: false,
   }
+}
+
+function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) {
+    return record
+  }
+  const next = { ...record }
+  delete next[key]
+  return next
 }

@@ -7,13 +7,14 @@ import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
 import { getFilePreviewKind } from '@/lib/filePreview'
-import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import {
   resolvePreviewPluginContextModel,
   resolvePreviewPluginToolArguments,
   resolvePreviewPluginToolRunnable,
 } from '@/features/preview/lib/previewPluginContextModel'
+import { resolvePreviewPluginMutationCommitParams } from '@/features/preview/lib/previewPluginMutationModel'
+import { resolvePreviewPluginWorkbenchTool } from '@/features/preview/lib/previewPluginWorkbenchModel'
 import type { FileItem, ResultProjection } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
@@ -54,41 +55,6 @@ interface PreviewPluginHostProps {
 interface ContinuousToolTask {
   key: string
   tool: RuntimeToolDescriptor
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
-}
-
-function readFirstResultRelativePath(result: unknown): string | null {
-  if (!isRecord(result)) return null
-  if (!Array.isArray(result.items) || result.items.length === 0) return null
-  const first = result.items[0]
-  if (!isRecord(first) || typeof first.relativePath !== 'string') return null
-  const normalized = normalizeRelativePath(first.relativePath)
-  return normalized || null
-}
-
-function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
-  if (!isRecord(result) || !Array.isArray(result.items)) {
-    return []
-  }
-
-  const unique = new Set<string>()
-  for (const item of result.items) {
-    if (!isRecord(item) || item.ok !== true || typeof item.absolutePath !== 'string') {
-      continue
-    }
-    const absolutePath = item.absolutePath.trim()
-    if (!absolutePath) continue
-    unique.add(absolutePath)
-  }
-
-  return [...unique]
 }
 
 export function PreviewPluginHost({
@@ -153,29 +119,12 @@ export function PreviewPluginHost({
     canRunTool: useCallback((tool: RuntimeToolDescriptor) => canRunProjectedMutationTool(tool), [canRunProjectedMutationTool]),
     onMutationCommitted: onMutationCommitted
       ? async ({ tool, result }) => {
-        const mutationParams: PreviewMutationCommitParams = {
-          mutationToolName: tool.name,
-        }
-        if (tool.name === 'fs.softDelete') {
-          mutationParams.undoRestoreItems = readDeleteUndoRestoreItems(result.result)
-          mutationParams.deletedRelativePath = readFirstResultRelativePath(result.result) ?? file.path
-          const deletedAbsolutePathSet = new Set<string>()
-          for (const absolutePath of readSuccessfulResultAbsolutePaths(result.result)) {
-            if (absolutePath) {
-              deletedAbsolutePathSet.add(absolutePath)
-            }
-          }
-          if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
-            deletedAbsolutePathSet.add(file.absolutePath.trim())
-          }
-          if (deletedAbsolutePathSet.size > 0) {
-            mutationParams.deletedAbsolutePaths = [...deletedAbsolutePathSet]
-          }
-          if (activeProjection?.id) {
-            mutationParams.projectionTabId = activeProjection.id
-            mutationParams.deletedProjectionPaths = [file.path]
-          }
-        }
+        const mutationParams = resolvePreviewPluginMutationCommitParams({
+          toolName: tool.name,
+          result,
+          file,
+          activeProjectionId: activeProjection?.id,
+        })
         await onMutationCommitted(mutationParams)
       }
       : undefined,
@@ -488,31 +437,10 @@ export function PreviewPluginHost({
     const tool = pluginRuntime.activeWorkbenchTool
     if (!tool || !hasWorkbenchMetadata(tool)) return null
     const previewKind = file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
-    const previewWorkbenchTool = tool.name === 'local.data'
-      ? {
-        ...tool,
-        toolActions: tool.toolActions.filter((action) => action.arguments?.operation !== 'ensureFileEntries'),
-      }
-      : tool.name === 'vision.face' && (previewKind === 'image' || previewKind === 'video')
-        ? {
-          ...tool,
-          toolActions: [
-            {
-              key: 'detectAssetRunCluster',
-              label: '检测并识别人脸',
-              description: previewKind === 'video'
-                ? '对当前视频抽帧检测并立即执行人物归属'
-                : '对当前图片执行检测并立即执行人物归属',
-              intent: 'primary',
-              arguments: {
-                operation: 'detectAsset',
-                runCluster: true,
-              },
-            },
-            ...tool.toolActions,
-          ],
-        }
-      : tool
+    const previewWorkbenchTool = resolvePreviewPluginWorkbenchTool({
+      tool,
+      previewKind,
+    })
 
     return (
       <PluginToolWorkbench

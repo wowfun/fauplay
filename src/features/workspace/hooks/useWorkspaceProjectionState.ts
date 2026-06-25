@@ -18,8 +18,10 @@ import {
 } from '@/features/workspace/lib/duplicateSelection'
 import {
   areStringArraysEqual,
+  pruneProjectionAfterDeletedAbsolutePaths,
   pruneProjectionTabsAfterDeletedFiles,
   resolveProjectionPreferredPath,
+  resolveProjectionTabCloseState,
   type WorkspaceActiveSurface,
 } from '@/features/workspace/lib/projectionTabs'
 import { toToolScopedProjectionId } from '@/lib/projection'
@@ -220,25 +222,7 @@ export function useWorkspaceProjectionState({
   }, [activeProjectionTabId, activeSurface, isResultPanelOpen, setIsResultPanelOpen])
 
   const sanitizeProjectionAgainstDeletedFiles = useCallback((projection: ResultProjection): ResultProjection | null => {
-    const deletedAbsolutePathSet = deletedProjectionAbsolutePathSetRef.current
-    if (deletedAbsolutePathSet.size === 0) {
-      return projection
-    }
-
-    const nextFiles = projection.files.filter((file) => {
-      const absolutePath = typeof file.absolutePath === 'string' ? file.absolutePath.trim() : ''
-      return !absolutePath || !deletedAbsolutePathSet.has(absolutePath)
-    })
-    if (nextFiles.length === 0) {
-      return null
-    }
-    if (nextFiles.length === projection.files.length) {
-      return projection
-    }
-    return {
-      ...projection,
-      files: nextFiles,
-    }
+    return pruneProjectionAfterDeletedAbsolutePaths(projection, deletedProjectionAbsolutePathSetRef.current)
   }, [])
 
   const handleActivateProjection = useCallback((projection: ResultProjection) => {
@@ -303,57 +287,40 @@ export function useWorkspaceProjectionState({
   ])
 
   const handleCloseProjectionTab = useCallback((tabId: string) => {
-    const closingIndex = projectionTabs.findIndex((projection) => projection.id === tabId)
-    const remainingTabs = projectionTabs.filter((projection) => projection.id !== tabId)
-    const nextActiveTabId = (() => {
-      if (remainingTabs.length === 0) return null
-      if (closingIndex < 0) return remainingTabs[0]?.id ?? null
-      return remainingTabs[closingIndex]?.id ?? remainingTabs[closingIndex - 1]?.id ?? remainingTabs[0]?.id ?? null
-    })()
-
-    setProjectionTabs(remainingTabs)
-    setProjectionSelectedPathsById((previous) => {
-      if (!(tabId in previous)) return previous
-      const next = { ...previous }
-      delete next[tabId]
-      return next
-    })
-    setDuplicateSelectionRuleByProjectionId((previous) => {
-      if (!(tabId in previous)) return previous
-      const next = { ...previous }
-      delete next[tabId]
-      return next
-    })
-    setProjectionFocusedPathById((previous) => {
-      if (!(tabId in previous)) return previous
-      const next = { ...previous }
-      delete next[tabId]
-      return next
+    const nextState = resolveProjectionTabCloseState({
+      projectionTabs,
+      projectionSelectedPathsById,
+      duplicateSelectionRuleByProjectionId,
+      projectionFocusedPathById,
+      activeSurface,
+      lastProjectionTabId: lastProjectionTabIdRef.current,
+      closingTabId: tabId,
     })
 
-    if (lastProjectionTabIdRef.current === tabId) {
-      lastProjectionTabIdRef.current = nextActiveTabId
-    }
+    setProjectionTabs(nextState.projectionTabs)
+    setProjectionSelectedPathsById(nextState.projectionSelectedPathsById)
+    setDuplicateSelectionRuleByProjectionId(nextState.duplicateSelectionRuleByProjectionId)
+    setProjectionFocusedPathById(nextState.projectionFocusedPathById)
+    setActiveProjectionTabId(nextState.activeProjectionTabId)
+    setActiveSurface(nextState.activeSurface)
+    lastProjectionTabIdRef.current = nextState.lastProjectionTabId
 
-    setActiveProjectionTabId(nextActiveTabId)
-    if (!nextActiveTabId) {
+    if (nextState.shouldCloseResultPanel) {
       setIsResultPanelOpen(false)
-      setActiveSurface({ kind: 'directory' })
-      interactionRef.current?.alignPreviewToPath(directoryFocusedPath)
-      return
     }
-
-    if (activeSurface.kind === 'projection' && activeSurface.tabId === tabId) {
-      const nextProjection = remainingTabs.find((projection) => projection.id === nextActiveTabId) ?? null
-      setActiveSurface({ kind: 'projection', tabId: nextActiveTabId })
-      alignPreviewToProjection(nextProjection, projectionFocusedPathById[nextActiveTabId])
+    if (nextState.previewAlignment.kind === 'directory') {
+      interactionRef.current?.alignPreviewToPath(directoryFocusedPath)
+    }
+    if (nextState.previewAlignment.kind === 'projection') {
+      interactionRef.current?.alignPreviewToPath(nextState.previewAlignment.path)
     }
   }, [
     activeSurface,
-    alignPreviewToProjection,
     directoryFocusedPath,
+    duplicateSelectionRuleByProjectionId,
     interactionRef,
     projectionFocusedPathById,
+    projectionSelectedPathsById,
     projectionTabs,
     setIsResultPanelOpen,
   ])
