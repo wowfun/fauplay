@@ -5,6 +5,8 @@ import {
   readSuccessfulResultAbsolutePaths,
   resolveWorkspaceAbsoluteDeletePayload,
   resolveWorkspaceMutationCommitParams,
+  resolveWorkspacePluginDuplicateProjectionDismissIntent,
+  resolveWorkspacePluginProjectionActivationIntent,
   resolveWorkspaceRecycleRestoreItems,
   resolveWorkspaceRelativeToolPayload,
 } from '../../src/features/explorer/lib/workspacePluginHostModel.ts'
@@ -14,6 +16,30 @@ function file(path, overrides = {}) {
     name: path.split('/').at(-1) ?? path,
     path,
     kind: 'file',
+    ...overrides,
+  }
+}
+
+function projection(id, overrides = {}) {
+  return {
+    id,
+    title: id,
+    entry: 'auto',
+    files: [],
+    ...overrides,
+  }
+}
+
+function queueItem(id, overrides = {}) {
+  return {
+    id,
+    contextKey: 'albums',
+    toolName: 'vision.face',
+    title: id,
+    trigger: 'manual',
+    status: 'success',
+    startedAt: 1,
+    collapsed: false,
     ...overrides,
   }
 }
@@ -47,6 +73,78 @@ test('Workspace Plugin Host Model resolves shared Root-relative targets for Runt
     file('a.jpg', { sourceRootPath: '/root-a', sourceRelativePath: 'a.jpg' }),
     file('b.jpg', { sourceRootPath: '/root-b', sourceRelativePath: 'b.jpg' }),
   ]), null)
+})
+
+test('Workspace Plugin Host Model activates the first unhandled auto Result Projection', () => {
+  const firstProjection = projection('faces')
+  const secondProjection = projection('duplicates')
+
+  assert.deepEqual(resolveWorkspacePluginProjectionActivationIntent({
+    queueItems: [
+      queueItem('result-1', {
+        toolName: 'vision.face',
+        projection: firstProjection,
+      }),
+      queueItem('result-2', {
+        toolName: 'data.findDuplicateFiles',
+        projection: secondProjection,
+      }),
+    ],
+    handledResultId: null,
+  }), {
+    kind: 'activate',
+    resultId: 'result-1',
+    toolName: 'vision.face',
+    projection: firstProjection,
+  })
+
+  assert.deepEqual(resolveWorkspacePluginProjectionActivationIntent({
+    queueItems: [
+      queueItem('result-1', {
+        toolName: 'vision.face',
+        projection: firstProjection,
+      }),
+    ],
+    handledResultId: 'result-1',
+  }), {
+    kind: 'none',
+  })
+})
+
+test('Workspace Plugin Host Model dismisses stale Duplicate Set projections after an empty latest result', () => {
+  const queueItems = [
+    queueItem('result-2', {
+      toolName: 'data.findDuplicateFiles',
+      projection: undefined,
+    }),
+    queueItem('result-1', {
+      toolName: 'data.findDuplicateFiles',
+      projection: projection('old-duplicates'),
+    }),
+  ]
+
+  assert.deepEqual(resolveWorkspacePluginProjectionActivationIntent({
+    queueItems,
+    handledResultId: null,
+  }), {
+    kind: 'none',
+  })
+
+  assert.deepEqual(resolveWorkspacePluginDuplicateProjectionDismissIntent({
+    queueItems,
+    handledResultId: null,
+  }), {
+    kind: 'dismiss',
+    resultId: 'result-2',
+    toolName: 'data.findDuplicateFiles',
+  })
+
+  assert.deepEqual(resolveWorkspacePluginDuplicateProjectionDismissIntent({
+    queueItems,
+    handledResultId: 'result-2',
+  }), {
+    kind: 'none',
+  })
 })
 
 test('Workspace Plugin Host Model resolves restore and absolute delete payloads', () => {

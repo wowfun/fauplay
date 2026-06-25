@@ -11,6 +11,8 @@ import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/m
 import {
   resolveWorkspaceAbsoluteDeletePayload,
   resolveWorkspaceMutationCommitParams,
+  resolveWorkspacePluginDuplicateProjectionDismissIntent,
+  resolveWorkspacePluginProjectionActivationIntent,
   resolveWorkspaceRecycleRestoreItems,
   resolveWorkspaceRelativeToolPayload,
 } from '@/features/explorer/lib/workspacePluginHostModel'
@@ -386,37 +388,25 @@ export function WorkspacePluginHost({
   }, [contextKey])
 
   useEffect(() => {
-    const latestDuplicateResult = runtime.currentQueue.find((item) => (
-      item.toolName === 'data.findDuplicateFiles'
-      && item.status === 'success'
-    ))
-    const autoProjectionItem = runtime.currentQueue.find((item) => (
-      item.status === 'success'
-      && item.projection?.entry === 'auto'
-      && !(
-        item.toolName === 'data.findDuplicateFiles'
-        && latestDuplicateResult
-        && latestDuplicateResult.id !== item.id
-        && !latestDuplicateResult.projection
-      )
-    ))
-    if (!autoProjectionItem?.projection) return
-    if (handledAutoProjectionIdRef.current === autoProjectionItem.id) return
-    handledAutoProjectionIdRef.current = autoProjectionItem.id
-    onActivateProjection(withToolScopedProjection(autoProjectionItem.projection, autoProjectionItem.toolName))
+    const intent = resolveWorkspacePluginProjectionActivationIntent({
+      queueItems: runtime.currentQueue,
+      handledResultId: handledAutoProjectionIdRef.current,
+    })
+    if (intent.kind !== 'activate') return
+
+    handledAutoProjectionIdRef.current = intent.resultId
+    onActivateProjection(withToolScopedProjection(intent.projection, intent.toolName))
   }, [onActivateProjection, runtime.currentQueue])
 
   useEffect(() => {
-    const latestDuplicateResult = runtime.currentQueue.find((item) => (
-      item.toolName === 'data.findDuplicateFiles'
-      && item.status === 'success'
-    ))
-    if (!latestDuplicateResult) return
-    if (latestDuplicateResult.projection) return
-    if (handledDuplicateProjectionDismissResultIdRef.current === latestDuplicateResult.id) return
+    const intent = resolveWorkspacePluginDuplicateProjectionDismissIntent({
+      queueItems: runtime.currentQueue,
+      handledResultId: handledDuplicateProjectionDismissResultIdRef.current,
+    })
+    if (intent.kind !== 'dismiss') return
 
-    handledDuplicateProjectionDismissResultIdRef.current = latestDuplicateResult.id
-    onDismissProjectionTool(latestDuplicateResult.toolName)
+    handledDuplicateProjectionDismissResultIdRef.current = intent.resultId
+    onDismissProjectionTool(intent.toolName)
   }, [onDismissProjectionTool, runtime.currentQueue])
 
   const handleWorkbenchRunAction = useCallback((tool: RuntimeToolDescriptor, action: Parameters<typeof runtime.handleRunWorkbenchAction>[1]) => {

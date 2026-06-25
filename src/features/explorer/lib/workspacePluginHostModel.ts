@@ -1,4 +1,11 @@
 import type { FileItem } from '../../../types/index.ts'
+import type { PluginResultQueueItem } from '../../plugin-runtime/types/index.ts'
+import {
+  type PluginDuplicateProjectionDismissIntent,
+  type PluginProjectionActivationIntent,
+  resolvePluginDuplicateProjectionDismissIntent,
+  resolvePluginProjectionActivationIntent,
+} from '../../plugin-runtime/lib/pluginProjectionIntentModel.ts'
 import { readDeleteUndoRestoreItems } from '../../workspace/lib/deleteUndo.ts'
 import type { WorkspaceMutationCommitParams } from '../../workspace/types/mutation.ts'
 
@@ -17,6 +24,16 @@ export interface ResolveWorkspaceMutationCommitParamsParams {
   selectedDeleteAbsoluteArgs: WorkspaceAbsoluteDeletePayload | null
   activeProjectionId: string | null | undefined
   selectedFileEntries: FileItem[]
+}
+
+interface ResolveWorkspacePluginProjectionActivationIntentParams {
+  queueItems: readonly PluginResultQueueItem[]
+  handledResultId: string | null
+}
+
+interface ResolveWorkspacePluginDuplicateProjectionDismissIntentParams {
+  queueItems: readonly PluginResultQueueItem[]
+  handledResultId: string | null
 }
 
 function isAbsolutePathLike(value: string): boolean {
@@ -91,6 +108,20 @@ export function resolveWorkspaceAbsoluteDeletePayload(files: FileItem[]): Worksp
     return null
   }
   return { absolutePaths }
+}
+
+export function resolveWorkspacePluginProjectionActivationIntent({
+  queueItems,
+  handledResultId,
+}: ResolveWorkspacePluginProjectionActivationIntentParams): PluginProjectionActivationIntent {
+  return resolvePluginProjectionActivationIntent({ queueItems, handledResultId })
+}
+
+export function resolveWorkspacePluginDuplicateProjectionDismissIntent({
+  queueItems,
+  handledResultId,
+}: ResolveWorkspacePluginDuplicateProjectionDismissIntentParams): PluginDuplicateProjectionDismissIntent {
+  return resolvePluginDuplicateProjectionDismissIntent({ queueItems, handledResultId })
 }
 
 export function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
