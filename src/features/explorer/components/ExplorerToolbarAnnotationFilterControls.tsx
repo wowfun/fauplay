@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Tags, X } from 'lucide-react'
 import {
-  ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY,
-  ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY,
-  ANNOTATION_FILTER_UNANNOTATED_TAG_KEY,
   type AnnotationFilterTagOption,
   type FilterState,
 } from '@/types'
 import { Button } from '@/ui/Button'
 import { Select } from '@/ui/Select'
+import {
+  type AnnotationFilterTagPanel,
+  resolveAnnotationFilterFacetState,
+  resolveAnnotationFilterPanelDisclosure,
+  resolveAnnotationFilterPanelOptions,
+  resolveAnnotationFilterPanelSelectionState,
+  resolveAnnotationFilterTagLabel,
+  resolveAnnotationFilterTagSelection,
+  resolveAnnotationFilterTagSummary,
+} from '@/features/explorer/lib/annotationFilterOptionModel'
 
 type ExplorerToolbarKind = 'wide' | 'compact'
 
@@ -20,107 +27,6 @@ interface ExplorerToolbarAnnotationFilterControlsProps {
   onOpenAnnotationFilterPanel: () => void
 }
 
-function annotationTagDisplayLabel(option: AnnotationFilterTagOption): string {
-  if (option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY) {
-    return '未标注'
-  }
-  if (option.tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY) {
-    return '人物管理: 未归属'
-  }
-  if (option.tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY) {
-    return '人物管理: 误检/忽略'
-  }
-  return `${option.key}: ${option.value}`
-}
-
-function isSpecialAnnotationTagOption(option: AnnotationFilterTagOption): boolean {
-  return option.tagKey === ANNOTATION_FILTER_UNANNOTATED_TAG_KEY
-    || option.tagKey === ANNOTATION_FILTER_PEOPLE_UNASSIGNED_TAG_KEY
-    || option.tagKey === ANNOTATION_FILTER_PEOPLE_IGNORED_TAG_KEY
-}
-
-function compareAnnotationSource(left: string, right: string): number {
-  if (left === 'meta.annotation' && right !== 'meta.annotation') return -1
-  if (left !== 'meta.annotation' && right === 'meta.annotation') return 1
-  return left.localeCompare(right, 'zh-Hans-CN')
-}
-
-function compareAnnotationKey(left: string, right: string): number {
-  return left.localeCompare(right, 'zh-Hans-CN')
-}
-
-function buildAnnotationSourceFacetOptions(
-  options: AnnotationFilterTagOption[],
-  selectedKeyFacet: string
-): string[] {
-  const sourceSet = new Set<string>()
-  for (const option of options) {
-    if (isSpecialAnnotationTagOption(option)) continue
-    if (selectedKeyFacet && option.key !== selectedKeyFacet) continue
-    option.sources.forEach((source) => sourceSet.add(source))
-  }
-  return [...sourceSet].sort(compareAnnotationSource)
-}
-
-function buildAnnotationKeyFacetOptions(
-  options: AnnotationFilterTagOption[],
-  selectedSourceFacet: string
-): string[] {
-  const keySet = new Set<string>()
-  for (const option of options) {
-    if (isSpecialAnnotationTagOption(option)) continue
-    if (selectedSourceFacet && !option.sources.includes(selectedSourceFacet)) continue
-    keySet.add(option.key)
-  }
-  return [...keySet].sort(compareAnnotationKey)
-}
-
-function matchesAnnotationTagFacets(
-  option: AnnotationFilterTagOption,
-  selectedSourceFacet: string,
-  selectedKeyFacet: string
-): boolean {
-  if (isSpecialAnnotationTagOption(option)) {
-    return !selectedSourceFacet && !selectedKeyFacet
-  }
-  if (selectedSourceFacet && !option.sources.includes(selectedSourceFacet)) {
-    return false
-  }
-  if (selectedKeyFacet && option.key !== selectedKeyFacet) {
-    return false
-  }
-  return true
-}
-
-function mergeAnnotationTagKeys(currentKeys: string[], nextKeys: string[]): string[] {
-  const merged = new Set(currentKeys)
-  nextKeys.forEach((key) => merged.add(key))
-  return [...merged]
-}
-
-function toggleTagKeySelection(currentKeys: string[], nextTagKey: string): string[] {
-  const keySet = new Set(currentKeys)
-  if (keySet.has(nextTagKey)) {
-    keySet.delete(nextTagKey)
-  } else {
-    keySet.add(nextTagKey)
-  }
-  return [...keySet]
-}
-
-function annotationTagSummaryText(
-  selectedTagKeys: string[],
-  optionByTagKey: Map<string, AnnotationFilterTagOption>,
-  emptyText: string
-): string {
-  if (selectedTagKeys.length === 0) return emptyText
-  if (selectedTagKeys.length === 1) {
-    const option = optionByTagKey.get(selectedTagKeys[0] || '')
-    return option ? annotationTagDisplayLabel(option) : '已选 1 项'
-  }
-  return `已选 ${selectedTagKeys.length} 项`
-}
-
 export function ExplorerToolbarAnnotationFilterControls({
   toolbarKind,
   filter,
@@ -129,129 +35,138 @@ export function ExplorerToolbarAnnotationFilterControls({
   onOpenAnnotationFilterPanel,
 }: ExplorerToolbarAnnotationFilterControlsProps) {
   const annotationFilterRef = useRef<HTMLDivElement>(null)
-  const [isAnnotationIncludeOpen, setIsAnnotationIncludeOpen] = useState(false)
-  const [isAnnotationExcludeOpen, setIsAnnotationExcludeOpen] = useState(false)
+  const [openAnnotationTagPanel, setOpenAnnotationTagPanel] = useState<AnnotationFilterTagPanel | null>(null)
   const [selectedAnnotationSourceFacet, setSelectedAnnotationSourceFacet] = useState('')
   const [selectedAnnotationKeyFacet, setSelectedAnnotationKeyFacet] = useState('')
 
-  const annotationFilterOptionByTagKey = useMemo(
-    () => new Map(annotationFilterTagOptions.map((item) => [item.tagKey, item])),
-    [annotationFilterTagOptions]
-  )
   const resetAnnotationTagFacets = useCallback(() => {
     setSelectedAnnotationSourceFacet('')
     setSelectedAnnotationKeyFacet('')
   }, [])
-  const annotationSourceFacetOptions = useMemo(
-    () => buildAnnotationSourceFacetOptions(annotationFilterTagOptions, selectedAnnotationKeyFacet),
-    [annotationFilterTagOptions, selectedAnnotationKeyFacet]
-  )
-  const annotationKeyFacetOptions = useMemo(
-    () => buildAnnotationKeyFacetOptions(annotationFilterTagOptions, selectedAnnotationSourceFacet),
-    [annotationFilterTagOptions, selectedAnnotationSourceFacet]
-  )
-  const filteredAnnotationFilterTagOptions = useMemo(
-    () => annotationFilterTagOptions.filter((option) => (
-      matchesAnnotationTagFacets(option, selectedAnnotationSourceFacet, selectedAnnotationKeyFacet)
-    )),
+  const {
+    sourceFacetOptions: annotationSourceFacetOptions,
+    keyFacetOptions: annotationKeyFacetOptions,
+    visibleOptions: filteredAnnotationFilterTagOptions,
+  } = useMemo(
+    () => resolveAnnotationFilterPanelOptions({
+      options: annotationFilterTagOptions,
+      selectedSourceFacet: selectedAnnotationSourceFacet,
+      selectedKeyFacet: selectedAnnotationKeyFacet,
+    }),
     [annotationFilterTagOptions, selectedAnnotationKeyFacet, selectedAnnotationSourceFacet]
   )
 
   useEffect(() => {
-    if (!selectedAnnotationSourceFacet) return
-    if (annotationSourceFacetOptions.includes(selectedAnnotationSourceFacet)) return
-    setSelectedAnnotationSourceFacet('')
-  }, [annotationSourceFacetOptions, selectedAnnotationSourceFacet])
+    const nextState = resolveAnnotationFilterFacetState({
+      selectedSourceFacet: selectedAnnotationSourceFacet,
+      selectedKeyFacet: selectedAnnotationKeyFacet,
+      sourceFacetOptions: annotationSourceFacetOptions,
+      keyFacetOptions: annotationKeyFacetOptions,
+    })
+    if (nextState.selectedSourceFacet !== selectedAnnotationSourceFacet) {
+      setSelectedAnnotationSourceFacet(nextState.selectedSourceFacet)
+    }
+    if (nextState.selectedKeyFacet !== selectedAnnotationKeyFacet) {
+      setSelectedAnnotationKeyFacet(nextState.selectedKeyFacet)
+    }
+  }, [
+    annotationKeyFacetOptions,
+    annotationSourceFacetOptions,
+    selectedAnnotationKeyFacet,
+    selectedAnnotationSourceFacet,
+  ])
 
-  useEffect(() => {
-    if (!selectedAnnotationKeyFacet) return
-    if (annotationKeyFacetOptions.includes(selectedAnnotationKeyFacet)) return
-    setSelectedAnnotationKeyFacet('')
-  }, [annotationKeyFacetOptions, selectedAnnotationKeyFacet])
 
   useEffect(() => {
     const handleGlobalPointerDown = (event: MouseEvent) => {
       const target = event.target as Node
       if (annotationFilterRef.current?.contains(target)) return
-      setIsAnnotationIncludeOpen(false)
-      setIsAnnotationExcludeOpen(false)
-      resetAnnotationTagFacets()
+      const disclosure = resolveAnnotationFilterPanelDisclosure({
+        openPanel: openAnnotationTagPanel,
+        action: { type: 'close-panels' },
+      })
+      setOpenAnnotationTagPanel(disclosure.openPanel)
+      if (disclosure.shouldResetFacets) {
+        resetAnnotationTagFacets()
+      }
     }
 
     window.addEventListener('mousedown', handleGlobalPointerDown)
     return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
-  }, [resetAnnotationTagFacets])
+  }, [openAnnotationTagPanel, resetAnnotationTagFacets])
 
   const handleToggleAnnotationIncludeTag = (tagKey: string) => {
-    const nextIncludeTagKeys = toggleTagKeySelection(filter.annotationIncludeTagKeys, tagKey)
     onFilterChange({
       ...filter,
-      annotationIncludeTagKeys: nextIncludeTagKeys,
+      annotationIncludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationIncludeTagKeys,
+        action: { type: 'toggle', tagKey },
+      }),
     })
   }
 
   const handleToggleAnnotationExcludeTag = (tagKey: string) => {
-    const nextExcludeTagKeys = toggleTagKeySelection(filter.annotationExcludeTagKeys, tagKey)
     onFilterChange({
       ...filter,
-      annotationExcludeTagKeys: nextExcludeTagKeys,
+      annotationExcludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationExcludeTagKeys,
+        action: { type: 'toggle', tagKey },
+      }),
     })
   }
 
   const clearAnnotationIncludeTags = () => {
     onFilterChange({
       ...filter,
-      annotationIncludeTagKeys: [],
+      annotationIncludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationIncludeTagKeys,
+        action: { type: 'clear' },
+      }),
     })
   }
 
   const clearAnnotationExcludeTags = () => {
     onFilterChange({
       ...filter,
-      annotationExcludeTagKeys: [],
+      annotationExcludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationExcludeTagKeys,
+        action: { type: 'clear' },
+      }),
     })
   }
 
   const selectAllAnnotationIncludeTags = () => {
-    const nextVisibleTagKeys = filteredAnnotationFilterTagOptions.map((option) => option.tagKey)
     onFilterChange({
       ...filter,
-      annotationIncludeTagKeys: mergeAnnotationTagKeys(filter.annotationIncludeTagKeys, nextVisibleTagKeys),
+      annotationIncludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationIncludeTagKeys,
+        action: { type: 'select-visible', visibleOptions: filteredAnnotationFilterTagOptions },
+      }),
     })
   }
 
   const selectAllAnnotationExcludeTags = () => {
-    const nextVisibleTagKeys = filteredAnnotationFilterTagOptions.map((option) => option.tagKey)
     onFilterChange({
       ...filter,
-      annotationExcludeTagKeys: mergeAnnotationTagKeys(filter.annotationExcludeTagKeys, nextVisibleTagKeys),
+      annotationExcludeTagKeys: resolveAnnotationFilterTagSelection({
+        selectedTagKeys: filter.annotationExcludeTagKeys,
+        action: { type: 'select-visible', visibleOptions: filteredAnnotationFilterTagOptions },
+      }),
     })
   }
 
-  const handleToggleAnnotationIncludePanel = () => {
-    if (isAnnotationIncludeOpen) {
-      setIsAnnotationIncludeOpen(false)
+  const handleToggleAnnotationPanel = (panel: AnnotationFilterTagPanel) => {
+    const disclosure = resolveAnnotationFilterPanelDisclosure({
+      openPanel: openAnnotationTagPanel,
+      action: { type: 'toggle-panel', panel },
+    })
+    setOpenAnnotationTagPanel(disclosure.openPanel)
+    if (disclosure.shouldResetFacets) {
       resetAnnotationTagFacets()
-      return
     }
-
-    resetAnnotationTagFacets()
-    onOpenAnnotationFilterPanel()
-    setIsAnnotationIncludeOpen(true)
-    setIsAnnotationExcludeOpen(false)
-  }
-
-  const handleToggleAnnotationExcludePanel = () => {
-    if (isAnnotationExcludeOpen) {
-      setIsAnnotationExcludeOpen(false)
-      resetAnnotationTagFacets()
-      return
+    if (disclosure.shouldOpenAnnotationFilterPanel) {
+      onOpenAnnotationFilterPanel()
     }
-
-    resetAnnotationTagFacets()
-    onOpenAnnotationFilterPanel()
-    setIsAnnotationExcludeOpen(true)
-    setIsAnnotationIncludeOpen(false)
   }
 
   const renderAnnotationTagPanel = (
@@ -260,8 +175,10 @@ export function ExplorerToolbarAnnotationFilterControls({
     onClear: () => void,
     onSelectAll: () => void
   ) => {
-    const allVisibleSelected = filteredAnnotationFilterTagOptions.length > 0
-      && filteredAnnotationFilterTagOptions.every((option) => selectedTagKeys.includes(option.tagKey))
+    const { canSelectVisible } = resolveAnnotationFilterPanelSelectionState({
+      selectedTagKeys,
+      visibleOptions: filteredAnnotationFilterTagOptions,
+    })
 
     return (
       <div
@@ -280,7 +197,7 @@ export function ExplorerToolbarAnnotationFilterControls({
                     type="button"
                     className="text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={onSelectAll}
-                    disabled={filteredAnnotationFilterTagOptions.length === 0 || allVisibleSelected}
+                    disabled={!canSelectVisible}
                   >
                     全选
                   </button>
@@ -334,7 +251,7 @@ export function ExplorerToolbarAnnotationFilterControls({
               <div className="max-h-64 overflow-auto">
                 {filteredAnnotationFilterTagOptions.map((option) => {
                   const checked = selectedTagKeys.includes(option.tagKey)
-                  const optionLabel = annotationTagDisplayLabel(option)
+                  const optionLabel = resolveAnnotationFilterTagLabel(option)
                   return (
                     <button
                       key={option.tagKey}
@@ -390,7 +307,7 @@ export function ExplorerToolbarAnnotationFilterControls({
 
       <div className="relative">
         <Button
-          onClick={handleToggleAnnotationIncludePanel}
+          onClick={() => handleToggleAnnotationPanel('include')}
           variant={filter.annotationIncludeTagKeys.length > 0 ? 'default' : 'ghost'}
           size="md"
           className="h-8 max-w-40 justify-start gap-1"
@@ -398,14 +315,14 @@ export function ExplorerToolbarAnnotationFilterControls({
         >
           <Tags className="h-4 w-4 shrink-0" />
           <span className="truncate text-xs">
-            {annotationTagSummaryText(
-              filter.annotationIncludeTagKeys,
-              annotationFilterOptionByTagKey,
-              '包含标签'
-            )}
+            {resolveAnnotationFilterTagSummary({
+              selectedTagKeys: filter.annotationIncludeTagKeys,
+              options: annotationFilterTagOptions,
+              emptyText: '包含标签',
+            })}
           </span>
         </Button>
-        {isAnnotationIncludeOpen && renderAnnotationTagPanel(
+        {openAnnotationTagPanel === 'include' && renderAnnotationTagPanel(
           filter.annotationIncludeTagKeys,
           handleToggleAnnotationIncludeTag,
           clearAnnotationIncludeTags,
@@ -415,7 +332,7 @@ export function ExplorerToolbarAnnotationFilterControls({
 
       <div className="relative">
         <Button
-          onClick={handleToggleAnnotationExcludePanel}
+          onClick={() => handleToggleAnnotationPanel('exclude')}
           variant={filter.annotationExcludeTagKeys.length > 0 ? 'default' : 'ghost'}
           size="md"
           className="h-8 max-w-40 justify-start gap-1"
@@ -423,14 +340,14 @@ export function ExplorerToolbarAnnotationFilterControls({
         >
           <X className="h-4 w-4 shrink-0" />
           <span className="truncate text-xs">
-            {annotationTagSummaryText(
-              filter.annotationExcludeTagKeys,
-              annotationFilterOptionByTagKey,
-              '排除标签'
-            )}
+            {resolveAnnotationFilterTagSummary({
+              selectedTagKeys: filter.annotationExcludeTagKeys,
+              options: annotationFilterTagOptions,
+              emptyText: '排除标签',
+            })}
           </span>
         </Button>
-        {isAnnotationExcludeOpen && renderAnnotationTagPanel(
+        {openAnnotationTagPanel === 'exclude' && renderAnnotationTagPanel(
           filter.annotationExcludeTagKeys,
           handleToggleAnnotationExcludeTag,
           clearAnnotationExcludeTags,

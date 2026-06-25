@@ -3,6 +3,10 @@ export interface FileGridViewportDimensions {
   height: number
 }
 
+export interface FileGridPathEntry {
+  path: string
+}
+
 export interface FileGridCardSize {
   width: number
   height: number
@@ -30,6 +34,48 @@ export interface ShouldLoadNextFileGridPageParams {
   fileCount: number
   rowCount: number
   overscanRowStopIndex: number
+}
+
+export interface FileGridRenderWindow {
+  overscanColumnStartIndex: number
+  overscanColumnStopIndex: number
+  overscanRowStartIndex: number
+  overscanRowStopIndex: number
+  visibleColumnStartIndex: number
+  visibleColumnStopIndex: number
+  visibleRowStartIndex: number
+  visibleRowStopIndex: number
+}
+
+export type FileGridThumbnailPriority = 'visible' | 'nearby'
+
+export interface ResolveFileGridThumbnailPriorityParams {
+  rowIndex: number
+  columnIndex: number
+  renderWindow: FileGridRenderWindow
+}
+
+export interface ResolveFileGridSelectedPathStateParams {
+  files: readonly FileGridPathEntry[]
+  selectedIndex: number
+  selectedPath: string | null
+}
+
+export interface FileGridSelectedPathState {
+  selectedIndex: number
+  selectedPath: string | null
+}
+
+export interface ResolveFileGridTransientSelectionStateParams {
+  files: readonly FileGridPathEntry[]
+  selectionAnchorPath: string | null
+  pendingPreviewPathDuringRange: string | null
+}
+
+export interface FileGridTransientSelectionState {
+  selectionAnchorPath: string | null
+  pendingPreviewPathDuringRange: string | null
+  shouldResetAnchor: boolean
 }
 
 export type FileGridKeyboardAction =
@@ -96,6 +142,77 @@ export function shouldLoadNextFileGridPage({
   return overscanRowStopIndex >= preloadThresholdRow
 }
 
+export function resolveFileGridRenderWindow(
+  previous: FileGridRenderWindow,
+  next: FileGridRenderWindow,
+): FileGridRenderWindow {
+  return areFileGridRenderWindowsEqual(previous, next) ? previous : next
+}
+
+export function resolveFileGridThumbnailPriority({
+  rowIndex,
+  columnIndex,
+  renderWindow,
+}: ResolveFileGridThumbnailPriorityParams): FileGridThumbnailPriority {
+  const isVisible =
+    rowIndex >= renderWindow.visibleRowStartIndex &&
+    rowIndex <= renderWindow.visibleRowStopIndex &&
+    columnIndex >= renderWindow.visibleColumnStartIndex &&
+    columnIndex <= renderWindow.visibleColumnStopIndex
+
+  return isVisible ? 'visible' : 'nearby'
+}
+
+export function resolveFileGridSelectedPathState({
+  files,
+  selectedIndex,
+  selectedPath,
+}: ResolveFileGridSelectedPathStateParams): FileGridSelectedPathState {
+  if (files.length === 0) {
+    return {
+      selectedIndex: 0,
+      selectedPath: null,
+    }
+  }
+
+  if (selectedPath) {
+    const selectedIndexByPath = files.findIndex((item) => item.path === selectedPath)
+    if (selectedIndexByPath >= 0) {
+      return {
+        selectedIndex: selectedIndexByPath,
+        selectedPath,
+      }
+    }
+  }
+
+  const nextSelectedIndex = clampGridIndex(selectedIndex, files.length)
+  return {
+    selectedIndex: nextSelectedIndex,
+    selectedPath: files[nextSelectedIndex]?.path ?? null,
+  }
+}
+
+export function resolveFileGridTransientSelectionState({
+  files,
+  selectionAnchorPath,
+  pendingPreviewPathDuringRange,
+}: ResolveFileGridTransientSelectionStateParams): FileGridTransientSelectionState {
+  const visiblePathSet = new Set(files.map((file) => file.path))
+  const nextSelectionAnchorPath = selectionAnchorPath && !visiblePathSet.has(selectionAnchorPath)
+    ? null
+    : selectionAnchorPath
+  const nextPendingPreviewPathDuringRange = pendingPreviewPathDuringRange &&
+    !visiblePathSet.has(pendingPreviewPathDuringRange)
+    ? null
+    : pendingPreviewPathDuringRange
+
+  return {
+    selectionAnchorPath: nextSelectionAnchorPath,
+    pendingPreviewPathDuringRange: nextPendingPreviewPathDuringRange,
+    shouldResetAnchor: Boolean(selectionAnchorPath && !nextSelectionAnchorPath),
+  }
+}
+
 export function resolveFileGridKeyboardIntent({
   action,
   currentIndex,
@@ -129,6 +246,17 @@ export function resolveFileGridKeyboardIntent({
     case 'page-up':
       return { kind: 'focus-item', index: clampGridIndex(currentIndex - pageSize, fileCount) }
   }
+}
+
+function areFileGridRenderWindowsEqual(left: FileGridRenderWindow, right: FileGridRenderWindow): boolean {
+  return left.overscanColumnStartIndex === right.overscanColumnStartIndex &&
+    left.overscanColumnStopIndex === right.overscanColumnStopIndex &&
+    left.overscanRowStartIndex === right.overscanRowStartIndex &&
+    left.overscanRowStopIndex === right.overscanRowStopIndex &&
+    left.visibleColumnStartIndex === right.visibleColumnStartIndex &&
+    left.visibleColumnStopIndex === right.visibleColumnStopIndex &&
+    left.visibleRowStartIndex === right.visibleRowStartIndex &&
+    left.visibleRowStopIndex === right.visibleRowStopIndex
 }
 
 function clampGridIndex(index: number, fileCount: number): number {

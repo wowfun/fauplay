@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  resolveFileGridRenderWindow,
+  resolveFileGridSelectedPathState,
+  resolveFileGridThumbnailPriority,
+  resolveFileGridTransientSelectionState,
   resolveFileGridKeyboardIntent,
   resolveFileGridViewportMetrics,
   shouldLoadNextFileGridPage,
@@ -91,5 +95,100 @@ test('File Grid Viewport Model resolves keyboard navigation intents with clamped
     canClearSelectionWithEscape: true,
   }), {
     kind: 'clear-selection',
+  })
+})
+
+test('File Grid Viewport Model reuses unchanged render windows and marks visible cells', () => {
+  const renderWindow = {
+    overscanColumnStartIndex: 0,
+    overscanColumnStopIndex: 3,
+    overscanRowStartIndex: 0,
+    overscanRowStopIndex: 5,
+    visibleColumnStartIndex: 1,
+    visibleColumnStopIndex: 2,
+    visibleRowStartIndex: 1,
+    visibleRowStopIndex: 4,
+  }
+
+  assert.equal(resolveFileGridRenderWindow(renderWindow, { ...renderWindow }), renderWindow)
+  assert.deepEqual(resolveFileGridRenderWindow(renderWindow, {
+    ...renderWindow,
+    visibleRowStopIndex: 5,
+  }), {
+    ...renderWindow,
+    visibleRowStopIndex: 5,
+  })
+
+  assert.equal(resolveFileGridThumbnailPriority({
+    rowIndex: 2,
+    columnIndex: 1,
+    renderWindow,
+  }), 'visible')
+  assert.equal(resolveFileGridThumbnailPriority({
+    rowIndex: 2,
+    columnIndex: 3,
+    renderWindow,
+  }), 'nearby')
+})
+
+test('File Grid Viewport Model repairs selected path state after Listing changes', () => {
+  const files = [
+    { path: 'a.jpg' },
+    { path: 'b.jpg' },
+    { path: 'c.jpg' },
+  ]
+
+  assert.deepEqual(resolveFileGridSelectedPathState({
+    files,
+    selectedIndex: 0,
+    selectedPath: 'c.jpg',
+  }), {
+    selectedIndex: 2,
+    selectedPath: 'c.jpg',
+  })
+
+  assert.deepEqual(resolveFileGridSelectedPathState({
+    files,
+    selectedIndex: 7,
+    selectedPath: 'missing.jpg',
+  }), {
+    selectedIndex: 2,
+    selectedPath: 'c.jpg',
+  })
+
+  assert.deepEqual(resolveFileGridSelectedPathState({
+    files: [],
+    selectedIndex: 2,
+    selectedPath: 'c.jpg',
+  }), {
+    selectedIndex: 0,
+    selectedPath: null,
+  })
+})
+
+test('File Grid Viewport Model keeps transient selection paths only while visible', () => {
+  const files = [
+    { path: 'a.jpg' },
+    { path: 'b.jpg' },
+  ]
+
+  assert.deepEqual(resolveFileGridTransientSelectionState({
+    files,
+    selectionAnchorPath: 'a.jpg',
+    pendingPreviewPathDuringRange: 'b.jpg',
+  }), {
+    selectionAnchorPath: 'a.jpg',
+    pendingPreviewPathDuringRange: 'b.jpg',
+    shouldResetAnchor: false,
+  })
+
+  assert.deepEqual(resolveFileGridTransientSelectionState({
+    files,
+    selectionAnchorPath: 'missing.jpg',
+    pendingPreviewPathDuringRange: 'gone.jpg',
+  }), {
+    selectionAnchorPath: null,
+    pendingPreviewPathDuringRange: null,
+    shouldResetAnchor: true,
   })
 })

@@ -12,10 +12,15 @@ import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
 import { FileGridCard } from './FileGridCard'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 import {
+  type FileGridRenderWindow,
+  type FileGridThumbnailPriority,
+  resolveFileGridRenderWindow,
+  resolveFileGridSelectedPathState,
+  resolveFileGridThumbnailPriority,
+  resolveFileGridTransientSelectionState,
   resolveFileGridViewportMetrics,
   shouldLoadNextFileGridPage,
 } from '@/features/explorer/lib/fileGridViewportModel'
@@ -43,17 +48,6 @@ export interface FileGridViewportHandle {
   syncSelectedPath: (path: string | null, options?: { scroll?: boolean; focus?: boolean }) => void
 }
 
-interface GridRenderWindow {
-  overscanColumnStartIndex: number
-  overscanColumnStopIndex: number
-  overscanRowStartIndex: number
-  overscanRowStopIndex: number
-  visibleColumnStartIndex: number
-  visibleColumnStopIndex: number
-  visibleRowStartIndex: number
-  visibleRowStopIndex: number
-}
-
 interface FocusItemOptions {
   syncPreview: boolean
   updateAnchor: boolean
@@ -61,7 +55,7 @@ interface FocusItemOptions {
   queuePreviewAfterShiftRelease: boolean
 }
 
-const INITIAL_RENDER_WINDOW: GridRenderWindow = {
+const INITIAL_RENDER_WINDOW: FileGridRenderWindow = {
   overscanColumnStartIndex: 0,
   overscanColumnStopIndex: -1,
   overscanRowStartIndex: 0,
@@ -100,7 +94,7 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   const selectionAnchorPathRef = useRef<string | null>(null)
   const pendingPreviewPathDuringRangeRef = useRef<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
-  const [renderWindow, setRenderWindow] = useState<GridRenderWindow>(INITIAL_RENDER_WINDOW)
+  const [renderWindow, setRenderWindow] = useState<FileGridRenderWindow>(INITIAL_RENDER_WINDOW)
   const cardSize = FILE_GRID_CARD_SIZE_BY_PRESET[thumbnailSizePreset]
   const {
     selectedIdSet: selectedPathSet,
@@ -169,21 +163,9 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     fileCount: files.length,
   }), [cardSize, dimensions, files.length])
 
-  const handleItemsRendered = useCallback((window: GridRenderWindow) => {
+  const handleItemsRendered = useCallback((window: FileGridRenderWindow) => {
     setRenderWindow((previous) => {
-      if (
-        previous.overscanColumnStartIndex === window.overscanColumnStartIndex &&
-        previous.overscanColumnStopIndex === window.overscanColumnStopIndex &&
-        previous.overscanRowStartIndex === window.overscanRowStartIndex &&
-        previous.overscanRowStopIndex === window.overscanRowStopIndex &&
-        previous.visibleColumnStartIndex === window.visibleColumnStartIndex &&
-        previous.visibleColumnStopIndex === window.visibleColumnStopIndex &&
-        previous.visibleRowStartIndex === window.visibleRowStartIndex &&
-        previous.visibleRowStopIndex === window.visibleRowStopIndex
-      ) {
-        return previous
-      }
-      return window
+      return resolveFileGridRenderWindow(previous, window)
     })
   }, [])
 
@@ -325,38 +307,28 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [clearCheckedPaths, resetAnchor, selectedPaths, selectionScopeKey])
 
   useEffect(() => {
-    const visiblePathSet = new Set(files.map((file) => file.path))
-    if (selectionAnchorPathRef.current && !visiblePathSet.has(selectionAnchorPathRef.current)) {
-      selectionAnchorPathRef.current = null
+    const nextState = resolveFileGridTransientSelectionState({
+      files,
+      selectionAnchorPath: selectionAnchorPathRef.current,
+      pendingPreviewPathDuringRange: pendingPreviewPathDuringRangeRef.current,
+    })
+
+    selectionAnchorPathRef.current = nextState.selectionAnchorPath
+    pendingPreviewPathDuringRangeRef.current = nextState.pendingPreviewPathDuringRange
+
+    if (nextState.shouldResetAnchor) {
       resetAnchor()
-    }
-    if (
-      pendingPreviewPathDuringRangeRef.current &&
-      !visiblePathSet.has(pendingPreviewPathDuringRangeRef.current)
-    ) {
-      pendingPreviewPathDuringRangeRef.current = null
     }
   }, [files, resetAnchor])
 
   useEffect(() => {
-    if (files.length === 0) {
-      selectedIndexRef.current = 0
-      selectedPathRef.current = null
-      return
-    }
-    const selectedPath = selectedPathRef.current
-    if (selectedPath) {
-      const selectedIndexByPath = files.findIndex((item) => item.path === selectedPath)
-      if (selectedIndexByPath >= 0) {
-        selectedIndexRef.current = selectedIndexByPath
-      } else {
-        selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
-        selectedPathRef.current = files[selectedIndexRef.current]?.path ?? null
-      }
-    } else {
-      selectedIndexRef.current = Math.min(selectedIndexRef.current, files.length - 1)
-      selectedPathRef.current = files[selectedIndexRef.current]?.path ?? null
-    }
+    const nextState = resolveFileGridSelectedPathState({
+      files,
+      selectedIndex: selectedIndexRef.current,
+      selectedPath: selectedPathRef.current,
+    })
+    selectedIndexRef.current = nextState.selectedIndex
+    selectedPathRef.current = nextState.selectedPath
 
     const path = selectedPathRef.current
     if (!path) return
@@ -420,12 +392,11 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
           if (index >= files.length) return null
 
           const file = files[index]
-          const isVisible =
-            rowIndex >= renderWindow.visibleRowStartIndex &&
-            rowIndex <= renderWindow.visibleRowStopIndex &&
-            columnIndex >= renderWindow.visibleColumnStartIndex &&
-            columnIndex <= renderWindow.visibleColumnStopIndex
-          const thumbnailPriority: ThumbnailTaskPriority = isVisible ? 'visible' : 'nearby'
+          const thumbnailPriority: FileGridThumbnailPriority = resolveFileGridThumbnailPriority({
+            rowIndex,
+            columnIndex,
+            renderWindow,
+          })
 
           return (
             <div
