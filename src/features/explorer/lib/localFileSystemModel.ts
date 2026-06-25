@@ -21,6 +21,11 @@ export interface MergeCachedLocalRootEntriesParams {
   rootLabelFallback: string
 }
 
+export interface ShouldRefreshCachedLocalRootsForStorageKeyParams {
+  eventKey: string | null
+  rootPathStorageKey: string
+}
+
 export interface ResolveLocalNavigationTargetParams {
   targetPath: string
   currentFlattened: boolean
@@ -33,6 +38,37 @@ export interface LocalNavigationTarget {
   isVirtualTrash: boolean
   flattened: boolean
 }
+
+export interface ResolveLocalRootActivationTargetParams {
+  targetRootId: string
+  targetPath: string
+  currentRootId: string | null
+  targetRoot?: CachedRootEntry | null
+  boundRootPath?: string | null
+  hasCachedHandle: boolean
+  rootLabelFallback: string
+}
+
+export type LocalRootActivationTarget =
+  | {
+    type: 'current-root'
+    path: string
+  }
+  | {
+    type: 'runtime-root'
+    rootId: string
+    rootName: string
+    path: string
+  }
+  | {
+    type: 'browser-root'
+    rootId: string
+    path: string
+  }
+  | {
+    type: 'cache-miss'
+    rootId: string
+  }
 
 export function normalizeLocalRootRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
@@ -76,6 +112,46 @@ export function resolveLocalNavigationTarget({
   }
 }
 
+export function resolveLocalRootActivationTarget({
+  targetRootId,
+  targetPath,
+  currentRootId,
+  targetRoot,
+  boundRootPath,
+  hasCachedHandle,
+  rootLabelFallback,
+}: ResolveLocalRootActivationTargetParams): LocalRootActivationTarget {
+  const path = normalizeLocalRootRelativePath(targetPath)
+  if (currentRootId === targetRootId) {
+    return {
+      type: 'current-root',
+      path,
+    }
+  }
+
+  if (hasCachedHandle) {
+    return {
+      type: 'browser-root',
+      rootId: targetRootId,
+      path,
+    }
+  }
+
+  if (boundRootPath || targetRoot?.boundRootPath) {
+    return {
+      type: 'runtime-root',
+      rootId: targetRootId,
+      rootName: targetRoot?.rootName || rootLabelFallback,
+      path,
+    }
+  }
+
+  return {
+    type: 'cache-miss',
+    rootId: targetRootId,
+  }
+}
+
 export function sortLocalChildDirectoryNames(names: string[]): string[] {
   return [...names].sort((left, right) => left.localeCompare(right, 'zh-Hans-CN', { numeric: true }))
 }
@@ -113,6 +189,13 @@ export function mergeCachedLocalRootEntries({
   }
 
   return [...cachedEntriesByRootId.values()]
+}
+
+export function shouldRefreshCachedLocalRootsForStorageKey({
+  eventKey,
+  rootPathStorageKey,
+}: ShouldRefreshCachedLocalRootsForStorageKeyParams): boolean {
+  return eventKey === rootPathStorageKey
 }
 
 export function toLocalListingItems(

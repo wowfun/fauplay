@@ -234,3 +234,7 @@ export async function syncLocalRootBindingsFromRuntime(): Promise<void> {
 export function getRootPathMapUpdatedEventName(): string {
   return ROOT_PATH_MAP_UPDATED_EVENT
 }
+
+export function getRootPathStorageKey(): string {
+  return ROOT_PATH_STORAGE_KEY
+}

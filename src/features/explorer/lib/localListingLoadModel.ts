@@ -2,9 +2,14 @@ import type { RuntimeListDirectoryRequest } from '../../../lib/runtimeApi/types.
 import type { FileItem, ListingQueryState } from '../../../types/index.ts'
 import {
   type RuntimeListingPageCursor,
+  isSameListingQuery,
+  normalizeListingQuery,
   toRuntimeListingQueryRequest,
 } from './listingQueryModel.ts'
-import { normalizeLocalRootRelativePath } from './localFileSystemModel.ts'
+import {
+  isLocalVirtualTrashPath,
+  normalizeLocalRootRelativePath,
+} from './localFileSystemModel.ts'
 
 export interface CreateRuntimeListingRequestParams {
   rootPath: string | null
@@ -28,6 +33,29 @@ export interface AppendRuntimeListingPageItemsParams {
   previousItems: FileItem[]
   nextItems: FileItem[]
 }
+
+export interface ResolveListingQueryUpdateParams {
+  currentQuery: ListingQueryState
+  nextQuery: ListingQueryState
+  rootId: string | null
+  currentPath: string
+  virtualTrashPath: string
+  hasBoundRootPath: boolean
+}
+
+export type ListingQueryUpdate =
+  | {
+    type: 'unchanged'
+    query: ListingQueryState
+  }
+  | {
+    type: 'state-only'
+    query: ListingQueryState
+  }
+  | {
+    type: 'reload-runtime-listing'
+    query: ListingQueryState
+  }
 
 export function createRuntimeListingRequest({
   rootPath,
@@ -76,4 +104,33 @@ export function appendRuntimeListingPageItems({
   const appendedItems = nextItems.filter((item) => !existingPaths.has(item.path))
   if (appendedItems.length === 0) return previousItems
   return [...previousItems, ...appendedItems]
+}
+
+export function resolveListingQueryUpdate({
+  currentQuery,
+  nextQuery,
+  rootId,
+  currentPath,
+  virtualTrashPath,
+  hasBoundRootPath,
+}: ResolveListingQueryUpdateParams): ListingQueryUpdate {
+  const query = normalizeListingQuery(nextQuery)
+  if (isSameListingQuery(currentQuery, query)) {
+    return {
+      type: 'unchanged',
+      query,
+    }
+  }
+
+  if (!rootId || isLocalVirtualTrashPath(currentPath, virtualTrashPath) || !hasBoundRootPath) {
+    return {
+      type: 'state-only',
+      query,
+    }
+  }
+
+  return {
+    type: 'reload-runtime-listing',
+    query,
+  }
 }

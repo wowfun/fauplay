@@ -1,71 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { appConfig } from '@/config/appConfig'
 import type {
   AddressPathHistoryEntry,
-  CachedRootEntry,
   FavoriteFolderEntry,
   FileItem,
-  ListingPageState,
-  ListingQueryState,
 } from '@/types'
-import { openDirectory, readDirectory, isHiddenSystemDirectory } from '@/lib/fileSystem'
+import { openDirectory, isHiddenSystemDirectory } from '@/lib/fileSystem'
 import {
   listRuntimeGlobalTrash,
   listRuntimeLocalDirectory,
   listRuntimeRootTrash,
-  toRuntimeFileItems,
   toRuntimeGlobalTrashFileItems,
   toRuntimeRootTrashFileItems,
 } from '@/lib/runtimeApi'
-import {
-  getCachedRootHandle,
-  listCachedRoots,
-  markCachedRootAsUsed,
-  removeCachedRoot,
-  upsertCachedRootHandle,
-} from '@/lib/rootHandleCache'
+import { upsertCachedRootHandle } from '@/lib/rootHandleCache'
 import {
   ensureRootPath,
   getBoundRootPath,
-  getRootPathMapUpdatedEventName,
-  listLocalRootBindings,
-  syncLocalRootBindingsFromRuntime,
 } from '@/lib/reveal'
 import {
   FAVORITE_FOLDERS_STORAGE_KEY,
-  getFavoriteFolderStorage,
-  loadFavoriteFoldersFromStorage,
-  saveFavoriteFoldersToStorage,
 } from '@/features/explorer/lib/favoriteFolderStore'
-import {
-  isFavoriteFolderActive,
-  removeFavoriteFolder as removeFavoriteFolderEntry,
-  toggleFavoriteFolder,
-  updateFavoriteFolderRootName,
-} from '@/features/explorer/lib/favoriteFolderModel'
-import {
-  DEFAULT_LISTING_QUERY,
-  type RuntimeListingPageCursor,
-  isSameListingQuery,
-  isSameRuntimeListingPageCursor,
-  normalizeListingQuery,
-  sortTrashFileItems,
-} from '@/features/explorer/lib/listingQueryModel'
-import {
-  appendRuntimeListingPageItems,
-  createRuntimeListingPageCursor,
-  createRuntimeListingRequest,
-} from '@/features/explorer/lib/localListingLoadModel'
+import { useCachedLocalRootsController } from '@/features/explorer/hooks/useCachedLocalRootsController'
+import { useFavoriteFolderController } from '@/features/explorer/hooks/useFavoriteFolderController'
+import { useLocalListingController } from '@/features/explorer/hooks/useLocalListingController'
+import { useLocalRootActivationController } from '@/features/explorer/hooks/useLocalRootActivationController'
+import { sortTrashFileItems } from '@/features/explorer/lib/listingQueryModel'
 import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
 import {
   createLocalChildDirectoryPath,
   isLocalVirtualTrashPath,
-  mergeCachedLocalRootEntries,
   normalizeLocalRootRelativePath,
+  resolveLocalRootActivationTarget,
   resolveLocalNavigationTarget,
   resolveLocalParentPath,
   sortLocalChildDirectoryNames,
-  toLocalListingItems,
 } from '@/features/explorer/lib/localFileSystemModel'
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
@@ -88,214 +57,36 @@ interface NavigateToPathOptions {
   resetFlattenView?: boolean
 }
 
-interface LoadDirectoryItemsOptions {
-  rootId?: string | null
-  resolveDirectoryHandle?: () => Promise<FileSystemDirectoryHandle | null>
-}
-
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootName, setRootName] = useState<string>(ROOT_LABEL_FALLBACK)
-  const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
-  const [isCachedRootsReady, setIsCachedRootsReady] = useState(false)
-  const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => (
-    loadFavoriteFoldersFromStorage({
-      storage: getFavoriteFolderStorage(),
-      storageKey: FAVORITE_FOLDERS_STORAGE_KEY,
-      options: FAVORITE_FOLDER_MODEL_OPTIONS,
-    })
-  ))
-  const [files, setFiles] = useState<FileItem[]>([])
-  const [listingQuery, setListingQueryState] = useState<ListingQueryState>(DEFAULT_LISTING_QUERY)
-  const [runtimeListingPageCursor, setRuntimeListingPageCursor] = useState<RuntimeListingPageCursor | null>(null)
-  const [isLoadingNextListingPage, setIsLoadingNextListingPage] = useState(false)
-  const listingQueryRef = useRef<ListingQueryState>(DEFAULT_LISTING_QUERY)
-  const runtimeListingPageCursorRef = useRef<RuntimeListingPageCursor | null>(null)
   const [currentPath, setCurrentPath] = useState<string>('')
   const [isFlattenView, setIsFlattenView] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const refreshCachedRoots = useCallback(async () => {
-    await syncLocalRootBindingsFromRuntime()
+  const {
+    cachedRoots,
+    isCachedRootsReady,
+    refreshCachedRoots,
+  } = useCachedLocalRootsController({
+    rootLabelFallback: ROOT_LABEL_FALLBACK,
+  })
 
-    const entries = await listCachedRoots()
-    setCachedRoots(mergeCachedLocalRootEntries({
-      cachedRoots: entries,
-      bindings: listLocalRootBindings(),
-      rootLabelFallback: ROOT_LABEL_FALLBACK,
-    }))
-    setIsCachedRootsReady(true)
-  }, [])
-
-  useEffect(() => {
-    void refreshCachedRoots()
-  }, [refreshCachedRoots])
-
-  useEffect(() => {
-    runtimeListingPageCursorRef.current = runtimeListingPageCursor
-  }, [runtimeListingPageCursor])
-
-  useEffect(() => {
-    listingQueryRef.current = listingQuery
-  }, [listingQuery])
-
-  useEffect(() => {
-    const eventName = getRootPathMapUpdatedEventName()
-    const handleRootPathMapUpdated = () => {
-      void refreshCachedRoots()
-    }
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== 'fauplay:host-root-path-map') return
-      void refreshCachedRoots()
-    }
-
-    window.addEventListener(eventName, handleRootPathMapUpdated)
-    window.addEventListener('storage', handleStorage)
-    return () => {
-      window.removeEventListener(eventName, handleRootPathMapUpdated)
-      window.removeEventListener('storage', handleStorage)
-    }
-  }, [refreshCachedRoots])
-
-  useEffect(() => {
-    saveFavoriteFoldersToStorage({
-      storage: getFavoriteFolderStorage(),
-      storageKey: FAVORITE_FOLDERS_STORAGE_KEY,
-      entries: favoriteFolders,
-    })
-  }, [favoriteFolders])
-
-  const loadDirectoryItems = useCallback(async (
-    dirHandle: FileSystemDirectoryHandle | null,
-    basePath: string,
-    flattenView: boolean,
-    options: LoadDirectoryItemsOptions = {}
-  ) => {
-    const boundRootPath = options.rootId ? getBoundRootPath(options.rootId) : null
-    if (boundRootPath) {
-      try {
-        const activeListingQuery = listingQueryRef.current
-        const runtimeListingRequest = createRuntimeListingRequest({
-          rootPath: boundRootPath,
-          rootRelativePath: basePath,
-          flattened: flattenView,
-          pageSize: RUNTIME_LISTING_PAGE_SIZE,
-          query: activeListingQuery,
-        })
-        if (!runtimeListingRequest) {
-          throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
-        }
-
-        const runtimeListing = await listRuntimeLocalDirectory(runtimeListingRequest)
-        setFiles(toRuntimeFileItems(runtimeListing.entries, boundRootPath))
-        setRuntimeListingPageCursor(createRuntimeListingPageCursor({
-          rootPath: boundRootPath,
-          rootRelativePath: basePath,
-          flattened: flattenView,
-          query: activeListingQuery,
-          isTruncated: runtimeListing.isTruncated,
-          nextOffset: runtimeListing.nextOffset,
-        }))
-        return
-      } catch {
-        // Fall back to File System Access while the runtime-backed Listing path is being adopted.
-      }
-    }
-
-    setRuntimeListingPageCursor(null)
-
-    const fallbackHandle = dirHandle ?? await options.resolveDirectoryHandle?.() ?? null
-    if (!fallbackHandle) {
-      throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
-    }
-
-    const result = await readDirectory(fallbackHandle, flattenView)
-    setFiles(toLocalListingItems(result, {
-      basePath,
-      flattened: flattenView,
-    }))
-  }, [])
-
-  const loadNextListingPage = useCallback(async (): Promise<void> => {
-    const cursor = runtimeListingPageCursorRef.current
-    if (!cursor || isLoadingNextListingPage) return
-
-    setIsLoadingNextListingPage(true)
-    setError(null)
-
-    try {
-      const runtimeListingRequest = createRuntimeListingRequest({
-        rootPath: cursor.rootPath,
-        rootRelativePath: cursor.rootRelativePath,
-        flattened: cursor.flattened,
-        pageSize: RUNTIME_LISTING_PAGE_SIZE,
-        offset: cursor.nextOffset,
-        query: cursor.query,
-      })
-      if (!runtimeListingRequest) return
-
-      const runtimeListing = await listRuntimeLocalDirectory(runtimeListingRequest)
-
-      if (!isSameRuntimeListingPageCursor(runtimeListingPageCursorRef.current, cursor)) {
-        return
-      }
-
-      const nextItems = toRuntimeFileItems(runtimeListing.entries, cursor.rootPath)
-      setFiles((previous) => appendRuntimeListingPageItems({
-        previousItems: previous,
-        nextItems,
-      }))
-      setRuntimeListingPageCursor(createRuntimeListingPageCursor({
-        rootPath: cursor.rootPath,
-        rootRelativePath: cursor.rootRelativePath,
-        flattened: cursor.flattened,
-        query: cursor.query,
-        isTruncated: runtimeListing.isTruncated,
-        nextOffset: runtimeListing.nextOffset,
-      }))
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setIsLoadingNextListingPage(false)
-    }
-  }, [isLoadingNextListingPage])
-
-  const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
-    const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
-    let rootTrashFiles: FileItem[] = []
-
-    if (boundRootPath) {
-      const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
-      rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
-    }
-
-    const globalTrash = await listRuntimeGlobalTrash({}, 120000)
-    const globalTrashFiles = toRuntimeGlobalTrashFileItems(globalTrash.entries)
-    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...globalTrashFiles])
-
-    setFiles(nextFiles)
-    setRuntimeListingPageCursor(null)
-    setCurrentPath(VIRTUAL_TRASH_PATH)
-    setIsFlattenView(false)
-    if (targetRootHandle) {
-      setRootHandle(targetRootHandle)
-    }
-    if (targetRootId) {
-      setRootId(targetRootId)
-    }
-  }, [])
-
-  const ensureDirectoryReadable = useCallback(async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
-    const opts: FileSystemPermissionDescriptor = { mode: 'read' }
-    const permission = await handle.queryPermission(opts)
-    if (permission === 'granted') return true
-    if (permission === 'denied') return false
-
-    const requested = await handle.requestPermission(opts)
-    return requested === 'granted'
-  }, [])
+  const {
+    favoriteFolders,
+    isCurrentPathFavorited,
+    removeFavoriteFolder,
+    toggleCurrentFolderFavorite,
+  } = useFavoriteFolderController({
+    rootId,
+    rootName,
+    currentPath,
+    virtualTrashPath: VIRTUAL_TRASH_PATH,
+    storageKey: FAVORITE_FOLDERS_STORAGE_KEY,
+    ...FAVORITE_FOLDER_MODEL_OPTIONS,
+  })
 
   const getDirectoryHandleByPathFromRoot = useCallback(async (
     baseRoot: FileSystemDirectoryHandle,
@@ -323,6 +114,58 @@ export function useFileSystem() {
 
     return current
   }, [])
+
+  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
+    if (!rootHandle) return null
+    return getDirectoryHandleByPathFromRoot(rootHandle, targetPath)
+  }, [rootHandle, getDirectoryHandleByPathFromRoot])
+
+  const getCurrentDirectoryHandle = useCallback(async () => {
+    return getDirectoryHandleByPath(currentPath)
+  }, [getDirectoryHandleByPath, currentPath])
+
+  const {
+    files,
+    listingPage,
+    loadDirectoryItems,
+    loadNextListingPage,
+    replaceListingItems,
+    setListingQuery,
+  } = useLocalListingController({
+    rootId,
+    currentPath,
+    isFlattenView,
+    virtualTrashPath: VIRTUAL_TRASH_PATH,
+    pageSize: RUNTIME_LISTING_PAGE_SIZE,
+    permissionDeniedMessage: ROOT_PERMISSION_DENIED_MESSAGE,
+    resolveCurrentDirectoryHandle: getCurrentDirectoryHandle,
+    setIsLoading,
+    setError,
+  })
+
+  const loadUnifiedTrashItems = useCallback(async (targetRootId: string | null, targetRootHandle: FileSystemDirectoryHandle | null) => {
+    const boundRootPath = targetRootId ? getBoundRootPath(targetRootId) : null
+    let rootTrashFiles: FileItem[] = []
+
+    if (boundRootPath) {
+      const runtimeRootTrash = await listRuntimeRootTrash({ rootPath: boundRootPath }, 120000)
+      rootTrashFiles = toRuntimeRootTrashFileItems(runtimeRootTrash.entries, boundRootPath)
+    }
+
+    const globalTrash = await listRuntimeGlobalTrash({}, 120000)
+    const globalTrashFiles = toRuntimeGlobalTrashFileItems(globalTrash.entries)
+    const nextFiles = sortTrashFileItems([...rootTrashFiles, ...globalTrashFiles])
+
+    replaceListingItems(nextFiles)
+    setCurrentPath(VIRTUAL_TRASH_PATH)
+    setIsFlattenView(false)
+    if (targetRootHandle) {
+      setRootHandle(targetRootHandle)
+    }
+    if (targetRootId) {
+      setRootId(targetRootId)
+    }
+  }, [replaceListingItems])
 
   const activateRootHandle = useCallback(async (
     nextRootHandle: FileSystemDirectoryHandle,
@@ -368,52 +211,6 @@ export function useFileSystem() {
     setIsFlattenView(false)
   }, [loadDirectoryItems, loadUnifiedTrashItems])
 
-  const warmupRootPathBinding = useCallback((targetRootId: string, targetRootLabel: string) => {
-    try {
-      ensureRootPath({
-        rootId: targetRootId,
-        rootLabel: targetRootLabel || '根目录',
-        promptIfMissing: true,
-      })
-    } catch {
-      // ignore mapping warmup errors, plugin call can still prompt on demand
-    }
-  }, [])
-
-  const getDirectoryHandleByPath = useCallback(async (targetPath: string) => {
-    if (!rootHandle) return null
-    return getDirectoryHandleByPathFromRoot(rootHandle, targetPath)
-  }, [rootHandle, getDirectoryHandleByPathFromRoot])
-
-  const getCurrentDirectoryHandle = useCallback(async () => {
-    return getDirectoryHandleByPath(currentPath)
-  }, [getDirectoryHandleByPath, currentPath])
-
-  const setListingQuery = useCallback(async (nextQuery: ListingQueryState): Promise<void> => {
-    const normalizedQuery = normalizeListingQuery(nextQuery)
-    if (isSameListingQuery(listingQueryRef.current, normalizedQuery)) return
-
-    listingQueryRef.current = normalizedQuery
-    setListingQueryState(normalizedQuery)
-    setRuntimeListingPageCursor(null)
-
-    if (!rootId || isLocalVirtualTrashPath(currentPath, VIRTUAL_TRASH_PATH)) return
-    if (!getBoundRootPath(rootId)) return
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      await loadDirectoryItems(null, currentPath, isFlattenView, {
-        rootId,
-        resolveDirectoryHandle: getCurrentDirectoryHandle,
-      })
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [currentPath, getCurrentDirectoryHandle, isFlattenView, loadDirectoryItems, rootId])
-
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
     const normalizedPath = normalizeLocalRootRelativePath(targetPath)
     if (isLocalVirtualTrashPath(normalizedPath, VIRTUAL_TRASH_PATH)) {
@@ -450,6 +247,20 @@ export function useFileSystem() {
     return sortLocalChildDirectoryNames(directoryNames)
   }, [rootHandle, rootId, getDirectoryHandleByPath])
 
+  const {
+    activateInactiveLocalRootTarget,
+    warmupRootPathBinding,
+  } = useLocalRootActivationController({
+    cachedRoots,
+    rootLabelFallback: ROOT_LABEL_FALLBACK,
+    cacheMissMessage: ROOT_CACHE_MISS_MESSAGE,
+    permissionDeniedMessage: ROOT_PERMISSION_DENIED_MESSAGE,
+    activateRootHandle,
+    activateRuntimeRoot,
+    refreshCachedRoots,
+    setError,
+  })
+
   const selectDirectory = useCallback(async () => {
     setIsLoading(true)
     setError(null)
@@ -476,42 +287,17 @@ export function useFileSystem() {
     setError(null)
 
     try {
-      const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
-      const cachedHandle = await getCachedRootHandle(targetRootId)
-      if (!cachedHandle) {
-        const boundRootPath = targetRoot?.boundRootPath ?? getBoundRootPath(targetRootId)
-        if (!boundRootPath) {
-          await removeCachedRoot(targetRootId)
-          await refreshCachedRoots()
-          setError(ROOT_CACHE_MISS_MESSAGE)
-          return false
-        }
-
-        await activateRuntimeRoot(targetRootId, targetRoot?.rootName || ROOT_LABEL_FALLBACK, '')
-        await refreshCachedRoots()
-        return true
-      }
-
-      const granted = await ensureDirectoryReadable(cachedHandle)
-      if (!granted) {
-        await removeCachedRoot(targetRootId)
-        await refreshCachedRoots()
-        setError(ROOT_PERMISSION_DENIED_MESSAGE)
-        return false
-      }
-
-      warmupRootPathBinding(targetRootId, cachedHandle.name)
-      await activateRootHandle(cachedHandle, targetRootId, '')
-      await markCachedRootAsUsed(targetRootId)
-      await refreshCachedRoots()
-      return true
+      return await activateInactiveLocalRootTarget({
+        targetRootId,
+        targetPath: '',
+      })
     } catch (err) {
       setError((err as Error).message)
       return false
     } finally {
       setIsLoading(false)
     }
-  }, [activateRootHandle, activateRuntimeRoot, cachedRoots, ensureDirectoryReadable, refreshCachedRoots, warmupRootPathBinding])
+  }, [activateInactiveLocalRootTarget])
 
   const rebindCachedRootPath = useCallback(async (targetRootId: string): Promise<boolean> => {
     if (!targetRootId) return false
@@ -577,44 +363,27 @@ export function useFileSystem() {
   const openPathInRoot = useCallback(async (targetRootId: string, targetPath: string): Promise<boolean> => {
     if (!targetRootId) return false
 
-    const normalizedPath = normalizeLocalRootRelativePath(targetPath)
-    if (rootId === targetRootId) {
-      return navigateToPath(normalizedPath, { resetFlattenView: true })
+    const currentRootTarget = resolveLocalRootActivationTarget({
+      targetRootId,
+      targetPath,
+      currentRootId: rootId,
+      targetRoot: null,
+      boundRootPath: null,
+      hasCachedHandle: false,
+      rootLabelFallback: ROOT_LABEL_FALLBACK,
+    })
+    if (currentRootTarget.type === 'current-root') {
+      return navigateToPath(currentRootTarget.path, { resetFlattenView: true })
     }
 
     setIsLoading(true)
     setError(null)
 
     try {
-      const targetRoot = cachedRoots.find((item) => item.rootId === targetRootId)
-      const cachedHandle = await getCachedRootHandle(targetRootId)
-      if (!cachedHandle) {
-        const boundRootPath = targetRoot?.boundRootPath ?? getBoundRootPath(targetRootId)
-        if (!boundRootPath) {
-          await removeCachedRoot(targetRootId)
-          await refreshCachedRoots()
-          setError(ROOT_CACHE_MISS_MESSAGE)
-          return false
-        }
-
-        await activateRuntimeRoot(targetRootId, targetRoot?.rootName || ROOT_LABEL_FALLBACK, normalizedPath)
-        await refreshCachedRoots()
-        return true
-      }
-
-      const granted = await ensureDirectoryReadable(cachedHandle)
-      if (!granted) {
-        await removeCachedRoot(targetRootId)
-        await refreshCachedRoots()
-        setError(ROOT_PERMISSION_DENIED_MESSAGE)
-        return false
-      }
-
-      warmupRootPathBinding(targetRootId, cachedHandle.name)
-      await activateRootHandle(cachedHandle, targetRootId, normalizedPath)
-      await markCachedRootAsUsed(targetRootId)
-      await refreshCachedRoots()
-      return true
+      return await activateInactiveLocalRootTarget({
+        targetRootId,
+        targetPath,
+      })
     } catch (err) {
       setError((err as Error).message)
       return false
@@ -622,14 +391,9 @@ export function useFileSystem() {
       setIsLoading(false)
     }
   }, [
-    activateRootHandle,
-    activateRuntimeRoot,
-    cachedRoots,
-    ensureDirectoryReadable,
+    activateInactiveLocalRootTarget,
     navigateToPath,
-    refreshCachedRoots,
     rootId,
-    warmupRootPathBinding,
   ])
 
   const openHistoryEntry = useCallback((entry: AddressPathHistoryEntry): Promise<boolean> => {
@@ -639,33 +403,6 @@ export function useFileSystem() {
   const openFavoriteFolder = useCallback((entry: FavoriteFolderEntry): Promise<boolean> => {
     return openPathInRoot(entry.rootId, entry.path)
   }, [openPathInRoot])
-
-  const removeFavoriteFolder = useCallback((entry: FavoriteFolderEntry): void => {
-    setFavoriteFolders((previous) => removeFavoriteFolderEntry(previous, entry))
-  }, [])
-
-  const toggleCurrentFolderFavorite = useCallback((): void => {
-    if (!rootId) return
-    setFavoriteFolders((previous) => (
-      toggleFavoriteFolder(previous, {
-        rootId,
-        rootName: rootName || ROOT_LABEL_FALLBACK,
-        path: currentPath,
-        favoritedAt: Date.now(),
-        ...FAVORITE_FOLDER_MODEL_OPTIONS,
-        virtualTrashPath: VIRTUAL_TRASH_PATH,
-      })
-    ))
-  }, [currentPath, rootId, rootName])
-
-  useEffect(() => {
-    if (!rootId) return
-    setFavoriteFolders((previous) => updateFavoriteFolderRootName(previous, {
-      rootId,
-      rootName,
-      ...FAVORITE_FOLDER_MODEL_OPTIONS,
-    }))
-  }, [rootId, rootName])
 
   const navigateToDirectory = useCallback(async (dirName: string) => {
     const nextPath = createLocalChildDirectoryPath(currentPath, dirName)
@@ -697,19 +434,6 @@ export function useFileSystem() {
   }, [getCurrentDirectoryHandle, loadDirectoryItems, currentPath, rootId])
 
   const filterFiles = useCallback(filterExplorerListingFiles, [])
-
-  const isCurrentPathFavorited = (() => {
-    return isFavoriteFolderActive(favoriteFolders, {
-      rootId,
-      path: currentPath,
-      virtualTrashPath: VIRTUAL_TRASH_PATH,
-    })
-  })()
-
-  const listingPage: ListingPageState = {
-    hasNextPage: runtimeListingPageCursor !== null,
-    isLoadingNextPage: isLoadingNextListingPage,
-  }
 
   return {
     rootHandle,

@@ -31,6 +31,16 @@ export interface ParsedFavoriteFolders {
   shouldRewrite: boolean
 }
 
+export interface ResolveCurrentFavoriteFolderStateParams extends FavoriteFolderModelOptions, FavoriteFolderPathOptions {
+  entries: FavoriteFolderEntry[]
+  rootName: string
+}
+
+export interface CurrentFavoriteFolderState {
+  entries: FavoriteFolderEntry[]
+  isCurrentPathFavorited: boolean
+}
+
 export function normalizeFavoriteFolderPath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
 }
@@ -181,4 +191,32 @@ export function updateFavoriteFolderRootName(
 
   if (!hasChanged) return entries
   return dedupeFavoriteFolders(updated, params)
+}
+
+export function resolveCurrentFavoriteFolderState({
+  entries,
+  rootId,
+  rootName,
+  path,
+  virtualTrashPath,
+  maxItems,
+  rootLabelFallback,
+}: ResolveCurrentFavoriteFolderStateParams): CurrentFavoriteFolderState {
+  const resolvedEntries = rootId
+    ? updateFavoriteFolderRootName(entries, {
+      rootId,
+      rootName,
+      maxItems,
+      rootLabelFallback,
+    })
+    : entries
+
+  return {
+    entries: resolvedEntries,
+    isCurrentPathFavorited: isFavoriteFolderActive(resolvedEntries, {
+      rootId,
+      path,
+      virtualTrashPath,
+    }),
+  }
 }

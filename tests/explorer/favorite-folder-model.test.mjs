@@ -5,6 +5,7 @@ import {
   isFavoriteFolderActive,
   parseFavoriteFolders,
   removeFavoriteFolder,
+  resolveCurrentFavoriteFolderState,
   toggleFavoriteFolder,
   updateFavoriteFolderRootName,
 } from '../../src/features/explorer/lib/favoriteFolderModel.ts'
@@ -236,4 +237,73 @@ test('Favorite Folder Model removes entries and refreshes root names by normaliz
       },
     ],
   )
+})
+
+test('Favorite Folder Model resolves current folder state with refreshed Local Root names', () => {
+  const entries = [
+    {
+      rootId: 'root-a',
+      rootName: 'Old Photos',
+      path: 'albums/raw',
+      favoritedAt: 20,
+    },
+    {
+      rootId: 'root-b',
+      rootName: 'Archive',
+      path: 'albums/raw',
+      favoritedAt: 10,
+    },
+  ]
+
+  assert.deepEqual(resolveCurrentFavoriteFolderState({
+    entries,
+    rootId: 'root-a',
+    rootName: 'Photos',
+    path: '/albums/raw/',
+    virtualTrashPath: '@trash',
+    maxItems: 10,
+    rootLabelFallback: '根目录',
+  }), {
+    entries: [
+      {
+        rootId: 'root-a',
+        rootName: 'Photos',
+        path: 'albums/raw',
+        favoritedAt: 20,
+      },
+      {
+        rootId: 'root-b',
+        rootName: 'Archive',
+        path: 'albums/raw',
+        favoritedAt: 10,
+      },
+    ],
+    isCurrentPathFavorited: true,
+  })
+
+  assert.deepEqual(resolveCurrentFavoriteFolderState({
+    entries,
+    rootId: 'root-a',
+    rootName: 'Photos',
+    path: '@trash',
+    virtualTrashPath: '@trash',
+    maxItems: 10,
+    rootLabelFallback: '根目录',
+  }), {
+    entries: [
+      {
+        rootId: 'root-a',
+        rootName: 'Photos',
+        path: 'albums/raw',
+        favoritedAt: 20,
+      },
+      {
+        rootId: 'root-b',
+        rootName: 'Archive',
+        path: 'albums/raw',
+        favoritedAt: 10,
+      },
+    ],
+    isCurrentPathFavorited: false,
+  })
 })

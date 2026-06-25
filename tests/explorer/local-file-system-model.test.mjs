@@ -5,9 +5,11 @@ import {
   createLocalChildDirectoryPath,
   isLocalVirtualTrashPath,
   mergeCachedLocalRootEntries,
+  resolveLocalRootActivationTarget,
   resolveLocalNavigationTarget,
   resolveLocalParentPath,
   readLocalRootNameFromPath,
+  shouldRefreshCachedLocalRootsForStorageKey,
   sortLocalChildDirectoryNames,
   toLocalListingItems,
 } from '../../src/features/explorer/lib/localFileSystemModel.ts'
@@ -124,6 +126,125 @@ test('Local File System Model merges Cached Roots with Local Root Bindings', () 
       boundRootPath: '/media/new-root/',
     },
   ])
+})
+
+test('Local File System Model recognizes Root Path Map storage refresh events', () => {
+  assert.equal(shouldRefreshCachedLocalRootsForStorageKey({
+    eventKey: 'fauplay:host-root-path-map',
+    rootPathStorageKey: 'fauplay:host-root-path-map',
+  }), true)
+
+  assert.equal(shouldRefreshCachedLocalRootsForStorageKey({
+    eventKey: 'fauplay:favorite-folders',
+    rootPathStorageKey: 'fauplay:host-root-path-map',
+  }), false)
+
+  assert.equal(shouldRefreshCachedLocalRootsForStorageKey({
+    eventKey: null,
+    rootPathStorageKey: 'fauplay:host-root-path-map',
+  }), false)
+})
+
+test('Local File System Model resolves Local Root activation targets', () => {
+  const cachedRoot = {
+    rootId: 'root-a',
+    rootName: 'Photos',
+    lastUsedAt: 10,
+    boundRootPath: '/media/photos',
+  }
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-a',
+    targetPath: '/albums/2026/',
+    currentRootId: 'root-a',
+    targetRoot: cachedRoot,
+    hasCachedHandle: true,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'current-root',
+    path: 'albums/2026',
+  })
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-a',
+    targetPath: '',
+    currentRootId: null,
+    targetRoot: cachedRoot,
+    hasCachedHandle: false,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'runtime-root',
+    rootId: 'root-a',
+    rootName: 'Photos',
+    path: '',
+  })
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-b',
+    targetPath: 'raw',
+    currentRootId: null,
+    targetRoot: {
+      rootId: 'root-b',
+      rootName: '',
+      lastUsedAt: 0,
+      boundRootPath: '/media/raw',
+    },
+    hasCachedHandle: false,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'runtime-root',
+    rootId: 'root-b',
+    rootName: '根目录',
+    path: 'raw',
+  })
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-b',
+    targetPath: 'raw',
+    currentRootId: null,
+    targetRoot: {
+      rootId: 'root-b',
+      rootName: 'Runtime Binding',
+      lastUsedAt: 0,
+    },
+    boundRootPath: '/runtime/root-b',
+    hasCachedHandle: false,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'runtime-root',
+    rootId: 'root-b',
+    rootName: 'Runtime Binding',
+    path: 'raw',
+  })
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-c',
+    targetPath: 'clips',
+    currentRootId: null,
+    targetRoot: {
+      rootId: 'root-c',
+      rootName: 'Clips',
+      lastUsedAt: 0,
+    },
+    hasCachedHandle: false,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'cache-miss',
+    rootId: 'root-c',
+  })
+
+  assert.deepEqual(resolveLocalRootActivationTarget({
+    targetRootId: 'root-d',
+    targetPath: '/clips/',
+    currentRootId: null,
+    targetRoot: null,
+    hasCachedHandle: true,
+    rootLabelFallback: '根目录',
+  }), {
+    type: 'browser-root',
+    rootId: 'root-d',
+    path: 'clips',
+  })
 })
 
 test('Local File System Model builds child and parent Root-relative Paths', () => {

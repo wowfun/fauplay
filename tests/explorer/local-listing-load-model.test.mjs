@@ -5,6 +5,7 @@ import {
   appendRuntimeListingPageItems,
   createRuntimeListingPageCursor,
   createRuntimeListingRequest,
+  resolveListingQueryUpdate,
 } from '../../src/features/explorer/lib/localListingLoadModel.ts'
 
 function file(path, overrides = {}) {
@@ -110,4 +111,68 @@ test('Local Listing Load Model appends Runtime Listing Pages without duplicate R
     'albums/c.jpg',
   ])
   assert.equal(result[1].size, undefined)
+})
+
+test('Local Listing Load Model resolves Listing Query update effects', () => {
+  const currentQuery = listingQuery({ search: 'raw' })
+
+  assert.deepEqual(resolveListingQueryUpdate({
+    currentQuery,
+    nextQuery: { ...currentQuery },
+    rootId: 'root-a',
+    currentPath: 'albums',
+    virtualTrashPath: '@trash',
+    hasBoundRootPath: true,
+  }), {
+    type: 'unchanged',
+    query: currentQuery,
+  })
+
+  assert.deepEqual(resolveListingQueryUpdate({
+    currentQuery,
+    nextQuery: listingQuery({ search: 'edited' }),
+    rootId: null,
+    currentPath: 'albums',
+    virtualTrashPath: '@trash',
+    hasBoundRootPath: true,
+  }), {
+    type: 'state-only',
+    query: listingQuery({ search: 'edited' }),
+  })
+
+  assert.deepEqual(resolveListingQueryUpdate({
+    currentQuery,
+    nextQuery: listingQuery({ search: 'edited' }),
+    rootId: 'root-a',
+    currentPath: '/@trash/',
+    virtualTrashPath: '@trash',
+    hasBoundRootPath: true,
+  }), {
+    type: 'state-only',
+    query: listingQuery({ search: 'edited' }),
+  })
+
+  assert.deepEqual(resolveListingQueryUpdate({
+    currentQuery,
+    nextQuery: listingQuery({ search: 'edited' }),
+    rootId: 'root-a',
+    currentPath: 'albums',
+    virtualTrashPath: '@trash',
+    hasBoundRootPath: false,
+  }), {
+    type: 'state-only',
+    query: listingQuery({ search: 'edited' }),
+  })
+
+  assert.deepEqual(resolveListingQueryUpdate({
+    currentQuery,
+    nextQuery: listingQuery({ search: 'edited' }),
+    rootId: 'root-a',
+    currentPath: 'albums',
+    virtualTrashPath: '@trash',
+    hasBoundRootPath: true,
+  }), {
+    type: 'reload-runtime-listing',
+    query: listingQuery({ search: 'edited' }),
+  })
 })
