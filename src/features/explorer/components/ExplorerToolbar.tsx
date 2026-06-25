@@ -38,10 +38,13 @@ import {
   sortAddressFavoriteFolders,
   sortAddressPathHistory,
 } from '@/features/explorer/lib/addressPathModel'
+import {
+  createExplorerToolbarDisclosureState,
+  resolveExplorerToolbarDisclosureState,
+  type ExplorerToolbarDisclosureAction,
+} from '@/features/explorer/lib/explorerToolbarDisclosureModel'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
-
-type AddressBarMode = 'breadcrumb' | 'edit'
 
 type SegmentDropdownStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -128,12 +131,7 @@ export function ExplorerToolbar({
   onOpenPeople,
   shortcutHelpEntries,
 }: ExplorerToolbarProps) {
-  const [addressBarMode, setAddressBarMode] = useState<AddressBarMode>('breadcrumb')
-  const [draftPath, setDraftPath] = useState(currentPath)
-  const [editError, setEditError] = useState<string | null>(null)
-  const [openSegmentPath, setOpenSegmentPath] = useState<string | null>(null)
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-  const [isFavoritesOpen, setIsFavoritesOpen] = useState(false)
+  const [disclosureState, setDisclosureState] = useState(() => createExplorerToolbarDisclosureState(currentPath))
   const [isNavigatingByAddressBar, setIsNavigatingByAddressBar] = useState(false)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [segmentDropdownStateByPath, setSegmentDropdownStateByPath] = useState<Record<string, SegmentDropdownState>>({})
@@ -141,7 +139,22 @@ export function ExplorerToolbar({
   const [addressSuggestionStatus, setAddressSuggestionStatus] = useState<AddressSuggestionStatus>('idle')
   const [addressSuggestionError, setAddressSuggestionError] = useState<string | null>(null)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
-  const [isHelpOpen, setIsHelpOpen] = useState(false)
+  const {
+    addressBarMode,
+    draftPath,
+    editError,
+    openSegmentPath,
+    isHistoryOpen,
+    isFavoritesOpen,
+    isHelpOpen,
+  } = disclosureState
+  const updateDisclosureState = useCallback((action: ExplorerToolbarDisclosureAction) => {
+    setDisclosureState((previous) => resolveExplorerToolbarDisclosureState({
+      state: previous,
+      currentPath,
+      action,
+    }))
+  }, [currentPath])
 
   const rootLabel = rootName || '根目录'
   const breadcrumbItems = useMemo(
@@ -161,11 +174,19 @@ export function ExplorerToolbar({
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionRequestSeqRef = useRef(0)
 
-  useEffect(() => {
-    if (addressBarMode !== 'breadcrumb') return
-    setDraftPath(currentPath)
-    setEditError(null)
-  }, [addressBarMode, currentPath])
+  const setDraftPathValue = useCallback((nextDraftPath: string) => {
+    setDisclosureState((previous) => ({
+      ...previous,
+      draftPath: nextDraftPath,
+    }))
+  }, [])
+
+  const setEditErrorValue = useCallback((nextEditError: string | null) => {
+    setDisclosureState((previous) => ({
+      ...previous,
+      editError: nextEditError,
+    }))
+  }, [])
 
   useEffect(() => {
     if (addressBarMode !== 'edit') return
@@ -174,40 +195,43 @@ export function ExplorerToolbar({
   }, [addressBarMode])
 
   useEffect(() => {
-    setOpenSegmentPath(null)
-    setIsHistoryOpen(false)
-    setIsFavoritesOpen(false)
-    setIsHelpOpen(false)
-  }, [currentPath])
+    updateDisclosureState({ type: 'current-path-changed' })
+  }, [updateDisclosureState])
 
   useEffect(() => {
     const handleGlobalPointerDown = (event: MouseEvent) => {
       const target = event.target as Node
       if (addressBarRef.current?.contains(target)) return
-      setOpenSegmentPath(null)
-      setIsHistoryOpen(false)
-      setIsFavoritesOpen(false)
-      if (addressBarMode === 'edit' && event.button === 0) {
-        setAddressBarMode('breadcrumb')
-        setDraftPath(currentPath)
-        setEditError(null)
-      }
+      setDisclosureState((previous) => (
+        event.button === 0
+          ? resolveExplorerToolbarDisclosureState({
+            state: previous,
+            currentPath,
+            action: { type: 'outside-address-click' },
+          })
+          : {
+            ...previous,
+            openSegmentPath: null,
+            isHistoryOpen: false,
+            isFavoritesOpen: false,
+          }
+      ))
     }
 
     window.addEventListener('mousedown', handleGlobalPointerDown)
     return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
-  }, [addressBarMode, currentPath])
+  }, [currentPath])
 
   useEffect(() => {
     const handleGlobalPointerDown = (event: MouseEvent) => {
       const target = event.target as Node
       if (helpPanelRef.current?.contains(target)) return
-      setIsHelpOpen(false)
+      updateDisclosureState({ type: 'close-help' })
     }
 
     window.addEventListener('mousedown', handleGlobalPointerDown)
     return () => window.removeEventListener('mousedown', handleGlobalPointerDown)
-  }, [])
+  }, [updateDisclosureState])
 
   useEffect(() => {
     if (!isHelpOpen) return
@@ -216,12 +240,12 @@ export function ExplorerToolbar({
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopImmediatePropagation()
-      setIsHelpOpen(false)
+      updateDisclosureState({ type: 'close-help' })
     }
 
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [isHelpOpen])
+  }, [isHelpOpen, updateDisclosureState])
 
   useEffect(() => {
     if (copyState === 'idle') return
@@ -273,20 +297,19 @@ export function ExplorerToolbar({
     void loadAddressSuggestions(draftPath)
   }, [addressBarMode, draftPath, loadAddressSuggestions])
 
+  const resetAddressSuggestions = () => {
+    setAddressSuggestionStatus('idle')
+    setAddressSuggestionError(null)
+    setAddressSuggestions([])
+    setActiveSuggestionIndex(-1)
+  }
+
   const enterEditMode = () => {
-    setAddressBarMode('edit')
-    setDraftPath(currentPath)
-    setEditError(null)
-    setOpenSegmentPath(null)
-    setIsHistoryOpen(false)
-    setIsFavoritesOpen(false)
-    setIsHelpOpen(false)
+    updateDisclosureState({ type: 'enter-edit' })
   }
 
   const cancelEditMode = () => {
-    setAddressBarMode('breadcrumb')
-    setDraftPath(currentPath)
-    setEditError(null)
+    updateDisclosureState({ type: 'cancel-edit' })
   }
 
   const navigateByAddressBar = async (path: string): Promise<boolean> => {
@@ -294,7 +317,7 @@ export function ExplorerToolbar({
     try {
       const ok = await onNavigateToPath(path)
       if (ok) {
-        setEditError(null)
+        setEditErrorValue(null)
       }
       return ok
     } finally {
@@ -338,14 +361,11 @@ export function ExplorerToolbar({
 
   const handleToggleSegmentDropdown = async (path: string) => {
     if (openSegmentPath === path) {
-      setOpenSegmentPath(null)
+      updateDisclosureState({ type: 'toggle-segment', path })
       return
     }
 
-    setOpenSegmentPath(path)
-    setIsHistoryOpen(false)
-    setIsFavoritesOpen(false)
-    setIsHelpOpen(false)
+    updateDisclosureState({ type: 'toggle-segment', path })
     await loadSegmentDirectories(path)
   }
 
@@ -353,49 +373,39 @@ export function ExplorerToolbar({
     const nextPath = createAddressChildPath(segmentPath, childName)
     const ok = await navigateByAddressBar(nextPath)
     if (!ok) return
-    setAddressBarMode('breadcrumb')
-    setOpenSegmentPath(null)
+    updateDisclosureState({ type: 'segment-navigation-committed' })
   }
 
   const submitAddressPath = async (path: string): Promise<void> => {
     const ok = await navigateByAddressBar(path)
     if (!ok) {
-      setEditError('路径无效或不可访问')
+      setEditErrorValue('路径无效或不可访问')
       return
     }
-    setAddressBarMode('breadcrumb')
-    setAddressSuggestionStatus('idle')
-    setAddressSuggestionError(null)
-    setAddressSuggestions([])
-    setActiveSuggestionIndex(-1)
+    updateDisclosureState({ type: 'cancel-edit' })
+    resetAddressSuggestions()
   }
 
   const submitAddressSuggestion = async (suggestion: AddressSuggestionItem): Promise<void> => {
     if (suggestion.source === 'favorite' && suggestion.favoriteEntry) {
       const ok = await onOpenFavoriteFolder(suggestion.favoriteEntry)
       if (!ok) {
-        setEditError('路径无效或不可访问')
+        setEditErrorValue('路径无效或不可访问')
         return
       }
-      setAddressBarMode('breadcrumb')
-      setAddressSuggestionStatus('idle')
-      setAddressSuggestionError(null)
-      setAddressSuggestions([])
-      setActiveSuggestionIndex(-1)
+      updateDisclosureState({ type: 'favorite-navigation-committed' })
+      resetAddressSuggestions()
       return
     }
 
     if (suggestion.source === 'history' && suggestion.historyEntry) {
       const ok = await onNavigateHistoryEntry(suggestion.historyEntry)
       if (!ok) {
-        setEditError('路径无效或不可访问')
+        setEditErrorValue('路径无效或不可访问')
         return
       }
-      setAddressBarMode('breadcrumb')
-      setAddressSuggestionStatus('idle')
-      setAddressSuggestionError(null)
-      setAddressSuggestions([])
-      setActiveSuggestionIndex(-1)
+      updateDisclosureState({ type: 'history-navigation-committed' })
+      resetAddressSuggestions()
       return
     }
 
@@ -415,32 +425,24 @@ export function ExplorerToolbar({
 
   const handleToggleHistory = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    setOpenSegmentPath(null)
-    setIsFavoritesOpen(false)
-    setIsHelpOpen(false)
-    setIsHistoryOpen((previous) => !previous)
+    updateDisclosureState({ type: 'toggle-history' })
   }
 
   const handleNavigateHistoryPath = async (entry: AddressPathHistoryEntry) => {
     const ok = await onNavigateHistoryEntry(entry)
     if (!ok) return
-    setAddressBarMode('breadcrumb')
-    setIsHistoryOpen(false)
+    updateDisclosureState({ type: 'history-navigation-committed' })
   }
 
   const handleToggleFavorites = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    setOpenSegmentPath(null)
-    setIsHistoryOpen(false)
-    setIsHelpOpen(false)
-    setIsFavoritesOpen((previous) => !previous)
+    updateDisclosureState({ type: 'toggle-favorites' })
   }
 
   const handleOpenFavoriteFolder = async (entry: FavoriteFolderEntry) => {
     const ok = await onOpenFavoriteFolder(entry)
     if (!ok) return
-    setAddressBarMode('breadcrumb')
-    setIsFavoritesOpen(false)
+    updateDisclosureState({ type: 'favorite-navigation-committed' })
   }
 
   const handleRemoveFavoriteFolder = (event: ReactMouseEvent<HTMLButtonElement>, entry: FavoriteFolderEntry) => {
@@ -470,10 +472,7 @@ export function ExplorerToolbar({
 
   const handleToggleHelp = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    setOpenSegmentPath(null)
-    setIsHistoryOpen(false)
-    setIsFavoritesOpen(false)
-    setIsHelpOpen((previous) => !previous)
+    updateDisclosureState({ type: 'toggle-help' })
   }
 
   const renderSegmentDropdown = (path: string) => {
@@ -553,10 +552,10 @@ export function ExplorerToolbar({
                 ref={inputRef}
                 value={draftPath}
                 onChange={(event) => {
-                  setDraftPath(event.target.value)
+                  setDraftPathValue(event.target.value)
                   setActiveSuggestionIndex(-1)
                   if (editError) {
-                    setEditError(null)
+                    setEditErrorValue(null)
                   }
                 }}
                 onKeyDown={(event) => {
@@ -591,7 +590,7 @@ export function ExplorerToolbar({
                     if (targetIndex === null) return
                     const target = addressSuggestions[targetIndex]
                     if (!target) return
-                    setDraftPath(target.path)
+                    setDraftPathValue(target.path)
                     setActiveSuggestionIndex(targetIndex)
                   }
                 }}

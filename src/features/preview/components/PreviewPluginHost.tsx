@@ -9,6 +9,11 @@ import { getBoundRootPath } from '@/lib/reveal'
 import { getFilePreviewKind } from '@/lib/filePreview'
 import { readDeleteUndoRestoreItems } from '@/features/workspace/lib/deleteUndo'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
+import {
+  resolvePreviewPluginContextModel,
+  resolvePreviewPluginToolArguments,
+  resolvePreviewPluginToolRunnable,
+} from '@/features/preview/lib/previewPluginContextModel'
 import type { FileItem, ResultProjection } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
@@ -20,7 +25,6 @@ import {
   isBooleanToolOptionEnabled,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
-import { orderToolsWithSoftDeleteLast } from '@/features/plugin-runtime/utils/toolOrdering'
 import { resolveActiveDigitAssignment } from '@/features/plugin-runtime/utils/annotationSchema'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 
@@ -60,10 +64,6 @@ function normalizeRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
 }
 
-function isAbsolutePathLike(value: string): boolean {
-  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)
-}
-
 function readFirstResultRelativePath(result: unknown): string | null {
   if (!isRecord(result)) return null
   if (!Array.isArray(result.items) || result.items.length === 0) return null
@@ -89,33 +89,6 @@ function readSuccessfulResultAbsolutePaths(result: unknown): string[] {
   }
 
   return [...unique]
-}
-
-function resolvePreviewBaseArguments(file: FileItem): Record<string, unknown> | null {
-  if (file.kind !== 'file') return null
-  if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
-    const items = [{
-      sourceType: file.sourceType,
-      ...(typeof file.recycleId === 'string' && file.recycleId.trim() ? { recycleId: file.recycleId.trim() } : {}),
-      ...(typeof file.absolutePath === 'string' && file.absolutePath.trim() ? { absolutePath: file.absolutePath.trim() } : {}),
-    }]
-    return { items }
-  }
-
-  const relativePath = typeof file.sourceRelativePath === 'string' && file.sourceRelativePath.trim()
-    ? file.sourceRelativePath.trim()
-    : (!isAbsolutePathLike(file.path) ? file.path : '')
-  if (!relativePath) {
-    if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
-      return {}
-    }
-    return null
-  }
-
-  return {
-    relativePath,
-    ...(typeof file.sourceRootPath === 'string' && file.sourceRootPath.trim() ? { rootPath: file.sourceRootPath.trim() } : {}),
-  }
 }
 
 export function PreviewPluginHost({
@@ -144,55 +117,27 @@ export function PreviewPluginHost({
   const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
   const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
   const continuousInFlightCountRef = useRef(0)
-  const normalizedFilePath = useMemo(
-    () => file.path.split('/').filter(Boolean).join('/'),
-    [file.path]
-  )
   const currentBoundRootPath = useMemo(
     () => (rootId ? getBoundRootPath(rootId) : null),
     [rootId]
   )
-  const isCrossRootProjection = useMemo(() => (
-    Boolean(file.sourceRootPath && file.sourceRootPath !== currentBoundRootPath)
-  ), [currentBoundRootPath, file.sourceRootPath])
-  const isTrashContext = useMemo(
-    () => (
-      file.sourceType === 'root_trash'
-      || file.sourceType === 'global_recycle'
-      || normalizedFilePath === '@trash'
-      || normalizedFilePath === '.trash'
-      || normalizedFilePath.startsWith('.trash/')
-    ),
-    [file.sourceType, normalizedFilePath]
-  )
-  const contextualTools = useMemo(() => {
-    const filteredTools = isTrashContext
-      ? previewActionTools.filter((tool) => tool.name === 'fs.restore')
-      : (isCrossRootProjection
-        ? previewActionTools.filter((tool) => (
-          tool.name === 'fs.softDelete' || tool.name === 'data.findDuplicateFiles'
-        ))
-        : previewActionTools.filter((tool) => tool.name !== 'fs.restore'))
-    return orderToolsWithSoftDeleteLast(filteredTools)
-  }, [isCrossRootProjection, isTrashContext, previewActionTools])
-  const previewBaseArguments = useMemo(
-    () => resolvePreviewBaseArguments(file),
-    [file]
-  )
-  const hasRelativeToolContext = useMemo(
-    () => Boolean(previewBaseArguments && typeof previewBaseArguments.relativePath === 'string'),
-    [previewBaseArguments]
-  )
+  const {
+    contextualTools,
+    previewBaseArguments,
+    isTrashContext,
+  } = useMemo(() => resolvePreviewPluginContextModel({
+    file,
+    rootId,
+    currentBoundRootPath,
+    previewActionTools,
+  }), [currentBoundRootPath, file, previewActionTools, rootId])
   const canRunProjectedMutationTool = useCallback((tool: RuntimeToolDescriptor) => {
-    if (file.kind !== 'file') return false
-    if (file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
-      return tool.name === 'fs.restore'
-    }
-    if (!hasRelativeToolContext) {
-      return tool.name === 'fs.softDelete' && typeof file.absolutePath === 'string' && file.absolutePath.trim().length > 0
-    }
-    return true
-  }, [file, hasRelativeToolContext])
+    return resolvePreviewPluginToolRunnable({
+      file,
+      previewBaseArguments,
+      tool,
+    })
+  }, [file, previewBaseArguments])
 
   const pluginRuntime = usePluginRuntime({
     scope: 'file',
@@ -245,42 +190,17 @@ export function PreviewPluginHost({
     }
     return map
   }, [fileActionTools])
-  const resolveToolArguments = useCallback((tool: RuntimeToolDescriptor, extraArgs?: Record<string, unknown>): Record<string, unknown> | null => {
-    if (tool.name === 'fs.softDelete') {
-      if (typeof file.absolutePath === 'string' && file.absolutePath.trim()) {
-        return {
-          absolutePaths: [file.absolutePath.trim()],
-          ...(extraArgs ?? {}),
-        }
-      }
-      if (previewBaseArguments) {
-        return {
-          ...previewBaseArguments,
-          ...(extraArgs ?? {}),
-        }
-      }
-      return null
-    }
-
-    if (tool.name === 'fs.restore') {
-      if (previewBaseArguments) {
-        return {
-          ...previewBaseArguments,
-          ...(extraArgs ?? {}),
-        }
-      }
-      return null
-    }
-
-    if (!previewBaseArguments) {
-      return null
-    }
-
-    return {
-      ...previewBaseArguments,
-      ...(extraArgs ?? {}),
-    }
-  }, [file.absolutePath, previewBaseArguments])
+  const resolveToolArguments = useCallback((
+    tool: RuntimeToolDescriptor,
+    extraArgs?: Record<string, unknown>
+  ): Record<string, unknown> | null => {
+    return resolvePreviewPluginToolArguments({
+      file,
+      previewBaseArguments,
+      tool,
+      extraArgs,
+    })
+  }, [file, previewBaseArguments])
   const handledAutoProjectionIdRef = useRef<string | null>(null)
   const handledDuplicateProjectionDismissResultIdRef = useRef<string | null>(null)
 

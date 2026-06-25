@@ -3,9 +3,11 @@ import test from 'node:test'
 
 import {
   resolvePeoplePanelCompactEmptySelectionStage,
+  resolvePeoplePanelFacesLoadPlan,
   resolvePeoplePanelListStage,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPreferredPersonFocus,
+  resolvePeoplePanelRefreshedPeopleSelection,
   resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
   resolvePeoplePanelViewSwitch,
@@ -292,5 +294,81 @@ test('People Panel Model keeps compact people view on the list when no person is
     open: true,
     view: 'ignored',
     selectedPersonId: null,
+  }), null)
+})
+
+test('People Panel Model resolves the current faces load plan', () => {
+  assert.deepEqual(resolvePeoplePanelFacesLoadPlan({
+    view: 'people',
+    selectedPersonId: 'person-a',
+    readonly: false,
+    scope: 'root',
+  }), {
+    kind: 'person',
+    personId: 'person-a',
+    scope: 'root',
+  })
+
+  assert.deepEqual(resolvePeoplePanelFacesLoadPlan({
+    view: 'people',
+    selectedPersonId: null,
+    readonly: false,
+    scope: 'global',
+  }), { kind: 'empty' })
+
+  assert.deepEqual(resolvePeoplePanelFacesLoadPlan({
+    view: 'ignored',
+    selectedPersonId: null,
+    readonly: false,
+    scope: 'global',
+  }), {
+    kind: 'review',
+    bucket: 'ignored',
+    scope: 'global',
+    size: 500,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFacesLoadPlan({
+    view: 'unassigned',
+    selectedPersonId: null,
+    readonly: false,
+    scope: 'root',
+  }), {
+    kind: 'review',
+    bucket: 'unassigned',
+    scope: 'root',
+    size: 500,
+  })
+
+  assert.deepEqual(resolvePeoplePanelFacesLoadPlan({
+    view: 'ignored',
+    selectedPersonId: null,
+    readonly: true,
+    scope: 'root',
+  }), { kind: 'empty' })
+})
+
+test('People Panel Model preserves selected people when refreshed list still contains them', () => {
+  const first = person({ personId: 'first' })
+  const second = person({ personId: 'second' })
+
+  assert.equal(resolvePeoplePanelRefreshedPeopleSelection({
+    previousSelectedPersonId: 'second',
+    people: [first, second],
+  }), 'second')
+
+  assert.equal(resolvePeoplePanelRefreshedPeopleSelection({
+    previousSelectedPersonId: 'missing',
+    people: [first, second],
+  }), 'first')
+
+  assert.equal(resolvePeoplePanelRefreshedPeopleSelection({
+    previousSelectedPersonId: null,
+    people: [first, second],
+  }), 'first')
+
+  assert.equal(resolvePeoplePanelRefreshedPeopleSelection({
+    previousSelectedPersonId: 'missing',
+    people: [],
   }), null)
 })

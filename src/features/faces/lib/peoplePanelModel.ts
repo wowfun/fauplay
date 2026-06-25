@@ -65,6 +65,23 @@ export interface ResolvePeoplePanelCompactEmptySelectionStageParams {
   selectedPersonId: string | null
 }
 
+export interface ResolvePeoplePanelFacesLoadPlanParams {
+  view: PanelView
+  selectedPersonId: string | null
+  readonly: boolean
+  scope: PersonScope
+}
+
+export type PeoplePanelFacesLoadPlan =
+  | { kind: 'empty' }
+  | { kind: 'person'; personId: string; scope: PersonScope }
+  | { kind: 'review'; bucket: 'ignored' | 'unassigned'; scope: PersonScope; size: number }
+
+export interface ResolvePeoplePanelRefreshedPeopleSelectionParams {
+  previousSelectedPersonId: string | null
+  people: PersonSummary[]
+}
+
 export function resolvePeoplePanelSelectionModel({
   people,
   allPeople,
@@ -164,4 +181,39 @@ export function resolvePeoplePanelCompactEmptySelectionStage({
 }: ResolvePeoplePanelCompactEmptySelectionStageParams): CompactPeopleStage | null {
   if (!isCompact || !open || view !== 'people' || selectedPersonId) return null
   return 'list'
+}
+
+export function resolvePeoplePanelFacesLoadPlan({
+  view,
+  selectedPersonId,
+  readonly,
+  scope,
+}: ResolvePeoplePanelFacesLoadPlanParams): PeoplePanelFacesLoadPlan {
+  if (view === 'people') {
+    if (!selectedPersonId) return { kind: 'empty' }
+    return {
+      kind: 'person',
+      personId: selectedPersonId,
+      scope,
+    }
+  }
+
+  if (readonly) return { kind: 'empty' }
+
+  return {
+    kind: 'review',
+    bucket: view === 'ignored' ? 'ignored' : 'unassigned',
+    scope,
+    size: 500,
+  }
+}
+
+export function resolvePeoplePanelRefreshedPeopleSelection({
+  previousSelectedPersonId,
+  people,
+}: ResolvePeoplePanelRefreshedPeopleSelectionParams): string | null {
+  if (previousSelectedPersonId && people.some((item) => item.personId === previousSelectedPersonId)) {
+    return previousSelectedPersonId
+  }
+  return people[0]?.personId ?? null
 }

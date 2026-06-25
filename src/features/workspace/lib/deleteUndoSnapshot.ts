@@ -1,12 +1,52 @@
 import type { DuplicateSelectionRule } from './duplicateSelection.ts'
 import {
+  type DeleteUndoBatch,
+  type DeleteUndoPreviewSnapshot,
+  type DeleteUndoRestoreItem,
   type DeleteUndoSnapshot,
   normalizeAbsolutePath,
   pathRefersToDeletedAbsolutePath,
   remapFileItemAfterRestore,
   remapPathForRoot,
 } from './deleteUndo.ts'
-import type { FileItem, ResultProjection } from '@/types'
+import type { WorkspaceActiveSurface } from './projectionTabs.ts'
+import type { FileItem, FilterState, ResultPanelDisplayMode, ResultProjection } from '@/types'
+
+export interface CreateDeleteUndoPreviewSnapshotParams {
+  showPreviewPane: boolean
+  selectedFile: FileItem | null
+  previewFile: FileItem | null
+}
+
+export interface CreateDeleteUndoSnapshotParams {
+  rootId: string
+  rootName: string
+  rootPath: string | null
+  currentPath: string
+  visitedAt: number
+  filter: FilterState
+  isFlattenView: boolean
+  activeSurface: WorkspaceActiveSurface
+  directorySelectedPaths: string[]
+  directoryFocusedPath: string | null
+  isResultPanelOpen: boolean
+  resultPanelDisplayMode: ResultPanelDisplayMode
+  resultPanelHeightPx: number
+  lastNormalResultPanelHeightPx: number
+  projectionTabs: ResultProjection[]
+  activeProjectionTabId: string | null
+  projectionSelectedPathsById: Record<string, string[]>
+  projectionFocusedPathById: Record<string, string | null>
+  duplicateSelectionRuleByProjectionId: Record<string, DuplicateSelectionRule | null>
+  preview: DeleteUndoPreviewSnapshot
+}
+
+export interface CreateDeleteUndoBatchParams {
+  id: string
+  createdAt: number
+  restoreItems: DeleteUndoRestoreItem[] | undefined
+  snapshot: DeleteUndoSnapshot | null
+}
 
 export function cloneFileItem(file: FileItem | null): FileItem | null {
   if (!file) return null
@@ -37,6 +77,98 @@ export function cloneDuplicateSelectionRuleRecord(
   record: Record<string, DuplicateSelectionRule | null>
 ): Record<string, DuplicateSelectionRule | null> {
   return { ...record }
+}
+
+export function createDeleteUndoPreviewSnapshot({
+  showPreviewPane,
+  selectedFile,
+  previewFile,
+}: CreateDeleteUndoPreviewSnapshotParams): DeleteUndoPreviewSnapshot {
+  return {
+    showPreviewPane,
+    selectedFile: cloneFileItem(selectedFile),
+    previewFile: cloneFileItem(previewFile),
+  }
+}
+
+export function createDeleteUndoSnapshot({
+  rootId,
+  rootName,
+  rootPath,
+  currentPath,
+  visitedAt,
+  filter,
+  isFlattenView,
+  activeSurface,
+  directorySelectedPaths,
+  directoryFocusedPath,
+  isResultPanelOpen,
+  resultPanelDisplayMode,
+  resultPanelHeightPx,
+  lastNormalResultPanelHeightPx,
+  projectionTabs,
+  activeProjectionTabId,
+  projectionSelectedPathsById,
+  projectionFocusedPathById,
+  duplicateSelectionRuleByProjectionId,
+  preview,
+}: CreateDeleteUndoSnapshotParams): DeleteUndoSnapshot | null {
+  if (!rootId) return null
+
+  return {
+    historyEntry: {
+      rootId,
+      rootName: rootName || '根目录',
+      path: currentPath,
+      visitedAt,
+    },
+    rootPath,
+    currentPath,
+    filter: cloneFilterState(filter),
+    isFlattenView,
+    activeSurface: activeSurface.kind === 'projection'
+      ? { kind: 'projection', tabId: activeSurface.tabId }
+      : { kind: 'directory' },
+    directorySelectedPaths: [...directorySelectedPaths],
+    directoryFocusedPath,
+    isResultPanelOpen,
+    resultPanelDisplayMode,
+    resultPanelHeightPx,
+    lastNormalResultPanelHeightPx,
+    projectionTabs: projectionTabs.map((projection) => cloneResultProjection(projection)),
+    activeProjectionTabId,
+    projectionSelectedPathsById: cloneStringArrayRecord(projectionSelectedPathsById),
+    projectionFocusedPathById: cloneNullableStringRecord(projectionFocusedPathById),
+    duplicateSelectionRuleByProjectionId: cloneDuplicateSelectionRuleRecord(duplicateSelectionRuleByProjectionId),
+    preview: createDeleteUndoPreviewSnapshot(preview),
+  }
+}
+
+export function createDeleteUndoBatch({
+  id,
+  createdAt,
+  restoreItems,
+  snapshot,
+}: CreateDeleteUndoBatchParams): DeleteUndoBatch | null {
+  if (!snapshot || !Array.isArray(restoreItems) || restoreItems.length === 0) {
+    return null
+  }
+
+  return {
+    id,
+    createdAt,
+    deletedCount: restoreItems.length,
+    restoreItems,
+    snapshot,
+  }
+}
+
+function cloneFilterState(filter: FilterState): FilterState {
+  return {
+    ...filter,
+    annotationIncludeTagKeys: [...filter.annotationIncludeTagKeys],
+    annotationExcludeTagKeys: [...filter.annotationExcludeTagKeys],
+  }
 }
 
 export function buildRestoredDeleteUndoSnapshot(

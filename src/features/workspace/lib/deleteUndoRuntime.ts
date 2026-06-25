@@ -66,10 +66,6 @@ function toRestoreRecycleResponseFromGlobalTrashRuntime(
   }
 }
 
-export function countDeleteUndoItems(items: DeleteUndoRestoreItem[]): number {
-  return items.length
-}
-
 export async function restoreDeleteUndoItemsThroughRuntime(
   items: DeleteUndoRestoreItem[],
   rootPath: string | null,

@@ -43,8 +43,8 @@ import { useWorkspaceFileSelectionSummary } from '@/features/workspace/hooks/use
 import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspacePathHistory'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { normalizeRootRelativePath as normalizeRelativePath } from '@/features/workspace/lib/projectionTabs'
+import { resolveWorkspacePreviewCapabilityModel } from '@/features/workspace/lib/workspacePreviewCapabilityModel'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
-import { getFilePreviewKind } from '@/lib/filePreview'
 import {
   type DeleteUndoBatch,
   type DeleteUndoPreviewSnapshot,
@@ -52,16 +52,17 @@ import {
   type DeleteUndoSnapshot,
 } from '@/features/workspace/lib/deleteUndo'
 import {
-  countDeleteUndoItems,
   createDeleteUndoId,
   restoreDeleteUndoItemsThroughRuntime,
 } from '@/features/workspace/lib/deleteUndoRuntime'
 import {
   cloneDuplicateSelectionRuleRecord,
-  cloneFileItem,
   cloneNullableStringRecord,
   cloneResultProjection,
   cloneStringArrayRecord,
+  createDeleteUndoBatch,
+  createDeleteUndoPreviewSnapshot,
+  createDeleteUndoSnapshot,
 } from '@/features/workspace/lib/deleteUndoSnapshot'
 import { resolveDeleteUndoRestoreResult } from '@/features/workspace/lib/deleteUndoRestorePlan'
 import { resolveWorkspacePreviewMutationPlan } from '@/features/workspace/lib/previewMutationPlan'
@@ -338,46 +339,38 @@ export function WorkspaceShell({
     showPreviewPane,
     thumbnailSizePreset,
   })
-  const hasActiveVideoPreview = useMemo(() => {
-    const activePreviewFile = previewFile ?? (showPreviewPane ? selectedFile : null)
-    if (!activePreviewFile || activePreviewFile.kind !== 'file') {
-      return false
-    }
-    return getFilePreviewKind(activePreviewFile.name) === 'video'
-  }, [previewFile, selectedFile, showPreviewPane])
-  const activePreviewFileForTagShortcuts = useMemo(
-    () => previewFile ?? (showPreviewPane ? selectedFile : null),
-    [previewFile, selectedFile, showPreviewPane]
-  )
-  const canRunPreviewTagShortcuts = useMemo(() => (
-    activePreviewFileForTagShortcuts?.kind === 'file'
-    && !activePreviewFileForTagShortcuts.path.startsWith('/')
-    && activePreviewFileForTagShortcuts.sourceType !== 'root_trash'
-    && activePreviewFileForTagShortcuts.sourceType !== 'global_recycle'
-    && pluginTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file'))
-  ), [activePreviewFileForTagShortcuts, pluginTools])
-  const canSoftDeleteActivePreview = useMemo(() => (
-    activePreviewFileForTagShortcuts?.kind === 'file'
-    && activePreviewFileForTagShortcuts.sourceType !== 'root_trash'
-    && activePreviewFileForTagShortcuts.sourceType !== 'global_recycle'
-    && pluginTools.some((tool) => tool.name === 'fs.softDelete' && tool.scopes.includes('file'))
-  ), [activePreviewFileForTagShortcuts, pluginTools])
-  const canNavigatePreviewBackward = previewFile ? canNavigateMediaFromModal : canNavigateMediaFromPane
-  const canNavigatePreviewForward = previewFile ? canNavigateMediaFromModal : canNavigateMediaFromPane
+  const {
+    activePreviewFile: activePreviewFileForTagShortcuts,
+    previewNavigationSurface,
+    hasActiveVideoPreview,
+    canRunTagShortcuts: canRunPreviewTagShortcuts,
+    canSoftDelete: canSoftDeleteActivePreview,
+  } = useMemo(() => resolveWorkspacePreviewCapabilityModel({
+    previewFile,
+    selectedFile,
+    showPreviewPane,
+    pluginTools,
+  }), [pluginTools, previewFile, selectedFile, showPreviewPane])
+  const canNavigatePreviewBackward = previewNavigationSurface === 'lightbox'
+    ? canNavigateMediaFromModal
+    : canNavigateMediaFromPane
+  const canNavigatePreviewForward = previewNavigationSurface === 'lightbox'
+    ? canNavigateMediaFromModal
+    : canNavigateMediaFromPane
   const handleNavigatePreviewBackward = useCallback(() => {
-    if (previewFile) {
+    if (previewNavigationSurface === 'lightbox') {
       navigateMediaFromModal('prev')
       return
     }
     navigateMediaFromPane('prev')
-  }, [navigateMediaFromModal, navigateMediaFromPane, previewFile])
+  }, [navigateMediaFromModal, navigateMediaFromPane, previewNavigationSurface])
   const handleNavigatePreviewForward = useCallback(() => {
-    if (previewFile) {
+    if (previewNavigationSurface === 'lightbox') {
       navigateMediaFromModal('next')
       return
     }
     navigateMediaFromPane('next')
-  }, [navigateMediaFromModal, navigateMediaFromPane, previewFile])
+  }, [navigateMediaFromModal, navigateMediaFromPane, previewNavigationSurface])
   const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
     rootId,
     relativePath: activePreviewFileForTagShortcuts?.kind === 'file' ? activePreviewFileForTagShortcuts.path : null,
@@ -402,7 +395,7 @@ export function WorkspaceShell({
     toggleActivePreviewVideoPlayback,
     seekActivePreviewVideo,
   } = useActivePreviewVideoControls({
-    preferredSurface: previewFile ? 'lightbox' : 'panel',
+    preferredSurface: previewNavigationSurface === 'lightbox' ? 'lightbox' : 'panel',
     seekStepSec: videoSeekStepSec,
     playbackRate: videoPlaybackRate,
     enabled: hasActiveVideoPreview,
@@ -500,44 +493,37 @@ export function WorkspaceShell({
     })
   }, [])
 
-  const captureDeleteUndoPreviewSnapshot = useCallback((): DeleteUndoPreviewSnapshot => ({
-    showPreviewPane,
-    selectedFile: cloneFileItem(selectedFile),
-    previewFile: cloneFileItem(previewFile),
-  }), [previewFile, selectedFile, showPreviewPane])
+  const captureDeleteUndoPreviewSnapshot = useCallback((): DeleteUndoPreviewSnapshot => (
+    createDeleteUndoPreviewSnapshot({
+      showPreviewPane,
+      selectedFile,
+      previewFile,
+    })
+  ), [previewFile, selectedFile, showPreviewPane])
 
   const captureDeleteUndoSnapshot = useCallback((): DeleteUndoSnapshot | null => {
-    if (!rootId) {
-      return null
-    }
-
-    return {
-      historyEntry: {
-        rootId,
-        rootName: rootName || '根目录',
-        path: currentPath,
-        visitedAt: Date.now(),
-      },
-      rootPath: getBoundRootPath(rootId),
+    return createDeleteUndoSnapshot({
+      rootId,
+      rootName,
+      rootPath: rootId ? getBoundRootPath(rootId) : null,
       currentPath,
-      filter: cloneFilterState(filter),
+      visitedAt: Date.now(),
+      filter,
       isFlattenView,
-      activeSurface: activeSurface.kind === 'projection'
-        ? { kind: 'projection', tabId: activeSurface.tabId }
-        : { kind: 'directory' },
-      directorySelectedPaths: [...directorySelectedPaths],
+      activeSurface,
+      directorySelectedPaths,
       directoryFocusedPath,
       isResultPanelOpen,
       resultPanelDisplayMode,
       resultPanelHeightPx,
       lastNormalResultPanelHeightPx: lastNormalResultPanelHeightRef.current,
-      projectionTabs: projectionTabs.map((projection) => cloneResultProjection(projection)),
+      projectionTabs,
       activeProjectionTabId,
-      projectionSelectedPathsById: cloneStringArrayRecord(projectionSelectedPathsById),
-      projectionFocusedPathById: cloneNullableStringRecord(projectionFocusedPathById),
-      duplicateSelectionRuleByProjectionId: cloneDuplicateSelectionRuleRecord(duplicateSelectionRuleByProjectionId),
+      projectionSelectedPathsById,
+      projectionFocusedPathById,
+      duplicateSelectionRuleByProjectionId,
       preview: captureDeleteUndoPreviewSnapshot(),
-    }
+    })
   }, [
     activeProjectionTabId,
     activeSurface,
@@ -563,17 +549,12 @@ export function WorkspaceShell({
     restoreItems: DeleteUndoRestoreItem[] | undefined,
     snapshot: DeleteUndoSnapshot | null
   ): DeleteUndoBatch | null => {
-    if (!snapshot || !Array.isArray(restoreItems) || restoreItems.length === 0) {
-      return null
-    }
-
-    return {
+    return createDeleteUndoBatch({
       id: createDeleteUndoId('delete-undo-batch'),
       createdAt: Date.now(),
-      deletedCount: countDeleteUndoItems(restoreItems),
       restoreItems,
       snapshot,
-    }
+    })
   }, [])
 
   const pushDeleteUndoBatch = useCallback((batch: DeleteUndoBatch | null) => {

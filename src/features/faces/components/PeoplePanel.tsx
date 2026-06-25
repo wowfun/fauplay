@@ -22,9 +22,11 @@ import {
 import {
   type CompactPeopleStage,
   resolvePeoplePanelCompactEmptySelectionStage,
+  resolvePeoplePanelFacesLoadPlan,
   resolvePeoplePanelListStage,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPreferredPersonFocus,
+  resolvePeoplePanelRefreshedPeopleSelection,
   resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
   resolvePeoplePanelViewSwitch,
@@ -36,12 +38,11 @@ import { FaceCropImage } from '@/features/faces/components/FaceCropImage'
 import { PeopleList } from '@/features/faces/components/PeopleList'
 import { PeoplePanelHeader } from '@/features/faces/components/PeoplePanelHeader'
 import { PeoplePanelNotice } from '@/features/faces/components/PeoplePanelNotice'
+import { PeoplePanelPersonTools } from '@/features/faces/components/PeoplePanelPersonTools'
 import { PeoplePanelViewTabs } from '@/features/faces/components/PeoplePanelViewTabs'
-import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTargetList'
 import { getPersonDisplayName } from '@/features/faces/utils/personDisplayName'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/Button'
-import { Input } from '@/ui/Input'
 
 interface PeoplePanelProps {
   open: boolean
@@ -150,12 +151,10 @@ export function PeoplePanel({
       })
       if (requestId !== peopleListRequestIdRef.current) return
       setPeople(items)
-      setSelectedPersonId((previous) => {
-        if (previous && items.some((item) => item.personId === previous)) {
-          return previous
-        }
-        return items[0]?.personId ?? null
-      })
+      setSelectedPersonId((previous) => resolvePeoplePanelRefreshedPeopleSelection({
+        previousSelectedPersonId: previous,
+        people: items,
+      }))
     } catch (error) {
       if (requestId !== peopleListRequestIdRef.current) return
       setPeople([])
@@ -173,27 +172,28 @@ export function PeoplePanel({
   const loadCurrentFaces = useCallback(async () => {
     setIsLoadingFaces(true)
     try {
-      if (view === 'people') {
-        if (!selectedPersonId) {
-          setFaces([])
-          return
-        }
+      const plan = resolvePeoplePanelFacesLoadPlan({
+        view,
+        selectedPersonId,
+        readonly,
+        scope,
+      })
+      if (plan.kind === 'empty') {
+        setFaces([])
+        return
+      }
+      if (plan.kind === 'person') {
         setFaces(await listPersonFaces(context, {
-          personId: selectedPersonId,
-          scope,
+          personId: plan.personId,
+          scope: plan.scope,
         }))
         return
       }
 
-      if (readonly) {
-        setFaces([])
-        return
-      }
-
       setFaces(await listReviewFaces(context, {
-        scope,
-        bucket: view === 'ignored' ? 'ignored' : 'unassigned',
-        size: 500,
+        scope: plan.scope,
+        bucket: plan.bucket,
+        size: plan.size,
       }))
     } catch (error) {
       setFaces([])
@@ -610,62 +610,25 @@ export function PeoplePanel({
                     )}
 
                     {!readonly && selectedPerson && (
-                      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-                        <div className="space-y-2">
-                          <div className="text-xs font-medium text-muted-foreground">重命名</div>
-                          <div className="flex flex-col gap-2">
-                            <Input
-                              value={renameDraft}
-                              onChange={(event) => setRenameDraft(event.target.value)}
-                              placeholder="人物名称，可留空"
-                              disabled={isSavingRename}
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              disabled={isSavingRename}
-                              onClick={() => {
-                                void handleSaveRename()
-                              }}
-                            >
-                              保存
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-xs font-medium text-muted-foreground">将当前人物并入</div>
-                          <div className="text-xs text-muted-foreground">
-                            当前人物会被合并到目标人物，当前人物将消失。
-                          </div>
-                          <Input
-                            value={mergeTargetQuery}
-                            onChange={(event) => setMergeTargetQuery(event.target.value)}
-                            placeholder="搜索目标人物"
-                            disabled={isMerging}
-                          />
-                          <PersonMergeTargetList
-                            people={mergeTargetCandidates}
-                            selectedPersonId={mergeTargetPersonId}
-                            scope={scope}
-                            disabled={isMerging}
-                            layout="compact"
-                            onSelectPerson={setMergeTargetPersonId}
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full"
-                            disabled={isMerging || !mergeTargetPersonId}
-                            onClick={() => {
-                              void handleMerge()
-                            }}
-                          >
-                            并入该人物
-                          </Button>
-                        </div>
-                      </div>
+                      <PeoplePanelPersonTools
+                        layout="compact"
+                        scope={scope}
+                        renameDraft={renameDraft}
+                        mergeTargetQuery={mergeTargetQuery}
+                        mergeTargetCandidates={mergeTargetCandidates}
+                        mergeTargetPersonId={mergeTargetPersonId}
+                        isSavingRename={isSavingRename}
+                        isMerging={isMerging}
+                        onRenameDraftChange={setRenameDraft}
+                        onSaveRename={() => {
+                          void handleSaveRename()
+                        }}
+                        onMergeTargetQueryChange={setMergeTargetQuery}
+                        onMergeTargetPersonChange={setMergeTargetPersonId}
+                        onMerge={() => {
+                          void handleMerge()
+                        }}
+                      />
                     )}
 
                     <div className="rounded-xl border border-border bg-card p-4">
@@ -816,62 +779,25 @@ export function PeoplePanel({
                       )}
                     </div>
 
-                    <div className="flex flex-wrap gap-3">
-                      <div className="min-w-[280px] flex-1">
-                        <div className="mb-2 text-xs font-medium text-muted-foreground">重命名</div>
-                        <div className="flex gap-2">
-                          <Input
-                            value={renameDraft}
-                            onChange={(event) => setRenameDraft(event.target.value)}
-                            placeholder="人物名称，可留空"
-                            disabled={isSavingRename}
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isSavingRename}
-                            onClick={() => {
-                              void handleSaveRename()
-                            }}
-                          >
-                            保存
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="min-w-[360px] flex-[1.4] space-y-2">
-                        <div>
-                          <div className="text-xs font-medium text-muted-foreground">将当前人物并入</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            当前人物会被合并到目标人物，当前人物将消失。
-                          </div>
-                        </div>
-                        <Input
-                          value={mergeTargetQuery}
-                          onChange={(event) => setMergeTargetQuery(event.target.value)}
-                          placeholder="搜索目标人物"
-                          disabled={isMerging}
-                        />
-                        <PersonMergeTargetList
-                          people={mergeTargetCandidates}
-                          selectedPersonId={mergeTargetPersonId}
-                          scope={scope}
-                          disabled={isMerging}
-                          layout="wide"
-                          onSelectPerson={setMergeTargetPersonId}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isMerging || !mergeTargetPersonId}
-                          onClick={() => {
-                            void handleMerge()
-                          }}
-                        >
-                          并入该人物
-                        </Button>
-                      </div>
-                    </div>
+                    <PeoplePanelPersonTools
+                      layout="wide"
+                      scope={scope}
+                      renameDraft={renameDraft}
+                      mergeTargetQuery={mergeTargetQuery}
+                      mergeTargetCandidates={mergeTargetCandidates}
+                      mergeTargetPersonId={mergeTargetPersonId}
+                      isSavingRename={isSavingRename}
+                      isMerging={isMerging}
+                      onRenameDraftChange={setRenameDraft}
+                      onSaveRename={() => {
+                        void handleSaveRename()
+                      }}
+                      onMergeTargetQueryChange={setMergeTargetQuery}
+                      onMergeTargetPersonChange={setMergeTargetPersonId}
+                      onMerge={() => {
+                        void handleMerge()
+                      }}
+                    />
                   </div>
                 )}
 

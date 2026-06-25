@@ -46,6 +46,7 @@ import {
   readPreviewLocalDataSetValueResult,
   resolvePreviewBatchRenameToolResult,
 } from '@/features/preview/lib/previewFileEditModel'
+import { resolvePreviewPanelCapabilityModel } from '@/features/preview/lib/previewPanelCapabilityModel'
 
 interface FilePreviewPanelProps {
   file: FileItem | null
@@ -207,86 +208,36 @@ export function FilePreviewPanel({
     shouldUseRuntimeFileContent,
     shouldUseFileSystemAccess,
   } = previewAccessPlan
-  const canUseAnnotationContext = useMemo(() => (
-    Boolean(
-      file
-      && file.kind === 'file'
-      && rootId
-      && canAccessThroughCurrentRoot
-      && file.sourceType !== 'root_trash'
-      && file.sourceType !== 'global_recycle'
-    )
-  ), [canAccessThroughCurrentRoot, file, rootId])
   useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
     getAnnotationDisplayStoreVersion
   )
 
-  const hasBatchRenameTool = useMemo(
-    () => previewActionTools.some((tool) => tool.name === 'fs.batchRename'),
-    [previewActionTools]
-  )
-  const canUseRuntimeRootMove = useMemo(() => (
-    Boolean(
-      file
-      && file.kind === 'file'
-      && rootId
-      && boundRootPath
-      && canAccessThroughCurrentRoot
-      && !shouldUseFileAccess
-      && file.sourceType !== 'root_trash'
-      && file.sourceType !== 'global_recycle'
-    )
-  ), [boundRootPath, canAccessThroughCurrentRoot, file, rootId, shouldUseFileAccess])
-  const hasVisionFaceTool = useMemo(
-    () => (
-      canUseAnnotationContext
-      && previewActionTools.some((tool) => tool.name === 'vision.face' && tool.scopes.includes('file'))
-    ),
-    [canUseAnnotationContext, previewActionTools]
-  )
-  const hasLocalDataTool = useMemo(
-    () => (
-      canUseAnnotationContext
-      && previewActionTools.some((tool) => tool.name === 'local.data' && tool.scopes.includes('file'))
-    ),
-    [canUseAnnotationContext, previewActionTools]
-  )
-
-  const renameUnavailableReason = useMemo(() => {
-    if (!file || file.kind !== 'file') {
-      return '当前项不可重命名'
-    }
-    if (!rootId || (!rootHandle && !canUseRuntimeRootMove)) {
-      return '工具上下文不完整'
-    }
-    if (!canAccessThroughCurrentRoot || file.sourceType === 'root_trash' || file.sourceType === 'global_recycle') {
-      return '当前结果项不支持重命名'
-    }
-    if (!canUseRuntimeRootMove && !hasBatchRenameTool) {
-      return '重命名能力不可用（Runtime 未连接且未注册 fs.batchRename）'
-    }
-    return null
-  }, [canAccessThroughCurrentRoot, canUseRuntimeRootMove, file, hasBatchRenameTool, rootHandle, rootId])
-
-  const canRenameFileName = renameUnavailableReason === null
-  const annotationTagManageUnavailableReason = useMemo(() => {
-    if (!file || file.kind !== 'file') {
-      return '当前项不可管理标签'
-    }
-    if (!rootHandle || !rootId) {
-      return '工具上下文不完整'
-    }
-    if (!canUseAnnotationContext) {
-      return '当前结果项不支持标签管理'
-    }
-    if (!hasLocalDataTool) {
-      return '标签管理能力不可用（网关离线或未注册 local.data）'
-    }
-    return null
-  }, [canUseAnnotationContext, file, hasLocalDataTool, rootHandle, rootId])
-  const canManageAnnotationTags = annotationTagManageUnavailableReason === null
+  const {
+    canUseAnnotationContext,
+    hasVisionFaceTool,
+    renameUnavailableReason,
+    canRenameFileName,
+    annotationTagManageUnavailableReason,
+    canManageAnnotationTags,
+  } = useMemo(() => resolvePreviewPanelCapabilityModel({
+    file,
+    rootId,
+    rootHandleAvailable: Boolean(rootHandle),
+    boundRootPath,
+    canAccessThroughCurrentRoot,
+    shouldUseFileAccess,
+    previewActionTools,
+  }), [
+    boundRootPath,
+    canAccessThroughCurrentRoot,
+    file,
+    previewActionTools,
+    rootHandle,
+    rootId,
+    shouldUseFileAccess,
+  ])
   const displayRenameUnavailableReason = showUnavailableReasons ? renameUnavailableReason : null
   const displayAnnotationTagManageUnavailableReason = showUnavailableReasons
     ? annotationTagManageUnavailableReason
