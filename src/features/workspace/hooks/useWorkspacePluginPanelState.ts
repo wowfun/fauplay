@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 import {
   clampToolPanelWidthPx,
@@ -14,6 +14,25 @@ const PREVIEW_TOOL_PANEL_COLLAPSED_STORAGE_KEY = 'fauplay:preview-tool-panel-col
 const WORKSPACE_TOOL_PANEL_WIDTH_STORAGE_KEY = 'fauplay:workspace-tool-panel-width'
 const PREVIEW_TOOL_PANEL_WIDTH_STORAGE_KEY = 'fauplay:preview-tool-panel-width'
 const SAME_DURATION_SCOPE_STORAGE_KEY = 'fauplay:media-search-same-duration-scope'
+
+export interface WorkspacePluginPanelState {
+  previewPluginResultQueueState: PluginResultQueueState
+  setPreviewPluginResultQueueState: Dispatch<SetStateAction<PluginResultQueueState>>
+  previewPluginWorkbenchState: PluginWorkbenchState
+  setPreviewPluginWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
+  workspacePluginResultQueueState: PluginResultQueueState
+  setWorkspacePluginResultQueueState: Dispatch<SetStateAction<PluginResultQueueState>>
+  workspacePluginWorkbenchState: PluginWorkbenchState
+  setWorkspacePluginWorkbenchState: Dispatch<SetStateAction<PluginWorkbenchState>>
+  workspaceToolPanelCollapsed: boolean
+  toggleWorkspaceToolPanelCollapsed: () => void
+  workspaceToolPanelWidthPx: number
+  updateWorkspaceToolPanelWidth: (nextWidthPx: number) => void
+  previewToolPanelCollapsed: boolean
+  togglePreviewToolPanelCollapsed: () => void
+  previewToolPanelWidthPx: number
+  updatePreviewToolPanelWidth: (nextWidthPx: number) => void
+}
 
 function readPersistedBoolean(key: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') return defaultValue
@@ -86,7 +105,7 @@ function writePersistedSameDurationScope(value: SameDurationScope): void {
   }
 }
 
-export function useWorkspacePluginPanelState() {
+export function useWorkspacePluginPanelState(): WorkspacePluginPanelState {
   const [previewPluginResultQueueState, setPreviewPluginResultQueueState] = useState<PluginResultQueueState>(
     createEmptyPluginResultQueueState,
   )
