@@ -1,31 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
-import { usePreviewTraversal } from '@/features/preview/hooks/usePreviewTraversal'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
-import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
 import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWorkspaceShell'
 import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
 import { useInputMode } from '@/features/workspace/hooks/useInputMode'
-import { useActivePreviewVideoControls } from '@/features/workspace/hooks/useActivePreviewVideoControls'
 import { useViewportMode } from '@/features/workspace/hooks/useViewportMode'
 import {
   preloadWorkspaceAnnotationFilterSnapshots,
   useWorkspaceAnnotationFilterOptions,
 } from '@/features/workspace/hooks/useWorkspaceAnnotationFilterOptions'
-import { useWorkspaceBrowserHistory } from '@/features/workspace/hooks/useWorkspaceBrowserHistory'
 import { useWorkspaceKeyboardShortcuts } from '@/features/workspace/hooks/useWorkspaceKeyboardShortcuts'
-import { useWorkspacePreviewPaneWidth } from '@/features/workspace/hooks/useWorkspacePreviewPaneWidth'
 import {
   type WorkspaceProjectionInteraction,
   useWorkspaceProjectionState,
 } from '@/features/workspace/hooks/useWorkspaceProjectionState'
 import { useWorkspaceResultPanelState } from '@/features/workspace/hooks/useWorkspaceResultPanelState'
 import { useWorkspaceSelectionFocusSync } from '@/features/workspace/hooks/useWorkspaceSelectionFocusSync'
-import {
-  preloadWorkspacePreviewModulesSoon,
-  useWorkspacePreviewOpenActions,
-} from '@/features/workspace/hooks/useWorkspacePreviewOpenActions'
+import { useWorkspacePreviewController } from '@/features/workspace/hooks/useWorkspacePreviewController'
 import { useWorkspacePeoplePanel } from '@/features/workspace/hooks/useWorkspacePeoplePanel'
 import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useWorkspacePresentationProfile'
 import { useWorkspacePluginTools } from '@/features/workspace/hooks/useWorkspacePluginTools'
@@ -39,7 +31,6 @@ import {
 import { useWorkspaceFileSelectionSummary } from '@/features/workspace/hooks/useWorkspaceFileSelectionSummary'
 import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspacePathHistory'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import { resolveWorkspacePreviewCapabilityModel } from '@/features/workspace/lib/workspacePreviewCapabilityModel'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import {
   runWorkspaceMutationCommitEffects,
@@ -278,7 +269,6 @@ export function WorkspaceShell({
     playbackOrder,
     hasOpenPreview,
     hasActiveMediaPreview,
-    showFileInPane,
     openFileInModal,
     closePreviewModal,
     closePreviewPane,
@@ -292,98 +282,42 @@ export function WorkspaceShell({
     toggleFaceBboxVisible,
     navigateMediaFromPane,
     navigateMediaFromModal,
-    canNavigateMediaFromPane,
-    canNavigateMediaFromModal,
     handleAutoPlayVideoEnded,
     handleAutoPlayVideoPlaybackError,
     alignPreviewToPath,
-  } = usePreviewTraversal({ filteredFiles: activeSurfaceFiles })
-  const {
     contentRef,
     paneWidthRatio,
     handlePreviewPaneResizeStart,
-  } = useWorkspacePreviewPaneWidth({
-    showPreviewPane,
-    thumbnailSizePreset,
-  })
-  const {
-    activePreviewFile: activePreviewFileForTagShortcuts,
-    previewNavigationSurface,
+    activePreviewFileForTagShortcuts,
     hasActiveVideoPreview,
-    canRunTagShortcuts: canRunPreviewTagShortcuts,
-    canSoftDelete: canSoftDeleteActivePreview,
-  } = useMemo(() => resolveWorkspacePreviewCapabilityModel({
-    previewFile,
-    selectedFile,
-    showPreviewPane,
-    pluginTools,
-  }), [pluginTools, previewFile, selectedFile, showPreviewPane])
-  const canNavigatePreviewBackward = previewNavigationSurface === 'lightbox'
-    ? canNavigateMediaFromModal
-    : canNavigateMediaFromPane
-  const canNavigatePreviewForward = previewNavigationSurface === 'lightbox'
-    ? canNavigateMediaFromModal
-    : canNavigateMediaFromPane
-  const handleNavigatePreviewBackward = useCallback(() => {
-    if (previewNavigationSurface === 'lightbox') {
-      navigateMediaFromModal('prev')
-      return
-    }
-    navigateMediaFromPane('prev')
-  }, [navigateMediaFromModal, navigateMediaFromPane, previewNavigationSurface])
-  const handleNavigatePreviewForward = useCallback(() => {
-    if (previewNavigationSurface === 'lightbox') {
-      navigateMediaFromModal('next')
-      return
-    }
-    navigateMediaFromPane('next')
-  }, [navigateMediaFromModal, navigateMediaFromPane, previewNavigationSurface])
-  const { getMatchingPreviewTagShortcut } = useResolvedPreviewTagShortcuts({
-    rootId,
-    relativePath: activePreviewFileForTagShortcuts?.kind === 'file' ? activePreviewFileForTagShortcuts.path : null,
-    enabled: canRunPreviewTagShortcuts,
-  })
-  const {
+    canRunPreviewTagShortcuts,
+    canSoftDeleteActivePreview,
+    canNavigatePreviewBackward,
+    canNavigatePreviewForward,
+    handleNavigatePreviewBackward,
+    handleNavigatePreviewForward,
+    getMatchingPreviewTagShortcut,
     toggleActivePreviewVideoPlayback,
     seekActivePreviewVideo,
-  } = useActivePreviewVideoControls({
-    preferredSurface: previewNavigationSurface === 'lightbox' ? 'lightbox' : 'panel',
-    seekStepSec: videoSeekStepSec,
-    playbackRate: videoPlaybackRate,
-    enabled: hasActiveVideoPreview,
-  })
-
-  const {
     openFileInPrimaryTarget,
     openFileInSecondaryTarget,
     openFileInPaneOrFullscreenFallback,
-  } = useWorkspacePreviewOpenActions({
+  } = useWorkspacePreviewController({
+    accessProvider,
+    rootId,
+    currentPath,
+    filteredFiles,
+    activeSurfaceFiles,
+    thumbnailSizePreset,
+    pluginTools,
     presentationProfile,
-    closePreviewPane,
-    openFileInModal,
-    showFileInPane,
+    navigateToPath,
   })
   projectionInteractionRef.current = {
     openFileInPrimaryTarget,
     openFileInSecondaryTarget,
     alignPreviewToPath,
   }
-
-  useWorkspaceBrowserHistory({
-    accessProvider,
-    rootId,
-    currentPath,
-    supportsPersistentPreviewPane: presentationProfile.supportsPersistentPreviewPane,
-    filteredFiles,
-    selectedFile,
-    previewFile,
-    showPreviewPane,
-    navigateToPath,
-    closePreviewModal,
-    closePreviewPane,
-    openFileInModal,
-    openFileInPaneOrFullscreenFallback,
-  })
 
   const {
     handleDirectoryClick,
@@ -596,10 +530,6 @@ export function WorkspaceShell({
       }
     })
   }, [isAnnotationFilterGateResolved, isReviewFilterGateResolved, setFilter, showAnnotationFilterControls])
-
-  useEffect(() => {
-    return preloadWorkspacePreviewModulesSoon()
-  }, [])
 
   useWorkspaceSelectionFocusSync({
     selectedFile,

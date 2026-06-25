@@ -1,44 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
-import {
-  listPeople,
-  listPersonFaces,
-  listReviewFaces,
-} from '@/features/faces/api'
-import {
-  type NoticeTone,
-  type PanelView,
-} from '@/features/faces/lib/peoplePanelText'
+import type { NoticeTone } from '@/features/faces/lib/peoplePanelText'
+import { usePeoplePanelDataController } from '@/features/faces/hooks/usePeoplePanelDataController'
 import { usePeoplePanelFaceMutationController } from '@/features/faces/hooks/usePeoplePanelFaceMutationController'
 import { usePeoplePanelPersonEditController } from '@/features/faces/hooks/usePeoplePanelPersonEditController'
 import { usePeoplePanelSourceActions } from '@/features/faces/hooks/usePeoplePanelSourceActions'
+import { usePeoplePanelViewController } from '@/features/faces/hooks/usePeoplePanelViewController'
 import {
-  type CompactPeopleStage,
-  resolvePeoplePanelCompactEmptySelectionStage,
-  resolvePeoplePanelFaceSelectionScopeCommit,
-  resolvePeoplePanelListStage,
   resolvePeoplePanelPanelState,
   resolvePeoplePanelPersonEditDraftCommit,
-  resolvePeoplePanelPersonSelection,
-  resolvePeoplePanelPreferredPersonFocus,
-  resolvePeoplePanelPeopleListRefreshPlan,
   resolvePeoplePanelRenderPlan,
-  resolvePeoplePanelReadonlyMode,
   resolvePeoplePanelSelectionModel,
-  resolvePeoplePanelViewSwitch,
 } from '@/features/faces/lib/peoplePanelModel'
-import {
-  loadPeoplePanelFaces,
-  resolvePeoplePanelFacesLoadCommit,
-  type PeoplePanelFacesLoaders,
-} from '@/features/faces/lib/peoplePanelFacesLoad'
-import {
-  loadPeoplePanelAllPeople,
-  loadPeoplePanelPeopleList,
-  resolvePeoplePanelAllPeopleLoadCommit,
-  resolvePeoplePanelPeopleListLoadCommit,
-} from '@/features/faces/lib/peoplePanelPeopleLoad'
-import type { FaceRecord, PersonScope, PersonSummary } from '@/features/faces/types'
+import type { FaceRecord } from '@/features/faces/types'
 import { PeopleList } from '@/features/faces/components/PeopleList'
 import { PeoplePanelFaceSection } from '@/features/faces/components/PeoplePanelFaceSection'
 import { PeoplePanelHeader } from '@/features/faces/components/PeoplePanelHeader'
@@ -61,11 +35,6 @@ interface PeoplePanelProps {
   onProjectFaceSources?: (faces: FaceRecord[]) => boolean | Promise<boolean>
 }
 
-const peoplePanelFacesLoaders = {
-  listPersonFaces,
-  listReviewFaces,
-} satisfies PeoplePanelFacesLoaders
-
 export function PeoplePanel({
   open,
   rootHandle,
@@ -77,28 +46,57 @@ export function PeoplePanel({
   onOpenFaceSource,
   onProjectFaceSources,
 }: PeoplePanelProps) {
-  const peopleListRequestIdRef = useRef(0)
   const context = useMemo(() => ({
     rootHandle,
     rootId,
   }), [rootHandle, rootId])
-  const [scope, setScope] = useState<PersonScope>(readonly ? 'root' : 'global')
-  const [view, setView] = useState<PanelView>('people')
-  const [allPeople, setAllPeople] = useState<PersonSummary[]>([])
-  const [people, setPeople] = useState<PersonSummary[]>([])
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null)
-  const [faces, setFaces] = useState<FaceRecord[]>([])
-  const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set())
   const [peopleQuery, setPeopleQuery] = useState('')
   const [renameDraft, setRenameDraft] = useState('')
   const [mergeTargetQuery, setMergeTargetQuery] = useState('')
   const [mergeTargetPersonId, setMergeTargetPersonId] = useState('')
-  const [isLoadingPeople, setIsLoadingPeople] = useState(false)
-  const [isLoadingFaces, setIsLoadingFaces] = useState(false)
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null)
-  const [compactPeopleStage, setCompactPeopleStage] = useState<CompactPeopleStage>('list')
-  const previousFaceSelectionScopeKeyRef = useRef<string | null>(null)
   const isCompact = layoutMode === 'compact'
+  const {
+    scope,
+    setScope,
+    view,
+    selectedPersonId,
+    setSelectedPersonId,
+    selectedFaceIds,
+    compactPeopleStage,
+    clearSelection,
+    handleFaceSelectionChange,
+    handleSelectPerson,
+    handleShowPeopleList,
+    handleSwitchView,
+  } = usePeoplePanelViewController({
+    open,
+    readonly,
+    preferredPersonId,
+    isCompact,
+  })
+  const {
+    allPeople,
+    people,
+    faces,
+    isLoadingPeople,
+    isLoadingFaces,
+    setFaces,
+    setIsLoadingFaces,
+    loadAllPeople,
+    loadPeopleList,
+    refreshAll,
+  } = usePeoplePanelDataController({
+    context,
+    open,
+    scope,
+    view,
+    peopleQuery,
+    selectedPersonId,
+    readonly,
+    setSelectedPersonId,
+    setNotice,
+  })
   const {
     selectedPerson,
     selectedFaces,
@@ -106,7 +104,6 @@ export function PeoplePanel({
     selectedIds,
     assignmentExcludedPersonIds,
     assignmentInputKey,
-    faceSelectionScopeKey,
   } = useMemo(() => resolvePeoplePanelSelectionModel({
     people,
     allPeople,
@@ -134,10 +131,6 @@ export function PeoplePanel({
     readonly,
   }), [compactPeopleStage, isCompact, readonly, selectedPerson, view])
 
-  const clearSelection = useCallback(() => {
-    setSelectedFaceIds(new Set())
-  }, [])
-
   const {
     isProjectingSources,
     openFaceSource,
@@ -148,76 +141,6 @@ export function PeoplePanel({
     onProjectFaceSources,
     setNotice,
   })
-
-  const loadAllPeople = useCallback(async () => {
-    const result = await loadPeoplePanelAllPeople({
-      context,
-      scope,
-      listPeople,
-    })
-    const commit = resolvePeoplePanelAllPeopleLoadCommit(result)
-    if (commit.allPeople) {
-      setAllPeople(commit.allPeople)
-    }
-    if (commit.notice) {
-      setNotice(commit.notice)
-    }
-  }, [context, scope])
-
-  const loadPeopleList = useCallback(async (query = '') => {
-    const requestId = ++peopleListRequestIdRef.current
-    setIsLoadingPeople(true)
-    const result = await loadPeoplePanelPeopleList({
-      context,
-      scope,
-      query,
-      listPeople,
-    })
-    if (requestId !== peopleListRequestIdRef.current) return
-
-    const commit = resolvePeoplePanelPeopleListLoadCommit(result, {
-      previousSelectedPersonId: null,
-    })
-    setPeople(commit.people)
-    if (commit.notice) {
-      setNotice(commit.notice)
-    }
-    setSelectedPersonId((previous) => {
-      const selectionCommit = resolvePeoplePanelPeopleListLoadCommit(result, {
-        previousSelectedPersonId: previous,
-      })
-      return selectionCommit.nextSelectedPersonId === undefined
-        ? previous
-        : selectionCommit.nextSelectedPersonId
-    })
-    setIsLoadingPeople(false)
-  }, [context, scope])
-
-  const loadCurrentFaces = useCallback(async () => {
-    setIsLoadingFaces(true)
-    const result = await loadPeoplePanelFaces({
-      context,
-      view,
-      selectedPersonId,
-      readonly,
-      scope,
-      loaders: peoplePanelFacesLoaders,
-    })
-    const commit = resolvePeoplePanelFacesLoadCommit(result)
-    setFaces(commit.faces)
-    if (commit.notice) {
-      setNotice(commit.notice)
-    }
-    setIsLoadingFaces(false)
-  }, [context, readonly, scope, selectedPersonId, view])
-
-  const refreshAll = useCallback(async () => {
-    await Promise.allSettled([
-      loadAllPeople(),
-      loadPeopleList(peopleQuery),
-      loadCurrentFaces(),
-    ])
-  }, [loadAllPeople, loadCurrentFaces, loadPeopleList, peopleQuery])
 
   const {
     isSavingRename,
@@ -264,51 +187,6 @@ export function PeoplePanel({
   }, [open])
 
   useEffect(() => {
-    const readonlyMode = resolvePeoplePanelReadonlyMode(readonly)
-    if (!readonlyMode) return
-    setScope(readonlyMode.scope)
-    setView(readonlyMode.view)
-  }, [readonly])
-
-  useEffect(() => {
-    const plan = resolvePeoplePanelPeopleListRefreshPlan({
-      open,
-      view,
-      query: peopleQuery,
-    })
-    if (!plan) return
-    const timeoutId = window.setTimeout(() => {
-      void loadPeopleList(peopleQuery)
-    }, plan.delayMs)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [loadPeopleList, open, peopleQuery, view])
-
-  useEffect(() => {
-    if (!open) return
-    void loadAllPeople()
-  }, [loadAllPeople, open])
-
-  useEffect(() => {
-    if (!open) return
-    void loadCurrentFaces()
-  }, [loadCurrentFaces, open])
-
-  useEffect(() => {
-    const commit = resolvePeoplePanelFaceSelectionScopeCommit({
-      open,
-      previousScopeKey: previousFaceSelectionScopeKeyRef.current,
-      nextScopeKey: faceSelectionScopeKey,
-    })
-    previousFaceSelectionScopeKeyRef.current = commit.nextPreviousScopeKey
-    if (commit.shouldClearSelection) {
-      clearSelection()
-    }
-  }, [clearSelection, faceSelectionScopeKey, open])
-
-  useEffect(() => {
     const commit = resolvePeoplePanelPersonEditDraftCommit({
       selectedPersonName: selectedPerson?.name,
     })
@@ -316,30 +194,6 @@ export function PeoplePanel({
     setMergeTargetPersonId(commit.mergeTargetPersonId)
     setMergeTargetQuery(commit.mergeTargetQuery)
   }, [selectedPerson?.name, selectedPersonId])
-
-  useEffect(() => {
-    const focus = resolvePeoplePanelPreferredPersonFocus({
-      open,
-      preferredPersonId,
-      isCompact,
-    })
-    if (!focus) return
-    setView(focus.view)
-    if (focus.shouldClearSelection) clearSelection()
-    setSelectedPersonId(focus.selectedPersonId)
-    if (focus.compactPeopleStage) setCompactPeopleStage(focus.compactPeopleStage)
-  }, [clearSelection, isCompact, open, preferredPersonId])
-
-  useEffect(() => {
-    const nextStage = resolvePeoplePanelCompactEmptySelectionStage({
-      isCompact,
-      open,
-      view,
-      selectedPersonId,
-    })
-    if (!nextStage) return
-    setCompactPeopleStage(nextStage)
-  }, [isCompact, open, selectedPersonId, view])
 
   useEffect(() => {
     if (!open) return undefined
@@ -353,29 +207,6 @@ export function PeoplePanel({
       window.removeEventListener('keydown', handleEscape)
     }
   }, [onClose, open])
-
-  const handleFaceSelectionChange = useCallback((faceIds: string[]) => {
-    setSelectedFaceIds(new Set(faceIds))
-  }, [])
-
-  const handleSelectPerson = useCallback((personId: string) => {
-    const selection = resolvePeoplePanelPersonSelection(personId, isCompact)
-    setSelectedPersonId(selection.selectedPersonId)
-    if (selection.compactPeopleStage) setCompactPeopleStage(selection.compactPeopleStage)
-  }, [isCompact])
-
-  const handleShowPeopleList = useCallback(() => {
-    const nextStage = resolvePeoplePanelListStage(isCompact)
-    if (!nextStage) return
-    setCompactPeopleStage(nextStage)
-  }, [isCompact])
-
-  const handleSwitchView = useCallback((nextView: PanelView) => {
-    const transition = resolvePeoplePanelViewSwitch(nextView, isCompact)
-    setView(transition.view)
-    if (transition.shouldClearSelection) clearSelection()
-    if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
-  }, [clearSelection, isCompact])
 
   const {
     faceSectionState,
