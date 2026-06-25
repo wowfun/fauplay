@@ -4,30 +4,42 @@ import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import { ensureRootPath } from '@/lib/reveal'
 import { callRuntimeHttp } from '@/lib/runtimeApi'
 import {
-  applyAnnotationPathState,
-  buildOptimisticAnnotationTagBinding,
-  buildOptimisticAnnotationTagUnbinding,
-  deriveAnnotationDisplaySnapshotFields,
+  buildAnnotationFileTagsRequest,
+  buildAnnotationTagQueryRequest,
+  buildGlobalAnnotationTagOptionsRequest,
+  createAnnotationTagQueryPageProgress,
+  resolveAnnotationRequestTarget,
+  resolveNextAnnotationTagQueryPageProgress,
+  type AnnotationHttpRequest,
+  type AnnotationRequestTarget,
+} from '@/features/preview/lib/annotationRequestPlanModel'
+import {
+  cloneGlobalAnnotationTagOptions,
+  createGlobalAnnotationTagOptionsState,
+  reduceGlobalAnnotationTagOptions,
+  type GlobalAnnotationTagOptionsSnapshot,
+  type GlobalAnnotationTagOptionsStatus,
+} from '@/features/preview/lib/annotationGlobalTagOptionsModel'
+import {
+  createAnnotationDisplaySnapshotState,
+  reduceAnnotationDisplaySnapshot,
   resolveAnnotationFilterUiGate,
+  type AnnotationDisplayPathRollbackState,
+  type AnnotationDisplaySnapshotAction,
+  type AnnotationDisplaySnapshotState,
   type AnnotationFilterUiGateReason,
   type AnnotationFilterUiGateState,
 } from '@/features/preview/lib/annotationDisplaySnapshotModel'
 import {
-  META_ANNOTATION_SOURCE,
-  buildAnnotationPathSnapshotFromTagViews as buildPathSnapshotFromTagViews,
-  buildAnnotationPathStateFromTags as buildPathStateFromTags,
-  buildGlobalAnnotationTagOptions as buildGlobalTagOptions,
   buildLogicalAnnotationTags as buildLogicalTags,
   getAnnotationFilterTagIdentity as parseAnnotationFilterTagKey,
   normalizeAnnotationRelativePath as normalizeRelativePath,
-  readAnnotationTagOptionsFromResult as readTagOptionsFromResult,
   readAnnotationTagViewsFromResult as readTagViewsFromResult,
 } from '@/features/preview/lib/annotationTagModel'
 import type {
   AnnotationGatewayFileTagView,
   AnnotationGatewayTagOptionRecord,
   AnnotationLogicalTag,
-  StoredAnnotationTagRecord,
 } from '@/features/preview/lib/annotationTagModel'
 
 export type { AnnotationLogicalTag } from '@/features/preview/lib/annotationTagModel'
@@ -35,28 +47,12 @@ export { toAnnotationFilterTagKey } from '@/features/preview/lib/annotationTagMo
 
 const TAG_QUERY_PAGE_SIZE = 1000
 
-type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
-type GlobalTagOptionsStatus = 'idle' | 'loading' | 'ready'
-
-interface RootAnnotationDisplaySnapshot {
-  status: RootSnapshotStatus
-  rawTagsByPath: Record<string, StoredAnnotationTagRecord[]>
-  byPathUpdatedAt: Record<string, number>
-  tagKeysByPath: Record<string, string[]>
-  tagOptions: AnnotationFilterTagOption[]
-  hasSidecarDir: boolean
-  hasSidecarFile: boolean
-  hasAnyFilterableAnnotation: boolean
+interface RootAnnotationDisplaySnapshot extends AnnotationDisplaySnapshotState {
   inflight: Promise<void> | null
-  loadedAtMs: number | null
 }
 
-interface GlobalAnnotationTagOptionsSnapshot {
-  status: GlobalTagOptionsStatus
-  options: AnnotationFilterTagOption[]
-  error: string | null
+interface GlobalAnnotationTagOptionsStoreSnapshot extends GlobalAnnotationTagOptionsSnapshot {
   inflight: Promise<void> | null
-  loadedAtMs: number | null
 }
 
 interface PreloadAnnotationDisplaySnapshotParams {
@@ -95,7 +91,7 @@ interface PatchAnnotationTagBindingParams {
 type PatchRollback = (() => void) | null
 
 export interface GlobalAnnotationTagOptionsState {
-  status: GlobalTagOptionsStatus
+  status: GlobalAnnotationTagOptionsStatus
   error: string | null
 }
 
@@ -116,12 +112,9 @@ interface GatewayTagOptionsResult {
 const rootSnapshots = new Map<string, RootAnnotationDisplaySnapshot>()
 const fileInflightLoads = new Map<string, Promise<void>>()
 const listeners = new Set<() => void>()
-const globalTagOptionsSnapshot: GlobalAnnotationTagOptionsSnapshot = {
-  status: 'idle',
-  options: [],
-  error: null,
+const globalTagOptionsSnapshot: GlobalAnnotationTagOptionsStoreSnapshot = {
+  ...createGlobalAnnotationTagOptionsState(),
   inflight: null,
-  loadedAtMs: null,
 }
 let storeVersion = 0
 
@@ -129,39 +122,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function applyDerivedSnapshotFields(snapshot: RootAnnotationDisplaySnapshot) {
-  const derivedFields = deriveAnnotationDisplaySnapshotFields(snapshot.rawTagsByPath)
-  snapshot.tagKeysByPath = derivedFields.tagKeysByPath
-  snapshot.tagOptions = derivedFields.tagOptions
-  snapshot.hasAnyFilterableAnnotation = derivedFields.hasAnyFilterableAnnotation
-}
-
 function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
   const existing = rootSnapshots.get(rootId)
   if (existing) return existing
 
   const next: RootAnnotationDisplaySnapshot = {
-    status: 'idle',
-    rawTagsByPath: {},
-    byPathUpdatedAt: {},
-    tagKeysByPath: {},
-    tagOptions: [],
-    hasSidecarDir: false,
-    hasSidecarFile: false,
-    hasAnyFilterableAnnotation: false,
+    ...createAnnotationDisplaySnapshotState(),
     inflight: null,
-    loadedAtMs: null,
   }
   rootSnapshots.set(rootId, next)
   return next
-}
-
-function resetSnapshot(snapshot: RootAnnotationDisplaySnapshot) {
-  snapshot.rawTagsByPath = {}
-  snapshot.byPathUpdatedAt = {}
-  snapshot.tagKeysByPath = {}
-  snapshot.tagOptions = []
-  snapshot.hasAnyFilterableAnnotation = false
 }
 
 function emitStoreUpdate() {
@@ -171,24 +141,55 @@ function emitStoreUpdate() {
   }
 }
 
-interface ResolvedAnnotationTarget {
-  remoteRootId: string | null
-  rootPath: string | null
+function assignRootSnapshotState(
+  snapshot: RootAnnotationDisplaySnapshot,
+  state: AnnotationDisplaySnapshotState,
+) {
+  snapshot.status = state.status
+  snapshot.rawTagsByPath = state.rawTagsByPath
+  snapshot.byPathUpdatedAt = state.byPathUpdatedAt
+  snapshot.tagKeysByPath = state.tagKeysByPath
+  snapshot.tagOptions = state.tagOptions
+  snapshot.hasSidecarDir = state.hasSidecarDir
+  snapshot.hasSidecarFile = state.hasSidecarFile
+  snapshot.hasAnyFilterableAnnotation = state.hasAnyFilterableAnnotation
+  snapshot.loadedAtMs = state.loadedAtMs
+}
+
+function applyRootSnapshotAction(
+  snapshot: RootAnnotationDisplaySnapshot,
+  action: AnnotationDisplaySnapshotAction,
+) {
+  const reduction = reduceAnnotationDisplaySnapshot(snapshot, action)
+  assignRootSnapshotState(snapshot, reduction.snapshot)
+  return reduction
+}
+
+function assignGlobalTagOptionsState(
+  snapshot: GlobalAnnotationTagOptionsStoreSnapshot,
+  state: GlobalAnnotationTagOptionsSnapshot,
+) {
+  snapshot.status = state.status
+  snapshot.options = state.options
+  snapshot.error = state.error
+  snapshot.loadedAtMs = state.loadedAtMs
 }
 
 function resolveAnnotationTarget(
   rootId: string,
   rootHandle: FileSystemDirectoryHandle | null,
   rootLabel?: string | null
-): ResolvedAnnotationTarget {
-  if (isRemoteReadonlyProviderActive()) {
-    const remoteWorkspace = getActiveRemoteWorkspace()
-    if (remoteWorkspace?.uiRootId === rootId) {
-      return {
-        remoteRootId: remoteWorkspace.configRootId,
-        rootPath: null,
-      }
-    }
+): AnnotationRequestTarget {
+  const remoteReadonlyActive = isRemoteReadonlyProviderActive()
+  const activeRemoteWorkspace = getActiveRemoteWorkspace()
+  const remoteTarget = resolveAnnotationRequestTarget({
+    rootId,
+    rootPath: null,
+    remoteReadonlyActive,
+    activeRemoteWorkspace,
+  })
+  if (remoteTarget.kind === 'remote') {
+    return remoteTarget
   }
 
   const resolvedRootPath = ensureRootPath({
@@ -197,116 +198,64 @@ function resolveAnnotationTarget(
     promptIfMissing: false,
   })
 
-  return {
-    remoteRootId: null,
+  return resolveAnnotationRequestTarget({
+    rootId,
     rootPath: resolvedRootPath,
-  }
+    remoteReadonlyActive: false,
+    activeRemoteWorkspace: null,
+  })
 }
 
-async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<AnnotationGatewayFileTagView[]> {
-  let page = 1
-  let total = Number.POSITIVE_INFINITY
+function callAnnotationHttp<T>(request: AnnotationHttpRequest): Promise<T> {
+  return request.transport === 'remote'
+    ? callRemoteAccessHttp<T>(request.path, request.body)
+    : callRuntimeHttp<T>(request.path, request.body)
+}
+
+async function loadAllTagViews(target: AnnotationRequestTarget): Promise<AnnotationGatewayFileTagView[]> {
+  let progress = createAnnotationTagQueryPageProgress()
   const items: AnnotationGatewayFileTagView[] = []
 
-  while (items.length < total) {
-    const result = target.remoteRootId
-      ? await callRemoteAccessHttp<GatewayTagQueryResult>('/v1/remote/tags/query', {
-        rootId: target.remoteRootId,
-        page,
-        size: TAG_QUERY_PAGE_SIZE,
-        includeTagKeys: [],
-        excludeTagKeys: [],
-        includeMatchMode: 'or',
-      })
-      : await callRuntimeHttp<GatewayTagQueryResult>('/v1/data/tags/query', {
-        rootPath: target.rootPath,
-        page,
-        size: TAG_QUERY_PAGE_SIZE,
-        includeTagKeys: [],
-        excludeTagKeys: [],
-        includeMatchMode: 'or',
-      })
+  while (progress.shouldContinue) {
+    const request = buildAnnotationTagQueryRequest({
+      target,
+      page: progress.page,
+      pageSize: TAG_QUERY_PAGE_SIZE,
+    })
+    if (!request) return items
+
+    const result = await callAnnotationHttp<GatewayTagQueryResult>(request)
 
     const batch = readTagViewsFromResult(result)
     items.push(...batch)
 
-    const nextTotal = Number(result.total)
-    total = Number.isFinite(nextTotal) && nextTotal >= 0 ? nextTotal : items.length
-
-    if (batch.length < TAG_QUERY_PAGE_SIZE) {
-      break
-    }
-
-    page += 1
-    if (page > 10000) {
-      break
-    }
+    progress = resolveNextAnnotationTagQueryPageProgress({
+      progress,
+      batchSize: batch.length,
+      itemsLoaded: items.length,
+      resultTotal: result.total,
+      pageSize: TAG_QUERY_PAGE_SIZE,
+      maxPage: 10000,
+    })
   }
 
   return items
-}
-
-function applyFileTagsToSnapshot(
-  snapshot: RootAnnotationDisplaySnapshot,
-  relativePath: string,
-  state: {
-    rawTags: StoredAnnotationTagRecord[] | null
-    updatedAt: number | null
-  }
-) {
-  const patch = applyAnnotationPathState({
-    rawTagsByPath: snapshot.rawTagsByPath,
-    byPathUpdatedAt: snapshot.byPathUpdatedAt,
-    relativePath,
-    state,
-  })
-  snapshot.rawTagsByPath = patch.rawTagsByPath
-  snapshot.byPathUpdatedAt = patch.byPathUpdatedAt
 }
 
 function createFileLoadKey(rootId: string, relativePath: string): string {
   return `${rootId}:${relativePath}`
 }
 
-function updateSnapshotForOptimisticMutation(snapshot: RootAnnotationDisplaySnapshot) {
-  snapshot.hasSidecarDir = true
-  snapshot.hasSidecarFile = true
-  snapshot.status = 'ready'
-  if (snapshot.loadedAtMs === null) {
-    snapshot.loadedAtMs = Date.now()
-  }
-}
-
-function createPathRollback(snapshot: RootAnnotationDisplaySnapshot, relativePath: string): () => void {
-  const previousRawTags = snapshot.rawTagsByPath[relativePath]
-    ? snapshot.rawTagsByPath[relativePath].map((tag) => ({ ...tag }))
-    : null
-  const previousUpdatedAt = snapshot.byPathUpdatedAt[relativePath]
-  const hadUpdatedAt = relativePath in snapshot.byPathUpdatedAt
-
+function createPathRollback(
+  snapshot: RootAnnotationDisplaySnapshot,
+  rollback: AnnotationDisplayPathRollbackState,
+): () => void {
   return () => {
-    const rollbackPatch = applyAnnotationPathState({
-      rawTagsByPath: snapshot.rawTagsByPath,
-      byPathUpdatedAt: snapshot.byPathUpdatedAt,
-      relativePath,
-      state: {
-        rawTags: previousRawTags,
-        updatedAt: previousRawTags && previousRawTags.length > 0
-          ? previousUpdatedAt
-          : null,
-      },
+    applyRootSnapshotAction(snapshot, {
+      type: 'restore-path',
+      rollback,
+      nowMs: Date.now(),
     })
-    snapshot.rawTagsByPath = rollbackPatch.rawTagsByPath
-    snapshot.byPathUpdatedAt = rollbackPatch.byPathUpdatedAt
-    if ((!previousRawTags || previousRawTags.length === 0) && hadUpdatedAt) {
-      snapshot.byPathUpdatedAt = {
-        ...snapshot.byPathUpdatedAt,
-        [relativePath]: previousUpdatedAt,
-      }
-    }
-
-    updateSnapshotForOptimisticMutation(snapshot)
-    applyDerivedSnapshotFields(snapshot)
     emitStoreUpdate()
   }
 }
@@ -326,38 +275,33 @@ export async function preloadAnnotationDisplaySnapshot({
     return
   }
 
-  snapshot.status = 'loading'
+  applyRootSnapshotAction(snapshot, { type: 'mark-loading' })
   emitStoreUpdate()
 
   const loadTask = (async () => {
     const targetDescriptor = resolveAnnotationTarget(rootId, rootHandle, rootLabel)
     const target = ensureRootSnapshot(rootId)
 
-    if (!targetDescriptor.rootPath && !targetDescriptor.remoteRootId) {
-      resetSnapshot(target)
-      target.hasSidecarDir = false
-      target.hasSidecarFile = false
-      target.status = 'ready'
-      target.loadedAtMs = Date.now()
+    if (targetDescriptor.kind === 'unavailable') {
+      applyRootSnapshotAction(target, {
+        type: 'mark-root-unavailable',
+        nowMs: Date.now(),
+      })
       return
     }
 
     try {
       const views = await loadAllTagViews(targetDescriptor)
-      const derived = buildPathSnapshotFromTagViews(views)
-      target.rawTagsByPath = derived.rawTagsByPath
-      target.byPathUpdatedAt = derived.byPathUpdatedAt
-      target.hasSidecarDir = true
-      target.hasSidecarFile = true
-      applyDerivedSnapshotFields(target)
-      target.status = 'ready'
-      target.loadedAtMs = Date.now()
+      applyRootSnapshotAction(target, {
+        type: 'apply-root-tag-views',
+        tagViews: views,
+        nowMs: Date.now(),
+      })
     } catch {
-      resetSnapshot(target)
-      target.hasSidecarDir = true
-      target.hasSidecarFile = false
-      target.status = 'ready'
-      target.loadedAtMs = Date.now()
+      applyRootSnapshotAction(target, {
+        type: 'apply-root-load-error',
+        nowMs: Date.now(),
+      })
     }
   })()
     .finally(() => {
@@ -388,7 +332,7 @@ export async function preloadFileAnnotationDisplaySnapshot({
   }
 
   const targetDescriptor = resolveAnnotationTarget(rootId, rootHandle, rootLabel)
-  if (!targetDescriptor.rootPath && !targetDescriptor.remoteRootId) return
+  if (targetDescriptor.kind === 'unavailable') return
 
   const loadKey = createFileLoadKey(rootId, normalizedPath)
   if (!force) {
@@ -400,28 +344,23 @@ export async function preloadFileAnnotationDisplaySnapshot({
   }
 
   const loadTask = (async () => {
-    const result = targetDescriptor.remoteRootId
-      ? await callRemoteAccessHttp<GatewayFileTagResult>('/v1/remote/tags/file', {
-        rootId: targetDescriptor.remoteRootId,
-        relativePath: normalizedPath,
-      })
-      : await callRuntimeHttp<GatewayFileTagResult>('/v1/data/tags/file', {
-        rootPath: targetDescriptor.rootPath,
-        relativePath: normalizedPath,
-      })
+    const request = buildAnnotationFileTagsRequest({
+      target: targetDescriptor,
+      relativePath: normalizedPath,
+    })
+    if (!request) return
+
+    const result = await callAnnotationHttp<GatewayFileTagResult>(request)
     const fileView = isRecord(result.file) ? result.file : null
     const tags = fileView && Array.isArray(fileView.tags) ? fileView.tags : []
-    const state = buildPathStateFromTags(tags)
 
     const target = ensureRootSnapshot(rootId)
-    applyFileTagsToSnapshot(target, normalizedPath, state)
-    target.hasSidecarDir = true
-    target.hasSidecarFile = true
-    if (target.status === 'idle') {
-      target.status = 'ready'
-      target.loadedAtMs = Date.now()
-    }
-    applyDerivedSnapshotFields(target)
+    applyRootSnapshotAction(target, {
+      type: 'apply-file-tags',
+      relativePath: normalizedPath,
+      tags,
+      nowMs: Date.now(),
+    })
     emitStoreUpdate()
   })()
     .catch(() => {
@@ -444,27 +383,36 @@ export async function preloadGlobalAnnotationTagOptions({
     return
   }
 
-  globalTagOptionsSnapshot.status = 'loading'
-  globalTagOptionsSnapshot.error = null
+  assignGlobalTagOptionsState(
+    globalTagOptionsSnapshot,
+    reduceGlobalAnnotationTagOptions(globalTagOptionsSnapshot, { type: 'mark-loading' }),
+  )
   emitStoreUpdate()
 
   const loadTask = (async () => {
     try {
-      const result = isRemoteReadonlyProviderActive() && getActiveRemoteWorkspace()
-        ? await callRemoteAccessHttp<GatewayTagOptionsResult>('/v1/remote/tags/options', {
-          rootId: getActiveRemoteWorkspace()!.configRootId,
-        })
-        : await callRuntimeHttp<GatewayTagOptionsResult>('/v1/data/tags/options', {})
-      const rawOptions = readTagOptionsFromResult(result)
-      globalTagOptionsSnapshot.options = buildGlobalTagOptions(rawOptions)
-      globalTagOptionsSnapshot.error = null
-      globalTagOptionsSnapshot.status = 'ready'
-      globalTagOptionsSnapshot.loadedAtMs = Date.now()
+      const request = buildGlobalAnnotationTagOptionsRequest({
+        remoteReadonlyActive: isRemoteReadonlyProviderActive(),
+        activeRemoteWorkspace: getActiveRemoteWorkspace(),
+      })
+      const result = await callAnnotationHttp<GatewayTagOptionsResult>(request)
+      assignGlobalTagOptionsState(
+        globalTagOptionsSnapshot,
+        reduceGlobalAnnotationTagOptions(globalTagOptionsSnapshot, {
+          type: 'apply-result',
+          result,
+          nowMs: Date.now(),
+        }),
+      )
     } catch (error) {
-      globalTagOptionsSnapshot.options = []
-      globalTagOptionsSnapshot.error = error instanceof Error ? error.message : '读取标签候选失败'
-      globalTagOptionsSnapshot.status = 'ready'
-      globalTagOptionsSnapshot.loadedAtMs = Date.now()
+      assignGlobalTagOptionsState(
+        globalTagOptionsSnapshot,
+        reduceGlobalAnnotationTagOptions(globalTagOptionsSnapshot, {
+          type: 'apply-error',
+          error,
+          nowMs: Date.now(),
+        }),
+      )
     }
   })()
     .finally(() => {
@@ -486,20 +434,13 @@ export function patchAnnotationSetValue(params: PatchAnnotationSetValueParams) {
   if (!relativePath || !key || !value) return
 
   const snapshot = ensureRootSnapshot(rootId)
-  const existingRawTags = snapshot.rawTagsByPath[relativePath] ?? []
-  const nextUpdatedAt = Date.now()
-  const retainedRawTags = existingRawTags.filter((tag) => !(
-    tag.source === META_ANNOTATION_SOURCE
-    && tag.key === key
-  ))
-  applyFileTagsToSnapshot(snapshot, relativePath, buildOptimisticAnnotationTagBinding({
-    existingRawTags: retainedRawTags,
+  applyRootSnapshotAction(snapshot, {
+    type: 'set-meta-value',
+    relativePath,
     key,
     value,
-    updatedAt: nextUpdatedAt,
-  }))
-  updateSnapshotForOptimisticMutation(snapshot)
-  applyDerivedSnapshotFields(snapshot)
+    nowMs: Date.now(),
+  })
   emitStoreUpdate()
 }
 
@@ -513,21 +454,17 @@ export function patchAnnotationTagBinding(params: PatchAnnotationTagBindingParam
   if (!relativePath || !key || !value) return null
 
   const snapshot = ensureRootSnapshot(rootId)
-  const existingRawTags = snapshot.rawTagsByPath[relativePath] ?? []
-  const patch = buildOptimisticAnnotationTagBinding({
-    existingRawTags,
+  const reduction = applyRootSnapshotAction(snapshot, {
+    type: 'bind-meta-tag',
+    relativePath,
     key,
     value,
-    updatedAt: Date.now(),
+    nowMs: Date.now(),
   })
-  if (!patch.changed) return null
+  if (!reduction.changed || !reduction.rollback) return null
 
-  const rollback = createPathRollback(snapshot, relativePath)
-  applyFileTagsToSnapshot(snapshot, relativePath, patch)
-  updateSnapshotForOptimisticMutation(snapshot)
-  applyDerivedSnapshotFields(snapshot)
   emitStoreUpdate()
-  return rollback
+  return createPathRollback(snapshot, reduction.rollback)
 }
 
 export function patchAnnotationTagUnbinding(params: PatchAnnotationTagBindingParams): PatchRollback {
@@ -540,21 +477,17 @@ export function patchAnnotationTagUnbinding(params: PatchAnnotationTagBindingPar
   if (!relativePath || !key || !value) return null
 
   const snapshot = ensureRootSnapshot(rootId)
-  const existingRawTags = snapshot.rawTagsByPath[relativePath] ?? []
-  const patch = buildOptimisticAnnotationTagUnbinding({
-    existingRawTags,
+  const reduction = applyRootSnapshotAction(snapshot, {
+    type: 'unbind-meta-tag',
+    relativePath,
     key,
     value,
+    nowMs: Date.now(),
   })
-  if (!patch.changed) return null
+  if (!reduction.changed || !reduction.rollback) return null
 
-  const rollback = createPathRollback(snapshot, relativePath)
-  applyFileTagsToSnapshot(snapshot, relativePath, patch)
-
-  updateSnapshotForOptimisticMutation(snapshot)
-  applyDerivedSnapshotFields(snapshot)
   emitStoreUpdate()
-  return rollback
+  return createPathRollback(snapshot, reduction.rollback)
 }
 
 export function getAnnotationFilterUiGateState(rootId: string | null | undefined): AnnotationFilterUiGateState {
@@ -609,10 +542,7 @@ export function getRootAnnotationFilterTagOptions(rootId: string | null | undefi
 }
 
 export function getGlobalAnnotationTagOptions(): AnnotationFilterTagOption[] {
-  return globalTagOptionsSnapshot.options.map((item) => ({
-    ...item,
-    sources: [...item.sources],
-  }))
+  return cloneGlobalAnnotationTagOptions(globalTagOptionsSnapshot.options)
 }
 
 export function getGlobalAnnotationTagOptionsState(): GlobalAnnotationTagOptionsState {
