@@ -6,6 +6,7 @@ import {
   buildOptimisticAnnotationTagBinding,
   buildOptimisticAnnotationTagUnbinding,
   deriveAnnotationDisplaySnapshotFields,
+  resolveAnnotationFilterUiGate,
 } from '../../src/features/preview/lib/annotationDisplaySnapshotModel.ts'
 
 const metaSource = 'meta.annotation'
@@ -102,6 +103,29 @@ test('Annotation Display Snapshot Model applies and removes per-file annotation 
     byPathUpdatedAt: {
       'albums/b.jpg': 8,
     },
+  })
+})
+
+test('Annotation Display Snapshot Model resolves annotation filter UI gate state', () => {
+  assert.deepEqual(resolveAnnotationFilterUiGate(null), {
+    isVisible: false,
+    reason: 'no_root',
+  })
+  assert.deepEqual(resolveAnnotationFilterUiGate({
+    hasSidecarDir: false,
+    hasSidecarFile: false,
+    hasAnyFilterableAnnotation: false,
+  }), {
+    isVisible: false,
+    reason: 'missing_sidecar_dir',
+  })
+  assert.deepEqual(resolveAnnotationFilterUiGate({
+    hasSidecarDir: true,
+    hasSidecarFile: true,
+    hasAnyFilterableAnnotation: true,
+  }), {
+    isVisible: true,
+    reason: null,
   })
 })
 

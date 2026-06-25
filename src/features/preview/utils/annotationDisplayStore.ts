@@ -8,6 +8,9 @@ import {
   buildOptimisticAnnotationTagBinding,
   buildOptimisticAnnotationTagUnbinding,
   deriveAnnotationDisplaySnapshotFields,
+  resolveAnnotationFilterUiGate,
+  type AnnotationFilterUiGateReason,
+  type AnnotationFilterUiGateState,
 } from '@/features/preview/lib/annotationDisplaySnapshotModel'
 import {
   META_ANNOTATION_SOURCE,
@@ -34,12 +37,6 @@ const TAG_QUERY_PAGE_SIZE = 1000
 
 type RootSnapshotStatus = 'idle' | 'loading' | 'ready'
 type GlobalTagOptionsStatus = 'idle' | 'loading' | 'ready'
-
-type AnnotationFilterUiGateReason =
-  | 'no_root'
-  | 'missing_sidecar_dir'
-  | 'missing_sidecar_file'
-  | 'no_filterable_annotations'
 
 interface RootAnnotationDisplaySnapshot {
   status: RootSnapshotStatus
@@ -96,12 +93,6 @@ interface PatchAnnotationTagBindingParams {
 }
 
 type PatchRollback = (() => void) | null
-
-interface AnnotationFilterUiGateState {
-  hasSidecarDir: boolean
-  hasSidecarFile: boolean
-  hasAnyFilterableAnnotation: boolean
-}
 
 export interface GlobalAnnotationTagOptionsState {
   status: GlobalTagOptionsStatus
@@ -592,8 +583,7 @@ export function getAnnotationFilterUiGateState(rootId: string | null | undefined
 }
 
 export function isAnnotationFilterUiVisible(rootId: string | null | undefined): boolean {
-  const gate = getAnnotationFilterUiGateState(rootId)
-  return gate.hasSidecarFile && gate.hasAnyFilterableAnnotation
+  return resolveAnnotationFilterUiGate(rootId ? getAnnotationFilterUiGateState(rootId) : null).isVisible
 }
 
 export function isAnnotationFilterUiGateResolved(rootId: string | null | undefined): boolean {
@@ -605,12 +595,7 @@ export function isAnnotationFilterUiGateResolved(rootId: string | null | undefin
 export function getAnnotationFilterUiGateReason(
   rootId: string | null | undefined
 ): AnnotationFilterUiGateReason | null {
-  if (!rootId) return 'no_root'
-  const gate = getAnnotationFilterUiGateState(rootId)
-  if (!gate.hasSidecarDir) return 'missing_sidecar_dir'
-  if (!gate.hasSidecarFile) return 'missing_sidecar_file'
-  if (!gate.hasAnyFilterableAnnotation) return 'no_filterable_annotations'
-  return null
+  return resolveAnnotationFilterUiGate(rootId ? getAnnotationFilterUiGateState(rootId) : null).reason
 }
 
 export function getRootAnnotationFilterTagOptions(rootId: string | null | undefined): AnnotationFilterTagOption[] {

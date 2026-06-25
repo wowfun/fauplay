@@ -1,5 +1,5 @@
-import { toToolScopedProjectionId } from '@/lib/projection'
-import type { FileItem, ResultProjection } from '@/types'
+import { toToolScopedProjectionId } from '../../../lib/projection.ts'
+import type { FileItem, ResultProjection } from '../../../types/index.ts'
 
 export type DuplicateSelectionRule = 'keep_newest' | 'keep_oldest' | 'keep_current_or_first'
 

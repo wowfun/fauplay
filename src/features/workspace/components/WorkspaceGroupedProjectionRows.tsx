@@ -11,7 +11,11 @@ import {
 } from 'react'
 import { FileGridCard } from '@/features/explorer/components/FileGridCard'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
-import { groupDuplicateProjectionFiles } from '@/features/workspace/lib/duplicateSelection'
+import {
+  buildGroupedProjectionRowsModel,
+  resolveGroupedProjectionRangeSelection,
+  resolveGroupedProjectionVerticalNeighborIndex,
+} from '@/features/workspace/lib/groupedProjectionRowsModel'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
@@ -34,11 +38,6 @@ interface WorkspaceGroupedProjectionRowsProps {
   onFileClick: (file: FileItem) => void
   onFileDoubleClick?: (file: FileItem) => void
   onDirectoryClick: (dirName: string) => void
-}
-
-interface GroupedProjectionRow {
-  groupId: string
-  items: Array<{ file: FileItem; index: number }>
 }
 
 interface FocusItemOptions {
@@ -85,29 +84,10 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
     const [containerHeight, setContainerHeight] = useState(0)
     const [selectedPathSet, setSelectedPathSet] = useState<Set<string>>(() => new Set())
     const cardSize = FILE_GRID_CARD_SIZE_BY_PRESET[thumbnailSizePreset]
-    const fileIndexByPath = useMemo(() => {
-      return new Map(files.map((file, index) => [file.path, index]))
+    const groupedRowsModel = useMemo(() => {
+      return buildGroupedProjectionRowsModel(files)
     }, [files])
-
-    const groupedRows = useMemo<GroupedProjectionRow[]>(() => {
-      return groupDuplicateProjectionFiles(files).map((group) => ({
-        groupId: group.groupId,
-        items: group.items.map((file) => ({
-          file,
-          index: fileIndexByPath.get(file.path) ?? 0,
-        })),
-      }))
-    }, [fileIndexByPath, files])
-
-    const indexToRowIndex = useMemo(() => {
-      const mapping = new Array<number>(files.length)
-      groupedRows.forEach((row, rowIndex) => {
-        row.items.forEach((item, columnIndex) => {
-          mapping[item.index] = rowIndex * 100000 + columnIndex
-        })
-      })
-      return mapping
-    }, [files.length, groupedRows])
+    const groupedRows = groupedRowsModel.rows
 
     const pageRowCount = useMemo(() => {
       const rowHeight = cardSize.height + FILE_GRID_GAP
@@ -183,23 +163,21 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
     }, [selectedPaths, setCheckedPathSet])
 
     const applyRangeSelection = useCallback((targetIndex: number, options?: { queuePreviewAfterShiftRelease?: boolean }) => {
-      if (files.length === 0) return
+      const selection = resolveGroupedProjectionRangeSelection({
+        files,
+        targetIndex,
+        anchorPath: selectionAnchorPathRef.current,
+        fallbackPath: selectedPathRef.current,
+      })
+      if (!selection) return
 
-      const clampedIndex = Math.max(0, Math.min(files.length - 1, targetIndex))
-      const targetFile = files[clampedIndex]
-      const fallbackAnchor = selectionAnchorPathRef.current ?? selectedPathRef.current ?? targetFile.path
-      const anchorIndexByPath = files.findIndex((file) => file.path === fallbackAnchor)
-      const anchorIndex = anchorIndexByPath >= 0 ? anchorIndexByPath : clampedIndex
-      const rangeStart = Math.min(anchorIndex, clampedIndex)
-      const rangeEnd = Math.max(anchorIndex, clampedIndex)
-      const nextSet = new Set(files.slice(rangeStart, rangeEnd + 1).map((file) => file.path))
-
-      setCheckedPathSet(() => nextSet)
-      markSelectedElement(clampedIndex, targetFile.path)
-      scrollIndexIntoView(clampedIndex)
+      setCheckedPathSet(() => new Set(selection.selectedPaths))
+      markSelectedElement(selection.clampedIndex, selection.targetPath)
+      scrollIndexIntoView(selection.clampedIndex)
 
       if (options?.queuePreviewAfterShiftRelease) {
-        pendingPreviewPathDuringRangeRef.current = targetFile.kind === 'file' ? targetFile.path : null
+        const targetFile = files[selection.clampedIndex]
+        pendingPreviewPathDuringRangeRef.current = targetFile?.kind === 'file' ? targetFile.path : null
       }
     }, [files, markSelectedElement, scrollIndexIntoView, setCheckedPathSet])
 
@@ -356,22 +334,8 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
     }, [])
 
     const getVerticalNeighborIndex = useCallback((currentIndex: number, deltaRows: number) => {
-      const encodedLocation = indexToRowIndex[currentIndex]
-      if (encodedLocation === undefined) {
-        return currentIndex
-      }
-
-      const currentRowIndex = Math.floor(encodedLocation / 100000)
-      const currentColumnIndex = encodedLocation % 100000
-      const nextRowIndex = Math.max(0, Math.min(groupedRows.length - 1, currentRowIndex + deltaRows))
-      const nextRow = groupedRows[nextRowIndex]
-      if (!nextRow) {
-        return currentIndex
-      }
-
-      const nextColumnIndex = Math.min(currentColumnIndex, nextRow.items.length - 1)
-      return nextRow.items[nextColumnIndex]?.index ?? currentIndex
-    }, [groupedRows, indexToRowIndex])
+      return resolveGroupedProjectionVerticalNeighborIndex(groupedRowsModel, currentIndex, deltaRows)
+    }, [groupedRowsModel])
 
     useEffect(() => {
       if (!keyboardNavigationEnabled) {
