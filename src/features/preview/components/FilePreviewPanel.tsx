@@ -1,21 +1,13 @@
 import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
-import { getFilePreviewKind, isMediaPreviewKind, TEXT_PREVIEW_MAX_BYTES } from '@/lib/filePreview'
-import { createObjectUrlForFile, getFileFromPath, getMimeType } from '@/lib/fileSystem'
+import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import {
-  buildRuntimeFileContentUrl,
   buildRuntimeGlobalTrashFileContentUrlForItem,
-  loadRuntimeGlobalTrashTextPreview,
-  loadRuntimeTextPreview,
   resolveRuntimeGlobalTrashRecycleId,
   resolveRuntimeFileLocator,
   type RuntimeToolDescriptor,
 } from '@/lib/runtimeApi'
-import type { FileItem, ResultProjection, TextPreviewPayload } from '@/types'
-import {
-  buildFileContentUrlForItem,
-  loadTextPreviewForItem,
-} from '@/lib/fileAccess'
+import type { FileItem, ResultProjection } from '@/types'
 import { getBoundRootPath } from '@/lib/reveal'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -39,8 +31,9 @@ import type { PreviewRenameResult } from './PreviewTitleRow'
 import { PreviewFaceCorrectionPanel } from '@/features/faces/components/PreviewFaceCorrectionPanel'
 import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
-import { readFileSystemTextPreview } from '@/features/preview/lib/fileSystemTextPreview'
+import { usePreviewFileLoader } from '@/features/preview/hooks/usePreviewFileLoader'
 import { resolvePreviewFileAccessPlan } from '@/features/preview/lib/previewFileAccess'
+import { resolvePreviewFileLoadPlan } from '@/features/preview/lib/previewFileLoadPlan'
 import {
   createPreviewFileNameRenamePlan,
   readPreviewLocalDataSetValueResult,
@@ -96,14 +89,6 @@ interface FilePreviewPanelProps {
   onDismissProjectionTool: (toolName: string) => void
 }
 
-const INITIAL_TEXT_PREVIEW: TextPreviewPayload = {
-  status: 'idle',
-  content: null,
-  fileSizeBytes: null,
-  sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-  error: null,
-}
-
 export function FilePreviewPanel({
   file,
   rootHandle,
@@ -151,16 +136,8 @@ export function FilePreviewPanel({
   onActivateProjection,
   onDismissProjectionTool,
 }: FilePreviewPanelProps) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [textPreview, setTextPreview] = useState<TextPreviewPayload>(INITIAL_TEXT_PREVIEW)
-  const [fileMimeType, setFileMimeType] = useState<string | null>(null)
-  const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null)
-  const [fileLastModifiedMs, setFileLastModifiedMs] = useState<number | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [selectedFaceForCorrection, setSelectedFaceForCorrection] = useState<PreviewFaceOverlayItem | null>(null)
-  const currentUrlRef = useRef<string | null>(null)
   const handledLocalDataQueueItemIdRef = useRef<string | null>(null)
   const handledVisionFaceQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
@@ -199,15 +176,38 @@ export function FilePreviewPanel({
     runtimeGlobalTrashRecycleId,
   ])
   const {
-    currentRootRelativePath,
     canAccessThroughCurrentRoot,
     shouldUseFileAccess,
-    shouldUseRuntimeGlobalTrashFileContent,
-    shouldUseRuntimeGlobalTrashTextPreview,
-    shouldUseRuntimeTextPreview,
-    shouldUseRuntimeFileContent,
-    shouldUseFileSystemAccess,
   } = previewAccessPlan
+  const previewLoadPlan = useMemo(() => resolvePreviewFileLoadPlan({
+    file,
+    previewKind,
+    accessPlan: previewAccessPlan,
+    runtimeFileLocator,
+    runtimeGlobalTrashRecycleId,
+    runtimeGlobalTrashFileContentUrl,
+  }), [
+    file,
+    previewAccessPlan,
+    previewKind,
+    runtimeFileLocator,
+    runtimeGlobalTrashFileContentUrl,
+    runtimeGlobalTrashRecycleId,
+  ])
+  const {
+    previewUrl,
+    textPreview,
+    fileMimeType,
+    fileSizeBytes,
+    fileLastModifiedMs,
+    isLoading,
+    error,
+  } = usePreviewFileLoader({
+    file,
+    rootHandle,
+    previewKind,
+    loadPlan: previewLoadPlan,
+  })
   useSyncExternalStore(
     subscribeAnnotationDisplayStore,
     getAnnotationDisplayStoreVersion,
@@ -262,14 +262,6 @@ export function FilePreviewPanel({
       force: true,
     })
   }, [canUseAnnotationContext, file, rootHandle, rootId])
-
-  const replacePreviewUrl = useCallback((nextUrl: string | null) => {
-    if (currentUrlRef.current?.startsWith('blob:')) {
-      URL.revokeObjectURL(currentUrlRef.current)
-    }
-    currentUrlRef.current = nextUrl
-    setPreviewUrl(nextUrl)
-  }, [])
 
   const currentFileQueue = useMemo(
     () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
@@ -436,191 +428,6 @@ export function FilePreviewPanel({
     rootHandle,
     rootId,
   ])
-
-  useEffect(() => {
-    if (!file || file.kind !== 'file') {
-      replacePreviewUrl(null)
-      setTextPreview(INITIAL_TEXT_PREVIEW)
-      setFileMimeType(null)
-      setFileSizeBytes(null)
-      setFileLastModifiedMs(null)
-      return
-    }
-
-    let cancelled = false
-    const previewKind = getFilePreviewKind(file.name)
-
-    const loadFile = async () => {
-      setIsLoading(true)
-      setError(null)
-      setTextPreview(
-        previewKind === 'text'
-          ? {
-            ...INITIAL_TEXT_PREVIEW,
-            status: 'loading',
-          }
-          : INITIAL_TEXT_PREVIEW
-      )
-
-      try {
-        if (shouldUseFileAccess) {
-          setFileMimeType(file.mimeType || getMimeType(file.name))
-          setFileSizeBytes(file.size ?? null)
-          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
-
-          if (previewKind === 'text') {
-            replacePreviewUrl(null)
-            const textResult = await loadTextPreviewForItem(file, TEXT_PREVIEW_MAX_BYTES)
-            if (cancelled) return
-            setTextPreview({
-              status: textResult.status,
-              content: textResult.content,
-              fileSizeBytes: textResult.fileSizeBytes,
-              sizeLimitBytes: textResult.sizeLimitBytes,
-              error: textResult.error,
-            })
-            return
-          }
-
-          setTextPreview(INITIAL_TEXT_PREVIEW)
-          if (previewKind === 'image' || previewKind === 'video') {
-            replacePreviewUrl(buildFileContentUrlForItem(file))
-            return
-          }
-          replacePreviewUrl(null)
-          return
-        }
-
-        if (shouldUseRuntimeGlobalTrashTextPreview && runtimeGlobalTrashRecycleId) {
-          setFileMimeType(file.mimeType || getMimeType(file.name))
-          setFileSizeBytes(file.size ?? null)
-          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
-          replacePreviewUrl(null)
-
-          const textResult = await loadRuntimeGlobalTrashTextPreview({
-            recycleId: runtimeGlobalTrashRecycleId,
-            sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-          })
-          if (cancelled) return
-          setFileSizeBytes(textResult.fileSizeBytes ?? file.size ?? null)
-          setTextPreview(textResult)
-          return
-        }
-
-        if (shouldUseRuntimeGlobalTrashFileContent && runtimeGlobalTrashFileContentUrl) {
-          setFileMimeType(file.mimeType || getMimeType(file.name))
-          setFileSizeBytes(file.size ?? null)
-          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
-          setTextPreview(INITIAL_TEXT_PREVIEW)
-          replacePreviewUrl(runtimeGlobalTrashFileContentUrl)
-          return
-        }
-
-        if (shouldUseRuntimeTextPreview && runtimeFileLocator) {
-          setFileMimeType(file.mimeType || getMimeType(file.name))
-          setFileSizeBytes(file.size ?? null)
-          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
-          replacePreviewUrl(null)
-
-          try {
-            const textResult = await loadRuntimeTextPreview({
-              rootPath: runtimeFileLocator.rootPath,
-              rootRelativePath: runtimeFileLocator.rootRelativePath,
-              sizeLimitBytes: TEXT_PREVIEW_MAX_BYTES,
-            })
-            if (cancelled) return
-            setFileSizeBytes(textResult.fileSizeBytes ?? file.size ?? null)
-            setTextPreview(textResult)
-            return
-          } catch {
-            // Fall back to File System Access while the runtime-backed preview path is being adopted.
-          }
-        }
-
-        if (shouldUseRuntimeFileContent && runtimeFileLocator) {
-          setFileMimeType(file.mimeType || getMimeType(file.name))
-          setFileSizeBytes(file.size ?? null)
-          setFileLastModifiedMs(file.lastModifiedMs ?? file.lastModified?.getTime() ?? null)
-          setTextPreview(INITIAL_TEXT_PREVIEW)
-          replacePreviewUrl(buildRuntimeFileContentUrl({
-            rootPath: runtimeFileLocator.rootPath,
-            rootRelativePath: runtimeFileLocator.rootRelativePath,
-          }))
-          return
-        }
-
-        if (!shouldUseFileSystemAccess || !rootHandle) {
-          throw new Error('当前文件无法通过工作区目录句柄读取')
-        }
-
-        const fileObj = await getFileFromPath(rootHandle, currentRootRelativePath)
-        if (cancelled) return
-
-        setFileMimeType(fileObj.type || getMimeType(file.name))
-        setFileSizeBytes(fileObj.size)
-        setFileLastModifiedMs(fileObj.lastModified || null)
-
-        if (previewKind === 'text') {
-          replacePreviewUrl(null)
-          const textResult = await readFileSystemTextPreview(fileObj, TEXT_PREVIEW_MAX_BYTES)
-          if (cancelled) return
-          setTextPreview(textResult)
-          return
-        }
-
-        setTextPreview(INITIAL_TEXT_PREVIEW)
-
-        if (previewKind === 'image' || previewKind === 'video') {
-          const nextUrl = createObjectUrlForFile(fileObj, file.name)
-          if (cancelled) {
-            URL.revokeObjectURL(nextUrl)
-            return
-          }
-          replacePreviewUrl(nextUrl)
-          return
-        }
-
-        replacePreviewUrl(null)
-      } catch (err) {
-        if (!cancelled) {
-          setError((err as Error).message)
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    loadFile()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    boundRootPath,
-    currentRootRelativePath,
-    file,
-    replacePreviewUrl,
-    rootHandle,
-    runtimeGlobalTrashRecycleId,
-    runtimeGlobalTrashFileContentUrl,
-    runtimeFileLocator,
-    shouldUseFileAccess,
-    shouldUseFileSystemAccess,
-    shouldUseRuntimeGlobalTrashFileContent,
-    shouldUseRuntimeGlobalTrashTextPreview,
-    shouldUseRuntimeFileContent,
-    shouldUseRuntimeTextPreview,
-  ])
-
-  useEffect(() => {
-    return () => {
-      if (currentUrlRef.current?.startsWith('blob:')) {
-        URL.revokeObjectURL(currentUrlRef.current)
-      }
-    }
-  }, [])
 
   useEffect(() => {
     setSelectedFaceForCorrection(null)

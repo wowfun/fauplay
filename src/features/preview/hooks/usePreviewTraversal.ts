@@ -1,36 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getFilePreviewKind } from '@/lib/filePreview'
+import {
+  buildPreviewMediaCollection,
+  canNavigatePreviewMedia,
+  clampAutoPlayIntervalSec,
+  createInitialPreviewShuffleState,
+  DEFAULT_AUTOPLAY_INTERVAL_SEC,
+  DEFAULT_FACE_BBOX_VISIBLE,
+  DEFAULT_VIDEO_PLAYBACK_RATE,
+  DEFAULT_VIDEO_SEEK_STEP_SEC,
+  getPreviewMediaIndex,
+  normalizePreviewPath,
+  normalizeVideoPlaybackRate,
+  normalizeVideoSeekStepSec,
+  nextVideoPlaybackRate,
+  resolvePreviewMediaNavigation,
+  type PreviewNavigateDirection,
+} from '@/features/preview/lib/previewTraversalModel'
 import type { FileItem } from '@/types'
 import type { PlaybackOrder } from '@/features/preview/types/playback'
 
-const DEFAULT_AUTOPLAY_INTERVAL_SEC = 3
-const MIN_AUTOPLAY_INTERVAL_SEC = 1
-const MAX_AUTOPLAY_INTERVAL_SEC = 10
-const VIDEO_SEEK_STEP_OPTIONS = [3, 5, 10] as const
-const DEFAULT_VIDEO_SEEK_STEP_SEC = 5
-const VIDEO_PLAYBACK_RATE_OPTIONS = [0.5, 1, 3, 5] as const
-const VIDEO_PLAYBACK_RATE_CYCLE_ORDER = [1, 3, 5, 0.5] as const
-const DEFAULT_VIDEO_PLAYBACK_RATE = 1
 const VIDEO_SEEK_STEP_STORAGE_KEY = 'fauplay:preview-video-seek-step-sec'
 const VIDEO_PLAYBACK_RATE_STORAGE_KEY = 'fauplay:preview-video-playback-rate'
 const PLAYBACK_ORDER_STORAGE_KEY = 'fauplay:preview-playback-order'
 const FACE_BBOX_VISIBLE_STORAGE_KEY = 'fauplay:preview-face-bbox-visible'
-const DEFAULT_FACE_BBOX_VISIBLE = false
 const WRAP_AT_BOUNDARY = true
 
 type NavigateSource = 'pane' | 'modal' | 'autoplay'
-type NavigateDirection = 'prev' | 'next'
-
-function shufflePaths(paths: string[]): string[] {
-  const result = [...paths]
-  for (let index = result.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(Math.random() * (index + 1))
-    const current = result[index]
-    result[index] = result[swapIndex]
-    result[swapIndex] = current
-  }
-  return result
-}
+type NavigateDirection = PreviewNavigateDirection
 
 interface UsePreviewTraversalOptions {
   filteredFiles: FileItem[]
@@ -43,9 +40,7 @@ function readPersistedVideoSeekStepSec(): number {
     if (raw === null) return DEFAULT_VIDEO_SEEK_STEP_SEC
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) return DEFAULT_VIDEO_SEEK_STEP_SEC
-    return VIDEO_SEEK_STEP_OPTIONS.includes(parsed as (typeof VIDEO_SEEK_STEP_OPTIONS)[number])
-      ? parsed
-      : DEFAULT_VIDEO_SEEK_STEP_SEC
+    return normalizeVideoSeekStepSec(parsed)
   } catch {
     return DEFAULT_VIDEO_SEEK_STEP_SEC
   }
@@ -67,9 +62,7 @@ function readPersistedVideoPlaybackRate(): number {
     if (raw === null) return DEFAULT_VIDEO_PLAYBACK_RATE
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) return DEFAULT_VIDEO_PLAYBACK_RATE
-    return VIDEO_PLAYBACK_RATE_OPTIONS.includes(parsed as (typeof VIDEO_PLAYBACK_RATE_OPTIONS)[number])
-      ? parsed
-      : DEFAULT_VIDEO_PLAYBACK_RATE
+    return normalizeVideoPlaybackRate(parsed)
   } catch {
     return DEFAULT_VIDEO_PLAYBACK_RATE
   }
@@ -126,18 +119,6 @@ function savePersistedFaceBboxVisible(value: boolean): void {
   }
 }
 
-function toVideoSeekStepSec(value: number): number {
-  return VIDEO_SEEK_STEP_OPTIONS.includes(value as (typeof VIDEO_SEEK_STEP_OPTIONS)[number])
-    ? value
-    : DEFAULT_VIDEO_SEEK_STEP_SEC
-}
-
-function toVideoPlaybackRate(value: number): number {
-  return VIDEO_PLAYBACK_RATE_OPTIONS.includes(value as (typeof VIDEO_PLAYBACK_RATE_OPTIONS)[number])
-    ? value
-    : DEFAULT_VIDEO_PLAYBACK_RATE
-}
-
 export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOptions) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
@@ -155,54 +136,28 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const autoPlayTimerRef = useRef<number | null>(null)
   const preferredPreviewPathRef = useRef<string | null>(null)
 
-  const mediaFiles = useMemo(
-    () =>
-      filteredFiles.filter(
-        (file): file is FileItem => {
-          if (file.kind !== 'file') return false
-          const previewKind = getFilePreviewKind(file.name)
-          return previewKind === 'image' || previewKind === 'video'
-        }
-      ),
+  const mediaCollection = useMemo(
+    () => buildPreviewMediaCollection(filteredFiles),
     [filteredFiles]
   )
-  const mediaIndexByPath = useMemo(() => {
-    const indexMap = new Map<string, number>()
-    mediaFiles.forEach((file, index) => {
-      indexMap.set(file.path, index)
-    })
-    return indexMap
-  }, [mediaFiles])
-  const mediaFileByPath = useMemo(() => {
-    const fileMap = new Map<string, FileItem>()
-    mediaFiles.forEach((file) => {
-      fileMap.set(file.path, file)
-    })
-    return fileMap
-  }, [mediaFiles])
-  const mediaSetKey = useMemo(
-    () => mediaFiles.map((file) => file.path).sort().join('\u0000'),
-    [mediaFiles]
-  )
+  const {
+    mediaFiles,
+    mediaIndexByPath,
+    mediaFileByPath,
+    mediaSetKey,
+  } = mediaCollection
   const lastShuffleMediaSetKeyRef = useRef<string | null>(null)
 
   const getMediaIndex = useCallback(
-    (file: FileItem | null) => {
-      if (!file || file.kind !== 'file') return -1
-      return mediaIndexByPath.get(file.path) ?? -1
-    },
-    [mediaIndexByPath]
+    (file: FileItem | null) => getPreviewMediaIndex(mediaCollection, file),
+    [mediaCollection]
   )
 
   const initializeShuffleState = useCallback((currentPath: string) => {
-    const nextQueue = shufflePaths(
-      mediaFiles
-        .map((file) => file.path)
-        .filter((path) => path !== currentPath)
-    )
-    setShuffleHistory([currentPath])
-    setShuffleQueue(nextQueue)
-  }, [mediaFiles])
+    const nextShuffleState = createInitialPreviewShuffleState(mediaCollection, currentPath)
+    setShuffleHistory(nextShuffleState.history)
+    setShuffleQueue(nextShuffleState.queue)
+  }, [mediaCollection])
 
   const applyMediaSelection = useCallback((
     nextFile: FileItem,
@@ -227,72 +182,28 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     direction: NavigateDirection,
     options: { source: NavigateSource; wrap: boolean }
   ) => {
-    const currentIndex = getMediaIndex(currentFile)
-    if (currentIndex < 0 || !currentFile || currentFile.kind !== 'file') return
-    const currentPath = currentFile.path
+    const navigationPlan = resolvePreviewMediaNavigation({
+      collection: mediaCollection,
+      currentFile,
+      direction,
+      playbackOrder,
+      wrap: options.wrap,
+      shuffleState: playbackOrder === 'shuffle'
+        ? { queue: shuffleQueue, history: shuffleHistory }
+        : undefined,
+    })
+    if (!navigationPlan) return
 
-    if (playbackOrder === 'shuffle') {
-      if (direction === 'prev') {
-        const historyTail = shuffleHistory[shuffleHistory.length - 1]
-        if (historyTail !== currentPath || shuffleHistory.length <= 1) return
-
-        const previousPath = shuffleHistory[shuffleHistory.length - 2]
-        const previousFile = mediaFileByPath.get(previousPath)
-        if (!previousFile) return
-
-        setShuffleHistory((previous) => previous.slice(0, -1))
-        setShuffleQueue((previous) => [currentPath, ...previous.filter((path) => path !== currentPath)])
-        applyMediaSelection(previousFile, options.source)
-        return
-      }
-
-      let nextQueue = shuffleQueue.filter((path) => path !== currentPath)
-      if (nextQueue.length === 0) {
-        nextQueue = shufflePaths(
-          mediaFiles
-            .map((file) => file.path)
-            .filter((path) => path !== currentPath)
-        )
-      }
-
-      const nextPath = nextQueue[0]
-      if (!nextPath) return
-
-      const nextFile = mediaFileByPath.get(nextPath)
-      if (!nextFile) return
-
-      setShuffleQueue(nextQueue.slice(1))
-      setShuffleHistory((previous) => {
-        if (previous.length > 0 && previous[previous.length - 1] === currentPath) {
-          return [...previous, nextPath]
-        }
-        return [currentPath, nextPath]
-      })
-      applyMediaSelection(nextFile, options.source)
-      return
+    if (navigationPlan.shuffleState) {
+      setShuffleQueue(navigationPlan.shuffleState.queue)
+      setShuffleHistory(navigationPlan.shuffleState.history)
     }
-
-    let targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
-    if (options.wrap) {
-      if (targetIndex < 0) {
-        targetIndex = mediaFiles.length - 1
-      } else if (targetIndex >= mediaFiles.length) {
-        targetIndex = 0
-      }
-    } else if (targetIndex < 0 || targetIndex >= mediaFiles.length) {
-      return
-    }
-
-    const nextFile = mediaFiles[targetIndex]
-    if (!nextFile || nextFile.path === currentPath) return
-    applyMediaSelection(nextFile, options.source)
+    applyMediaSelection(navigationPlan.nextFile, options.source)
   }, [
-    getMediaIndex,
+    mediaCollection,
     playbackOrder,
-    shuffleHistory,
-    mediaFileByPath,
     shuffleQueue,
-    mediaFiles,
+    shuffleHistory,
     applyMediaSelection,
   ])
 
@@ -305,12 +216,12 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [navigateMedia, previewFile])
 
   const canNavigateMediaFromPane = useMemo(() => (
-    mediaFiles.length > 1 && getMediaIndex(selectedFile) >= 0
-  ), [getMediaIndex, mediaFiles.length, selectedFile])
+    canNavigatePreviewMedia(mediaCollection, selectedFile)
+  ), [mediaCollection, selectedFile])
 
   const canNavigateMediaFromModal = useMemo(() => (
-    mediaFiles.length > 1 && getMediaIndex(previewFile) >= 0
-  ), [getMediaIndex, mediaFiles.length, previewFile])
+    canNavigatePreviewMedia(mediaCollection, previewFile)
+  ), [mediaCollection, previewFile])
 
   const hasOpenPreview = !!previewFile || showPreviewPane
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
@@ -331,7 +242,7 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   }, [])
 
   const alignPreviewToPath = useCallback((path: string | null) => {
-    const normalizedPath = (path || '').split('/').filter(Boolean).join('/')
+    const normalizedPath = normalizePreviewPath(path)
     if (!normalizedPath) {
       preferredPreviewPathRef.current = null
       return
@@ -426,32 +337,19 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   ])
 
   const setAutoPlayInterval = useCallback((value: number) => {
-    const nextValue = Math.min(
-      MAX_AUTOPLAY_INTERVAL_SEC,
-      Math.max(MIN_AUTOPLAY_INTERVAL_SEC, value)
-    )
-    setAutoPlayIntervalSec(nextValue)
+    setAutoPlayIntervalSec(clampAutoPlayIntervalSec(value))
   }, [])
 
   const setVideoSeekStep = useCallback((value: number) => {
-    setVideoSeekStepSec(toVideoSeekStepSec(value))
+    setVideoSeekStepSec(normalizeVideoSeekStepSec(value))
   }, [])
 
   const setVideoPlaybackRate = useCallback((value: number) => {
-    setVideoPlaybackRateState(toVideoPlaybackRate(value))
+    setVideoPlaybackRateState(normalizeVideoPlaybackRate(value))
   }, [])
 
   const cycleVideoPlaybackRate = useCallback(() => {
-    setVideoPlaybackRateState((previous) => {
-      const normalized = toVideoPlaybackRate(previous)
-      const currentIndex = VIDEO_PLAYBACK_RATE_CYCLE_ORDER.indexOf(
-        normalized as (typeof VIDEO_PLAYBACK_RATE_CYCLE_ORDER)[number]
-      )
-      if (currentIndex < 0) {
-        return DEFAULT_VIDEO_PLAYBACK_RATE
-      }
-      return VIDEO_PLAYBACK_RATE_CYCLE_ORDER[(currentIndex + 1) % VIDEO_PLAYBACK_RATE_CYCLE_ORDER.length]
-    })
+    setVideoPlaybackRateState((previous) => nextVideoPlaybackRate(previous))
   }, [])
 
   const toggleFaceBboxVisible = useCallback(() => {

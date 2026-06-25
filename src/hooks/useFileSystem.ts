@@ -32,8 +32,13 @@ import {
   syncLocalRootBindingsFromRuntime,
 } from '@/lib/reveal'
 import {
+  FAVORITE_FOLDERS_STORAGE_KEY,
+  getFavoriteFolderStorage,
+  loadFavoriteFoldersFromStorage,
+  saveFavoriteFoldersToStorage,
+} from '@/features/explorer/lib/favoriteFolderStore'
+import {
   isFavoriteFolderActive,
-  parseFavoriteFolders,
   removeFavoriteFolder as removeFavoriteFolderEntry,
   toggleFavoriteFolder,
   updateFavoriteFolderRootName,
@@ -45,8 +50,12 @@ import {
   isSameRuntimeListingPageCursor,
   normalizeListingQuery,
   sortTrashFileItems,
-  toRuntimeListingQueryRequest,
 } from '@/features/explorer/lib/listingQueryModel'
+import {
+  appendRuntimeListingPageItems,
+  createRuntimeListingPageCursor,
+  createRuntimeListingRequest,
+} from '@/features/explorer/lib/localListingLoadModel'
 import { filterExplorerListingFiles } from '@/features/explorer/lib/fileListingFilterModel'
 import {
   createLocalChildDirectoryPath,
@@ -61,7 +70,6 @@ import {
 
 const ROOT_CACHE_MISS_MESSAGE = '历史目录缓存不存在，请重新选择文件夹'
 const ROOT_PERMISSION_DENIED_MESSAGE = '目录访问权限不可用，请重新选择文件夹'
-const FAVORITE_FOLDERS_STORAGE_KEY = 'fauplay:favorite-folders'
 const FAVORITE_FOLDERS_MAX_ITEMS = appConfig.favorites.maxItems
 const ROOT_LABEL_FALLBACK = '根目录'
 const VIRTUAL_TRASH_PATH = '@trash'
@@ -85,38 +93,19 @@ interface LoadDirectoryItemsOptions {
   resolveDirectoryHandle?: () => Promise<FileSystemDirectoryHandle | null>
 }
 
-function saveFavoriteFolders(entries: FavoriteFolderEntry[]): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(FAVORITE_FOLDERS_STORAGE_KEY, JSON.stringify(entries))
-  } catch {
-    // Ignore storage write failures and keep runtime state available.
-  }
-}
-
-function loadFavoriteFolders(): FavoriteFolderEntry[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const parsed = parseFavoriteFolders(
-      window.localStorage.getItem(FAVORITE_FOLDERS_STORAGE_KEY),
-      FAVORITE_FOLDER_MODEL_OPTIONS
-    )
-    if (parsed.shouldRewrite) {
-      saveFavoriteFolders(parsed.entries)
-    }
-    return parsed.entries
-  } catch {
-    return []
-  }
-}
-
 export function useFileSystem() {
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootName, setRootName] = useState<string>(ROOT_LABEL_FALLBACK)
   const [cachedRoots, setCachedRoots] = useState<CachedRootEntry[]>([])
   const [isCachedRootsReady, setIsCachedRootsReady] = useState(false)
-  const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => loadFavoriteFolders())
+  const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolderEntry[]>(() => (
+    loadFavoriteFoldersFromStorage({
+      storage: getFavoriteFolderStorage(),
+      storageKey: FAVORITE_FOLDERS_STORAGE_KEY,
+      options: FAVORITE_FOLDER_MODEL_OPTIONS,
+    })
+  ))
   const [files, setFiles] = useState<FileItem[]>([])
   const [listingQuery, setListingQueryState] = useState<ListingQueryState>(DEFAULT_LISTING_QUERY)
   const [runtimeListingPageCursor, setRuntimeListingPageCursor] = useState<RuntimeListingPageCursor | null>(null)
@@ -171,7 +160,11 @@ export function useFileSystem() {
   }, [refreshCachedRoots])
 
   useEffect(() => {
-    saveFavoriteFolders(favoriteFolders)
+    saveFavoriteFoldersToStorage({
+      storage: getFavoriteFolderStorage(),
+      storageKey: FAVORITE_FOLDERS_STORAGE_KEY,
+      entries: favoriteFolders,
+    })
   }, [favoriteFolders])
 
   const loadDirectoryItems = useCallback(async (
@@ -184,23 +177,27 @@ export function useFileSystem() {
     if (boundRootPath) {
       try {
         const activeListingQuery = listingQueryRef.current
-        const runtimeListing = await listRuntimeLocalDirectory({
+        const runtimeListingRequest = createRuntimeListingRequest({
           rootPath: boundRootPath,
           rootRelativePath: basePath,
           flattened: flattenView,
-          limit: RUNTIME_LISTING_PAGE_SIZE,
-          ...toRuntimeListingQueryRequest(activeListingQuery),
+          pageSize: RUNTIME_LISTING_PAGE_SIZE,
+          query: activeListingQuery,
         })
+        if (!runtimeListingRequest) {
+          throw new Error(ROOT_PERMISSION_DENIED_MESSAGE)
+        }
+
+        const runtimeListing = await listRuntimeLocalDirectory(runtimeListingRequest)
         setFiles(toRuntimeFileItems(runtimeListing.entries, boundRootPath))
-        setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
-          ? {
-              rootPath: boundRootPath,
-              rootRelativePath: normalizeLocalRootRelativePath(basePath),
-              flattened: flattenView,
-              query: activeListingQuery,
-              nextOffset: runtimeListing.nextOffset,
-            }
-          : null)
+        setRuntimeListingPageCursor(createRuntimeListingPageCursor({
+          rootPath: boundRootPath,
+          rootRelativePath: basePath,
+          flattened: flattenView,
+          query: activeListingQuery,
+          isTruncated: runtimeListing.isTruncated,
+          nextOffset: runtimeListing.nextOffset,
+        }))
         return
       } catch {
         // Fall back to File System Access while the runtime-backed Listing path is being adopted.
@@ -229,32 +226,35 @@ export function useFileSystem() {
     setError(null)
 
     try {
-      const runtimeListing = await listRuntimeLocalDirectory({
+      const runtimeListingRequest = createRuntimeListingRequest({
         rootPath: cursor.rootPath,
         rootRelativePath: cursor.rootRelativePath,
         flattened: cursor.flattened,
-        limit: RUNTIME_LISTING_PAGE_SIZE,
+        pageSize: RUNTIME_LISTING_PAGE_SIZE,
         offset: cursor.nextOffset,
-        ...toRuntimeListingQueryRequest(cursor.query),
+        query: cursor.query,
       })
+      if (!runtimeListingRequest) return
+
+      const runtimeListing = await listRuntimeLocalDirectory(runtimeListingRequest)
 
       if (!isSameRuntimeListingPageCursor(runtimeListingPageCursorRef.current, cursor)) {
         return
       }
 
       const nextItems = toRuntimeFileItems(runtimeListing.entries, cursor.rootPath)
-      setFiles((previous) => {
-        const existingPaths = new Set(previous.map((item) => item.path))
-        const appendedItems = nextItems.filter((item) => !existingPaths.has(item.path))
-        if (appendedItems.length === 0) return previous
-        return [...previous, ...appendedItems]
-      })
-      setRuntimeListingPageCursor(runtimeListing.isTruncated && runtimeListing.nextOffset !== null
-        ? {
-            ...cursor,
-            nextOffset: runtimeListing.nextOffset,
-          }
-        : null)
+      setFiles((previous) => appendRuntimeListingPageItems({
+        previousItems: previous,
+        nextItems,
+      }))
+      setRuntimeListingPageCursor(createRuntimeListingPageCursor({
+        rootPath: cursor.rootPath,
+        rootRelativePath: cursor.rootRelativePath,
+        flattened: cursor.flattened,
+        query: cursor.query,
+        isTruncated: runtimeListing.isTruncated,
+        nextOffset: runtimeListing.nextOffset,
+      }))
     } catch (err) {
       setError((err as Error).message)
     } finally {

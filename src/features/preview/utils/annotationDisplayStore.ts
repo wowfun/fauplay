@@ -4,14 +4,18 @@ import { callRemoteAccessHttp } from '@/lib/remoteAccess'
 import { ensureRootPath } from '@/lib/reveal'
 import { callRuntimeHttp } from '@/lib/runtimeApi'
 import {
+  applyAnnotationPathState,
+  buildOptimisticAnnotationTagBinding,
+  buildOptimisticAnnotationTagUnbinding,
+  deriveAnnotationDisplaySnapshotFields,
+} from '@/features/preview/lib/annotationDisplaySnapshotModel'
+import {
   META_ANNOTATION_SOURCE,
-  buildAnnotationFilterTagOptions as buildFilterTagOptions,
   buildAnnotationPathSnapshotFromTagViews as buildPathSnapshotFromTagViews,
   buildAnnotationPathStateFromTags as buildPathStateFromTags,
   buildGlobalAnnotationTagOptions as buildGlobalTagOptions,
   buildLogicalAnnotationTags as buildLogicalTags,
   getAnnotationFilterTagIdentity as parseAnnotationFilterTagKey,
-  getStoredAnnotationTagsUpdatedAt as computeUpdatedAt,
   normalizeAnnotationRelativePath as normalizeRelativePath,
   readAnnotationTagOptionsFromResult as readTagOptionsFromResult,
   readAnnotationTagViewsFromResult as readTagViewsFromResult,
@@ -135,16 +139,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function applyDerivedSnapshotFields(snapshot: RootAnnotationDisplaySnapshot) {
-  const tagKeysByPath: Record<string, string[]> = {}
-  for (const [relativePath, rawTags] of Object.entries(snapshot.rawTagsByPath)) {
-    const logicalTags = buildLogicalTags(rawTags)
-    if (logicalTags.length === 0) continue
-    tagKeysByPath[relativePath] = logicalTags.map((item) => item.tagKey)
-  }
-
-  snapshot.tagKeysByPath = tagKeysByPath
-  snapshot.tagOptions = buildFilterTagOptions(snapshot.rawTagsByPath)
-  snapshot.hasAnyFilterableAnnotation = snapshot.tagOptions.length > 0
+  const derivedFields = deriveAnnotationDisplaySnapshotFields(snapshot.rawTagsByPath)
+  snapshot.tagKeysByPath = derivedFields.tagKeysByPath
+  snapshot.tagOptions = derivedFields.tagOptions
+  snapshot.hasAnyFilterableAnnotation = derivedFields.hasAnyFilterableAnnotation
 }
 
 function ensureRootSnapshot(rootId: string): RootAnnotationDisplaySnapshot {
@@ -257,13 +255,6 @@ async function loadAllTagViews(target: ResolvedAnnotationTarget): Promise<Annota
   return items
 }
 
-function removeRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  if (!(key in record)) return record
-  const next = { ...record }
-  delete next[key]
-  return next
-}
-
 function applyFileTagsToSnapshot(
   snapshot: RootAnnotationDisplaySnapshot,
   relativePath: string,
@@ -272,20 +263,14 @@ function applyFileTagsToSnapshot(
     updatedAt: number | null
   }
 ) {
-  if (!state.rawTags || state.rawTags.length === 0) {
-    snapshot.rawTagsByPath = removeRecordKey(snapshot.rawTagsByPath, relativePath)
-    snapshot.byPathUpdatedAt = removeRecordKey(snapshot.byPathUpdatedAt, relativePath)
-    return
-  }
-
-  snapshot.rawTagsByPath = {
-    ...snapshot.rawTagsByPath,
-    [relativePath]: state.rawTags,
-  }
-  snapshot.byPathUpdatedAt = {
-    ...snapshot.byPathUpdatedAt,
-    [relativePath]: state.updatedAt ?? 0,
-  }
+  const patch = applyAnnotationPathState({
+    rawTagsByPath: snapshot.rawTagsByPath,
+    byPathUpdatedAt: snapshot.byPathUpdatedAt,
+    relativePath,
+    state,
+  })
+  snapshot.rawTagsByPath = patch.rawTagsByPath
+  snapshot.byPathUpdatedAt = patch.byPathUpdatedAt
 }
 
 function createFileLoadKey(rootId: string, relativePath: string): string {
@@ -309,19 +294,20 @@ function createPathRollback(snapshot: RootAnnotationDisplaySnapshot, relativePat
   const hadUpdatedAt = relativePath in snapshot.byPathUpdatedAt
 
   return () => {
-    if (!previousRawTags || previousRawTags.length === 0) {
-      snapshot.rawTagsByPath = removeRecordKey(snapshot.rawTagsByPath, relativePath)
-      snapshot.byPathUpdatedAt = hadUpdatedAt
-        ? {
-          ...snapshot.byPathUpdatedAt,
-          [relativePath]: previousUpdatedAt,
-        }
-        : removeRecordKey(snapshot.byPathUpdatedAt, relativePath)
-    } else {
-      snapshot.rawTagsByPath = {
-        ...snapshot.rawTagsByPath,
-        [relativePath]: previousRawTags,
-      }
+    const rollbackPatch = applyAnnotationPathState({
+      rawTagsByPath: snapshot.rawTagsByPath,
+      byPathUpdatedAt: snapshot.byPathUpdatedAt,
+      relativePath,
+      state: {
+        rawTags: previousRawTags,
+        updatedAt: previousRawTags && previousRawTags.length > 0
+          ? previousUpdatedAt
+          : null,
+      },
+    })
+    snapshot.rawTagsByPath = rollbackPatch.rawTagsByPath
+    snapshot.byPathUpdatedAt = rollbackPatch.byPathUpdatedAt
+    if ((!previousRawTags || previousRawTags.length === 0) && hadUpdatedAt) {
       snapshot.byPathUpdatedAt = {
         ...snapshot.byPathUpdatedAt,
         [relativePath]: previousUpdatedAt,
@@ -515,26 +501,12 @@ export function patchAnnotationSetValue(params: PatchAnnotationSetValueParams) {
     tag.source === META_ANNOTATION_SOURCE
     && tag.key === key
   ))
-
-  const nextRawTags: StoredAnnotationTagRecord[] = [
-    ...retainedRawTags,
-    {
-      key,
-      value,
-      source: META_ANNOTATION_SOURCE,
-      appliedAt: nextUpdatedAt,
-      updatedAt: nextUpdatedAt,
-    },
-  ]
-
-  snapshot.rawTagsByPath = {
-    ...snapshot.rawTagsByPath,
-    [relativePath]: nextRawTags,
-  }
-  snapshot.byPathUpdatedAt = {
-    ...snapshot.byPathUpdatedAt,
-    [relativePath]: nextUpdatedAt,
-  }
+  applyFileTagsToSnapshot(snapshot, relativePath, buildOptimisticAnnotationTagBinding({
+    existingRawTags: retainedRawTags,
+    key,
+    value,
+    updatedAt: nextUpdatedAt,
+  }))
   updateSnapshotForOptimisticMutation(snapshot)
   applyDerivedSnapshotFields(snapshot)
   emitStoreUpdate()
@@ -551,34 +523,16 @@ export function patchAnnotationTagBinding(params: PatchAnnotationTagBindingParam
 
   const snapshot = ensureRootSnapshot(rootId)
   const existingRawTags = snapshot.rawTagsByPath[relativePath] ?? []
-  const alreadyBound = existingRawTags.some((tag) => (
-    tag.source === META_ANNOTATION_SOURCE
-    && tag.key === key
-    && tag.value === value
-  ))
-  if (alreadyBound) return null
+  const patch = buildOptimisticAnnotationTagBinding({
+    existingRawTags,
+    key,
+    value,
+    updatedAt: Date.now(),
+  })
+  if (!patch.changed) return null
 
   const rollback = createPathRollback(snapshot, relativePath)
-  const nextUpdatedAt = Date.now()
-  const nextRawTags: StoredAnnotationTagRecord[] = [
-    ...existingRawTags,
-    {
-      key,
-      value,
-      source: META_ANNOTATION_SOURCE,
-      appliedAt: nextUpdatedAt,
-      updatedAt: nextUpdatedAt,
-    },
-  ]
-
-  snapshot.rawTagsByPath = {
-    ...snapshot.rawTagsByPath,
-    [relativePath]: nextRawTags,
-  }
-  snapshot.byPathUpdatedAt = {
-    ...snapshot.byPathUpdatedAt,
-    [relativePath]: nextUpdatedAt,
-  }
+  applyFileTagsToSnapshot(snapshot, relativePath, patch)
   updateSnapshotForOptimisticMutation(snapshot)
   applyDerivedSnapshotFields(snapshot)
   emitStoreUpdate()
@@ -596,30 +550,15 @@ export function patchAnnotationTagUnbinding(params: PatchAnnotationTagBindingPar
 
   const snapshot = ensureRootSnapshot(rootId)
   const existingRawTags = snapshot.rawTagsByPath[relativePath] ?? []
-  const nextRawTags = existingRawTags.filter((tag) => !(
-    tag.source === META_ANNOTATION_SOURCE
-    && tag.key === key
-    && tag.value === value
-  ))
-
-  if (nextRawTags.length === existingRawTags.length) {
-    return null
-  }
+  const patch = buildOptimisticAnnotationTagUnbinding({
+    existingRawTags,
+    key,
+    value,
+  })
+  if (!patch.changed) return null
 
   const rollback = createPathRollback(snapshot, relativePath)
-  if (nextRawTags.length === 0) {
-    snapshot.rawTagsByPath = removeRecordKey(snapshot.rawTagsByPath, relativePath)
-    snapshot.byPathUpdatedAt = removeRecordKey(snapshot.byPathUpdatedAt, relativePath)
-  } else {
-    snapshot.rawTagsByPath = {
-      ...snapshot.rawTagsByPath,
-      [relativePath]: nextRawTags,
-    }
-    snapshot.byPathUpdatedAt = {
-      ...snapshot.byPathUpdatedAt,
-      [relativePath]: computeUpdatedAt(nextRawTags),
-    }
-  }
+  applyFileTagsToSnapshot(snapshot, relativePath, patch)
 
   updateSnapshotForOptimisticMutation(snapshot)
   applyDerivedSnapshotFields(snapshot)
