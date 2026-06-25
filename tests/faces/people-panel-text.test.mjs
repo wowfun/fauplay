@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  readPeoplePanelPersonEditNotice,
   readPeoplePanelSourceActionNotice,
 } from '../../src/features/faces/lib/peoplePanelText.ts'
 
@@ -34,5 +35,37 @@ test('People Panel Text reads source action notices', () => {
   assert.deepEqual(readPeoplePanelSourceActionNotice('project-sources', 'error'), {
     tone: 'error',
     message: '源文件投射失败',
+  })
+})
+
+test('People Panel Text reads person edit notices', () => {
+  assert.deepEqual(readPeoplePanelPersonEditNotice('rename-person', 'success'), {
+    tone: 'info',
+    message: '人物名称已更新',
+  })
+
+  assert.deepEqual(readPeoplePanelPersonEditNotice('rename-person', 'error'), {
+    tone: 'error',
+    message: '人物重命名失败',
+  })
+
+  assert.deepEqual(readPeoplePanelPersonEditNotice('merge-person', 'success'), {
+    tone: 'info',
+    message: '人物已合并',
+  })
+
+  assert.deepEqual(readPeoplePanelPersonEditNotice('merge-person', 'error'), {
+    tone: 'error',
+    message: '人物合并失败',
+  })
+
+  assert.deepEqual(readPeoplePanelPersonEditNotice('load-merged-person-faces', 'error'), {
+    tone: 'error',
+    message: '人脸列表读取失败',
+  })
+
+  assert.deepEqual(readPeoplePanelPersonEditNotice('merge-person', 'error', new Error('target missing')), {
+    tone: 'error',
+    message: 'target missing',
   })
 })

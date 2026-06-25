@@ -4,6 +4,8 @@ export type PanelView = 'people' | 'unassigned' | 'ignored'
 export type NoticeTone = 'info' | 'error'
 export type PeoplePanelSourceAction = 'open-source' | 'project-sources'
 export type PeoplePanelSourceActionOutcome = 'unavailable' | 'rejected' | 'error'
+export type PeoplePanelPersonEditAction = 'rename-person' | 'merge-person' | 'load-merged-person-faces'
+export type PeoplePanelPersonEditOutcome = 'success' | 'error'
 
 export function faceCountText(person: PersonSummary, scope: PersonScope): string {
   if (scope === 'global') {
@@ -45,6 +47,37 @@ export function readPeoplePanelSourceActionNotice(
     tone: 'error',
     message: readPeoplePanelSourceActionMessage(action, outcome, error),
   }
+}
+
+export function readPeoplePanelPersonEditNotice(
+  action: PeoplePanelPersonEditAction,
+  outcome: PeoplePanelPersonEditOutcome,
+  error?: unknown,
+): { tone: NoticeTone; message: string } {
+  return {
+    tone: outcome === 'success' ? 'info' : 'error',
+    message: readPeoplePanelPersonEditMessage(action, outcome, error),
+  }
+}
+
+function readPeoplePanelPersonEditMessage(
+  action: PeoplePanelPersonEditAction,
+  outcome: PeoplePanelPersonEditOutcome,
+  error?: unknown,
+): string {
+  if (outcome === 'error' && error instanceof Error) {
+    return error.message
+  }
+
+  if (action === 'rename-person') {
+    return outcome === 'success' ? '人物名称已更新' : '人物重命名失败'
+  }
+
+  if (action === 'merge-person') {
+    return outcome === 'success' ? '人物已合并' : '人物合并失败'
+  }
+
+  return '人脸列表读取失败'
 }
 
 function readPeoplePanelSourceActionMessage(

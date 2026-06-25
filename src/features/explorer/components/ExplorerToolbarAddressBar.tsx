@@ -13,11 +13,9 @@ import type {
   FavoriteFolderEntry,
 } from '@/types'
 import {
-  type AddressSuggestionItem,
   buildAddressBreadcrumbItems,
   buildAddressSuggestionDisplayPath,
   buildRootPathDisplayText,
-  createAddressChildPath,
   getAddressSuggestionSourceLabel,
   moveAddressSuggestionIndex,
   resolveAddressSuggestionCompletionIndex,
@@ -29,19 +27,9 @@ import {
   type ExplorerToolbarDisclosureAction,
   type ExplorerToolbarDisclosureState,
 } from '@/features/explorer/lib/explorerToolbarDisclosureModel'
-import {
-  createIdleAddressSuggestionSessionState,
-  getSegmentDropdownState,
-  resolveAddressSuggestionLoadErrorState,
-  resolveAddressSuggestionLoadStartState,
-  resolveAddressSuggestionLoadSuccessState,
-  resolveAddressSuggestionLookupPath,
-  resolveSegmentDropdownLoadErrorState,
-  resolveSegmentDropdownLoadStartState,
-  resolveSegmentDropdownLoadSuccessState,
-  toAddressTaskErrorMessage,
-  type SegmentDropdownStateByPath,
-} from '@/features/explorer/lib/explorerToolbarAddressBarModel'
+import { useExplorerToolbarAddressSuggestions } from '@/features/explorer/hooks/useExplorerToolbarAddressSuggestions'
+import { useExplorerToolbarSegmentDropdowns } from '@/features/explorer/hooks/useExplorerToolbarSegmentDropdowns'
+import { useExplorerToolbarAddressNavigation } from '@/features/explorer/hooks/useExplorerToolbarAddressNavigation'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
@@ -84,10 +72,7 @@ export function ExplorerToolbarAddressBar({
   onToggleCurrentPathFavorite,
   onNavigateUp,
 }: ExplorerToolbarAddressBarProps) {
-  const [isNavigatingByAddressBar, setIsNavigatingByAddressBar] = useState(false)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [segmentDropdownStateByPath, setSegmentDropdownStateByPath] = useState<SegmentDropdownStateByPath>({})
-  const [addressSuggestionSession, setAddressSuggestionSession] = useState(createIdleAddressSuggestionSessionState)
   const {
     addressBarMode,
     draftPath,
@@ -96,12 +81,6 @@ export function ExplorerToolbarAddressBar({
     isHistoryOpen,
     isFavoritesOpen,
   } = disclosureState
-  const {
-    status: addressSuggestionStatus,
-    items: addressSuggestions,
-    errorMessage: addressSuggestionError,
-    activeIndex: activeSuggestionIndex,
-  } = addressSuggestionSession
 
   const rootLabel = rootName || '根目录'
   const breadcrumbItems = useMemo(
@@ -117,7 +96,6 @@ export function ExplorerToolbarAddressBar({
 
   const addressBarRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const suggestionRequestSeqRef = useRef(0)
 
   const setDraftPathValue = useCallback((nextDraftPath: string) => {
     onDisclosureAction({ type: 'set-draft-path', draftPath: nextDraftPath })
@@ -127,14 +105,48 @@ export function ExplorerToolbarAddressBar({
     onDisclosureAction({ type: 'set-edit-error', editError: nextEditError })
   }, [onDisclosureAction])
 
-  const setActiveSuggestionIndex = useCallback((nextActiveIndex: number | ((previous: number) => number)) => {
-    setAddressSuggestionSession((previous) => ({
-      ...previous,
-      activeIndex: typeof nextActiveIndex === 'function'
-        ? nextActiveIndex(previous.activeIndex)
-        : nextActiveIndex,
-    }))
-  }, [])
+  const {
+    addressSuggestionSession,
+    setActiveSuggestionIndex,
+    resetAddressSuggestions,
+  } = useExplorerToolbarAddressSuggestions({
+    addressBarMode,
+    draftPath,
+    onListChildDirectories,
+    rootId,
+    rootLabel,
+    sortedFavorites,
+    sortedHistory,
+    maxItems: MAX_ADDRESS_SUGGESTION_ITEMS,
+  })
+  const {
+    readSegmentDropdownState,
+    loadSegmentDirectories,
+  } = useExplorerToolbarSegmentDropdowns({
+    onListChildDirectories,
+  })
+  const {
+    isNavigatingByAddressBar,
+    navigateByAddressBar,
+    submitAddressEdit,
+    submitAddressSuggestion,
+    navigateSegmentChild,
+    navigateHistoryEntry,
+    openFavoriteFolder,
+  } = useExplorerToolbarAddressNavigation({
+    onNavigateToPath,
+    onNavigateHistoryEntry,
+    onOpenFavoriteFolder,
+    onDisclosureAction,
+    onEditErrorChange: setEditErrorValue,
+    resetAddressSuggestions,
+  })
+  const {
+    status: addressSuggestionStatus,
+    items: addressSuggestions,
+    errorMessage: addressSuggestionError,
+    activeIndex: activeSuggestionIndex,
+  } = addressSuggestionSession
 
   useEffect(() => {
     if (addressBarMode !== 'edit') return
@@ -161,83 +173,12 @@ export function ExplorerToolbarAddressBar({
     return () => window.clearTimeout(timer)
   }, [copyState])
 
-  const loadAddressSuggestions = useCallback(async (draftValue: string): Promise<void> => {
-    const requestSeq = ++suggestionRequestSeqRef.current
-    const lookupPath = resolveAddressSuggestionLookupPath(draftValue)
-
-    setAddressSuggestionSession(resolveAddressSuggestionLoadStartState())
-
-    try {
-      const childDirectories = await onListChildDirectories(lookupPath)
-      if (requestSeq !== suggestionRequestSeqRef.current) return
-
-      setAddressSuggestionSession(resolveAddressSuggestionLoadSuccessState({
-        draftPath: draftValue,
-        childDirectories,
-        favoriteFolders: sortedFavorites,
-        recentPathHistory: sortedHistory,
-        currentRootId: rootId,
-        currentRootLabel: rootLabel,
-        maxItems: MAX_ADDRESS_SUGGESTION_ITEMS,
-      }))
-    } catch (error) {
-      if (requestSeq !== suggestionRequestSeqRef.current) return
-      setAddressSuggestionSession(resolveAddressSuggestionLoadErrorState(
-        toAddressTaskErrorMessage(error, '读取补全候选失败'),
-      ))
-    }
-  }, [onListChildDirectories, rootId, rootLabel, sortedFavorites, sortedHistory])
-
-  useEffect(() => {
-    if (addressBarMode !== 'edit') {
-      setAddressSuggestionSession(createIdleAddressSuggestionSessionState())
-      return
-    }
-    void loadAddressSuggestions(draftPath)
-  }, [addressBarMode, draftPath, loadAddressSuggestions])
-
-  const resetAddressSuggestions = () => {
-    setAddressSuggestionSession(createIdleAddressSuggestionSessionState())
-  }
-
   const enterEditMode = () => {
     onDisclosureAction({ type: 'enter-edit' })
   }
 
   const cancelEditMode = () => {
     onDisclosureAction({ type: 'cancel-edit' })
-  }
-
-  const navigateByAddressBar = async (path: string): Promise<boolean> => {
-    setIsNavigatingByAddressBar(true)
-    try {
-      const ok = await onNavigateToPath(path)
-      if (ok) {
-        setEditErrorValue(null)
-      }
-      return ok
-    } finally {
-      setIsNavigatingByAddressBar(false)
-    }
-  }
-
-  const loadSegmentDirectories = async (path: string): Promise<void> => {
-    setSegmentDropdownStateByPath((previous) => resolveSegmentDropdownLoadStartState(previous, path))
-
-    try {
-      const directories = await onListChildDirectories(path)
-      setSegmentDropdownStateByPath((previous) => (
-        resolveSegmentDropdownLoadSuccessState(previous, path, directories)
-      ))
-    } catch (error) {
-      setSegmentDropdownStateByPath((previous) => (
-        resolveSegmentDropdownLoadErrorState(
-          previous,
-          path,
-          toAddressTaskErrorMessage(error, '读取子目录失败'),
-        )
-      ))
-    }
   }
 
   const handleToggleSegmentDropdown = async (path: string) => {
@@ -250,58 +191,13 @@ export function ExplorerToolbarAddressBar({
     await loadSegmentDirectories(path)
   }
 
-  const handleSegmentNavigate = async (segmentPath: string, childName: string) => {
-    const nextPath = createAddressChildPath(segmentPath, childName)
-    const ok = await navigateByAddressBar(nextPath)
-    if (!ok) return
-    onDisclosureAction({ type: 'segment-navigation-committed' })
-  }
-
-  const submitAddressPath = async (path: string): Promise<void> => {
-    const ok = await navigateByAddressBar(path)
-    if (!ok) {
-      setEditErrorValue('路径无效或不可访问')
-      return
-    }
-    onDisclosureAction({ type: 'cancel-edit' })
-    resetAddressSuggestions()
-  }
-
-  const submitAddressSuggestion = async (suggestion: AddressSuggestionItem): Promise<void> => {
-    if (suggestion.source === 'favorite' && suggestion.favoriteEntry) {
-      const ok = await onOpenFavoriteFolder(suggestion.favoriteEntry)
-      if (!ok) {
-        setEditErrorValue('路径无效或不可访问')
-        return
-      }
-      onDisclosureAction({ type: 'favorite-navigation-committed' })
-      resetAddressSuggestions()
-      return
-    }
-
-    if (suggestion.source === 'history' && suggestion.historyEntry) {
-      const ok = await onNavigateHistoryEntry(suggestion.historyEntry)
-      if (!ok) {
-        setEditErrorValue('路径无效或不可访问')
-        return
-      }
-      onDisclosureAction({ type: 'history-navigation-committed' })
-      resetAddressSuggestions()
-      return
-    }
-
-    await submitAddressPath(suggestion.path)
-  }
-
   const handleSubmitEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const hasActiveSuggestion = activeSuggestionIndex >= 0 && activeSuggestionIndex < addressSuggestions.length
-    const targetSuggestion = hasActiveSuggestion ? addressSuggestions[activeSuggestionIndex] : null
-    if (targetSuggestion) {
-      await submitAddressSuggestion(targetSuggestion)
-      return
-    }
-    await submitAddressPath(draftPath)
+    await submitAddressEdit({
+      activeIndex: activeSuggestionIndex,
+      suggestions: addressSuggestions,
+      draftPath,
+    })
   }
 
   const handleToggleHistory = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -310,9 +206,7 @@ export function ExplorerToolbarAddressBar({
   }
 
   const handleNavigateHistoryPath = async (entry: AddressPathHistoryEntry) => {
-    const ok = await onNavigateHistoryEntry(entry)
-    if (!ok) return
-    onDisclosureAction({ type: 'history-navigation-committed' })
+    await navigateHistoryEntry(entry)
   }
 
   const handleToggleFavorites = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -321,9 +215,7 @@ export function ExplorerToolbarAddressBar({
   }
 
   const handleOpenFavoriteFolder = async (entry: FavoriteFolderEntry) => {
-    const ok = await onOpenFavoriteFolder(entry)
-    if (!ok) return
-    onDisclosureAction({ type: 'favorite-navigation-committed' })
+    await openFavoriteFolder(entry)
   }
 
   const handleRemoveFavoriteFolder = (event: ReactMouseEvent<HTMLButtonElement>, entry: FavoriteFolderEntry) => {
@@ -354,7 +246,7 @@ export function ExplorerToolbarAddressBar({
   const renderSegmentDropdown = (path: string) => {
     if (openSegmentPath !== path) return null
 
-    const state = getSegmentDropdownState(segmentDropdownStateByPath, path)
+    const state = readSegmentDropdownState(path)
 
     return (
       <div
@@ -381,7 +273,7 @@ export function ExplorerToolbarAddressBar({
                 className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
                 title={item}
                 onClick={() => {
-                  void handleSegmentNavigate(path, item)
+                  void navigateSegmentChild(path, item)
                 }}
               >
                 {item}

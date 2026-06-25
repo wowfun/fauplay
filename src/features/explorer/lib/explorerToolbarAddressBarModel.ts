@@ -24,6 +24,23 @@ export interface AddressSuggestionSessionState {
   activeIndex: number
 }
 
+export type AddressSuggestionActiveIndexUpdate = number | ((previous: number) => number)
+
+export type AddressSuggestionSubmitTarget =
+  | { kind: 'path'; path: string }
+  | { kind: 'suggestion'; suggestion: AddressSuggestionItem }
+
+export type AddressSuggestionNavigationIntent =
+  | { kind: 'path'; path: string }
+  | { kind: 'favorite'; entry: FavoriteFolderEntry }
+  | { kind: 'history'; entry: AddressPathHistoryEntry }
+
+export interface ResolveAddressSuggestionSubmitTargetParams {
+  activeIndex: number
+  suggestions: AddressSuggestionItem[]
+  draftPath: string
+}
+
 export interface ResolveAddressSuggestionLoadSuccessStateParams {
   draftPath: string
   childDirectories: string[]
@@ -144,6 +161,61 @@ export function resolveAddressSuggestionLoadErrorState(errorMessage: string): Ad
     items: [],
     errorMessage,
     activeIndex: -1,
+  }
+}
+
+export function resolveAddressSuggestionActiveIndexState(
+  state: AddressSuggestionSessionState,
+  nextActiveIndex: AddressSuggestionActiveIndexUpdate,
+): AddressSuggestionSessionState {
+  return {
+    ...state,
+    activeIndex: typeof nextActiveIndex === 'function'
+      ? nextActiveIndex(state.activeIndex)
+      : nextActiveIndex,
+  }
+}
+
+export function resolveAddressSuggestionSubmitTarget({
+  activeIndex,
+  suggestions,
+  draftPath,
+}: ResolveAddressSuggestionSubmitTargetParams): AddressSuggestionSubmitTarget {
+  const targetSuggestion = activeIndex >= 0 && activeIndex < suggestions.length
+    ? suggestions[activeIndex]
+    : null
+  if (targetSuggestion) {
+    return {
+      kind: 'suggestion',
+      suggestion: targetSuggestion,
+    }
+  }
+  return {
+    kind: 'path',
+    path: draftPath,
+  }
+}
+
+export function resolveAddressSuggestionNavigationIntent(
+  suggestion: AddressSuggestionItem,
+): AddressSuggestionNavigationIntent {
+  if (suggestion.source === 'favorite' && suggestion.favoriteEntry) {
+    return {
+      kind: 'favorite',
+      entry: suggestion.favoriteEntry,
+    }
+  }
+
+  if (suggestion.source === 'history' && suggestion.historyEntry) {
+    return {
+      kind: 'history',
+      entry: suggestion.historyEntry,
+    }
+  }
+
+  return {
+    kind: 'path',
+    path: suggestion.path,
   }
 }
 

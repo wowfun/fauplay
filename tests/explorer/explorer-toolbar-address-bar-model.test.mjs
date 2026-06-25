@@ -8,6 +8,9 @@ import {
   resolveAddressSuggestionLoadErrorState,
   resolveAddressSuggestionLoadStartState,
   resolveAddressSuggestionLoadSuccessState,
+  resolveAddressSuggestionActiveIndexState,
+  resolveAddressSuggestionNavigationIntent,
+  resolveAddressSuggestionSubmitTarget,
   resolveSegmentDropdownLoadErrorState,
   resolveSegmentDropdownLoadStartState,
   resolveSegmentDropdownLoadSuccessState,
@@ -126,6 +129,95 @@ test('Explorer Toolbar Address Bar Model resolves suggestion loading states', ()
     items: [],
     errorMessage: '读取补全失败',
     activeIndex: -1,
+  })
+})
+
+test('Explorer Toolbar Address Bar Model resolves active suggestion and submit targets', () => {
+  const session = resolveAddressSuggestionLoadSuccessState({
+    draftPath: 'albums/r',
+    childDirectories: ['raw', 'rendered'],
+    favoriteFolders: [],
+    recentPathHistory: [],
+    currentRootId: 'local-root',
+    currentRootLabel: 'Photos',
+    maxItems: 4,
+  })
+  const activeSession = resolveAddressSuggestionActiveIndexState(session, (previous) => previous + 1)
+
+  assert.equal(activeSession.activeIndex, 0)
+  assert.deepEqual(resolveAddressSuggestionSubmitTarget({
+    activeIndex: activeSession.activeIndex,
+    suggestions: activeSession.items,
+    draftPath: 'albums/r',
+  }), {
+    kind: 'suggestion',
+    suggestion: activeSession.items[0],
+  })
+
+  assert.deepEqual(resolveAddressSuggestionSubmitTarget({
+    activeIndex: 10,
+    suggestions: activeSession.items,
+    draftPath: 'albums/custom',
+  }), {
+    kind: 'path',
+    path: 'albums/custom',
+  })
+})
+
+test('Explorer Toolbar Address Bar Model resolves suggestion navigation intents', () => {
+  const favoriteEntry = {
+    rootId: 'archive-root',
+    rootName: 'Archive',
+    path: 'albums/restored',
+    favoritedAt: 10,
+  }
+  const historyEntry = {
+    rootId: 'local-root',
+    rootName: 'Photos',
+    path: 'albums/raw',
+    visitedAt: 20,
+  }
+
+  assert.deepEqual(resolveAddressSuggestionNavigationIntent({
+    path: favoriteEntry.path,
+    source: 'favorite',
+    rootId: favoriteEntry.rootId,
+    rootName: favoriteEntry.rootName,
+    favoriteEntry,
+  }), {
+    kind: 'favorite',
+    entry: favoriteEntry,
+  })
+
+  assert.deepEqual(resolveAddressSuggestionNavigationIntent({
+    path: historyEntry.path,
+    source: 'history',
+    rootId: historyEntry.rootId,
+    rootName: historyEntry.rootName,
+    historyEntry,
+  }), {
+    kind: 'history',
+    entry: historyEntry,
+  })
+
+  assert.deepEqual(resolveAddressSuggestionNavigationIntent({
+    path: 'albums/rendered',
+    source: 'directory',
+    rootId: 'local-root',
+    rootName: 'Photos',
+  }), {
+    kind: 'path',
+    path: 'albums/rendered',
+  })
+
+  assert.deepEqual(resolveAddressSuggestionNavigationIntent({
+    path: 'albums/missing-entry',
+    source: 'favorite',
+    rootId: 'archive-root',
+    rootName: 'Archive',
+  }), {
+    kind: 'path',
+    path: 'albums/missing-entry',
   })
 })
 

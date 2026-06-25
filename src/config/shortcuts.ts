@@ -1,34 +1,33 @@
 import rawShortcutConfig from '@/config/shortcuts.json'
 import type { ShortcutBinding } from '@/lib/keyboard'
+import {
+  cloneKeyboardShortcuts,
+  cloneShortcutBindings,
+  createEmptyKeyboardShortcuts,
+  setShortcutActionBindings,
+  shortcutActionIds,
+  shortcutActionTargets,
+} from './shortcutActionCatalog.ts'
+import type {
+  KeyboardShortcuts,
+  ShortcutActionId,
+} from './shortcutActionCatalog.ts'
+
+export {
+  cloneKeyboardShortcuts,
+  getShortcutActionTarget,
+  getShortcutBindingsForAction,
+  shortcutActionDisplayDescriptors,
+} from './shortcutActionCatalog.ts'
+export type {
+  KeyboardShortcuts,
+  ShortcutActionDisplayDescriptor,
+  ShortcutActionId,
+  ShortcutDisplayGroup,
+} from './shortcutActionCatalog.ts'
 
 export type ShortcutConfigBindingValue = string[] | 'none'
 export type TagShortcutActionId = `tag:${string}`
-
-export type ShortcutActionId =
-  | 'app_open_directory'
-  | 'app_navigate_up'
-  | 'app_undo_delete'
-  | 'preview_toggle_autoplay'
-  | 'preview_toggle_playback_order'
-  | 'preview_toggle_video_play_pause'
-  | 'preview_seek_backward'
-  | 'preview_seek_forward'
-  | 'preview_cycle_video_playback_rate'
-  | 'preview_soft_delete'
-  | 'preview_annotation_assign_digit'
-  | 'preview_open_annotation_tag_editor'
-  | 'preview_prev'
-  | 'preview_next'
-  | 'preview_close'
-  | 'grid_select_all'
-  | 'grid_clear_selection'
-  | 'grid_move_right'
-  | 'grid_move_left'
-  | 'grid_move_down'
-  | 'grid_move_up'
-  | 'grid_page_down'
-  | 'grid_page_up'
-  | 'grid_open_selected'
 
 export interface ShortcutConfigFileV1 {
   version: 1
@@ -43,235 +42,12 @@ export interface ConfiguredPreviewTagShortcut {
   bindings: ShortcutBinding[]
 }
 
-export interface KeyboardShortcuts {
-  app: {
-    openDirectory: ShortcutBinding[]
-    navigateUp: ShortcutBinding[]
-    undoDelete: ShortcutBinding[]
-  }
-  preview: {
-    toggleAutoPlay: ShortcutBinding[]
-    togglePlaybackOrder: ShortcutBinding[]
-    toggleVideoPlayPause: ShortcutBinding[]
-    seekBackward: ShortcutBinding[]
-    seekForward: ShortcutBinding[]
-    cycleVideoPlaybackRate: ShortcutBinding[]
-    softDelete: ShortcutBinding[]
-    annotationAssignByDigit: ShortcutBinding[]
-    openAnnotationTagEditor: ShortcutBinding[]
-    prev: ShortcutBinding[]
-    next: ShortcutBinding[]
-    close: ShortcutBinding[]
-  }
-  grid: {
-    selectAll: ShortcutBinding[]
-    clearSelection: ShortcutBinding[]
-    moveRight: ShortcutBinding[]
-    moveLeft: ShortcutBinding[]
-    moveDown: ShortcutBinding[]
-    moveUp: ShortcutBinding[]
-    pageDown: ShortcutBinding[]
-    pageUp: ShortcutBinding[]
-    openSelected: ShortcutBinding[]
-  }
-}
-
 export interface ParsedShortcutConfigLayer {
   source: string
   bindingsByAction: Partial<Record<ShortcutActionId, ShortcutBinding[] | null>>
   previewTagBindingsByActionId: Partial<Record<TagShortcutActionId, ConfiguredPreviewTagShortcut | null>>
   warnings: string[]
 }
-
-export type ShortcutDisplayGroup = keyof KeyboardShortcuts
-
-export interface ShortcutActionDisplayDescriptor {
-  actionId: ShortcutActionId
-  group: ShortcutDisplayGroup
-  label: string
-  order: number
-}
-
-type ShortcutActionTarget = {
-  group: keyof KeyboardShortcuts
-  action: string
-  implicitBinding: Partial<ShortcutBinding>
-  label: string
-  order: number
-}
-
-const shortcutActionTargets: Record<ShortcutActionId, ShortcutActionTarget> = {
-  app_open_directory: {
-    group: 'app',
-    action: 'openDirectory',
-    implicitBinding: { primary: true },
-    label: '选择文件夹',
-    order: 10,
-  },
-  app_navigate_up: {
-    group: 'app',
-    action: 'navigateUp',
-    implicitBinding: {},
-    label: '返回上一级目录',
-    order: 20,
-  },
-  app_undo_delete: {
-    group: 'app',
-    action: 'undoDelete',
-    implicitBinding: { primary: true },
-    label: '撤销最近删除',
-    order: 30,
-  },
-  preview_toggle_autoplay: {
-    group: 'preview',
-    action: 'toggleAutoPlay',
-    implicitBinding: { ctrl: false, meta: false, alt: false },
-    label: '切换自动播放',
-    order: 10,
-  },
-  preview_toggle_playback_order: {
-    group: 'preview',
-    action: 'togglePlaybackOrder',
-    implicitBinding: { ctrl: false, meta: false, alt: false },
-    label: '切换遍历模式',
-    order: 20,
-  },
-  preview_toggle_video_play_pause: {
-    group: 'preview',
-    action: 'toggleVideoPlayPause',
-    implicitBinding: { ctrl: false, meta: false, alt: false, shift: false },
-    label: '视频播放/暂停',
-    order: 30,
-  },
-  preview_seek_backward: {
-    group: 'preview',
-    action: 'seekBackward',
-    implicitBinding: { ctrl: false, meta: false, alt: false, shift: false },
-    label: '视频快退',
-    order: 40,
-  },
-  preview_seek_forward: {
-    group: 'preview',
-    action: 'seekForward',
-    implicitBinding: { ctrl: false, meta: false, alt: false, shift: false },
-    label: '视频快进',
-    order: 50,
-  },
-  preview_cycle_video_playback_rate: {
-    group: 'preview',
-    action: 'cycleVideoPlaybackRate',
-    implicitBinding: { ctrl: false, meta: false, alt: false, shift: false },
-    label: '循环切换视频倍速',
-    order: 60,
-  },
-  preview_soft_delete: {
-    group: 'preview',
-    action: 'softDelete',
-    implicitBinding: { ctrl: false, meta: false, alt: false },
-    label: '软删除当前预览文件',
-    order: 70,
-  },
-  preview_annotation_assign_digit: {
-    group: 'preview',
-    action: 'annotationAssignByDigit',
-    implicitBinding: { ctrl: false, meta: false, alt: false, shift: false },
-    label: '快速标注当前文件',
-    order: 80,
-  },
-  preview_open_annotation_tag_editor: {
-    group: 'preview',
-    action: 'openAnnotationTagEditor',
-    implicitBinding: {},
-    label: '打开标签绑定面板',
-    order: 90,
-  },
-  preview_prev: {
-    group: 'preview',
-    action: 'prev',
-    implicitBinding: { ctrl: false, meta: false, alt: false },
-    label: '上一个媒体项',
-    order: 100,
-  },
-  preview_next: {
-    group: 'preview',
-    action: 'next',
-    implicitBinding: { ctrl: false, meta: false, alt: false },
-    label: '下一个媒体项',
-    order: 110,
-  },
-  preview_close: {
-    group: 'preview',
-    action: 'close',
-    implicitBinding: {},
-    label: '关闭预览',
-    order: 120,
-  },
-  grid_select_all: {
-    group: 'grid',
-    action: 'selectAll',
-    implicitBinding: { primary: true },
-    label: '全选当前可见项',
-    order: 10,
-  },
-  grid_clear_selection: {
-    group: 'grid',
-    action: 'clearSelection',
-    implicitBinding: {},
-    label: '清空勾选集合',
-    order: 20,
-  },
-  grid_move_right: {
-    group: 'grid',
-    action: 'moveRight',
-    implicitBinding: {},
-    label: '网格向右移动',
-    order: 30,
-  },
-  grid_move_left: {
-    group: 'grid',
-    action: 'moveLeft',
-    implicitBinding: {},
-    label: '网格向左移动',
-    order: 40,
-  },
-  grid_move_down: {
-    group: 'grid',
-    action: 'moveDown',
-    implicitBinding: {},
-    label: '网格向下移动',
-    order: 50,
-  },
-  grid_move_up: {
-    group: 'grid',
-    action: 'moveUp',
-    implicitBinding: {},
-    label: '网格向上移动',
-    order: 60,
-  },
-  grid_page_down: {
-    group: 'grid',
-    action: 'pageDown',
-    implicitBinding: {},
-    label: '网格向下翻页',
-    order: 70,
-  },
-  grid_page_up: {
-    group: 'grid',
-    action: 'pageUp',
-    implicitBinding: {},
-    label: '网格向上翻页',
-    order: 80,
-  },
-  grid_open_selected: {
-    group: 'grid',
-    action: 'openSelected',
-    implicitBinding: {},
-    label: '打开当前选中项',
-    order: 90,
-  },
-}
-
-const shortcutActionIds = Object.keys(shortcutActionTargets) as ShortcutActionId[]
 
 const modifierAliases: Record<string, 'mod' | 'ctrl' | 'meta' | 'alt' | 'shift'> = {
   alt: 'alt',
@@ -336,80 +112,6 @@ const previewTagShortcutImplicitBinding: Partial<ShortcutBinding> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function createEmptyKeyboardShortcuts(): KeyboardShortcuts {
-  return {
-    app: {
-      openDirectory: [],
-      navigateUp: [],
-      undoDelete: [],
-    },
-    preview: {
-      toggleAutoPlay: [],
-      togglePlaybackOrder: [],
-      toggleVideoPlayPause: [],
-      seekBackward: [],
-      seekForward: [],
-      cycleVideoPlaybackRate: [],
-      softDelete: [],
-      annotationAssignByDigit: [],
-      openAnnotationTagEditor: [],
-      prev: [],
-      next: [],
-      close: [],
-    },
-    grid: {
-      selectAll: [],
-      clearSelection: [],
-      moveRight: [],
-      moveLeft: [],
-      moveDown: [],
-      moveUp: [],
-      pageDown: [],
-      pageUp: [],
-      openSelected: [],
-    },
-  }
-}
-
-function cloneBindings(bindings: readonly ShortcutBinding[]): ShortcutBinding[] {
-  return bindings.map((binding) => ({ ...binding }))
-}
-
-export function cloneKeyboardShortcuts(shortcuts: KeyboardShortcuts): KeyboardShortcuts {
-  return {
-    app: {
-      openDirectory: cloneBindings(shortcuts.app.openDirectory),
-      navigateUp: cloneBindings(shortcuts.app.navigateUp),
-      undoDelete: cloneBindings(shortcuts.app.undoDelete),
-    },
-    preview: {
-      toggleAutoPlay: cloneBindings(shortcuts.preview.toggleAutoPlay),
-      togglePlaybackOrder: cloneBindings(shortcuts.preview.togglePlaybackOrder),
-      toggleVideoPlayPause: cloneBindings(shortcuts.preview.toggleVideoPlayPause),
-      seekBackward: cloneBindings(shortcuts.preview.seekBackward),
-      seekForward: cloneBindings(shortcuts.preview.seekForward),
-      cycleVideoPlaybackRate: cloneBindings(shortcuts.preview.cycleVideoPlaybackRate),
-      softDelete: cloneBindings(shortcuts.preview.softDelete),
-      annotationAssignByDigit: cloneBindings(shortcuts.preview.annotationAssignByDigit),
-      openAnnotationTagEditor: cloneBindings(shortcuts.preview.openAnnotationTagEditor),
-      prev: cloneBindings(shortcuts.preview.prev),
-      next: cloneBindings(shortcuts.preview.next),
-      close: cloneBindings(shortcuts.preview.close),
-    },
-    grid: {
-      selectAll: cloneBindings(shortcuts.grid.selectAll),
-      clearSelection: cloneBindings(shortcuts.grid.clearSelection),
-      moveRight: cloneBindings(shortcuts.grid.moveRight),
-      moveLeft: cloneBindings(shortcuts.grid.moveLeft),
-      moveDown: cloneBindings(shortcuts.grid.moveDown),
-      moveUp: cloneBindings(shortcuts.grid.moveUp),
-      pageDown: cloneBindings(shortcuts.grid.pageDown),
-      pageUp: cloneBindings(shortcuts.grid.pageUp),
-      openSelected: cloneBindings(shortcuts.grid.openSelected),
-    },
-  }
 }
 
 function serializeShortcutBinding(binding: ShortcutBinding): string {
@@ -796,41 +498,6 @@ export function parseShortcutConfigLayer(input: unknown, source: string): Parsed
   }
 }
 
-function setActionBindings(
-  shortcuts: KeyboardShortcuts,
-  actionId: ShortcutActionId,
-  bindings: readonly ShortcutBinding[]
-) {
-  const target = shortcutActionTargets[actionId]
-  ;(shortcuts[target.group] as Record<string, ShortcutBinding[]>)[target.action] = cloneBindings(bindings)
-}
-
-export const shortcutActionDisplayDescriptors: ShortcutActionDisplayDescriptor[] = shortcutActionIds
-  .map((actionId) => ({
-    actionId,
-    group: shortcutActionTargets[actionId].group,
-    label: shortcutActionTargets[actionId].label,
-    order: shortcutActionTargets[actionId].order,
-  }))
-  .sort((left, right) => {
-    if (left.group !== right.group) {
-      return left.group.localeCompare(right.group)
-    }
-    if (left.order !== right.order) {
-      return left.order - right.order
-    }
-    return left.actionId.localeCompare(right.actionId)
-  })
-
-export function getShortcutBindingsForAction(
-  shortcuts: KeyboardShortcuts,
-  actionId: ShortcutActionId
-): ShortcutBinding[] {
-  const target = shortcutActionTargets[actionId]
-  const bindings = (shortcuts[target.group] as Record<string, ShortcutBinding[]>)[target.action] ?? []
-  return cloneBindings(bindings)
-}
-
 export function resolveKeyboardShortcuts(layers: readonly ParsedShortcutConfigLayer[]): KeyboardShortcuts {
   const shortcuts = createEmptyKeyboardShortcuts()
 
@@ -838,7 +505,7 @@ export function resolveKeyboardShortcuts(layers: readonly ParsedShortcutConfigLa
     for (const actionId of shortcutActionIds) {
       if (!(actionId in layer.bindingsByAction)) continue
       const nextBindings = layer.bindingsByAction[actionId]
-      setActionBindings(shortcuts, actionId, nextBindings ?? [])
+      setShortcutActionBindings(shortcuts, actionId, nextBindings ?? [])
     }
   }
 
@@ -861,7 +528,7 @@ export function resolveConfiguredPreviewTagShortcuts(
     .sort((left, right) => left.actionId.localeCompare(right.actionId))
     .map((shortcut) => ({
       ...shortcut,
-      bindings: cloneBindings(shortcut.bindings),
+      bindings: cloneShortcutBindings(shortcut.bindings),
     }))
 }
 
@@ -923,6 +590,6 @@ export function getDefaultKeyboardShortcuts(): KeyboardShortcuts {
 export function getDefaultConfiguredPreviewTagShortcuts(): ConfiguredPreviewTagShortcut[] {
   return defaultConfiguredPreviewTagShortcuts.map((shortcut) => ({
     ...shortcut,
-    bindings: cloneBindings(shortcut.bindings),
+    bindings: cloneShortcutBindings(shortcut.bindings),
   }))
 }

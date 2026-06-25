@@ -4,8 +4,6 @@ import {
   listPeople,
   listPersonFaces,
   listReviewFaces,
-  mergePeople,
-  renamePerson,
 } from '@/features/faces/api'
 import {
   faceCountText,
@@ -13,6 +11,7 @@ import {
   type PanelView,
 } from '@/features/faces/lib/peoplePanelText'
 import { usePeoplePanelFaceMutationController } from '@/features/faces/hooks/usePeoplePanelFaceMutationController'
+import { usePeoplePanelPersonEditController } from '@/features/faces/hooks/usePeoplePanelPersonEditController'
 import { usePeoplePanelSourceActions } from '@/features/faces/hooks/usePeoplePanelSourceActions'
 import {
   type CompactPeopleStage,
@@ -79,8 +78,6 @@ export function PeoplePanel({
   const [mergeTargetPersonId, setMergeTargetPersonId] = useState('')
   const [isLoadingPeople, setIsLoadingPeople] = useState(false)
   const [isLoadingFaces, setIsLoadingFaces] = useState(false)
-  const [isSavingRename, setIsSavingRename] = useState(false)
-  const [isMerging, setIsMerging] = useState(false)
   const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null)
   const [compactPeopleStage, setCompactPeopleStage] = useState<CompactPeopleStage>('list')
   const previousFaceSelectionScopeKeyRef = useRef<string | null>(null)
@@ -218,6 +215,28 @@ export function PeoplePanel({
   }, [loadAllPeople, loadCurrentFaces, loadPeopleList, peopleQuery])
 
   const {
+    isSavingRename,
+    isMerging,
+    saveRename,
+    mergeSelectedPerson,
+  } = usePeoplePanelPersonEditController({
+    context,
+    selectedPerson,
+    renameDraft,
+    mergeTargetPersonId,
+    scope,
+    loadAllPeople,
+    loadPeopleList,
+    setFaces,
+    setIsLoadingFaces,
+    setMergeTargetPersonId,
+    setMergeTargetQuery,
+    setPeopleQuery,
+    setSelectedPersonId,
+    setNotice,
+  })
+
+  const {
     isMutatingFaces,
     assignSelectedFaces,
     createPersonForSelectedFaces,
@@ -340,87 +359,6 @@ export function PeoplePanel({
     if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
   }, [clearSelection, isCompact])
 
-  const handleSaveRename = useCallback(async () => {
-    if (!selectedPerson) return
-    const nextName = renameDraft.trim()
-    if (nextName === selectedPerson.name) return
-
-    setIsSavingRename(true)
-    setNotice(null)
-    try {
-      await renamePerson(context, {
-        personId: selectedPerson.personId,
-        name: nextName,
-      })
-      setNotice({
-        tone: 'info',
-        message: '人物名称已更新',
-      })
-      await Promise.allSettled([loadAllPeople(), loadPeopleList()])
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '人物重命名失败',
-      })
-    } finally {
-      setIsSavingRename(false)
-    }
-  }, [context, loadAllPeople, loadPeopleList, renameDraft, selectedPerson])
-
-  const handleMerge = useCallback(async () => {
-    if (!selectedPerson || !mergeTargetPersonId || selectedPerson.personId === mergeTargetPersonId) return
-
-    const sourcePersonId = selectedPerson.personId
-    const targetPersonId = mergeTargetPersonId
-
-    setIsMerging(true)
-    setNotice(null)
-    try {
-      await mergePeople(context, {
-        targetPersonId,
-        sourcePersonIds: [sourcePersonId],
-      })
-      setNotice({
-        tone: 'info',
-        message: '人物已合并',
-      })
-      setMergeTargetPersonId('')
-      setMergeTargetQuery('')
-      setPeopleQuery('')
-      setSelectedPersonId(targetPersonId)
-      setIsLoadingFaces(true)
-      const loadTargetFaces = listPersonFaces(context, {
-        personId: targetPersonId,
-        scope,
-      })
-        .then((items) => {
-          setFaces(items)
-        })
-        .catch((error) => {
-          setFaces([])
-          setNotice({
-            tone: 'error',
-            message: error instanceof Error ? error.message : '人脸列表读取失败',
-          })
-        })
-        .finally(() => {
-          setIsLoadingFaces(false)
-        })
-      await Promise.allSettled([
-        loadAllPeople(),
-        loadPeopleList(''),
-        loadTargetFaces,
-      ])
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '人物合并失败',
-      })
-    } finally {
-      setIsMerging(false)
-    }
-  }, [context, loadAllPeople, loadPeopleList, mergeTargetPersonId, scope, selectedPerson])
-
   if (!open) return null
 
   return (
@@ -529,12 +467,12 @@ export function PeoplePanel({
                         isMerging={isMerging}
                         onRenameDraftChange={setRenameDraft}
                         onSaveRename={() => {
-                          void handleSaveRename()
+                          void saveRename()
                         }}
                         onMergeTargetQueryChange={setMergeTargetQuery}
                         onMergeTargetPersonChange={setMergeTargetPersonId}
                         onMerge={() => {
-                          void handleMerge()
+                          void mergeSelectedPerson()
                         }}
                       />
                     )}
@@ -652,12 +590,12 @@ export function PeoplePanel({
                       isMerging={isMerging}
                       onRenameDraftChange={setRenameDraft}
                       onSaveRename={() => {
-                        void handleSaveRename()
+                        void saveRename()
                       }}
                       onMergeTargetQueryChange={setMergeTargetQuery}
                       onMergeTargetPersonChange={setMergeTargetPersonId}
                       onMerge={() => {
-                        void handleMerge()
+                        void mergeSelectedPerson()
                       }}
                     />
                   </div>
