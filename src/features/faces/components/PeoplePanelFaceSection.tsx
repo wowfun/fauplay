@@ -4,28 +4,12 @@ import { FaceSelectionActions } from '@/features/faces/components/FaceSelectionA
 import {
   resolvePeoplePanelFaceSectionModel,
   type PeoplePanelFaceSectionLayout,
+  type PeoplePanelFaceSectionState,
 } from '@/features/faces/lib/peoplePanelModel'
-import type { PanelView } from '@/features/faces/lib/peoplePanelText'
-import type { FaceRecord, PersonScope } from '@/features/faces/types'
+import type { FaceRecord } from '@/features/faces/types'
 import { Button } from '@/ui/Button'
 
 type FaceActionHandler = () => Promise<boolean | void> | boolean | void
-
-export interface PeoplePanelFaceSectionState {
-  view: PanelView
-  readonly: boolean
-  context: FaceApiContext
-  scope: PersonScope
-  faces: FaceRecord[]
-  selectedFaceIds: Set<string>
-  selectedIds: string[]
-  selectedFaces: FaceRecord[]
-  excludedPersonIds: string[]
-  assignmentInputKey: string
-  isLoadingFaces: boolean
-  isMutatingFaces: boolean
-  isProjectingSources: boolean
-}
 
 export interface PeoplePanelFaceSectionActions {
   onClearSelection: () => void
@@ -42,7 +26,7 @@ export interface PeoplePanelFaceSectionActions {
 
 interface PeoplePanelFaceSectionProps {
   layout: PeoplePanelFaceSectionLayout
-  state: PeoplePanelFaceSectionState
+  state: PeoplePanelFaceSectionState<FaceApiContext>
   actions: PeoplePanelFaceSectionActions
 }
 

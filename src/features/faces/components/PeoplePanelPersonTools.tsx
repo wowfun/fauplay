@@ -1,17 +1,7 @@
-import type { PersonScope, PersonSummary } from '@/features/faces/types'
+import type { PeoplePanelPersonToolsState } from '@/features/faces/lib/peoplePanelModel'
 import { PersonMergeTargetList } from '@/features/faces/components/PersonMergeTargetList'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
-
-export interface PeoplePanelPersonToolsState {
-  scope: PersonScope
-  renameDraft: string
-  mergeTargetQuery: string
-  mergeTargetCandidates: PersonSummary[]
-  mergeTargetPersonId: string
-  isSavingRename: boolean
-  isMerging: boolean
-}
 
 export interface PeoplePanelPersonToolsActions {
   onRenameDraftChange: (value: string) => void

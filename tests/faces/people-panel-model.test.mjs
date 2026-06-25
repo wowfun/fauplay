@@ -6,6 +6,7 @@ import {
   resolvePeoplePanelFacesLoadPlan,
   resolvePeoplePanelFaceSectionModel,
   resolvePeoplePanelFaceSelectionScopeCommit,
+  resolvePeoplePanelPanelState,
   resolvePeoplePanelListStage,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPersonEditDraftCommit,
@@ -178,6 +179,64 @@ test('People Panel Selection Model derives assignment state only for people view
   assert.deepEqual(reviewModel.assignmentExcludedPersonIds, [])
   assert.equal(reviewModel.assignmentInputKey, 'global:ignored:')
   assert.equal(peopleListModel.assignmentInputKey, 'global:people:')
+})
+
+test('People Panel Model resolves child panel state from selection and operation state', () => {
+  const selected = person({ personId: 'person-a', name: 'Ada' })
+  const mergeTarget = person({ personId: 'person-b', name: 'Grace' })
+  const firstFace = face('face-1', selected.personId)
+  const secondFace = face('face-2')
+  const context = {
+    rootHandle: null,
+    rootId: 'root-a',
+  }
+
+  assert.deepEqual(resolvePeoplePanelPanelState({
+    view: 'people',
+    readonly: false,
+    context,
+    scope: 'root',
+    faces: [firstFace, secondFace],
+    selectedFaceIds: new Set(['face-1']),
+    selectedIds: ['face-1'],
+    selectedFaces: [firstFace],
+    assignmentExcludedPersonIds: [selected.personId],
+    assignmentInputKey: 'root:people:person-a',
+    isLoadingFaces: false,
+    isMutatingFaces: true,
+    isProjectingSources: false,
+    renameDraft: 'Ada Lovelace',
+    mergeTargetQuery: 'gra',
+    mergeTargetCandidates: [mergeTarget],
+    mergeTargetPersonId: mergeTarget.personId,
+    isSavingRename: false,
+    isMerging: true,
+  }), {
+    faceSectionState: {
+      view: 'people',
+      readonly: false,
+      context,
+      scope: 'root',
+      faces: [firstFace, secondFace],
+      selectedFaceIds: new Set(['face-1']),
+      selectedIds: ['face-1'],
+      selectedFaces: [firstFace],
+      excludedPersonIds: [selected.personId],
+      assignmentInputKey: 'root:people:person-a',
+      isLoadingFaces: false,
+      isMutatingFaces: true,
+      isProjectingSources: false,
+    },
+    personToolsState: {
+      scope: 'root',
+      renameDraft: 'Ada Lovelace',
+      mergeTargetQuery: 'gra',
+      mergeTargetCandidates: [mergeTarget],
+      mergeTargetPersonId: mergeTarget.personId,
+      isSavingRename: false,
+      isMerging: true,
+    },
+  })
 })
 
 test('People Panel Model resolves view switches and compact stages', () => {

@@ -147,6 +147,59 @@ export interface PeoplePanelFaceSectionModel {
   compactGrid: boolean
 }
 
+export interface PeoplePanelFaceSectionState<TContext = unknown> {
+  view: PanelView
+  readonly: boolean
+  context: TContext
+  scope: PersonScope
+  faces: FaceRecord[]
+  selectedFaceIds: Set<string>
+  selectedIds: string[]
+  selectedFaces: FaceRecord[]
+  excludedPersonIds: string[]
+  assignmentInputKey: string
+  isLoadingFaces: boolean
+  isMutatingFaces: boolean
+  isProjectingSources: boolean
+}
+
+export interface PeoplePanelPersonToolsState {
+  scope: PersonScope
+  renameDraft: string
+  mergeTargetQuery: string
+  mergeTargetCandidates: PersonSummary[]
+  mergeTargetPersonId: string
+  isSavingRename: boolean
+  isMerging: boolean
+}
+
+export interface ResolvePeoplePanelPanelStateParams<TContext = unknown> {
+  view: PanelView
+  readonly: boolean
+  context: TContext
+  scope: PersonScope
+  faces: FaceRecord[]
+  selectedFaceIds: Set<string>
+  selectedIds: string[]
+  selectedFaces: FaceRecord[]
+  assignmentExcludedPersonIds: string[]
+  assignmentInputKey: string
+  isLoadingFaces: boolean
+  isMutatingFaces: boolean
+  isProjectingSources: boolean
+  renameDraft: string
+  mergeTargetQuery: string
+  mergeTargetCandidates: PersonSummary[]
+  mergeTargetPersonId: string
+  isSavingRename: boolean
+  isMerging: boolean
+}
+
+export interface PeoplePanelPanelState<TContext = unknown> {
+  faceSectionState: PeoplePanelFaceSectionState<TContext>
+  personToolsState: PeoplePanelPersonToolsState
+}
+
 export function resolvePeoplePanelSelectionModel({
   people,
   allPeople,
@@ -187,6 +240,55 @@ export function resolvePeoplePanelSelectionModel({
     assignmentExcludedPersonIds: view === 'people' && selectedPersonId ? [selectedPersonId] : [],
     assignmentInputKey,
     faceSelectionScopeKey,
+  }
+}
+
+export function resolvePeoplePanelPanelState<TContext = unknown>({
+  view,
+  readonly,
+  context,
+  scope,
+  faces,
+  selectedFaceIds,
+  selectedIds,
+  selectedFaces,
+  assignmentExcludedPersonIds,
+  assignmentInputKey,
+  isLoadingFaces,
+  isMutatingFaces,
+  isProjectingSources,
+  renameDraft,
+  mergeTargetQuery,
+  mergeTargetCandidates,
+  mergeTargetPersonId,
+  isSavingRename,
+  isMerging,
+}: ResolvePeoplePanelPanelStateParams<TContext>): PeoplePanelPanelState<TContext> {
+  return {
+    faceSectionState: {
+      view,
+      readonly,
+      context,
+      scope,
+      faces,
+      selectedFaceIds,
+      selectedIds,
+      selectedFaces,
+      excludedPersonIds: assignmentExcludedPersonIds,
+      assignmentInputKey,
+      isLoadingFaces,
+      isMutatingFaces,
+      isProjectingSources,
+    },
+    personToolsState: {
+      scope,
+      renameDraft,
+      mergeTargetQuery,
+      mergeTargetCandidates,
+      mergeTargetPersonId,
+      isSavingRename,
+      isMerging,
+    },
   }
 }
 

@@ -17,6 +17,7 @@ import {
   resolvePeoplePanelCompactEmptySelectionStage,
   resolvePeoplePanelFaceSelectionScopeCommit,
   resolvePeoplePanelListStage,
+  resolvePeoplePanelPanelState,
   resolvePeoplePanelPersonEditDraftCommit,
   resolvePeoplePanelPersonSelection,
   resolvePeoplePanelPreferredPersonFocus,
@@ -376,7 +377,10 @@ export function PeoplePanel({
     if (transition.compactPeopleStage) setCompactPeopleStage(transition.compactPeopleStage)
   }, [clearSelection, isCompact])
 
-  const faceSectionState = {
+  const {
+    faceSectionState,
+    personToolsState,
+  } = resolvePeoplePanelPanelState({
     view,
     readonly,
     context,
@@ -385,12 +389,18 @@ export function PeoplePanel({
     selectedFaceIds,
     selectedIds,
     selectedFaces,
-    excludedPersonIds: assignmentExcludedPersonIds,
+    assignmentExcludedPersonIds,
     assignmentInputKey,
     isLoadingFaces,
     isMutatingFaces,
     isProjectingSources,
-  }
+    renameDraft,
+    mergeTargetQuery,
+    mergeTargetCandidates,
+    mergeTargetPersonId,
+    isSavingRename,
+    isMerging,
+  })
   const faceSectionActions = {
     onClearSelection: clearSelection,
     onSelectionChange: handleFaceSelectionChange,
@@ -402,15 +412,6 @@ export function PeoplePanel({
     onRestoreIgnored: restoreIgnoredFacesForSelection,
     onRequeue: requeueSelectedFaces,
     onProjectSources: projectFaceSources,
-  }
-  const personToolsState = {
-    scope,
-    renameDraft,
-    mergeTargetQuery,
-    mergeTargetCandidates,
-    mergeTargetPersonId,
-    isSavingRename,
-    isMerging,
   }
   const personToolsActions = {
     onRenameDraftChange: setRenameDraft,
