@@ -5,6 +5,7 @@ import {
   createPreviewFileNameRenamePlan,
   readPreviewLocalDataSetValueResult,
   resolvePreviewBatchRenameToolResult,
+  resolvePreviewFileNameRenameActionPlan,
   splitPreviewFileName,
 } from '../../src/features/preview/lib/previewFileEditModel.ts'
 
@@ -45,6 +46,94 @@ test('Preview File Edit Model treats an unchanged base name as a no-op rename', 
       path: 'photo.jpg',
     }, 'photo'),
     null,
+  )
+})
+
+test('Preview File Edit Model resolves file-name rename action plans', () => {
+  assert.deepEqual(
+    resolvePreviewFileNameRenameActionPlan({
+      file: null,
+      rootId: 'root-1',
+      canRenameFileName: true,
+      renameUnavailableReason: null,
+      nextBaseName: 'cover',
+    }),
+    {
+      ok: false,
+      error: '当前项不可重命名',
+    },
+  )
+
+  assert.deepEqual(
+    resolvePreviewFileNameRenameActionPlan({
+      file: {
+        name: 'photo.jpg',
+        path: 'photo.jpg',
+        kind: 'file',
+      },
+      rootId: 'root-1',
+      canRenameFileName: false,
+      renameUnavailableReason: '重命名能力不可用（Runtime 未连接且未注册 fs.batchRename）',
+      nextBaseName: 'cover',
+    }),
+    {
+      ok: false,
+      error: '重命名能力不可用（Runtime 未连接且未注册 fs.batchRename）',
+    },
+  )
+
+  assert.deepEqual(
+    resolvePreviewFileNameRenameActionPlan({
+      file: {
+        name: 'photo.jpg',
+        path: 'albums/photo.jpg',
+        kind: 'file',
+      },
+      rootId: 'root-1',
+      canRenameFileName: true,
+      renameUnavailableReason: null,
+      nextBaseName: 'photo',
+    }),
+    {
+      ok: true,
+      kind: 'noop',
+    },
+  )
+
+  assert.deepEqual(
+    resolvePreviewFileNameRenameActionPlan({
+      file: {
+        name: 'photo.jpg',
+        path: 'albums/photo.jpg',
+        kind: 'file',
+      },
+      rootId: 'root-1',
+      canRenameFileName: true,
+      renameUnavailableReason: null,
+      nextBaseName: 'cover',
+    }),
+    {
+      ok: true,
+      kind: 'rename',
+      rootId: 'root-1',
+      expectedRelativePath: 'albums/cover.jpg',
+      dryRunArgs: {
+        relativePaths: ['albums/photo.jpg'],
+        nameMask: '[N]',
+        findText: 'photo',
+        replaceText: 'cover',
+        searchMode: 'plain',
+        confirm: false,
+      },
+      commitArgs: {
+        relativePaths: ['albums/photo.jpg'],
+        nameMask: '[N]',
+        findText: 'photo',
+        replaceText: 'cover',
+        searchMode: 'plain',
+        confirm: true,
+      },
+    },
   )
 })
 

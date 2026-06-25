@@ -1,5 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
-import { dispatchSystemTool } from '@/lib/actionDispatcher'
+import { useEffect, useState, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import {
   buildRuntimeGlobalTrashFileContentUrlForItem,
@@ -12,32 +11,17 @@ import { getBoundRootPath } from '@/lib/reveal'
 import type { PlaybackOrder, PreviewSurface } from '@/features/preview/types/playback'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
 import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import {
-  getAnnotationDisplayStoreVersion,
-  getFileLogicalTags,
-  getGlobalAnnotationTagOptions,
-  getGlobalAnnotationTagOptionsState,
-  patchAnnotationTagBinding,
-  patchAnnotationTagUnbinding,
-  preloadFileAnnotationDisplaySnapshot,
-  preloadAnnotationDisplaySnapshot,
-  preloadGlobalAnnotationTagOptions,
-  subscribeAnnotationDisplayStore,
-} from '@/features/preview/utils/annotationDisplayStore'
 import { FilePreviewCanvas } from './FilePreviewCanvas'
-import { PreviewHeaderBar, type PreviewHeaderAnnotationTag } from './PreviewHeaderBar'
-import type { PreviewRenameResult } from './PreviewTitleRow'
+import { PreviewHeaderBar } from './PreviewHeaderBar'
 import { PreviewFaceCorrectionPanel } from '@/features/faces/components/PreviewFaceCorrectionPanel'
 import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 import { usePreviewFileLoader } from '@/features/preview/hooks/usePreviewFileLoader'
+import { usePreviewAnnotationTagActions } from '@/features/preview/hooks/usePreviewAnnotationTagActions'
+import { usePreviewFileNameRenameAction } from '@/features/preview/hooks/usePreviewFileNameRenameAction'
 import { usePreviewPluginResultAnnotationEffects } from '@/features/preview/hooks/usePreviewPluginResultAnnotationEffects'
 import { resolvePreviewFileAccessPlan } from '@/features/preview/lib/previewFileAccess'
 import { resolvePreviewFileLoadPlan } from '@/features/preview/lib/previewFileLoadPlan'
-import {
-  createPreviewFileNameRenamePlan,
-  resolvePreviewBatchRenameToolResult,
-} from '@/features/preview/lib/previewFileEditModel'
 import { resolvePreviewPanelCapabilityModel } from '@/features/preview/lib/previewPanelCapabilityModel'
 
 interface FilePreviewPanelProps {
@@ -135,7 +119,6 @@ export function FilePreviewPanel({
   onActivateProjection,
   onDismissProjectionTool,
 }: FilePreviewPanelProps) {
-  const [isRenaming, setIsRenaming] = useState(false)
   const [selectedFaceForCorrection, setSelectedFaceForCorrection] = useState<PreviewFaceOverlayItem | null>(null)
   const isFullscreen = presentation === 'lightbox'
   const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
@@ -205,11 +188,6 @@ export function FilePreviewPanel({
     previewKind,
     loadPlan: previewLoadPlan,
   })
-  useSyncExternalStore(
-    subscribeAnnotationDisplayStore,
-    getAnnotationDisplayStoreVersion,
-    getAnnotationDisplayStoreVersion
-  )
 
   const {
     canUseAnnotationContext,
@@ -240,25 +218,33 @@ export function FilePreviewPanel({
     ? annotationTagManageUnavailableReason
     : null
 
-  useEffect(() => {
-    if (!rootId || !canUseAnnotationContext) return
-    void preloadAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: null,
-    })
-  }, [canUseAnnotationContext, rootHandle, rootId])
-
-  useEffect(() => {
-    if (!rootId || !file || file.kind !== 'file' || !canUseAnnotationContext) return
-    void preloadFileAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: null,
-      relativePath: file.path,
-      force: true,
-    })
-  }, [canUseAnnotationContext, file, rootHandle, rootId])
+  const {
+    annotationTags,
+    annotationTagOptions,
+    annotationTagOptionsState,
+    refreshCurrentPreviewFileTags,
+    handleRequestAnnotationTagOptions,
+    handleBindAnnotationTag,
+    handleUnbindAnnotationTag,
+  } = usePreviewAnnotationTagActions({
+    file,
+    rootHandle,
+    rootId,
+    canUseAnnotationContext,
+    canManageAnnotationTags,
+    annotationTagManageUnavailableReason,
+  })
+  const {
+    isRenaming,
+    handleSubmitFileNameRename,
+  } = usePreviewFileNameRenameAction({
+    file,
+    rootHandle,
+    rootId,
+    canRenameFileName,
+    renameUnavailableReason,
+    onMutationCommitted,
+  })
 
   const currentFileQueue = useMemo(
     () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
@@ -278,21 +264,6 @@ export function FilePreviewPanel({
       .map((item) => `${item.id}:${item.status}`)
       .join('|')
   }, [currentFileQueue, file])
-  const refreshCurrentPreviewFileTags = useCallback(async () => {
-    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) return
-    await preloadFileAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: null,
-      relativePath: file.path,
-      force: true,
-    })
-  }, [canUseAnnotationContext, file, rootHandle, rootId])
-  const refreshGlobalAnnotationTagOptions = useCallback(async () => {
-    await preloadGlobalAnnotationTagOptions({
-      force: true,
-    })
-  }, [])
   const {
     items: faceOverlays,
     isLoading: faceOverlayLoading,
@@ -320,206 +291,9 @@ export function FilePreviewPanel({
     reloadFaceOverlays()
   }, [onMutationCommitted, refreshCurrentPreviewFileTags, reloadFaceOverlays])
 
-  const handleRequestAnnotationTagOptions = useCallback(() => {
-    if (!canManageAnnotationTags) return
-    void preloadGlobalAnnotationTagOptions()
-  }, [canManageAnnotationTags])
-
-  const handleBindAnnotationTag = useCallback(async ({ key, value }: { key: string; value: string }) => {
-    if (!file || file.kind !== 'file') {
-      throw new Error('当前项不可管理标签')
-    }
-    if (!canManageAnnotationTags || !rootHandle || !rootId) {
-      throw new Error(annotationTagManageUnavailableReason || '标签管理能力不可用')
-    }
-
-    const rollback = patchAnnotationTagBinding({
-      rootId,
-      relativePath: file.path,
-      key,
-      value,
-    })
-
-    try {
-      const result = await dispatchSystemTool({
-        toolName: 'local.data',
-        rootHandle,
-        rootId,
-        additionalArgs: {
-          operation: 'bindAnnotationTag',
-          relativePath: file.path,
-          key,
-          value,
-        },
-      })
-
-      if (!result.ok) {
-        throw new Error(result.error || '标签绑定失败')
-      }
-
-      await Promise.allSettled([
-        refreshCurrentPreviewFileTags(),
-        refreshGlobalAnnotationTagOptions(),
-      ])
-    } catch (error) {
-      rollback?.()
-      await Promise.allSettled([
-        refreshCurrentPreviewFileTags(),
-        refreshGlobalAnnotationTagOptions(),
-      ])
-      throw error
-    }
-  }, [
-    annotationTagManageUnavailableReason,
-    canManageAnnotationTags,
-    file,
-    refreshCurrentPreviewFileTags,
-    refreshGlobalAnnotationTagOptions,
-    rootHandle,
-    rootId,
-  ])
-
-  const handleUnbindAnnotationTag = useCallback(async (tag: PreviewHeaderAnnotationTag) => {
-    if (!file || file.kind !== 'file') {
-      throw new Error('当前项不可管理标签')
-    }
-    if (!canManageAnnotationTags || !rootHandle || !rootId) {
-      throw new Error(annotationTagManageUnavailableReason || '标签管理能力不可用')
-    }
-
-    const rollback = patchAnnotationTagUnbinding({
-      rootId,
-      relativePath: file.path,
-      key: tag.key,
-      value: tag.value,
-    })
-
-    try {
-      const result = await dispatchSystemTool({
-        toolName: 'local.data',
-        rootHandle,
-        rootId,
-        additionalArgs: {
-          operation: 'unbindAnnotationTag',
-          relativePath: file.path,
-          key: tag.key,
-          value: tag.value,
-        },
-      })
-
-      if (!result.ok) {
-        throw new Error(result.error || '标签删除失败')
-      }
-
-      await Promise.allSettled([
-        refreshCurrentPreviewFileTags(),
-        refreshGlobalAnnotationTagOptions(),
-      ])
-    } catch (error) {
-      rollback?.()
-      await Promise.allSettled([
-        refreshCurrentPreviewFileTags(),
-        refreshGlobalAnnotationTagOptions(),
-      ])
-      throw error
-    }
-  }, [
-    annotationTagManageUnavailableReason,
-    canManageAnnotationTags,
-    file,
-    refreshCurrentPreviewFileTags,
-    refreshGlobalAnnotationTagOptions,
-    rootHandle,
-    rootId,
-  ])
-
   useEffect(() => {
     setSelectedFaceForCorrection(null)
   }, [file?.path])
-
-  const handleSubmitFileNameRename = useCallback(async (nextBaseName: string): Promise<PreviewRenameResult> => {
-    if (!file || file.kind !== 'file') {
-      return { ok: false, error: '当前项不可重命名' }
-    }
-    if (!canRenameFileName || !rootId) {
-      return { ok: false, error: renameUnavailableReason || '重命名能力不可用' }
-    }
-
-    const renamePlan = createPreviewFileNameRenamePlan(file, nextBaseName)
-    if (!renamePlan) {
-      return { ok: true }
-    }
-
-    setIsRenaming(true)
-    try {
-      const dryRunResult = await dispatchSystemTool({
-        toolName: 'fs.batchRename',
-        rootHandle,
-        rootId,
-        additionalArgs: {
-          ...renamePlan.ruleArgs,
-          confirm: false,
-        },
-      })
-
-      const dryRunResolution = resolvePreviewBatchRenameToolResult(dryRunResult, {
-        expectedRelativePath: renamePlan.expectedRelativePath,
-        fallbackError: '重命名预演失败',
-        invalidResultError: '重命名预演返回无效结果',
-        requireExpectedRelativePath: true,
-      })
-      if (!dryRunResolution.ok) {
-        return dryRunResolution
-      }
-
-      const commitResult = await dispatchSystemTool({
-        toolName: 'fs.batchRename',
-        rootHandle,
-        rootId,
-        additionalArgs: {
-          ...renamePlan.ruleArgs,
-          confirm: true,
-        },
-      })
-
-      const commitResolution = resolvePreviewBatchRenameToolResult(commitResult, {
-        expectedRelativePath: renamePlan.expectedRelativePath,
-        fallbackError: '重命名提交失败',
-        invalidResultError: '重命名提交返回无效结果',
-        requireExpectedRelativePath: false,
-      })
-      if (!commitResolution.ok) {
-        return commitResolution
-      }
-
-      await onMutationCommitted?.({ preferredPreviewPath: renamePlan.expectedRelativePath })
-      return { ok: true }
-    } finally {
-      setIsRenaming(false)
-    }
-  }, [
-    canRenameFileName,
-    file,
-    onMutationCommitted,
-    renameUnavailableReason,
-    rootHandle,
-    rootId,
-  ])
-
-  const annotationTags: PreviewHeaderAnnotationTag[] = (
-    file && file.kind === 'file' && rootId && canUseAnnotationContext
-      ? getFileLogicalTags(rootId, file.path).map((tag) => ({
-        tagKey: tag.tagKey,
-        key: tag.key,
-        value: tag.value,
-        sources: tag.sources,
-        hasMetaAnnotation: tag.hasMetaAnnotation,
-        representativeSource: tag.representativeSource,
-      }))
-      : []
-  )
-  const annotationTagOptions = getGlobalAnnotationTagOptions()
-  const annotationTagOptionsState = getGlobalAnnotationTagOptionsState()
 
   if (!file) {
     return (

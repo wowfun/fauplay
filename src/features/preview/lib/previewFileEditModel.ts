@@ -8,6 +8,10 @@ export interface PreviewFileNameRenameSubject {
   path: string
 }
 
+export interface PreviewFileNameRenameActionSubject extends PreviewFileNameRenameSubject {
+  kind: 'file' | 'directory'
+}
+
 export interface PreviewFileNameRenamePlan {
   expectedRelativePath: string
   ruleArgs: {
@@ -18,6 +22,41 @@ export interface PreviewFileNameRenamePlan {
     searchMode: 'plain'
   }
 }
+
+export interface PreviewFileNameRenameToolArgs extends Record<string, unknown> {
+  relativePaths: string[]
+  nameMask: '[N]'
+  findText: string
+  replaceText: string
+  searchMode: 'plain'
+  confirm: boolean
+}
+
+export interface ResolvePreviewFileNameRenameActionPlanParams {
+  file: PreviewFileNameRenameActionSubject | null
+  rootId: string | null | undefined
+  canRenameFileName: boolean
+  renameUnavailableReason: string | null | undefined
+  nextBaseName: string
+}
+
+export type PreviewFileNameRenameActionPlan =
+  | {
+    ok: false
+    error: string
+  }
+  | {
+    ok: true
+    kind: 'noop'
+  }
+  | {
+    ok: true
+    kind: 'rename'
+    rootId: string
+    expectedRelativePath: string
+    dryRunArgs: PreviewFileNameRenameToolArgs
+    commitArgs: PreviewFileNameRenameToolArgs
+  }
 
 export interface PreviewBatchRenameToolResult {
   ok: boolean
@@ -89,6 +128,51 @@ export function createPreviewFileNameRenamePlan(
       findText: baseName,
       replaceText: nextBaseName,
       searchMode: 'plain',
+    },
+  }
+}
+
+export function resolvePreviewFileNameRenameActionPlan({
+  file,
+  rootId,
+  canRenameFileName,
+  renameUnavailableReason,
+  nextBaseName,
+}: ResolvePreviewFileNameRenameActionPlanParams): PreviewFileNameRenameActionPlan {
+  if (!file || file.kind !== 'file') {
+    return {
+      ok: false,
+      error: '当前项不可重命名',
+    }
+  }
+
+  if (!canRenameFileName || !rootId) {
+    return {
+      ok: false,
+      error: renameUnavailableReason || '重命名能力不可用',
+    }
+  }
+
+  const renamePlan = createPreviewFileNameRenamePlan(file, nextBaseName)
+  if (!renamePlan) {
+    return {
+      ok: true,
+      kind: 'noop',
+    }
+  }
+
+  return {
+    ok: true,
+    kind: 'rename',
+    rootId,
+    expectedRelativePath: renamePlan.expectedRelativePath,
+    dryRunArgs: {
+      ...renamePlan.ruleArgs,
+      confirm: false,
+    },
+    commitArgs: {
+      ...renamePlan.ruleArgs,
+      confirm: true,
     },
   }
 }

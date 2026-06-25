@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import { CONTINUOUS_CALL_OPTION_KEY, toolContinuousCallConfig, toEffectiveMaxContinuousConcurrent } from '@/config/toolContinuousCall'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import type { RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { withToolScopedProjection } from '@/lib/projection'
 import { getBoundRootPath } from '@/lib/reveal'
 import { getFilePreviewKind } from '@/lib/filePreview'
+import { usePreviewContinuousToolRunner } from '@/features/preview/hooks/usePreviewContinuousToolRunner'
 import { useResolvedPreviewTagShortcuts } from '@/features/preview/hooks/useResolvedPreviewTagShortcuts'
 import {
   resolvePreviewPluginContextModel,
@@ -14,6 +14,11 @@ import {
   resolvePreviewPluginToolRunnable,
 } from '@/features/preview/lib/previewPluginContextModel'
 import { resolvePreviewPluginMutationCommitParams } from '@/features/preview/lib/previewPluginMutationModel'
+import {
+  resolvePreviewPluginDuplicateProjectionDismissIntent,
+  resolvePreviewPluginProjectionActivationIntent,
+} from '@/features/preview/lib/previewPluginProjectionModel'
+import { resolvePreviewPluginShortcutIntent } from '@/features/preview/lib/previewPluginShortcutIntentModel'
 import { resolvePreviewPluginWorkbenchTool } from '@/features/preview/lib/previewPluginWorkbenchModel'
 import type { FileItem, ResultProjection } from '@/types'
 import type { PreviewMutationCommitParams } from '@/features/preview/types/mutation'
@@ -23,7 +28,6 @@ import { PluginToolResultPanel } from '@/features/plugin-runtime/components/Plug
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
 import {
   hasWorkbenchMetadata,
-  isBooleanToolOptionEnabled,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
 import { resolveActiveDigitAssignment } from '@/features/plugin-runtime/utils/annotationSchema'
@@ -52,11 +56,6 @@ interface PreviewPluginHostProps {
   onDismissProjectionTool: (toolName: string) => void
 }
 
-interface ContinuousToolTask {
-  key: string
-  tool: RuntimeToolDescriptor
-}
-
 export function PreviewPluginHost({
   file,
   rootHandle,
@@ -80,9 +79,6 @@ export function PreviewPluginHost({
   onDismissProjectionTool,
 }: PreviewPluginHostProps) {
   const keyboardShortcuts = useKeyboardShortcuts()
-  const continuousTaskQueueRef = useRef<ContinuousToolTask[]>([])
-  const continuousTaskKeySetRef = useRef<Set<string>>(new Set())
-  const continuousInFlightCountRef = useRef(0)
   const currentBoundRootPath = useMemo(
     () => (rootId ? getBoundRootPath(rootId) : null),
     [rootId]
@@ -159,37 +155,25 @@ export function PreviewPluginHost({
   }, [file.path])
 
   useEffect(() => {
-    const latestDuplicateResult = pluginRuntime.currentQueue.find((item) => (
-      item.toolName === 'data.findDuplicateFiles'
-      && item.status === 'success'
-    ))
-    const autoProjectionItem = pluginRuntime.currentQueue.find((item) => (
-      item.status === 'success'
-      && item.projection?.entry === 'auto'
-      && !(
-        item.toolName === 'data.findDuplicateFiles'
-        && latestDuplicateResult
-        && latestDuplicateResult.id !== item.id
-        && !latestDuplicateResult.projection
-      )
-    ))
-    if (!autoProjectionItem?.projection) return
-    if (handledAutoProjectionIdRef.current === autoProjectionItem.id) return
-    handledAutoProjectionIdRef.current = autoProjectionItem.id
-    onActivateProjection(withToolScopedProjection(autoProjectionItem.projection, autoProjectionItem.toolName))
+    const intent = resolvePreviewPluginProjectionActivationIntent({
+      queueItems: pluginRuntime.currentQueue,
+      handledResultId: handledAutoProjectionIdRef.current,
+    })
+    if (intent.kind === 'none') return
+
+    handledAutoProjectionIdRef.current = intent.resultId
+    onActivateProjection(withToolScopedProjection(intent.projection, intent.toolName))
   }, [onActivateProjection, pluginRuntime.currentQueue])
 
   useEffect(() => {
-    const latestDuplicateResult = pluginRuntime.currentQueue.find((item) => (
-      item.toolName === 'data.findDuplicateFiles'
-      && item.status === 'success'
-    ))
-    if (!latestDuplicateResult) return
-    if (latestDuplicateResult.projection) return
-    if (handledDuplicateProjectionDismissResultIdRef.current === latestDuplicateResult.id) return
+    const intent = resolvePreviewPluginDuplicateProjectionDismissIntent({
+      queueItems: pluginRuntime.currentQueue,
+      handledResultId: handledDuplicateProjectionDismissResultIdRef.current,
+    })
+    if (intent.kind === 'none') return
 
-    handledDuplicateProjectionDismissResultIdRef.current = latestDuplicateResult.id
-    onDismissProjectionTool(latestDuplicateResult.toolName)
+    handledDuplicateProjectionDismissResultIdRef.current = intent.resultId
+    onDismissProjectionTool(intent.toolName)
   }, [onDismissProjectionTool, pluginRuntime.currentQueue])
   const softDeleteTool = useMemo(
     () => fileActionTools.find((tool) => tool.name === 'fs.softDelete') ?? null,
@@ -215,67 +199,17 @@ export function PreviewPluginHost({
   const currentFileQueue = pluginRuntime.currentQueue
   const showActionRail = fileActionTools.length > 0
   const showResultPanel = fileActionTools.length > 0
-  const maxContinuousConcurrent = useMemo(
-    () => toEffectiveMaxContinuousConcurrent(toolContinuousCallConfig.maxConcurrent),
-    []
-  )
-
-  const continuousEnabledToolNames = useMemo(
-    () => new Set(
-      fileActionTools
-        .filter((tool) => isBooleanToolOptionEnabled(tool, CONTINUOUS_CALL_OPTION_KEY, toolWorkbenchState.optionValuesByTool))
-        .map((tool) => tool.name)
-    ),
-    [fileActionTools, toolWorkbenchState.optionValuesByTool]
-  )
-
-  const processContinuousQueue = useCallback(() => {
-    if (!enableContinuousAutoRunOwner) return
-
-    while (
-      continuousInFlightCountRef.current < maxContinuousConcurrent
-      && continuousTaskQueueRef.current.length > 0
-    ) {
-      const nextTask = continuousTaskQueueRef.current.shift()
-      if (!nextTask) return
-
-      if (pluginRuntime.hasCompletedRequest(nextTask.tool.name, nextTask.key)) {
-        continuousTaskKeySetRef.current.delete(nextTask.key)
-        continue
-      }
-
-      continuousInFlightCountRef.current += 1
-      void pluginRuntime.runToolCall(nextTask.tool, {
-        trigger: 'continuous',
-        requestSignature: nextTask.key,
-        skipIfAlreadyCompleted: true,
-      }).finally(() => {
-        continuousInFlightCountRef.current = Math.max(0, continuousInFlightCountRef.current - 1)
-        continuousTaskKeySetRef.current.delete(nextTask.key)
-        processContinuousQueue()
-      })
-    }
-  }, [enableContinuousAutoRunOwner, maxContinuousConcurrent, pluginRuntime])
-
-  const enqueueContinuousTasks = useCallback((tools: RuntimeToolDescriptor[]) => {
-    if (!enableContinuousAutoRunOwner) return
-
-    for (const tool of tools) {
-      const requestSignature = pluginRuntime.getRequestSignature(tool)
-      if (!requestSignature) continue
-
-      if (pluginRuntime.hasCompletedRequest(tool.name, requestSignature)) continue
-      if (continuousTaskKeySetRef.current.has(requestSignature)) continue
-
-      continuousTaskKeySetRef.current.add(requestSignature)
-      continuousTaskQueueRef.current.push({
-        key: requestSignature,
-        tool,
-      })
-    }
-
-    processContinuousQueue()
-  }, [enableContinuousAutoRunOwner, pluginRuntime, processContinuousQueue])
+  const { continuousEnabledToolNames } = usePreviewContinuousToolRunner({
+    enabled: enableContinuousAutoRunOwner,
+    fileKind: file.kind,
+    previewViewState,
+    tools: fileActionTools,
+    optionValuesByTool: toolWorkbenchState.optionValuesByTool,
+    hasExecutionContext: pluginRuntime.hasExecutionContext,
+    getRequestSignature: pluginRuntime.getRequestSignature,
+    hasCompletedRequest: pluginRuntime.hasCompletedRequest,
+    runToolCall: pluginRuntime.runToolCall,
+  })
 
   useEffect(() => {
     setToolResultQueueState((prev) => {
@@ -289,73 +223,47 @@ export function PreviewPluginHost({
   }, [file.path, setToolResultQueueState])
 
   useEffect(() => {
-    if (!enableContinuousAutoRunOwner) return
-    if (file.kind !== 'file' || !pluginRuntime.hasExecutionContext) return
-    if (previewViewState !== 'ready') return
-
-    const continuousTools = fileActionTools.filter((tool) => continuousEnabledToolNames.has(tool.name))
-    if (continuousTools.length === 0) return
-
-    enqueueContinuousTasks(continuousTools)
-  }, [
-    continuousEnabledToolNames,
-    enableContinuousAutoRunOwner,
-    enqueueContinuousTasks,
-    file.kind,
-    fileActionTools,
-    pluginRuntime.hasExecutionContext,
-    previewViewState,
-  ])
-
-  useEffect(() => {
-    if (!enableContinuousAutoRunOwner) return
-    processContinuousQueue()
-  }, [enableContinuousAutoRunOwner, processContinuousQueue])
-
-  useEffect(() => {
-    if (!enableAnnotationTagShortcutOwner) return
     if (file.kind !== 'file') return
-    if (!annotationTool) return
+    if (!annotationTool && !softDeleteTool) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      if (event.repeat) return
-      if (isTypingTarget(event.target)) return
-
-      const matchedShortcut = getMatchingPreviewTagShortcut(event)
-      if (!matchedShortcut) return
-
-      event.preventDefault()
-      if (matchedShortcut.alreadyBound) return
-
-      void runToolCall(annotationTool, {
-        trigger: 'manual',
-        actionLabel: `${matchedShortcut.key}=${matchedShortcut.value}`,
-        additionalArgs: {
-          operation: 'bindAnnotationTag',
-          key: matchedShortcut.key,
-          value: matchedShortcut.value,
+      const intent = resolvePreviewPluginShortcutIntent({
+        event: {
+          defaultPrevented: event.defaultPrevented,
+          repeat: event.repeat,
+          isTypingTarget: isTypingTarget(event.target),
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          shiftKey: event.shiftKey,
+          matchesSoftDeleteShortcut: matchesAnyShortcut(event, keyboardShortcuts.preview.softDelete),
+          matchesAnnotationDigitShortcut: matchesAnyShortcut(event, keyboardShortcuts.preview.annotationAssignByDigit),
         },
+        fileKind: file.kind,
+        enableAnnotationTagShortcutOwner,
+        enableContinuousAutoRunOwner,
+        annotationToolAvailable: annotationTool !== null,
+        softDeleteToolAvailable: softDeleteTool !== null,
+        matchedTagShortcut: getMatchingPreviewTagShortcut(event),
+        activeDigitAssignment: resolveActiveDigitAssignment(rootId),
       })
-    }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [annotationTool, enableAnnotationTagShortcutOwner, file.kind, getMatchingPreviewTagShortcut, runToolCall])
-
-  useEffect(() => {
-    if (!enableContinuousAutoRunOwner) return
-    if (file.kind !== 'file') return
-    if (!softDeleteTool) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      if (event.repeat) return
-      if (isTypingTarget(event.target)) return
-      if (getMatchingPreviewTagShortcut(event)) return
-      if (!matchesAnyShortcut(event, keyboardShortcuts.preview.softDelete)) return
-
+      if (intent.kind === 'none') return
       event.preventDefault()
+      if (intent.kind === 'consume') return
+
+      if (intent.kind === 'run-annotation-tool') {
+        if (!annotationTool) return
+        void runToolCall(annotationTool, {
+          trigger: 'manual',
+          actionLabel: intent.actionLabel,
+          additionalArgs: intent.additionalArgs,
+        })
+        return
+      }
+
+      if (!softDeleteTool) return
       const additionalArgs = resolveToolArguments(softDeleteTool)
       if (!additionalArgs) return
       void runToolCall(softDeleteTool, {
@@ -367,52 +275,17 @@ export function PreviewPluginHost({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
+    annotationTool,
+    enableAnnotationTagShortcutOwner,
     enableContinuousAutoRunOwner,
     file.kind,
     getMatchingPreviewTagShortcut,
     keyboardShortcuts,
     resolveToolArguments,
+    rootId,
     runToolCall,
     softDeleteTool,
   ])
-
-  useEffect(() => {
-    if (!enableContinuousAutoRunOwner) return
-    if (file.kind !== 'file') return
-    if (!annotationTool) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      if (event.repeat) return
-      if (isTypingTarget(event.target)) return
-      if (getMatchingPreviewTagShortcut(event)) return
-      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-      if (!matchesAnyShortcut(event, keyboardShortcuts.preview.annotationAssignByDigit)) return
-
-      const digit = event.key
-      if (!/^[0-9]$/.test(digit)) return
-
-      const assignment = resolveActiveDigitAssignment(rootId)
-      if (!assignment) return
-      const value = assignment.valueByDigit[digit]
-      if (!value) return
-
-      event.preventDefault()
-      void runToolCall(annotationTool, {
-        trigger: 'manual',
-        actionLabel: `${assignment.fieldKey}=${value}`,
-        additionalArgs: {
-          operation: 'setAnnotationValue',
-          fieldKey: assignment.fieldKey,
-          value,
-          source: 'hotkey',
-        },
-      })
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [annotationTool, enableContinuousAutoRunOwner, file.kind, getMatchingPreviewTagShortcut, keyboardShortcuts, rootId, runToolCall])
 
   const railActions = useMemo(
     () => pluginRuntime.railActions.map((action) => ({
