@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, useCallback, useMemo, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { dispatchSystemTool } from '@/lib/actionDispatcher'
 import { getFilePreviewKind, isMediaPreviewKind } from '@/lib/filePreview'
 import {
@@ -17,7 +17,6 @@ import {
   getFileLogicalTags,
   getGlobalAnnotationTagOptions,
   getGlobalAnnotationTagOptionsState,
-  patchAnnotationSetValue,
   patchAnnotationTagBinding,
   patchAnnotationTagUnbinding,
   preloadFileAnnotationDisplaySnapshot,
@@ -32,11 +31,11 @@ import { PreviewFaceCorrectionPanel } from '@/features/faces/components/PreviewF
 import { usePreviewFaceOverlays } from '@/features/faces/hooks/usePreviewFaceOverlays'
 import type { PreviewFaceOverlayItem } from '@/features/faces/types'
 import { usePreviewFileLoader } from '@/features/preview/hooks/usePreviewFileLoader'
+import { usePreviewPluginResultAnnotationEffects } from '@/features/preview/hooks/usePreviewPluginResultAnnotationEffects'
 import { resolvePreviewFileAccessPlan } from '@/features/preview/lib/previewFileAccess'
 import { resolvePreviewFileLoadPlan } from '@/features/preview/lib/previewFileLoadPlan'
 import {
   createPreviewFileNameRenamePlan,
-  readPreviewLocalDataSetValueResult,
   resolvePreviewBatchRenameToolResult,
 } from '@/features/preview/lib/previewFileEditModel'
 import { resolvePreviewPanelCapabilityModel } from '@/features/preview/lib/previewPanelCapabilityModel'
@@ -138,8 +137,6 @@ export function FilePreviewPanel({
 }: FilePreviewPanelProps) {
   const [isRenaming, setIsRenaming] = useState(false)
   const [selectedFaceForCorrection, setSelectedFaceForCorrection] = useState<PreviewFaceOverlayItem | null>(null)
-  const handledLocalDataQueueItemIdRef = useRef<string | null>(null)
-  const handledVisionFaceQueueItemIdRef = useRef<string | null>(null)
   const isFullscreen = presentation === 'lightbox'
   const previewKind = file && file.kind === 'file' ? getFilePreviewKind(file.name) : 'unsupported'
   const boundRootPath = useMemo(
@@ -267,6 +264,13 @@ export function FilePreviewPanel({
     () => (file ? (toolResultQueueState.byContextKey[file.path] ?? []) : []),
     [file, toolResultQueueState.byContextKey]
   )
+  usePreviewPluginResultAnnotationEffects({
+    file,
+    rootHandle,
+    rootId,
+    canUseAnnotationContext,
+    currentFileQueue,
+  })
   const faceOverlayRefreshToken = useMemo(() => {
     if (!file || file.kind !== 'file') return ''
     return currentFileQueue
@@ -501,57 +505,6 @@ export function FilePreviewPanel({
     rootHandle,
     rootId,
   ])
-
-  useEffect(() => {
-    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) {
-      handledLocalDataQueueItemIdRef.current = null
-      return
-    }
-
-    const latestLocalDataSuccess = currentFileQueue.find((item) => (
-      item.toolName === 'local.data'
-      && item.status === 'success'
-    ))
-    if (!latestLocalDataSuccess) return
-    if (handledLocalDataQueueItemIdRef.current === latestLocalDataSuccess.id) return
-    handledLocalDataQueueItemIdRef.current = latestLocalDataSuccess.id
-
-    const setValueResult = readPreviewLocalDataSetValueResult(latestLocalDataSuccess.result)
-    if (setValueResult) {
-      patchAnnotationSetValue({
-        rootId,
-        relativePath: setValueResult.relativePath,
-        fieldKey: setValueResult.fieldKey,
-        value: setValueResult.value,
-      })
-      return
-    }
-
-    void preloadFileAnnotationDisplaySnapshot({
-      rootId,
-      rootHandle,
-      rootLabel: null,
-      relativePath: file.path,
-      force: true,
-    })
-  }, [canUseAnnotationContext, currentFileQueue, file, rootHandle, rootId])
-
-  useEffect(() => {
-    if (!file || file.kind !== 'file' || !rootId || !canUseAnnotationContext) {
-      handledVisionFaceQueueItemIdRef.current = null
-      return
-    }
-
-    const latestVisionFaceSuccess = currentFileQueue.find((item) => (
-      item.toolName === 'vision.face'
-      && item.status === 'success'
-    ))
-    if (!latestVisionFaceSuccess) return
-    if (handledVisionFaceQueueItemIdRef.current === latestVisionFaceSuccess.id) return
-    handledVisionFaceQueueItemIdRef.current = latestVisionFaceSuccess.id
-
-    void refreshCurrentPreviewFileTags()
-  }, [canUseAnnotationContext, currentFileQueue, file, refreshCurrentPreviewFileTags, rootId])
 
   const annotationTags: PreviewHeaderAnnotationTag[] = (
     file && file.kind === 'file' && rootId && canUseAnnotationContext

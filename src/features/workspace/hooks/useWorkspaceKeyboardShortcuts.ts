@@ -1,7 +1,11 @@
 import { useEffect } from 'react'
 import type { KeyboardShortcuts } from '@/config/shortcuts'
 import type { FileItem } from '@/types'
-import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
+import { isTypingTarget } from '@/lib/keyboard'
+import {
+  resolveWorkspaceKeyboardShortcutIntent,
+  type WorkspaceKeyboardShortcutIntent,
+} from '@/features/workspace/lib/workspaceKeyboardShortcutIntentModel'
 
 interface UseWorkspaceKeyboardShortcutsParams {
   keyboardShortcuts: KeyboardShortcuts
@@ -47,99 +51,74 @@ export function useWorkspaceKeyboardShortcuts({
   closePreviewPane,
 }: UseWorkspaceKeyboardShortcutsParams): void {
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      const isTyping = isTypingTarget(event.target)
+    const executeIntent = (intent: WorkspaceKeyboardShortcutIntent, event: KeyboardEvent) => {
+      if (intent.kind === 'none') return
 
-      if (matchesAnyShortcut(event, keyboardShortcuts.app.openDirectory)) {
-        event.preventDefault()
+      event.preventDefault()
+      if (intent.kind === 'select-directory') {
         void selectDirectory()
         return
       }
-
-      if (isTyping) return
-      if (matchesAnyShortcut(event, keyboardShortcuts.app.undoDelete)) {
-        event.preventDefault()
+      if (intent.kind === 'undo-delete') {
         void undoDelete()
         return
       }
-      const matchedPreviewTagShortcut = getMatchingPreviewTagShortcut(event)
-
-      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleVideoPlayPause)) {
-        event.preventDefault()
-        if (event.repeat) return
+      if (intent.kind === 'toggle-video-playback') {
         toggleActivePreviewVideoPlayback()
         return
       }
-
-      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekBackward)) {
-        event.preventDefault()
-        seekActivePreviewVideo('backward')
+      if (intent.kind === 'seek-video') {
+        seekActivePreviewVideo(intent.direction)
         return
       }
-
-      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.seekForward)) {
-        event.preventDefault()
-        seekActivePreviewVideo('forward')
-        return
-      }
-
-      if (!matchedPreviewTagShortcut && hasActiveVideoPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.cycleVideoPlaybackRate)) {
-        event.preventDefault()
-        if (event.repeat) return
+      if (intent.kind === 'cycle-video-playback-rate') {
         cycleVideoPlaybackRate()
         return
       }
-
-      if (!matchedPreviewTagShortcut && hasActiveMediaPreview && matchesAnyShortcut(event, keyboardShortcuts.preview.toggleAutoPlay)) {
-        event.preventDefault()
+      if (intent.kind === 'toggle-auto-play') {
         toggleAutoPlay()
         return
       }
-
-      if (!matchedPreviewTagShortcut && hasActiveMediaPreview) {
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.togglePlaybackOrder)) {
-          event.preventDefault()
-          togglePlaybackOrder()
-          return
-        }
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.prev)) {
-          event.preventDefault()
-          if (previewFile) {
-            navigateMediaFromModal('prev')
-          } else {
-            navigateMediaFromPane('prev')
-          }
-          return
-        }
-        if (matchesAnyShortcut(event, keyboardShortcuts.preview.next)) {
-          event.preventDefault()
-          if (previewFile) {
-            navigateMediaFromModal('next')
-          } else {
-            navigateMediaFromPane('next')
-          }
-          return
-        }
+      if (intent.kind === 'toggle-playback-order') {
+        togglePlaybackOrder()
+        return
       }
-
-      if (matchesAnyShortcut(event, keyboardShortcuts.app.navigateUp) && currentPath) {
-        event.preventDefault()
+      if (intent.kind === 'navigate-preview-media') {
+        if (intent.target === 'lightbox') {
+          navigateMediaFromModal(intent.direction)
+        } else {
+          navigateMediaFromPane(intent.direction)
+        }
+        return
+      }
+      if (intent.kind === 'navigate-up') {
         void navigateUp()
         return
       }
-
-      if (!matchedPreviewTagShortcut && matchesAnyShortcut(event, keyboardShortcuts.preview.close)) {
-        if (previewFile) {
-          event.preventDefault()
+      if (intent.kind === 'close-preview') {
+        if (intent.target === 'lightbox') {
           closePreviewModal()
-          return
-        }
-        if (showPreviewPane) {
-          event.preventDefault()
+        } else {
           closePreviewPane()
         }
       }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isTyping = isTypingTarget(event.target)
+      const hasMatchingPreviewTagShortcut = !isTyping && Boolean(getMatchingPreviewTagShortcut(event))
+
+      executeIntent(resolveWorkspaceKeyboardShortcutIntent({
+        event,
+        keyboardShortcuts,
+        isTypingTarget: isTyping,
+        hasMatchingPreviewTagShortcut,
+        hasActiveVideoPreview,
+        hasActiveMediaPreview,
+        previewFileOpen: Boolean(previewFile),
+        currentPath,
+        showPreviewPane,
+      }), event)
     }
 
     window.addEventListener('keydown', handleKeyDown)

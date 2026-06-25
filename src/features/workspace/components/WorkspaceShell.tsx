@@ -31,6 +31,7 @@ import { useWorkspacePresentationProfile } from '@/features/workspace/hooks/useW
 import { useWorkspacePluginTools } from '@/features/workspace/hooks/useWorkspacePluginTools'
 import { useWorkspaceTrashAvailability } from '@/features/workspace/hooks/useWorkspaceTrashAvailability'
 import { useWorkspaceDeleteUndoController } from '@/features/workspace/hooks/useWorkspaceDeleteUndoController'
+import { useWorkspaceShellInteractionHandlers } from '@/features/workspace/hooks/useWorkspaceShellInteractionHandlers'
 import {
   isAnnotationFilterAtDefault,
   useWorkspaceFilterState,
@@ -181,7 +182,6 @@ export function WorkspaceShell({
   const directoryFileGridRef = useRef<FileBrowserGridHandle>(null)
   const projectionFileGridRef = useRef<FileBrowserGridHandle>(null)
   const projectionInteractionRef = useRef<WorkspaceProjectionInteraction | null>(null)
-  const previousShellKindRef = useRef(presentationProfile.shellKind)
 
   useEffect(() => {
     if (!setListingQuery) return
@@ -380,50 +380,24 @@ export function WorkspaceShell({
     openFileInPaneOrFullscreenFallback,
   })
 
-  useEffect(() => {
-    const previousShellKind = previousShellKindRef.current
-    previousShellKindRef.current = presentationProfile.shellKind
-
-    if (previousShellKind === presentationProfile.shellKind) return
-    if (presentationProfile.supportsPersistentPreviewPane) return
-    if (!showPreviewPane || selectedFile?.kind !== 'file') return
-
-    closePreviewPane()
-    if (!previewFile) {
-      openFileInModal(selectedFile)
-    }
-  }, [
+  const {
+    handleDirectoryClick,
+    handleDirectoryFileClick,
+    handleDirectoryFileDoubleClick,
+  } = useWorkspaceShellInteractionHandlers({
+    shellKind: presentationProfile.shellKind,
+    supportsPersistentPreviewPane: presentationProfile.supportsPersistentPreviewPane,
+    showPreviewPane,
+    selectedFile,
+    previewFile,
     closePreviewPane,
     openFileInModal,
-    presentationProfile.shellKind,
-    presentationProfile.supportsPersistentPreviewPane,
-    previewFile,
-    selectedFile,
-    showPreviewPane,
-  ])
-
-  const handleDirectoryClick = useCallback((dirName: string) => {
-    setActiveSurface({ kind: 'directory' })
-    void navigateToDirectory(dirName)
-  }, [navigateToDirectory, setActiveSurface])
-
-  const handleDirectoryFileClick = useCallback((file: FileItem) => {
-    setActiveSurface({ kind: 'directory' })
-    if (file.kind === 'directory') {
-      void navigateToDirectory(file.name)
-    } else {
-      setDirectoryFocusedPath(file.path)
-      openFileInPrimaryTarget(file)
-    }
-  }, [navigateToDirectory, openFileInPrimaryTarget, setActiveSurface])
-
-  const handleDirectoryFileDoubleClick = useCallback((file: FileItem) => {
-    if (file.kind === 'file') {
-      setActiveSurface({ kind: 'directory' })
-      setDirectoryFocusedPath(file.path)
-      openFileInSecondaryTarget(file)
-    }
-  }, [openFileInSecondaryTarget, setActiveSurface])
+    setActiveSurface,
+    navigateToDirectory,
+    setDirectoryFocusedPath,
+    openFileInPrimaryTarget,
+    openFileInSecondaryTarget,
+  })
 
   const handleNavigateToPath = useCallback((path: string) => {
     return navigateToPath(path, { resetFlattenView: true })
