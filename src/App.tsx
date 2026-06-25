@@ -5,6 +5,13 @@ import { useRemoteFileSystem } from '@/hooks/useRemoteFileSystem'
 import { matchesAnyShortcut, type ShortcutBinding } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
 import {
+  buildLocalPublishedRootSyncPayload,
+  readRemoteConnectErrorMessage,
+  resolveAppWorkspaceVisibility,
+  resolveInitialAccessProvider,
+  resolveRemoteRootsConnectionPlan,
+} from '@/lib/appAccessModel'
+import {
   clearRemoteSession,
   getActiveRemoteWorkspace,
   getRemoteSessionInvalidatedEventName,
@@ -24,7 +31,6 @@ import {
   renameRememberedDeviceAdmin,
   revokeAllRememberedDevicesAdmin,
   revokeRememberedDeviceAdmin,
-  type LocalPublishedRootSyncEntry,
   type RememberedDeviceAdminEntry,
   type RemoteRootEntry,
 } from '@/lib/remoteAccess'
@@ -47,39 +53,6 @@ function getFallbackSessionRootId(handle: FileSystemDirectoryHandle): string {
   const next = `session:${handle.name}:${suffix}`
   fallbackSessionRootIdByHandle.set(handle, next)
   return next
-}
-
-function readRemoteConnectErrorMessage(
-  error: unknown,
-  fallback: string,
-  unauthorizedMessage: string = '远程会话已失效，请重新连接'
-): string {
-  if (error && typeof error === 'object' && 'code' in error && error.code === 'REMOTE_UNAUTHORIZED') {
-    return unauthorizedMessage
-  }
-  return error instanceof Error ? error.message : fallback
-}
-
-function buildLocalPublishedRootSyncPayload(
-  cachedRoots: Array<{ rootId: string; rootName: string; boundRootPath?: string }>,
-  favoriteFolders: Array<{ rootId: string; path: string }>,
-): LocalPublishedRootSyncEntry[] {
-  return cachedRoots.flatMap((root) => {
-    const absolutePath = typeof root.boundRootPath === 'string' ? root.boundRootPath.trim() : ''
-    if (!absolutePath) return []
-    const favoritePaths = [
-      ...new Set(
-        favoriteFolders
-          .filter((item) => item.rootId === root.rootId)
-          .map((item) => item.path.split('/').filter(Boolean).join('/')),
-      ),
-    ]
-    return [{
-      label: root.rootName,
-      absolutePath,
-      favoritePaths,
-    }]
-  })
 }
 
 function useDirectorySelectionShortcut(
@@ -118,12 +91,10 @@ function WorkspaceLoadingFallback({ rootName }: { rootName: string }) {
 
 function App() {
   const localFileSystem = useFileSystem()
-  const [accessProvider, setAccessProvider] = useState<AccessProvider>(() => {
-    const storedProvider = getStoredAccessProvider()
-    return storedProvider === 'remote-readonly' && getActiveRemoteWorkspace()
-      ? 'remote-readonly'
-      : 'local-browser'
-  })
+  const [accessProvider, setAccessProvider] = useState<AccessProvider>(() => resolveInitialAccessProvider({
+    storedProvider: getStoredAccessProvider(),
+    activeRemoteWorkspace: getActiveRemoteWorkspace(),
+  }))
   const [remoteStep, setRemoteStep] = useState<'idle' | 'token' | 'roots'>('idle')
   const [remoteToken, setRemoteToken] = useState('')
   const [rememberRemoteDevice, setRememberRemoteDevice] = useState(false)
@@ -149,9 +120,14 @@ function App() {
   const activeRootId = accessProvider === 'remote-readonly'
     ? remoteFileSystem.rootId
     : localFileSystem.rootId
-  const shouldShowRemoteWorkspace = accessProvider === 'remote-readonly' && Boolean(activeRemoteWorkspace)
-  const shouldShowLocalWorkspace = !shouldShowRemoteWorkspace && Boolean(localFileSystem.rootId)
-  const shouldShowStartupScreen = !shouldShowRemoteWorkspace && !shouldShowLocalWorkspace
+  const {
+    shouldShowRemoteWorkspace,
+    shouldShowStartupScreen,
+  } = resolveAppWorkspaceVisibility({
+    accessProvider,
+    activeRemoteWorkspace,
+    localRootId: localFileSystem.rootId,
+  })
   const isLoopbackUi = isLoopbackOrigin()
   const localPublishedRootSyncPayload = useMemo(
     () => buildLocalPublishedRootSyncPayload(localFileSystem.cachedRoots, localFileSystem.favoriteFolders),
@@ -402,20 +378,19 @@ function App() {
         const roots = await loadRemoteAccessRoots(2000, {
           clearSessionOnUnauthorized: false,
         })
-        if (roots.length === 0) {
-          throw new Error('当前远程服务未配置可访问的 Root')
+        const plan = resolveRemoteRootsConnectionPlan(roots)
+        if (plan.kind === 'error') {
+          throw new Error(plan.message)
         }
-
         setRemoteRoots(roots)
-        if (roots.length === 1) {
-          const onlyRoot = roots[0]!
-          setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(onlyRoot.id, onlyRoot.label))
-          setRemoteStep('roots')
-          updateAccessProvider('remote-readonly')
+        if (plan.kind === 'auto-select') {
+          setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(plan.root.id, plan.root.label))
+          setRemoteStep(plan.nextRemoteStep)
+          updateAccessProvider(plan.nextAccessProvider)
           return
         }
 
-        setRemoteStep('roots')
+        setRemoteStep(plan.nextRemoteStep)
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'REMOTE_UNAUTHORIZED') {
           setRemoteStep('token')
@@ -456,23 +431,23 @@ function App() {
         rememberDeviceLabel: rememberRemoteDeviceLabel,
       })
       const roots = await loadRemoteAccessRoots()
-      if (roots.length === 0) {
-        throw new Error('当前远程服务未配置可访问的 Root')
+      const plan = resolveRemoteRootsConnectionPlan(roots)
+      if (plan.kind === 'error') {
+        throw new Error(plan.message)
       }
 
       setRemoteToken('')
       setRememberRemoteDevice(false)
       setRememberRemoteDeviceLabel('')
       setRemoteRoots(roots)
-      if (roots.length === 1) {
-        const onlyRoot = roots[0]!
-        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(onlyRoot.id, onlyRoot.label))
-        setRemoteStep('roots')
-        updateAccessProvider('remote-readonly')
+      if (plan.kind === 'auto-select') {
+        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(plan.root.id, plan.root.label))
+        setRemoteStep(plan.nextRemoteStep)
+        updateAccessProvider(plan.nextAccessProvider)
         return
       }
 
-      setRemoteStep('roots')
+      setRemoteStep(plan.nextRemoteStep)
     } catch (error) {
       setRemoteError(readRemoteConnectErrorMessage(
         error,
