@@ -4,8 +4,13 @@ import test from 'node:test'
 import {
   formatFileGridCardFileSize,
   resolveFileGridCardDirectoryBadge,
+  resolveFileGridCardDisplayedThumbnailUrl,
+  resolveFileGridCardIconKind,
+  resolveFileGridCardTextView,
+  resolveFileGridCardThumbnailFrameView,
   resolveFileGridCardThumbnailLoadPlan,
   resolveFileGridCardThumbnailPlan,
+  resolveFileGridCardThumbnailSourceUrls,
 } from '../../src/features/explorer/lib/fileGridCardModel.ts'
 
 function file(name, overrides = {}) {
@@ -264,5 +269,223 @@ test('File Grid Card Model resolves thumbnail load state before side effects', (
     kind: 'pipeline-thumbnail',
     requestIdentity: 'clip.mp4::10::20::video::auto',
     shouldClearGeneratedThumbnail: true,
+  })
+})
+
+test('File Grid Card Model resolves displayed thumbnail URLs by source priority', () => {
+  assert.equal(resolveFileGridCardDisplayedThumbnailUrl({
+    runtimeThumbnailUrl: '/runtime/photo.jpg',
+    fileAccessThumbnailUrl: '/file-access/photo.jpg',
+    generatedThumbnailUrl: 'blob:generated',
+    generatedThumbnailIdentity: 'photo::current',
+    requestIdentity: 'photo::current',
+    latestCachedThumbnailUrl: 'blob:latest',
+  }), '/runtime/photo.jpg')
+
+  assert.equal(resolveFileGridCardDisplayedThumbnailUrl({
+    runtimeThumbnailUrl: null,
+    fileAccessThumbnailUrl: '/file-access/photo.jpg',
+    generatedThumbnailUrl: 'blob:generated',
+    generatedThumbnailIdentity: 'photo::current',
+    requestIdentity: 'photo::current',
+    latestCachedThumbnailUrl: 'blob:latest',
+  }), '/file-access/photo.jpg')
+
+  assert.equal(resolveFileGridCardDisplayedThumbnailUrl({
+    runtimeThumbnailUrl: null,
+    fileAccessThumbnailUrl: null,
+    generatedThumbnailUrl: 'blob:generated',
+    generatedThumbnailIdentity: 'photo::current',
+    requestIdentity: 'photo::current',
+    latestCachedThumbnailUrl: 'blob:latest',
+  }), 'blob:generated')
+
+  assert.equal(resolveFileGridCardDisplayedThumbnailUrl({
+    runtimeThumbnailUrl: null,
+    fileAccessThumbnailUrl: null,
+    generatedThumbnailUrl: 'blob:stale',
+    generatedThumbnailIdentity: 'photo::old',
+    requestIdentity: 'photo::current',
+    latestCachedThumbnailUrl: 'blob:latest',
+  }), 'blob:latest')
+})
+
+test('File Grid Card Model resolves thumbnail source URLs from the thumbnail plan', () => {
+  const localImagePlan = resolveFileGridCardThumbnailPlan({
+    file: file('photo.jpg', { path: 'photos/photo.jpg' }),
+    rootHandleAvailable: true,
+    thumbnailSizePreset: 'auto',
+  })
+  assert.deepEqual(resolveFileGridCardThumbnailSourceUrls({
+    thumbnailPlan: localImagePlan,
+    runtimeLocalFileContentUrl: '/runtime/local/photos/photo.jpg',
+    runtimeGlobalTrashFileContentUrl: null,
+    fileAccessThumbnailUrl: '/file-access/photos/photo.jpg',
+  }), {
+    runtimeFileContentUrl: '/runtime/local/photos/photo.jpg',
+    runtimeThumbnailUrl: '/runtime/local/photos/photo.jpg',
+    runtimeVideoThumbnailSourceUrl: null,
+    fileAccessThumbnailUrl: null,
+    directThumbnailUrl: '/runtime/local/photos/photo.jpg',
+    hasDirectThumbnailSource: true,
+  })
+
+  const localVideoPlan = resolveFileGridCardThumbnailPlan({
+    file: file('clip.mp4', { path: 'clips/clip.mp4' }),
+    rootHandleAvailable: true,
+    thumbnailSizePreset: '256',
+  })
+  assert.deepEqual(resolveFileGridCardThumbnailSourceUrls({
+    thumbnailPlan: localVideoPlan,
+    runtimeLocalFileContentUrl: '/runtime/local/clips/clip.mp4',
+    runtimeGlobalTrashFileContentUrl: null,
+    fileAccessThumbnailUrl: null,
+  }), {
+    runtimeFileContentUrl: '/runtime/local/clips/clip.mp4',
+    runtimeThumbnailUrl: null,
+    runtimeVideoThumbnailSourceUrl: '/runtime/local/clips/clip.mp4',
+    fileAccessThumbnailUrl: null,
+    directThumbnailUrl: null,
+    hasDirectThumbnailSource: false,
+  })
+
+  const remoteImagePlan = resolveFileGridCardThumbnailPlan({
+    file: file('remote.jpg', {
+      path: 'remote.jpg',
+      remoteRootId: 'remote-a',
+      absolutePath: '/remote/remote.jpg',
+    }),
+    rootHandleAvailable: false,
+    thumbnailSizePreset: '512',
+  })
+  assert.deepEqual(resolveFileGridCardThumbnailSourceUrls({
+    thumbnailPlan: remoteImagePlan,
+    runtimeLocalFileContentUrl: '/runtime/local/remote.jpg',
+    runtimeGlobalTrashFileContentUrl: '/runtime/trash/remote.jpg',
+    fileAccessThumbnailUrl: '/file-access/remote.jpg',
+  }), {
+    runtimeFileContentUrl: null,
+    runtimeThumbnailUrl: null,
+    runtimeVideoThumbnailSourceUrl: null,
+    fileAccessThumbnailUrl: '/file-access/remote.jpg',
+    directThumbnailUrl: '/file-access/remote.jpg',
+    hasDirectThumbnailSource: true,
+  })
+})
+
+test('File Grid Card Model resolves fallback icon kinds', () => {
+  assert.equal(resolveFileGridCardIconKind({
+    isDirectory: true,
+    displayedThumbnailUrl: null,
+    previewKind: 'unsupported',
+  }), 'folder')
+
+  assert.equal(resolveFileGridCardIconKind({
+    isDirectory: false,
+    displayedThumbnailUrl: 'blob:thumbnail',
+    previewKind: 'image',
+  }), null)
+
+  assert.equal(resolveFileGridCardIconKind({
+    isDirectory: false,
+    displayedThumbnailUrl: null,
+    previewKind: 'image',
+  }), 'image')
+
+  assert.equal(resolveFileGridCardIconKind({
+    isDirectory: false,
+    displayedThumbnailUrl: null,
+    previewKind: 'video',
+  }), 'video')
+
+  assert.equal(resolveFileGridCardIconKind({
+    isDirectory: false,
+    displayedThumbnailUrl: null,
+    previewKind: 'text',
+  }), 'file')
+})
+
+test('File Grid Card Model resolves thumbnail frame display state', () => {
+  assert.deepEqual(resolveFileGridCardThumbnailFrameView({
+    isDirectory: false,
+    displayedThumbnailUrl: 'blob:photo',
+    thumbnailState: 'failed',
+    previewKind: 'image',
+    directoryBadgeLabel: null,
+  }), {
+    content: { kind: 'thumbnail', url: 'blob:photo' },
+    showFailedBadge: false,
+    directoryBadgeLabel: null,
+  })
+
+  assert.deepEqual(resolveFileGridCardThumbnailFrameView({
+    isDirectory: false,
+    displayedThumbnailUrl: null,
+    thumbnailState: 'loading',
+    previewKind: 'image',
+    directoryBadgeLabel: null,
+  }), {
+    content: { kind: 'loading' },
+    showFailedBadge: false,
+    directoryBadgeLabel: null,
+  })
+
+  assert.deepEqual(resolveFileGridCardThumbnailFrameView({
+    isDirectory: false,
+    displayedThumbnailUrl: null,
+    thumbnailState: 'failed',
+    previewKind: 'video',
+    directoryBadgeLabel: null,
+  }), {
+    content: { kind: 'icon', iconKind: 'video' },
+    showFailedBadge: true,
+    directoryBadgeLabel: null,
+  })
+
+  assert.deepEqual(resolveFileGridCardThumbnailFrameView({
+    isDirectory: true,
+    displayedThumbnailUrl: null,
+    thumbnailState: 'failed',
+    previewKind: 'unsupported',
+    directoryBadgeLabel: '12',
+  }), {
+    content: { kind: 'icon', iconKind: 'folder' },
+    showFailedBadge: false,
+    directoryBadgeLabel: '12',
+  })
+})
+
+test('File Grid Card Model resolves card text display state', () => {
+  assert.deepEqual(resolveFileGridCardTextView(file('photo.jpg', {
+    displayPath: 'albums/photo.jpg',
+    size: 2048,
+  })), {
+    nameLabel: 'photo.jpg',
+    nameTitle: 'photo.jpg',
+    displayPathLabel: 'albums/photo.jpg',
+    displayPathTitle: 'albums/photo.jpg',
+    fileSizeLabel: '2.0 KB',
+  })
+
+  assert.deepEqual(resolveFileGridCardTextView(file('photo.jpg', {
+    displayPath: 'photo.jpg',
+    size: 0,
+  })), {
+    nameLabel: 'photo.jpg',
+    nameTitle: 'photo.jpg',
+    displayPathLabel: null,
+    displayPathTitle: null,
+    fileSizeLabel: '',
+  })
+
+  assert.deepEqual(resolveFileGridCardTextView(directory('albums', {
+    displayPath: 'Library/albums',
+    size: 4096,
+  })), {
+    nameLabel: 'albums',
+    nameTitle: 'albums',
+    displayPathLabel: 'Library/albums',
+    displayPathTitle: 'Library/albums',
+    fileSizeLabel: null,
   })
 })

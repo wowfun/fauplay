@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { FolderOpen, File, Image, Video, Loader2 } from 'lucide-react'
+import { FolderOpen, File as FileIcon, Image, Video, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getDirectoryItemCount } from '@/lib/fileSystem'
 import { buildFileThumbnailUrlForItem } from '@/lib/fileAccess'
@@ -16,10 +16,17 @@ import {
 import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
 import {
-  formatFileGridCardFileSize,
   resolveFileGridCardDirectoryBadge,
+  resolveFileGridCardTextView,
+  resolveFileGridCardDisplayedThumbnailUrl,
+  resolveFileGridCardThumbnailFrameView,
   resolveFileGridCardThumbnailLoadPlan,
   resolveFileGridCardThumbnailPlan,
+  resolveFileGridCardThumbnailSourceUrls,
+} from '@/features/explorer/lib/fileGridCardModel'
+import type {
+  FileGridCardIconKind,
+  FileGridCardThumbnailState,
 } from '@/features/explorer/lib/fileGridCardModel'
 
 interface FileGridCardProps {
@@ -34,8 +41,6 @@ interface FileGridCardProps {
   onDoubleClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
   onToggleChecked: (event: ReactMouseEvent<HTMLInputElement>) => void
 }
-
-type ThumbnailLoadState = 'placeholder' | 'loading' | 'ready' | 'failed'
 
 const THUMBNAIL_BOX_SIZE_BY_PRESET: Record<ThumbnailSizePreset, number> = {
   auto: 80,
@@ -98,13 +103,14 @@ export function FileGridCard({
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
   const [thumbnailUrlIdentity, setThumbnailUrlIdentity] = useState<string | null>(null)
   const [thumbnailState, setThumbnailState] =
-    useState<ThumbnailLoadState>('placeholder')
+    useState<FileGridCardThumbnailState>('placeholder')
   const [directoryItemCount, setDirectoryItemCount] = useState<number | null>(null)
   const requestIdentityRef = useRef<string | null>(null)
   const directoryBadge = resolveFileGridCardDirectoryBadge({
     file,
     loadedDirectoryItemCount: directoryItemCount,
   })
+  const textView = resolveFileGridCardTextView(file)
   const runtimeLocalFileContentUrl = (
     thumbnailPlan.runtimeContentSource === 'local-root'
   )
@@ -115,9 +121,23 @@ export function FileGridCard({
   )
     ? buildRuntimeGlobalTrashFileContentUrlForItem(file)
     : null
-  const runtimeFileContentUrl = runtimeLocalFileContentUrl ?? runtimeGlobalTrashFileContentUrl
-  const runtimeThumbnailUrl = thumbnailPlan.runtimeImageThumbnail ? runtimeFileContentUrl : null
-  const runtimeVideoThumbnailSourceUrl = thumbnailPlan.runtimeVideoThumbnail ? runtimeFileContentUrl : null
+  const candidateFileAccessThumbnailUrl = thumbnailPlan.fileAccessThumbnail
+    ? buildFileThumbnailUrlForItem(file, {
+      sizePreset: thumbnailSizePreset,
+    })
+    : null
+  const {
+    runtimeThumbnailUrl,
+    runtimeVideoThumbnailSourceUrl,
+    fileAccessThumbnailUrl,
+    directThumbnailUrl,
+    hasDirectThumbnailSource,
+  } = resolveFileGridCardThumbnailSourceUrls({
+    thumbnailPlan,
+    runtimeLocalFileContentUrl,
+    runtimeGlobalTrashFileContentUrl,
+    fileAccessThumbnailUrl: candidateFileAccessThumbnailUrl,
+  })
   const exactCachedThumbnailUrl = !isDir && mediaType
     ? getExactCachedThumbnailFromPipeline({
       filePath: file.path,
@@ -136,24 +156,29 @@ export function FileGridCard({
       fileLastModifiedMs,
     })
     : null
-  const fileAccessThumbnailUrl = thumbnailPlan.fileAccessThumbnail
-    ? buildFileThumbnailUrlForItem(file, {
-      sizePreset: thumbnailSizePreset,
-    })
-    : null
-  const displayedThumbnailUrl =
-    runtimeThumbnailUrl ??
-    fileAccessThumbnailUrl ??
-    (requestIdentity && thumbnailUrlIdentity === requestIdentity ? thumbnailUrl : null) ??
-    latestCachedThumbnailUrl
+  const displayedThumbnailUrl = resolveFileGridCardDisplayedThumbnailUrl({
+    runtimeThumbnailUrl,
+    fileAccessThumbnailUrl,
+    generatedThumbnailUrl: thumbnailUrl,
+    generatedThumbnailIdentity: thumbnailUrlIdentity,
+    requestIdentity,
+    latestCachedThumbnailUrl,
+  })
+  const thumbnailFrameView = resolveFileGridCardThumbnailFrameView({
+    isDirectory: isDir,
+    displayedThumbnailUrl,
+    thumbnailState,
+    previewKind,
+    directoryBadgeLabel: directoryBadge.label,
+  })
 
   useEffect(() => {
     const loadPlan = resolveFileGridCardThumbnailLoadPlan({
       rootHandleAvailable: Boolean(rootHandle),
       isDirectory: isDir,
       mediaType,
-      hasDirectThumbnailSource: thumbnailPlan.runtimeImageThumbnail || thumbnailPlan.fileAccessThumbnail,
-      directThumbnailUrl: runtimeThumbnailUrl ?? fileAccessThumbnailUrl,
+      hasDirectThumbnailSource,
+      directThumbnailUrl,
       requestIdentity,
       previousRequestIdentity: requestIdentityRef.current,
       exactCachedThumbnailUrl,
@@ -282,12 +307,9 @@ export function FileGridCard({
     thumbnailPriority,
     requestIdentity,
     exactCachedThumbnailUrl,
-    runtimeFileContentUrl,
-    runtimeThumbnailUrl,
     runtimeVideoThumbnailSourceUrl,
-    fileAccessThumbnailUrl,
-    thumbnailPlan.fileAccessThumbnail,
-    thumbnailPlan.runtimeImageThumbnail,
+    directThumbnailUrl,
+    hasDirectThumbnailSource,
   ])
 
   useEffect(() => {
@@ -318,12 +340,12 @@ export function FileGridCard({
     }
   }, [rootHandle, isDir, file.path, directoryBadge.shouldLoadDirectoryItemCount])
 
-  const getIcon = () => {
-    if (isDir) return <FolderOpen size={iconSize} className="text-yellow-500" />
-    if (displayedThumbnailUrl) return null
-    if (previewKind === 'image') return <Image size={iconSize} className="text-green-500" />
-    if (previewKind === 'video') return <Video size={iconSize} className="text-blue-500" />
-    return <File size={iconSize} className="text-gray-500" />
+  const renderIcon = (kind: FileGridCardIconKind | null) => {
+    if (kind === 'folder') return <FolderOpen size={iconSize} className="text-yellow-500" />
+    if (kind === 'image') return <Image size={iconSize} className="text-green-500" />
+    if (kind === 'video') return <Video size={iconSize} className="text-blue-500" />
+    if (kind === 'file') return <FileIcon size={iconSize} className="text-gray-500" />
+    return null
   }
 
   return (
@@ -357,42 +379,42 @@ export function FileGridCard({
           className="relative flex items-center justify-center mb-2 bg-muted rounded-lg overflow-hidden"
           style={{ width: thumbnailBoxSize, height: thumbnailBoxSize }}
         >
-          {displayedThumbnailUrl ? (
+          {thumbnailFrameView.content.kind === 'thumbnail' ? (
             <img
-              src={displayedThumbnailUrl}
+              src={thumbnailFrameView.content.url}
               alt={file.name}
               draggable={false}
               className="w-full h-full object-cover"
               onLoad={() => setThumbnailState('ready')}
               onError={() => setThumbnailState('failed')}
             />
-          ) : thumbnailState === 'loading' ? (
+          ) : thumbnailFrameView.content.kind === 'loading' ? (
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
           ) : (
-            getIcon()
+            renderIcon(thumbnailFrameView.content.iconKind)
           )}
-          {thumbnailState === 'failed' && !displayedThumbnailUrl && !isDir && (
+          {thumbnailFrameView.showFailedBadge && (
             <span className="absolute bottom-1 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
               失败
             </span>
           )}
-          {isDir && directoryBadge.label !== null && (
+          {thumbnailFrameView.directoryBadgeLabel !== null && (
             <span className="absolute right-1 top-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-secondary-foreground">
-              {directoryBadge.label}
+              {thumbnailFrameView.directoryBadgeLabel}
             </span>
           )}
         </div>
-        <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={file.name}>
-          {file.name}
+        <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-center" title={textView.nameTitle}>
+          {textView.nameLabel}
         </span>
-        {file.displayPath && file.displayPath !== file.name && (
-          <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-center text-muted-foreground" title={file.displayPath}>
-            {file.displayPath}
+        {textView.displayPathLabel !== null && (
+          <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-center text-muted-foreground" title={textView.displayPathTitle ?? undefined}>
+            {textView.displayPathLabel}
           </span>
         )}
-        {!isDir && (
+        {textView.fileSizeLabel !== null && (
           <span className="text-xs text-muted-foreground">
-            {formatFileGridCardFileSize(file.size)}
+            {textView.fileSizeLabel}
           </span>
         )}
       </button>
