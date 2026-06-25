@@ -247,6 +247,7 @@ export function WorkspaceShell({
     directoryFocusedPath,
     isResultPanelOpen,
     setIsResultPanelOpen,
+    resultPanelDisplayMode,
     setResultPanelDisplayMode,
     setResultPanelHeightPx,
     lastNormalResultPanelHeightRef,

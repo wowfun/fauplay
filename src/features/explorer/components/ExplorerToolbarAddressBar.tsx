@@ -6,7 +6,6 @@ import {
   Clock3,
   Copy,
   Star,
-  X,
 } from 'lucide-react'
 import type {
   AddressPathHistoryEntry,
@@ -14,11 +13,7 @@ import type {
 } from '@/types'
 import {
   buildAddressBreadcrumbItems,
-  buildAddressSuggestionDisplayPath,
   buildRootPathDisplayText,
-  getAddressSuggestionSourceLabel,
-  moveAddressSuggestionIndex,
-  resolveAddressSuggestionCompletionIndex,
   shouldShowAddressSuggestionPanel,
   sortAddressFavoriteFolders,
   sortAddressPathHistory,
@@ -30,6 +25,13 @@ import {
 import { useExplorerToolbarAddressSuggestions } from '@/features/explorer/hooks/useExplorerToolbarAddressSuggestions'
 import { useExplorerToolbarSegmentDropdowns } from '@/features/explorer/hooks/useExplorerToolbarSegmentDropdowns'
 import { useExplorerToolbarAddressNavigation } from '@/features/explorer/hooks/useExplorerToolbarAddressNavigation'
+import { useExplorerToolbarAddressEditKeyboard } from '@/features/explorer/hooks/useExplorerToolbarAddressEditKeyboard'
+import {
+  AddressHistoryDropdown,
+  AddressSuggestionPanel,
+  FavoriteFoldersDropdown,
+  SegmentDirectoryDropdown,
+} from '@/features/explorer/components/ExplorerToolbarAddressMenus'
 import { Button } from '@/ui/Button'
 import { Input } from '@/ui/Input'
 
@@ -205,22 +207,9 @@ export function ExplorerToolbarAddressBar({
     onDisclosureAction({ type: 'toggle-history' })
   }
 
-  const handleNavigateHistoryPath = async (entry: AddressPathHistoryEntry) => {
-    await navigateHistoryEntry(entry)
-  }
-
   const handleToggleFavorites = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onDisclosureAction({ type: 'toggle-favorites' })
-  }
-
-  const handleOpenFavoriteFolder = async (entry: FavoriteFolderEntry) => {
-    await openFavoriteFolder(entry)
-  }
-
-  const handleRemoveFavoriteFolder = (event: ReactMouseEvent<HTMLButtonElement>, entry: FavoriteFolderEntry) => {
-    event.stopPropagation()
-    onRemoveFavoriteFolder(entry)
   }
 
   const handleToggleCurrentFavorite = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -243,47 +232,13 @@ export function ExplorerToolbarAddressBar({
     }
   }
 
-  const renderSegmentDropdown = (path: string) => {
-    if (openSegmentPath !== path) return null
-
-    const state = readSegmentDropdownState(path)
-
-    return (
-      <div
-        className="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-border bg-background p-1 shadow-md"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {state.status === 'loading' && (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">加载中...</div>
-        )}
-        {state.status === 'error' && (
-          <div className="px-2 py-1.5 text-xs text-destructive" title={state.errorMessage ?? undefined}>
-            读取失败
-          </div>
-        )}
-        {state.status === 'ready' && state.items.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">无子目录</div>
-        )}
-        {state.status === 'ready' && state.items.length > 0 && (
-          <div className="max-h-56 overflow-auto">
-            {state.items.map((item) => (
-              <button
-                key={item}
-                type="button"
-                className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                title={item}
-                onClick={() => {
-                  void navigateSegmentChild(path, item)
-                }}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
+  const handleAddressEditKeyDown = useExplorerToolbarAddressEditKeyboard({
+    activeSuggestionIndex,
+    suggestions: addressSuggestions,
+    onCancelEdit: cancelEditMode,
+    onDraftPathChange: setDraftPathValue,
+    onActiveSuggestionIndexChange: setActiveSuggestionIndex,
+  })
 
   const shouldShowAddressSuggestionPanelValue = shouldShowAddressSuggestionPanel(
     addressBarMode,
@@ -323,40 +278,7 @@ export function ExplorerToolbarAddressBar({
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    cancelEditMode()
-                    return
-                  }
-                  if (event.key === 'ArrowDown') {
-                    if (addressSuggestions.length === 0) return
-                    event.preventDefault()
-                    setActiveSuggestionIndex((previous) => (
-                      moveAddressSuggestionIndex(previous, addressSuggestions.length, 'next')
-                    ))
-                    return
-                  }
-                  if (event.key === 'ArrowUp') {
-                    if (addressSuggestions.length === 0) return
-                    event.preventDefault()
-                    setActiveSuggestionIndex((previous) => (
-                      moveAddressSuggestionIndex(previous, addressSuggestions.length, 'previous')
-                    ))
-                    return
-                  }
-                  if (event.key === 'Tab') {
-                    if (addressSuggestions.length === 0) return
-                    event.preventDefault()
-                    const targetIndex = resolveAddressSuggestionCompletionIndex(
-                      activeSuggestionIndex,
-                      addressSuggestions.length,
-                    )
-                    if (targetIndex === null) return
-                    const target = addressSuggestions[targetIndex]
-                    if (!target) return
-                    setDraftPathValue(target.path)
-                    setActiveSuggestionIndex(targetIndex)
-                  }
+                  handleAddressEditKeyDown(event)
                 }}
                 className="h-7 min-w-0 flex-1"
                 placeholder="输入相对路径"
@@ -404,7 +326,13 @@ export function ExplorerToolbarAddressBar({
                   >
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
-                  {renderSegmentDropdown(item.path)}
+                  <SegmentDirectoryDropdown
+                    isOpen={openSegmentPath === item.path}
+                    state={readSegmentDropdownState(item.path)}
+                    onNavigateChild={(childName) => {
+                      void navigateSegmentChild(item.path, childName)
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -433,47 +361,13 @@ export function ExplorerToolbarAddressBar({
               >
                 <Star className="h-3.5 w-3.5" />
               </Button>
-              {isFavoritesOpen && (
-                <div
-                  className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-border bg-background p-1 shadow-md"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {sortedFavorites.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">暂无收藏目录</div>
-                  ) : (
-                    <div className="max-h-64 overflow-auto">
-                      {sortedFavorites.map((item) => {
-                        const displayPath = buildRootPathDisplayText(item.rootName || rootLabel, item.path)
-                        return (
-                          <div
-                            key={`${item.rootId}:${item.path}`}
-                            className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handleOpenFavoriteFolder(item)
-                              }}
-                              className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-sm"
-                              title={displayPath}
-                            >
-                              {displayPath}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(event) => handleRemoveFavoriteFolder(event, item)}
-                              className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                              title="移除收藏"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <FavoriteFoldersDropdown
+                isOpen={isFavoritesOpen}
+                items={sortedFavorites}
+                rootLabel={rootLabel}
+                onOpenFavoriteFolder={openFavoriteFolder}
+                onRemoveFavoriteFolder={onRemoveFavoriteFolder}
+              />
             </div>
 
             <div className="relative">
@@ -486,35 +380,12 @@ export function ExplorerToolbarAddressBar({
               >
                 <Clock3 className="h-3.5 w-3.5" />
               </Button>
-              {isHistoryOpen && (
-                <div
-                  className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border border-border bg-background p-1 shadow-md"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {sortedHistory.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">暂无历史路径</div>
-                  ) : (
-                    <div className="max-h-64 overflow-auto">
-                      {sortedHistory.map((item) => {
-                        const displayPath = buildRootPathDisplayText(item.rootName || rootLabel, item.path)
-                        return (
-                          <button
-                            key={`${item.rootId}:${item.path}:${item.visitedAt}`}
-                            type="button"
-                            onClick={() => {
-                              void handleNavigateHistoryPath(item)
-                            }}
-                            className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
-                            title={displayPath}
-                          >
-                            <div className="truncate text-sm">{displayPath}</div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <AddressHistoryDropdown
+                isOpen={isHistoryOpen}
+                items={sortedHistory}
+                rootLabel={rootLabel}
+                onNavigateHistoryPath={navigateHistoryEntry}
+              />
             </div>
 
             <Button
@@ -528,51 +399,17 @@ export function ExplorerToolbarAddressBar({
             </Button>
           </div>
         </div>
-        {shouldShowAddressSuggestionPanelValue && (
-          <div
-            className="absolute left-0 top-full z-30 mt-1 w-full rounded-md border border-border bg-background p-1 shadow-md"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {addressSuggestionStatus === 'loading' && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">补全加载中...</div>
-            )}
-            {addressSuggestionStatus === 'error' && (
-              <div className="px-2 py-1.5 text-xs text-destructive" title={addressSuggestionError ?? undefined}>
-                读取补全失败
-              </div>
-            )}
-            {addressSuggestionStatus === 'ready' && addressSuggestions.length === 0 && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">无匹配路径</div>
-            )}
-            {addressSuggestionStatus === 'ready' && addressSuggestions.length > 0 && (
-              <div className="max-h-64 overflow-auto">
-                {addressSuggestions.map((item, index) => (
-                  <button
-                    key={`${item.source}:${item.rootId || '__current__'}:${item.path}`}
-                    type="button"
-                    className={`block w-full rounded px-2 py-1.5 text-left ${
-                      index === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent'
-                    }`}
-                    onMouseEnter={() => setActiveSuggestionIndex(index)}
-                    onClick={() => {
-                      void submitAddressSuggestion(item)
-                    }}
-                    title={buildAddressSuggestionDisplayPath(item, rootId, rootLabel)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        {buildAddressSuggestionDisplayPath(item, rootId, rootLabel)}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {getAddressSuggestionSourceLabel(item.source)}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <AddressSuggestionPanel
+          isVisible={shouldShowAddressSuggestionPanelValue}
+          status={addressSuggestionStatus}
+          errorMessage={addressSuggestionError}
+          suggestions={addressSuggestions}
+          activeIndex={activeSuggestionIndex}
+          currentRootId={rootId}
+          rootLabel={rootLabel}
+          onActiveIndexChange={setActiveSuggestionIndex}
+          onSubmitSuggestion={submitAddressSuggestion}
+        />
         {editError && (
           <div className="absolute left-0 top-full mt-1 text-xs text-destructive">{editError}</div>
         )}

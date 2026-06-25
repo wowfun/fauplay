@@ -5,6 +5,7 @@ import {
   pruneProjectionAfterDeletedAbsolutePaths,
   resolveProjectionActivationPlan,
   resolveProjectionFileInteractionPlan,
+  resolveProjectionPanelDisplayTogglePlan,
   resolveProjectionTabCloseState,
 } from '../../src/features/workspace/lib/projectionTabs.ts'
 
@@ -210,6 +211,69 @@ test('Projection Tabs Model activates fallback tabs when reopening the result pa
       kind: 'projection',
       path: 'first/a.jpg',
     },
+  })
+})
+
+test('Projection Tabs Model resolves result panel display toggles with preview alignment', () => {
+  const first = projection('first', [file('first/a.jpg')])
+  const last = projection('last', [file('last/a.jpg'), file('last/b.jpg')])
+
+  assert.deepEqual(resolveProjectionPanelDisplayTogglePlan({
+    projectionTabs: [first, last],
+    activeProjectionTabId: 'missing',
+    projectionFocusedPathById: {
+      last: 'last/b.jpg',
+    },
+    currentDisplayMode: 'normal',
+    lastNormalHeightPx: 320,
+  }), {
+    nextDisplayMode: 'maximized',
+    nextHeightPx: null,
+    activation: {
+      activeProjectionTabId: 'first',
+      activeSurface: { kind: 'projection', tabId: 'first' },
+      lastProjectionTabId: 'first',
+      previewAlignment: {
+        kind: 'projection',
+        path: 'first/a.jpg',
+      },
+    },
+  })
+
+  assert.deepEqual(resolveProjectionPanelDisplayTogglePlan({
+    projectionTabs: [first, last],
+    activeProjectionTabId: 'last',
+    projectionFocusedPathById: {
+      last: 'last/b.jpg',
+    },
+    currentDisplayMode: 'maximized',
+    lastNormalHeightPx: 320,
+  }), {
+    nextDisplayMode: 'normal',
+    nextHeightPx: 320,
+    activation: {
+      activeProjectionTabId: 'last',
+      activeSurface: { kind: 'projection', tabId: 'last' },
+      lastProjectionTabId: 'last',
+      previewAlignment: {
+        kind: 'projection',
+        path: 'last/b.jpg',
+      },
+    },
+  })
+})
+
+test('Projection Tabs Model toggles result panel display without projection activation when no tabs exist', () => {
+  assert.deepEqual(resolveProjectionPanelDisplayTogglePlan({
+    projectionTabs: [],
+    activeProjectionTabId: null,
+    projectionFocusedPathById: {},
+    currentDisplayMode: 'normal',
+    lastNormalHeightPx: 320,
+  }), {
+    nextDisplayMode: 'maximized',
+    nextHeightPx: null,
+    activation: null,
   })
 })
 

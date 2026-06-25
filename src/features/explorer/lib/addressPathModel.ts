@@ -4,6 +4,13 @@ export type AddressSuggestionSource = 'directory' | 'favorite' | 'history'
 export type AddressBarMode = 'breadcrumb' | 'edit'
 export type AddressSuggestionStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type AddressSuggestionNavigationDirection = 'next' | 'previous'
+export type AddressEditKeyboardAction = 'cancel' | 'move-next' | 'move-previous' | 'complete'
+
+export type AddressEditKeyboardIntent =
+  | { kind: 'none' }
+  | { kind: 'cancel-edit' }
+  | { kind: 'set-active-suggestion-index'; index: number }
+  | { kind: 'complete-suggestion'; index: number }
 
 export interface DraftPathSuggestionContext {
   basePath: string
@@ -34,6 +41,12 @@ export interface BuildAddressSuggestionsParams {
 export interface AddressBreadcrumbItem {
   label: string
   path: string
+}
+
+export interface ResolveAddressEditKeyboardIntentParams {
+  action: AddressEditKeyboardAction
+  activeIndex: number
+  suggestionCount: number
 }
 
 export function segmentKey(path: string): string {
@@ -116,6 +129,35 @@ export function shouldShowAddressSuggestionPanel(
     || addressSuggestionStatus === 'error'
     || suggestionCount > 0
   )
+}
+
+export function resolveAddressEditKeyboardIntent({
+  action,
+  activeIndex,
+  suggestionCount,
+}: ResolveAddressEditKeyboardIntentParams): AddressEditKeyboardIntent {
+  if (action === 'cancel') return { kind: 'cancel-edit' }
+
+  if (suggestionCount <= 0) return { kind: 'none' }
+
+  if (action === 'move-next') {
+    return {
+      kind: 'set-active-suggestion-index',
+      index: moveAddressSuggestionIndex(activeIndex, suggestionCount, 'next'),
+    }
+  }
+
+  if (action === 'move-previous') {
+    return {
+      kind: 'set-active-suggestion-index',
+      index: moveAddressSuggestionIndex(activeIndex, suggestionCount, 'previous'),
+    }
+  }
+
+  const completionIndex = resolveAddressSuggestionCompletionIndex(activeIndex, suggestionCount)
+  return completionIndex === null
+    ? { kind: 'none' }
+    : { kind: 'complete-suggestion', index: completionIndex }
 }
 
 export function parseDraftPathSuggestionContext(path: string): DraftPathSuggestionContext {

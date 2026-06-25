@@ -19,6 +19,7 @@ import {
   pruneProjectionTabsAfterDeletedFiles,
   resolveProjectionActivationPlan,
   resolveProjectionFileInteractionPlan,
+  resolveProjectionPanelDisplayTogglePlan,
   resolveProjectionPreferredPath,
   resolveProjectionTabCloseState,
   type ProjectionFileInteractionPlan,
@@ -38,6 +39,7 @@ interface UseWorkspaceProjectionStateParams {
   directoryFocusedPath: string | null
   isResultPanelOpen: boolean
   setIsResultPanelOpen: (isOpen: boolean) => void
+  resultPanelDisplayMode: ResultPanelDisplayMode
   setResultPanelDisplayMode: Dispatch<SetStateAction<ResultPanelDisplayMode>>
   setResultPanelHeightPx: Dispatch<SetStateAction<number>>
   lastNormalResultPanelHeightRef: MutableRefObject<number>
@@ -104,6 +106,7 @@ export function useWorkspaceProjectionState({
   directoryFocusedPath,
   isResultPanelOpen,
   setIsResultPanelOpen,
+  resultPanelDisplayMode,
   setResultPanelDisplayMode,
   setResultPanelHeightPx,
   lastNormalResultPanelHeightRef,
@@ -267,27 +270,31 @@ export function useWorkspaceProjectionState({
   }, [directoryFocusedPath, interactionRef, setIsResultPanelOpen])
 
   const handleToggleResultPanelMaximized = useCallback(() => {
-    const fallbackTabId = activeProjectionTab?.id ?? projectionTabs[0]?.id ?? null
-    if (fallbackTabId) {
-      const targetProjection = projectionTabs.find((projection) => projection.id === fallbackTabId) ?? null
-      setActiveProjectionTabId(fallbackTabId)
-      lastProjectionTabIdRef.current = fallbackTabId
-      setActiveSurface({ kind: 'projection', tabId: fallbackTabId })
-      alignPreviewToProjection(targetProjection, projectionFocusedPathById[fallbackTabId])
-    }
-    setResultPanelDisplayMode((previous) => {
-      if (previous === 'maximized') {
-        setResultPanelHeightPx(lastNormalResultPanelHeightRef.current)
-        return 'normal'
-      }
-      return 'maximized'
+    const plan = resolveProjectionPanelDisplayTogglePlan({
+      projectionTabs,
+      activeProjectionTabId,
+      projectionFocusedPathById,
+      currentDisplayMode: resultPanelDisplayMode,
+      lastNormalHeightPx: lastNormalResultPanelHeightRef.current,
     })
+
+    if (plan.activation) {
+      setActiveProjectionTabId(plan.activation.activeProjectionTabId)
+      lastProjectionTabIdRef.current = plan.activation.lastProjectionTabId
+      setActiveSurface(plan.activation.activeSurface)
+      interactionRef.current?.alignPreviewToPath(plan.activation.previewAlignment.path)
+    }
+    if (plan.nextHeightPx !== null) {
+      setResultPanelHeightPx(plan.nextHeightPx)
+    }
+    setResultPanelDisplayMode(plan.nextDisplayMode)
   }, [
-    activeProjectionTab?.id,
-    alignPreviewToProjection,
+    activeProjectionTabId,
+    interactionRef,
     lastNormalResultPanelHeightRef,
     projectionFocusedPathById,
     projectionTabs,
+    resultPanelDisplayMode,
     setResultPanelDisplayMode,
     setResultPanelHeightPx,
   ])

@@ -10,6 +10,7 @@ import {
   getAddressSuggestionSourceLabel,
   moveAddressSuggestionIndex,
   parseDraftPathSuggestionContext,
+  resolveAddressEditKeyboardIntent,
   resolveAddressSuggestionCompletionIndex,
   shouldShowAddressSuggestionPanel,
   sortAddressFavoriteFolders,
@@ -186,4 +187,40 @@ test('Address Path Model resolves suggestion completion and panel visibility', (
   assert.equal(shouldShowAddressSuggestionPanel('edit', 'idle', 1), true)
   assert.equal(shouldShowAddressSuggestionPanel('edit', 'loading', 0), true)
   assert.equal(shouldShowAddressSuggestionPanel('edit', 'error', 0), true)
+})
+
+test('Address Path Model resolves address edit keyboard intents', () => {
+  assert.deepEqual(resolveAddressEditKeyboardIntent({
+    action: 'cancel',
+    activeIndex: 1,
+    suggestionCount: 3,
+  }), {
+    kind: 'cancel-edit',
+  })
+
+  assert.deepEqual(resolveAddressEditKeyboardIntent({
+    action: 'move-next',
+    activeIndex: 2,
+    suggestionCount: 3,
+  }), {
+    kind: 'set-active-suggestion-index',
+    index: 0,
+  })
+
+  assert.deepEqual(resolveAddressEditKeyboardIntent({
+    action: 'complete',
+    activeIndex: -1,
+    suggestionCount: 3,
+  }), {
+    kind: 'complete-suggestion',
+    index: 0,
+  })
+
+  assert.deepEqual(resolveAddressEditKeyboardIntent({
+    action: 'move-next',
+    activeIndex: 0,
+    suggestionCount: 0,
+  }), {
+    kind: 'none',
+  })
 })

@@ -29,6 +29,34 @@ export interface GroupedProjectionRangeSelection {
   selectedPaths: string[]
 }
 
+export type GroupedProjectionKeyboardAction =
+  | 'select-all'
+  | 'clear-selection'
+  | 'move-right'
+  | 'move-left'
+  | 'move-down'
+  | 'move-up'
+  | 'page-down'
+  | 'page-up'
+  | 'open-selected'
+
+export type GroupedProjectionKeyboardIntent =
+  | { kind: 'none' }
+  | { kind: 'select-all' }
+  | { kind: 'clear-selection' }
+  | { kind: 'open-selected' }
+  | { kind: 'focus-item'; index: number }
+
+export interface ResolveGroupedProjectionKeyboardIntentParams {
+  model: GroupedProjectionRowsModel
+  action: GroupedProjectionKeyboardAction
+  currentIndex: number
+  fileCount: number
+  pageRowCount: number
+  selectedCount: number
+  canClearSelectionWithEscape: boolean
+}
+
 const ROW_LOCATION_MULTIPLIER = 100000
 
 export function buildGroupedProjectionRowsModel(files: FileItem[]): GroupedProjectionRowsModel {
@@ -99,4 +127,49 @@ export function resolveGroupedProjectionRangeSelection({
     targetPath: targetFile.path,
     selectedPaths: files.slice(rangeStart, rangeEnd + 1).map((file) => file.path),
   }
+}
+
+export function resolveGroupedProjectionKeyboardIntent({
+  model,
+  action,
+  currentIndex,
+  fileCount,
+  pageRowCount,
+  selectedCount,
+  canClearSelectionWithEscape,
+}: ResolveGroupedProjectionKeyboardIntentParams): GroupedProjectionKeyboardIntent {
+  if (fileCount <= 0) return { kind: 'none' }
+
+  switch (action) {
+    case 'select-all':
+      return { kind: 'select-all' }
+    case 'clear-selection':
+      return canClearSelectionWithEscape && selectedCount > 0
+        ? { kind: 'clear-selection' }
+        : { kind: 'none' }
+    case 'open-selected':
+      return { kind: 'open-selected' }
+    case 'move-right':
+      return { kind: 'focus-item', index: clampGroupedProjectionIndex(currentIndex + 1, fileCount) }
+    case 'move-left':
+      return { kind: 'focus-item', index: clampGroupedProjectionIndex(currentIndex - 1, fileCount) }
+    case 'move-down':
+      return { kind: 'focus-item', index: resolveGroupedProjectionVerticalNeighborIndex(model, currentIndex, 1) }
+    case 'move-up':
+      return { kind: 'focus-item', index: resolveGroupedProjectionVerticalNeighborIndex(model, currentIndex, -1) }
+    case 'page-down':
+      return {
+        kind: 'focus-item',
+        index: resolveGroupedProjectionVerticalNeighborIndex(model, currentIndex, pageRowCount),
+      }
+    case 'page-up':
+      return {
+        kind: 'focus-item',
+        index: resolveGroupedProjectionVerticalNeighborIndex(model, currentIndex, -pageRowCount),
+      }
+  }
+}
+
+function clampGroupedProjectionIndex(index: number, fileCount: number): number {
+  return Math.max(0, Math.min(fileCount - 1, index))
 }

@@ -1,5 +1,5 @@
 import type { DuplicateSelectionRule } from '@/features/workspace/lib/duplicateSelection'
-import type { FileItem, ResultProjection } from '@/types'
+import type { FileItem, ResultPanelDisplayMode, ResultProjection } from '@/types'
 
 export type WorkspaceActiveSurface =
   | { kind: 'directory' }
@@ -53,6 +53,14 @@ interface ResolveProjectionActivationPlanParams {
   deletedAbsolutePaths?: ReadonlySet<string>
 }
 
+interface ResolveProjectionPanelDisplayTogglePlanParams {
+  projectionTabs: ResultProjection[]
+  activeProjectionTabId: string | null
+  projectionFocusedPathById: Record<string, string | null>
+  currentDisplayMode: ResultPanelDisplayMode
+  lastNormalHeightPx: number
+}
+
 export type ProjectionActivationPreviewAlignment =
   | { kind: 'projection'; path: string | null }
 
@@ -69,6 +77,17 @@ export type ProjectionActivationPlan =
   }
 
 export type ProjectionFileInteractionTrigger = 'click' | 'double-click'
+
+export interface ProjectionPanelDisplayTogglePlan {
+  nextDisplayMode: ResultPanelDisplayMode
+  nextHeightPx: number | null
+  activation: {
+    activeProjectionTabId: string
+    activeSurface: Extract<WorkspaceActiveSurface, { kind: 'projection' }>
+    lastProjectionTabId: string
+    previewAlignment: ProjectionActivationPreviewAlignment
+  } | null
+}
 
 export type ProjectionFileInteractionPlan =
   | { kind: 'none' }
@@ -209,6 +228,63 @@ export function resolveProjectionActivationPlan({
       ),
     },
   }
+}
+
+export function resolveProjectionPanelDisplayTogglePlan({
+  projectionTabs,
+  activeProjectionTabId,
+  projectionFocusedPathById,
+  currentDisplayMode,
+  lastNormalHeightPx,
+}: ResolveProjectionPanelDisplayTogglePlanParams): ProjectionPanelDisplayTogglePlan {
+  const fallbackProjection = resolveActiveProjectionForPanelDisplayToggle({
+    projectionTabs,
+    activeProjectionTabId,
+  })
+  const activation = fallbackProjection
+    ? {
+      activeProjectionTabId: fallbackProjection.id,
+      activeSurface: { kind: 'projection' as const, tabId: fallbackProjection.id },
+      lastProjectionTabId: fallbackProjection.id,
+      previewAlignment: {
+        kind: 'projection' as const,
+        path: resolveProjectionPreferredPath(
+          fallbackProjection,
+          projectionFocusedPathById[fallbackProjection.id],
+        ),
+      },
+    }
+    : null
+
+  if (currentDisplayMode === 'maximized') {
+    return {
+      nextDisplayMode: 'normal',
+      nextHeightPx: lastNormalHeightPx,
+      activation,
+    }
+  }
+
+  return {
+    nextDisplayMode: 'maximized',
+    nextHeightPx: null,
+    activation,
+  }
+}
+
+function resolveActiveProjectionForPanelDisplayToggle({
+  projectionTabs,
+  activeProjectionTabId,
+}: {
+  projectionTabs: ResultProjection[]
+  activeProjectionTabId: string | null
+}): ResultProjection | null {
+  return (
+    (activeProjectionTabId
+      ? projectionTabs.find((projection) => projection.id === activeProjectionTabId)
+      : null)
+    ?? projectionTabs[0]
+    ?? null
+  )
 }
 
 function resolveFallbackProjectionForActivation({

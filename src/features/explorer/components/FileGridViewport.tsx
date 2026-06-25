@@ -14,8 +14,12 @@ import { FileGridCard } from './FileGridCard'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
-import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
+import {
+  resolveFileGridViewportMetrics,
+  shouldLoadNextFileGridPage,
+} from '@/features/explorer/lib/fileGridViewportModel'
+import { useFileGridKeyboardNavigation } from '@/features/explorer/hooks/useFileGridKeyboardNavigation'
 import { useGridSelection } from '@/hooks/useGridSelection'
 
 interface FileGridViewportProps {
@@ -152,18 +156,18 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     return () => observer.disconnect()
   }, [])
 
-  const columnCount = useMemo(() => {
-    return Math.max(1, Math.floor((dimensions.width + FILE_GRID_GAP) / (cardSize.width + FILE_GRID_GAP)))
-  }, [dimensions.width, cardSize.width])
-
-  const rowCount = useMemo(() => {
-    return Math.ceil(files.length / columnCount)
-  }, [files.length, columnCount])
-
-  const pageSize = useMemo(() => {
-    const visibleRows = Math.max(1, Math.floor(dimensions.height / (cardSize.height + FILE_GRID_GAP)))
-    return visibleRows * columnCount
-  }, [dimensions.height, columnCount, cardSize.height])
+  const {
+    columnCount,
+    rowCount,
+    pageSize,
+    cellWidth,
+    cellHeight,
+  } = useMemo(() => resolveFileGridViewportMetrics({
+    dimensions,
+    cardSize,
+    gap: FILE_GRID_GAP,
+    fileCount: files.length,
+  }), [cardSize, dimensions, files.length])
 
   const handleItemsRendered = useCallback((window: GridRenderWindow) => {
     setRenderWindow((previous) => {
@@ -184,13 +188,18 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
   }, [])
 
   useEffect(() => {
-    if (!hasNextPage || isLoadingNextPage || !onLoadNextPage) return
-    if (files.length === 0 || rowCount === 0) return
+    if (!shouldLoadNextFileGridPage({
+      hasNextPage,
+      isLoadingNextPage,
+      canLoadNextPage: Boolean(onLoadNextPage),
+      fileCount: files.length,
+      rowCount,
+      overscanRowStopIndex: renderWindow.overscanRowStopIndex,
+    })) {
+      return
+    }
 
-    const preloadThresholdRow = Math.max(0, rowCount - 2)
-    if (renderWindow.overscanRowStopIndex < preloadThresholdRow) return
-
-    void onLoadNextPage()
+    void onLoadNextPage?.()
   }, [
     files.length,
     hasNextPage,
@@ -357,112 +366,23 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     })
   }, [files, markSelectedElement])
 
-  useEffect(() => {
-    if (!keyboardNavigationEnabled) {
-      return
-    }
-
-    const getCurrentIndex = () => {
-      const active = document.activeElement as HTMLElement | null
-      const rawIndex = active?.dataset?.gridIndex
-      if (rawIndex === undefined) {
-        return selectedIndexRef.current
-      }
-      const index = Number(rawIndex)
-      return Number.isNaN(index) ? selectedIndexRef.current : index
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || files.length === 0 || isTypingTarget(event.target)) return
-
-      if (matchesAnyShortcut(event, keyboardShortcuts.grid.selectAll)) {
-        event.preventDefault()
-        selectAllVisiblePaths()
-        return
-      }
-
-      if (matchesAnyShortcut(event, keyboardShortcuts.grid.clearSelection)) {
-        if (canClearSelectionWithEscape && selectedPathSet.size > 0) {
-          event.preventDefault()
-          clearCheckedPaths()
-        }
-        return
-      }
-
-      let nextIndex = -1
-      const currentIndex = getCurrentIndex()
-
-      if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveRight)) {
-        nextIndex = Math.min(files.length - 1, currentIndex + 1)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveLeft)) {
-        nextIndex = Math.max(0, currentIndex - 1)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveDown)) {
-        nextIndex = Math.min(files.length - 1, currentIndex + columnCount)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveUp)) {
-        nextIndex = Math.max(0, currentIndex - columnCount)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageDown)) {
-        nextIndex = Math.min(files.length - 1, currentIndex + pageSize)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageUp)) {
-        nextIndex = Math.max(0, currentIndex - pageSize)
-      } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.openSelected)) {
-        event.preventDefault()
-        if (files[currentIndex].kind === 'directory') {
-          onDirectoryClick(files[currentIndex].name)
-        } else if (onFileDoubleClick) {
-          onFileDoubleClick(files[currentIndex])
-        } else {
-          onFileClick(files[currentIndex])
-        }
-        return
-      } else {
-        return
-      }
-
-      event.preventDefault()
-      if (nextIndex < 0) return
-
-      const applyRangeSelectionByKeyboard = event.shiftKey
-      focusItem(nextIndex, {
-        syncPreview: !applyRangeSelectionByKeyboard,
-        updateAnchor: !applyRangeSelectionByKeyboard,
-        applyRangeSelection: applyRangeSelectionByKeyboard,
-        queuePreviewAfterShiftRelease: applyRangeSelectionByKeyboard,
-      })
-    }
-
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key !== 'Shift') return
-      const pendingPath = pendingPreviewPathDuringRangeRef.current
-      if (!pendingPath) return
-      pendingPreviewPathDuringRangeRef.current = null
-
-      const targetFile = files.find((file) => file.path === pendingPath)
-      if (targetFile?.kind === 'file') {
-        onFileClick(targetFile)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [
+  useFileGridKeyboardNavigation({
+    enabled: keyboardNavigationEnabled,
     keyboardShortcuts,
     files,
-    selectedPathSet.size,
+    selectedIndexRef,
+    pendingPreviewPathDuringRangeRef,
+    selectedCount: selectedPathSet.size,
     canClearSelectionWithEscape,
-    keyboardNavigationEnabled,
     columnCount,
     pageSize,
+    onSelectAll: selectAllVisiblePaths,
+    onClearSelection: clearCheckedPaths,
+    onFocusItem: focusItem,
     onDirectoryClick,
-    onFileDoubleClick,
     onFileClick,
-    clearCheckedPaths,
-    focusItem,
-    selectAllVisiblePaths,
-  ])
+    onFileDoubleClick,
+  })
 
   if (files.length === 0) {
     return (
@@ -487,11 +407,11 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
       <Grid
         ref={gridRef}
         columnCount={columnCount}
-        columnWidth={cardSize.width + FILE_GRID_GAP}
+        columnWidth={cellWidth}
         height={dimensions.height}
         onItemsRendered={handleItemsRendered}
         rowCount={rowCount}
-        rowHeight={cardSize.height + FILE_GRID_GAP}
+        rowHeight={cellHeight}
         width={dimensions.width}
         className="scrollbar-thin"
       >

@@ -14,11 +14,10 @@ import type { FileBrowserGridHandle } from '@/features/explorer/components/FileB
 import {
   buildGroupedProjectionRowsModel,
   resolveGroupedProjectionRangeSelection,
-  resolveGroupedProjectionVerticalNeighborIndex,
 } from '@/features/workspace/lib/groupedProjectionRowsModel'
+import { useGroupedProjectionKeyboardNavigation } from '@/features/workspace/hooks/useGroupedProjectionKeyboardNavigation'
 import { FILE_GRID_CARD_SIZE_BY_PRESET, FILE_GRID_GAP } from '@/features/explorer/constants/gridLayout'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
-import { isTypingTarget, matchesAnyShortcut } from '@/lib/keyboard'
 import type { ThumbnailTaskPriority } from '@/lib/thumbnailPipeline'
 import type { FileItem, ThumbnailSizePreset } from '@/types'
 
@@ -323,120 +322,23 @@ export const WorkspaceGroupedProjectionRows = forwardRef<FileBrowserGridHandle, 
       })
     }, [files, markSelectedElement])
 
-    const getCurrentIndex = useCallback(() => {
-      const active = document.activeElement as HTMLElement | null
-      const rawIndex = active?.dataset?.gridIndex
-      if (rawIndex === undefined) {
-        return selectedIndexRef.current
-      }
-      const index = Number(rawIndex)
-      return Number.isNaN(index) ? selectedIndexRef.current : index
-    }, [])
-
-    const getVerticalNeighborIndex = useCallback((currentIndex: number, deltaRows: number) => {
-      return resolveGroupedProjectionVerticalNeighborIndex(groupedRowsModel, currentIndex, deltaRows)
-    }, [groupedRowsModel])
-
-    useEffect(() => {
-      if (!keyboardNavigationEnabled) {
-        return
-      }
-
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.defaultPrevented || files.length === 0 || isTypingTarget(event.target)) return
-
-        if (matchesAnyShortcut(event, keyboardShortcuts.grid.selectAll)) {
-          event.preventDefault()
-          selectAllVisiblePaths()
-          return
-        }
-
-        if (matchesAnyShortcut(event, keyboardShortcuts.grid.clearSelection)) {
-          if (canClearSelectionWithEscape && selectedPathSet.size > 0) {
-            event.preventDefault()
-            clearCheckedPaths()
-          }
-          return
-        }
-
-        let nextIndex = -1
-        const currentIndex = getCurrentIndex()
-
-        if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveRight)) {
-          nextIndex = Math.min(files.length - 1, currentIndex + 1)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveLeft)) {
-          nextIndex = Math.max(0, currentIndex - 1)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveDown)) {
-          nextIndex = getVerticalNeighborIndex(currentIndex, 1)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.moveUp)) {
-          nextIndex = getVerticalNeighborIndex(currentIndex, -1)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageDown)) {
-          nextIndex = getVerticalNeighborIndex(currentIndex, pageRowCount)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.pageUp)) {
-          nextIndex = getVerticalNeighborIndex(currentIndex, -pageRowCount)
-        } else if (matchesAnyShortcut(event, keyboardShortcuts.grid.openSelected)) {
-          event.preventDefault()
-          const targetFile = files[currentIndex]
-          if (!targetFile) return
-
-          if (targetFile.kind === 'directory') {
-            onDirectoryClick(targetFile.name)
-          } else if (onFileDoubleClick) {
-            onFileDoubleClick(targetFile)
-          } else {
-            onFileClick(targetFile)
-          }
-          return
-        } else {
-          return
-        }
-
-        event.preventDefault()
-        if (nextIndex < 0) return
-
-        const applyRangeSelectionByKeyboard = event.shiftKey
-        focusItem(nextIndex, {
-          syncPreview: !applyRangeSelectionByKeyboard,
-          updateAnchor: !applyRangeSelectionByKeyboard,
-          applyRangeSelection: applyRangeSelectionByKeyboard,
-          queuePreviewAfterShiftRelease: applyRangeSelectionByKeyboard,
-        })
-      }
-
-      const handleKeyUp = (event: KeyboardEvent) => {
-        if (event.key !== 'Shift') return
-        const pendingPath = pendingPreviewPathDuringRangeRef.current
-        if (!pendingPath) return
-        pendingPreviewPathDuringRangeRef.current = null
-
-        const targetFile = files.find((file) => file.path === pendingPath)
-        if (targetFile?.kind === 'file') {
-          onFileClick(targetFile)
-        }
-      }
-
-      window.addEventListener('keydown', handleKeyDown)
-      window.addEventListener('keyup', handleKeyUp)
-      return () => {
-        window.removeEventListener('keydown', handleKeyDown)
-        window.removeEventListener('keyup', handleKeyUp)
-      }
-    }, [
-      canClearSelectionWithEscape,
-      clearCheckedPaths,
+    useGroupedProjectionKeyboardNavigation({
+      enabled: keyboardNavigationEnabled,
       files,
-      focusItem,
-      getCurrentIndex,
-      getVerticalNeighborIndex,
-      keyboardNavigationEnabled,
+      model: groupedRowsModel,
       keyboardShortcuts,
+      selectedIndexRef,
+      pendingPreviewPathDuringRangeRef,
+      selectedCount: selectedPathSet.size,
+      canClearSelectionWithEscape,
+      pageRowCount,
+      onSelectAll: selectAllVisiblePaths,
+      onClearSelection: clearCheckedPaths,
+      onFocusItem: focusItem,
       onDirectoryClick,
       onFileClick,
       onFileDoubleClick,
-      pageRowCount,
-      selectAllVisiblePaths,
-      selectedPathSet.size,
-    ])
+    })
 
     const handleHorizontalRowWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
       if (event.shiftKey) {

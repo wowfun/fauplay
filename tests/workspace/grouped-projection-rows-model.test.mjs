@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildGroupedProjectionRowsModel,
+  resolveGroupedProjectionKeyboardIntent,
   resolveGroupedProjectionRangeSelection,
   resolveGroupedProjectionVerticalNeighborIndex,
 } from '../../src/features/workspace/lib/groupedProjectionRowsModel.ts'
@@ -62,5 +63,56 @@ test('Grouped Projection Rows Model selects a contiguous visible range from the 
       'set-b/one.jpg',
       'set-b/two.jpg',
     ],
+  })
+})
+
+test('Grouped Projection Rows Model resolves keyboard intents across Duplicate Set rows', () => {
+  const model = buildGroupedProjectionRowsModel([
+    file('set-a/one.jpg', 'set-a'),
+    file('set-a/two.jpg', 'set-a'),
+    file('set-a/three.jpg', 'set-a'),
+    file('set-b/one.jpg', 'set-b'),
+    file('set-b/two.jpg', 'set-b'),
+    file('set-c/one.jpg', 'set-c'),
+    file('set-c/two.jpg', 'set-c'),
+    file('set-c/three.jpg', 'set-c'),
+  ])
+
+  assert.deepEqual(resolveGroupedProjectionKeyboardIntent({
+    model,
+    action: 'move-down',
+    currentIndex: 2,
+    fileCount: 8,
+    pageRowCount: 2,
+    selectedCount: 0,
+    canClearSelectionWithEscape: true,
+  }), {
+    kind: 'focus-item',
+    index: 4,
+  })
+
+  assert.deepEqual(resolveGroupedProjectionKeyboardIntent({
+    model,
+    action: 'page-down',
+    currentIndex: 2,
+    fileCount: 8,
+    pageRowCount: 2,
+    selectedCount: 0,
+    canClearSelectionWithEscape: true,
+  }), {
+    kind: 'focus-item',
+    index: 7,
+  })
+
+  assert.deepEqual(resolveGroupedProjectionKeyboardIntent({
+    model,
+    action: 'clear-selection',
+    currentIndex: 2,
+    fileCount: 8,
+    pageRowCount: 2,
+    selectedCount: 0,
+    canClearSelectionWithEscape: true,
+  }), {
+    kind: 'none',
   })
 })
