@@ -1,15 +1,20 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useKeyboardShortcuts, useKeyboardShortcutsRuntime } from '@/config/shortcutStore'
 import { useFileSystem } from '@/hooks/useFileSystem'
 import { useRemoteFileSystem } from '@/hooks/useRemoteFileSystem'
 import { matchesAnyShortcut, type ShortcutBinding } from '@/lib/keyboard'
 import { DirectorySelectionLayout } from '@/layouts/DirectorySelectionLayout'
 import {
-  buildLocalPublishedRootSyncPayload,
   readRemoteConnectErrorMessage,
   resolveAppWorkspaceVisibility,
   resolveInitialAccessProvider,
-  resolveRemoteRootsConnectionPlan,
+  resolveLocalPublishedRootSyncPlan,
+  resolveLocalWorkspaceIdentity,
+  resolveRemoteAccessConnectionCommitPlan,
+  resolveRemoteAccessResetPlan,
+  resolveRemoteWorkspaceRestorePlan,
+  type RemoteAccessConnectionCommitPlan,
+  type RemoteAccessResetPlan,
 } from '@/lib/appAccessModel'
 import {
   clearRemoteSession,
@@ -129,14 +134,6 @@ function App() {
     localRootId: localFileSystem.rootId,
   })
   const isLoopbackUi = isLoopbackOrigin()
-  const localPublishedRootSyncPayload = useMemo(
-    () => buildLocalPublishedRootSyncPayload(localFileSystem.cachedRoots, localFileSystem.favoriteFolders),
-    [localFileSystem.cachedRoots, localFileSystem.favoriteFolders],
-  )
-  const localPublishedRootSyncSignature = useMemo(
-    () => JSON.stringify(localPublishedRootSyncPayload),
-    [localPublishedRootSyncPayload],
-  )
   const lastPublishedRootSyncSignatureRef = useRef<string | null>(null)
 
   useKeyboardShortcutsRuntime(activeRootHandle, activeRootId)
@@ -158,6 +155,44 @@ function App() {
     updateAccessProvider('local-browser')
     await localFileSystem.selectDirectory()
   }, [localFileSystem, updateAccessProvider])
+
+  const applyRemoteAccessResetPlan = useCallback((plan: RemoteAccessResetPlan) => {
+    if (plan.clearActiveRemoteWorkspace) {
+      setActiveRemoteWorkspaceState(null)
+    }
+    setRemoteRoots(plan.remoteRoots)
+    setRemoteToken(plan.remoteToken)
+    setRememberRemoteDevice(plan.rememberRemoteDevice)
+    setRememberRemoteDeviceLabel(plan.rememberRemoteDeviceLabel)
+    setRemoteStep(plan.remoteStep)
+    if ('remoteError' in plan) {
+      setRemoteError(plan.remoteError ?? null)
+    }
+    if (plan.nextAccessProvider) {
+      updateAccessProvider(plan.nextAccessProvider)
+    }
+  }, [updateAccessProvider])
+
+  const applyRemoteAccessConnectionCommitPlan = useCallback((
+    plan: Extract<RemoteAccessConnectionCommitPlan, { kind: 'commit' }>
+  ) => {
+    if (plan.clearConnectionDraft) {
+      setRemoteToken('')
+      setRememberRemoteDevice(false)
+      setRememberRemoteDeviceLabel('')
+    }
+    setRemoteRoots(plan.remoteRoots)
+    if (plan.activeRemoteRoot) {
+      setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(
+        plan.activeRemoteRoot.id,
+        plan.activeRemoteRoot.label,
+      ))
+    }
+    setRemoteStep(plan.remoteStep)
+    if (plan.nextAccessProvider) {
+      updateAccessProvider(plan.nextAccessProvider)
+    }
+  }, [updateAccessProvider])
 
   useDirectorySelectionShortcut(
     accessProvider !== 'remote-readonly' && localFileSystem.rootId === null && !activeRemoteWorkspace,
@@ -184,11 +219,17 @@ function App() {
         const roots = await loadRemoteAccessRoots()
         if (cancelled) return
         setRemoteRoots(roots)
-        const matchedRoot = roots.find((item) => item.id === storedWorkspace.configRootId) ?? null
-        if (!matchedRoot) {
-          throw new Error('远程 Root 已不存在或当前会话无权访问')
+        const restorePlan = resolveRemoteWorkspaceRestorePlan({
+          activeRemoteWorkspace: storedWorkspace,
+          roots,
+        })
+        if (restorePlan.kind === 'error') {
+          throw new Error(restorePlan.message)
         }
-        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(matchedRoot.id, matchedRoot.label))
+        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(
+          restorePlan.root.id,
+          restorePlan.root.label,
+        ))
       } catch (error) {
         if (cancelled) return
         clearRemoteSession()
@@ -213,19 +254,12 @@ function App() {
   useEffect(() => {
     const eventName = getRemoteSessionInvalidatedEventName()
     const handleRemoteSessionInvalidated = () => {
-      setActiveRemoteWorkspaceState(null)
-      setRemoteRoots([])
-      setRemoteToken('')
-      setRememberRemoteDevice(false)
-      setRememberRemoteDeviceLabel('')
-      setRemoteStep('token')
-      setRemoteError('远程会话已失效，请重新连接')
-      updateAccessProvider('local-browser')
+      applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'session-invalidated' }))
     }
 
     window.addEventListener(eventName, handleRemoteSessionInvalidated)
     return () => window.removeEventListener(eventName, handleRemoteSessionInvalidated)
-  }, [updateAccessProvider])
+  }, [applyRemoteAccessResetPlan])
 
   useEffect(() => {
     if (!shouldShowStartupScreen || typeof window === 'undefined') {
@@ -236,17 +270,19 @@ function App() {
   }, [shouldShowStartupScreen])
 
   useEffect(() => {
-    if (!isLoopbackUi || !localFileSystem.isCachedRootsReady) {
-      return
-    }
-    if (lastPublishedRootSyncSignatureRef.current === localPublishedRootSyncSignature) {
-      return
-    }
+    const plan = resolveLocalPublishedRootSyncPlan({
+      isLoopbackUi,
+      isCachedRootsReady: localFileSystem.isCachedRootsReady,
+      cachedRoots: localFileSystem.cachedRoots,
+      favoriteFolders: localFileSystem.favoriteFolders,
+      lastSyncedSignature: lastPublishedRootSyncSignatureRef.current,
+    })
+    if (plan.kind === 'skip') return
 
     const timeoutId = window.setTimeout(() => {
-      void syncRemotePublishedRootsFromLocalBrowser(localPublishedRootSyncPayload)
+      void syncRemotePublishedRootsFromLocalBrowser(plan.payload)
         .then(() => {
-          lastPublishedRootSyncSignatureRef.current = localPublishedRootSyncSignature
+          lastPublishedRootSyncSignatureRef.current = plan.signature
         })
         .catch(() => {
           // Keep the local browsing flow unaffected; the next state change can retry.
@@ -259,8 +295,8 @@ function App() {
   }, [
     isLoopbackUi,
     localFileSystem.isCachedRootsReady,
-    localPublishedRootSyncPayload,
-    localPublishedRootSyncSignature,
+    localFileSystem.cachedRoots,
+    localFileSystem.favoriteFolders,
   ])
 
   const refreshRememberedDevices = useCallback(async () => {
@@ -362,12 +398,7 @@ function App() {
   const handleOpenRemoteConnect = useCallback(() => {
     const openRemoteConnect = async () => {
       setIsRemoteLoading(true)
-      setRemoteError(null)
-      setRemoteRoots([])
-      setRemoteToken('')
-      setRememberRemoteDevice(false)
-      setRememberRemoteDeviceLabel('')
-      setRemoteStep('token')
+      applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'open-connect' }))
 
       try {
         const capabilities = await loadRemoteAccessCapabilities()
@@ -378,19 +409,14 @@ function App() {
         const roots = await loadRemoteAccessRoots(2000, {
           clearSessionOnUnauthorized: false,
         })
-        const plan = resolveRemoteRootsConnectionPlan(roots)
+        const plan = resolveRemoteAccessConnectionCommitPlan({
+          roots,
+          clearConnectionDraft: false,
+        })
         if (plan.kind === 'error') {
           throw new Error(plan.message)
         }
-        setRemoteRoots(roots)
-        if (plan.kind === 'auto-select') {
-          setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(plan.root.id, plan.root.label))
-          setRemoteStep(plan.nextRemoteStep)
-          updateAccessProvider(plan.nextAccessProvider)
-          return
-        }
-
-        setRemoteStep(plan.nextRemoteStep)
+        applyRemoteAccessConnectionCommitPlan(plan)
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'REMOTE_UNAUTHORIZED') {
           setRemoteStep('token')
@@ -403,16 +429,11 @@ function App() {
     }
 
     void openRemoteConnect()
-  }, [updateAccessProvider])
+  }, [applyRemoteAccessConnectionCommitPlan, applyRemoteAccessResetPlan])
 
   const handleCancelRemoteConnect = useCallback(() => {
-    setRemoteError(null)
-    setRemoteRoots([])
-    setRemoteToken('')
-    setRememberRemoteDevice(false)
-    setRememberRemoteDeviceLabel('')
-    setRemoteStep('idle')
-  }, [])
+    applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'cancel-connect' }))
+  }, [applyRemoteAccessResetPlan])
 
   const handleSubmitRemoteToken = useCallback(async () => {
     const normalizedToken = remoteToken.trim()
@@ -431,23 +452,15 @@ function App() {
         rememberDeviceLabel: rememberRemoteDeviceLabel,
       })
       const roots = await loadRemoteAccessRoots()
-      const plan = resolveRemoteRootsConnectionPlan(roots)
+      const plan = resolveRemoteAccessConnectionCommitPlan({
+        roots,
+        clearConnectionDraft: true,
+      })
       if (plan.kind === 'error') {
         throw new Error(plan.message)
       }
 
-      setRemoteToken('')
-      setRememberRemoteDevice(false)
-      setRememberRemoteDeviceLabel('')
-      setRemoteRoots(roots)
-      if (plan.kind === 'auto-select') {
-        setActiveRemoteWorkspaceState(setActiveRemoteWorkspace(plan.root.id, plan.root.label))
-        setRemoteStep(plan.nextRemoteStep)
-        updateAccessProvider(plan.nextAccessProvider)
-        return
-      }
-
-      setRemoteStep(plan.nextRemoteStep)
+      applyRemoteAccessConnectionCommitPlan(plan)
     } catch (error) {
       setRemoteError(readRemoteConnectErrorMessage(
         error,
@@ -457,7 +470,12 @@ function App() {
     } finally {
       setIsRemoteLoading(false)
     }
-  }, [rememberRemoteDevice, rememberRemoteDeviceLabel, remoteToken, updateAccessProvider])
+  }, [
+    applyRemoteAccessConnectionCommitPlan,
+    rememberRemoteDevice,
+    rememberRemoteDeviceLabel,
+    remoteToken,
+  ])
 
   const handleSelectRemoteRoot = useCallback((root: RemoteRootEntry) => {
     setRemoteError(null)
@@ -468,15 +486,8 @@ function App() {
   const handleDisconnectRemoteWorkspace = useCallback(() => {
     void clearRemoteAccessSession().catch(() => undefined)
     clearRemoteSession()
-    setActiveRemoteWorkspaceState(null)
-    setRemoteRoots([])
-    setRemoteToken('')
-    setRememberRemoteDevice(false)
-    setRememberRemoteDeviceLabel('')
-    setRemoteError(null)
-    setRemoteStep('token')
-    updateAccessProvider('local-browser')
-  }, [updateAccessProvider])
+    applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'disconnect-workspace' }))
+  }, [applyRemoteAccessResetPlan])
 
   const handleForgetRemoteDevice = useCallback(() => {
     const forgetRemoteDevice = async () => {
@@ -488,18 +499,12 @@ function App() {
         setRemoteError(readRemoteConnectErrorMessage(error, '忘记此设备失败'))
       } finally {
         clearRemoteSession()
-        setActiveRemoteWorkspaceState(null)
-        setRemoteRoots([])
-        setRemoteToken('')
-        setRememberRemoteDevice(false)
-        setRememberRemoteDeviceLabel('')
-        setRemoteStep('token')
-        updateAccessProvider('local-browser')
+        applyRemoteAccessResetPlan(resolveRemoteAccessResetPlan({ reason: 'forget-device' }))
       }
     }
 
     void forgetRemoteDevice()
-  }, [updateAccessProvider])
+  }, [applyRemoteAccessResetPlan])
 
   if (shouldShowStartupScreen && isRememberedDevicesAdminOpen) {
     return (
@@ -587,19 +592,24 @@ function App() {
     return <WorkspaceLoadingFallback rootName={activeRemoteWorkspace.rootLabel} />
   }
 
-  const resolvedRootId = localFileSystem.rootId
-    ?? (localFileSystem.rootHandle ? getFallbackSessionRootId(localFileSystem.rootHandle) : 'local-runtime')
-  const resolvedRootName = localFileSystem.rootName || localFileSystem.rootHandle?.name || '根目录'
+  const localWorkspaceIdentity = resolveLocalWorkspaceIdentity({
+    rootId: localFileSystem.rootId,
+    rootName: localFileSystem.rootName,
+    rootHandleName: localFileSystem.rootHandle?.name ?? null,
+    fallbackSessionRootId: localFileSystem.rootHandle
+      ? getFallbackSessionRootId(localFileSystem.rootHandle)
+      : null,
+  })
 
   return (
-    <Suspense fallback={<WorkspaceLoadingFallback rootName={resolvedRootName} />}>
+    <Suspense fallback={<WorkspaceLoadingFallback rootName={localWorkspaceIdentity.rootName} />}>
       <WorkspaceShell
-        key={`local:${resolvedRootId}`}
+        key={localWorkspaceIdentity.workspaceKey}
         accessProvider="local-browser"
         rootHandle={localFileSystem.rootHandle}
-        rootId={resolvedRootId}
-        rootName={resolvedRootName}
-        storageNamespace="local-browser"
+        rootId={localWorkspaceIdentity.rootId}
+        rootName={localWorkspaceIdentity.rootName}
+        storageNamespace={localWorkspaceIdentity.storageNamespace}
         favoriteFolders={localFileSystem.favoriteFolders}
         isCurrentPathFavorited={localFileSystem.isCurrentPathFavorited}
         files={localFileSystem.files}

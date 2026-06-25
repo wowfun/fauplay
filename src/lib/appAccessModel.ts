@@ -29,7 +29,55 @@ export interface LocalPublishedRootSyncFavorite {
   path: string
 }
 
+export interface ResolveLocalWorkspaceIdentityParams {
+  rootId: string | null
+  rootName: string | null
+  rootHandleName: string | null
+  fallbackSessionRootId: string | null
+}
+
+export interface LocalWorkspaceIdentity {
+  rootId: string
+  rootName: string
+  workspaceKey: string
+  storageNamespace: 'local-browser'
+}
+
+export interface ResolveLocalPublishedRootSyncPlanParams {
+  isLoopbackUi: boolean
+  isCachedRootsReady: boolean
+  cachedRoots: LocalPublishedRootSyncRoot[]
+  favoriteFolders: LocalPublishedRootSyncFavorite[]
+  lastSyncedSignature: string | null
+}
+
+export type LocalPublishedRootSyncPlan =
+  | { kind: 'skip' }
+  | {
+    kind: 'sync'
+    payload: LocalPublishedRootSyncEntry[]
+    signature: string
+  }
+
 export type RemoteStep = 'idle' | 'token' | 'roots'
+
+export type RemoteAccessResetReason =
+  | 'open-connect'
+  | 'cancel-connect'
+  | 'session-invalidated'
+  | 'disconnect-workspace'
+  | 'forget-device'
+
+export interface RemoteAccessResetPlan {
+  clearActiveRemoteWorkspace: boolean
+  remoteRoots: RemoteRootEntry[]
+  remoteToken: string
+  rememberRemoteDevice: boolean
+  rememberRemoteDeviceLabel: string
+  remoteStep: RemoteStep
+  remoteError?: string | null
+  nextAccessProvider?: Extract<AccessProvider, 'local-browser'>
+}
 
 export type RemoteRootsConnectionPlan =
   | {
@@ -45,6 +93,30 @@ export type RemoteRootsConnectionPlan =
   | {
     kind: 'choose-root'
     nextRemoteStep: RemoteStep
+  }
+
+export type RemoteWorkspaceRestorePlan =
+  | {
+    kind: 'restore'
+    root: RemoteRootEntry
+  }
+  | {
+    kind: 'error'
+    message: string
+  }
+
+export type RemoteAccessConnectionCommitPlan =
+  | {
+    kind: 'error'
+    message: string
+  }
+  | {
+    kind: 'commit'
+    remoteRoots: RemoteRootEntry[]
+    remoteStep: RemoteStep
+    clearConnectionDraft: boolean
+    activeRemoteRoot?: RemoteRootEntry
+    nextAccessProvider?: Extract<AccessProvider, 'remote-readonly'>
   }
 
 export function resolveInitialAccessProvider({
@@ -102,6 +174,115 @@ export function resolveRemoteRootsConnectionPlan(roots: RemoteRootEntry[]): Remo
   }
 }
 
+export function resolveRemoteAccessConnectionCommitPlan({
+  roots,
+  clearConnectionDraft,
+}: {
+  roots: RemoteRootEntry[]
+  clearConnectionDraft: boolean
+}): RemoteAccessConnectionCommitPlan {
+  const connectionPlan = resolveRemoteRootsConnectionPlan(roots)
+  if (connectionPlan.kind === 'error') {
+    return connectionPlan
+  }
+
+  const base = {
+    kind: 'commit' as const,
+    remoteRoots: roots,
+    remoteStep: connectionPlan.nextRemoteStep,
+    clearConnectionDraft,
+  }
+
+  if (connectionPlan.kind === 'auto-select') {
+    return {
+      ...base,
+      activeRemoteRoot: connectionPlan.root,
+      nextAccessProvider: connectionPlan.nextAccessProvider,
+    }
+  }
+
+  return base
+}
+
+export function resolveRemoteWorkspaceRestorePlan({
+  activeRemoteWorkspace,
+  roots,
+}: {
+  activeRemoteWorkspace: ActiveRemoteWorkspace
+  roots: RemoteRootEntry[]
+}): RemoteWorkspaceRestorePlan {
+  const matchedRoot = roots.find((item) => item.id === activeRemoteWorkspace.configRootId) ?? null
+  if (!matchedRoot) {
+    return {
+      kind: 'error',
+      message: '远程 Root 已不存在或当前会话无权访问',
+    }
+  }
+
+  return {
+    kind: 'restore',
+    root: matchedRoot,
+  }
+}
+
+export function resolveRemoteAccessResetPlan({
+  reason,
+}: {
+  reason: RemoteAccessResetReason
+}): RemoteAccessResetPlan {
+  const base = {
+    remoteRoots: [],
+    remoteToken: '',
+    rememberRemoteDevice: false,
+    rememberRemoteDeviceLabel: '',
+  }
+
+  if (reason === 'open-connect') {
+    return {
+      ...base,
+      clearActiveRemoteWorkspace: false,
+      remoteStep: 'token',
+      remoteError: null,
+    }
+  }
+
+  if (reason === 'cancel-connect') {
+    return {
+      ...base,
+      clearActiveRemoteWorkspace: false,
+      remoteStep: 'idle',
+      remoteError: null,
+    }
+  }
+
+  if (reason === 'session-invalidated') {
+    return {
+      ...base,
+      clearActiveRemoteWorkspace: true,
+      remoteStep: 'token',
+      remoteError: '远程会话已失效，请重新连接',
+      nextAccessProvider: 'local-browser',
+    }
+  }
+
+  if (reason === 'disconnect-workspace') {
+    return {
+      ...base,
+      clearActiveRemoteWorkspace: true,
+      remoteStep: 'token',
+      remoteError: null,
+      nextAccessProvider: 'local-browser',
+    }
+  }
+
+  return {
+    ...base,
+    clearActiveRemoteWorkspace: true,
+    remoteStep: 'token',
+    nextAccessProvider: 'local-browser',
+  }
+}
+
 export function buildLocalPublishedRootSyncPayload(
   cachedRoots: LocalPublishedRootSyncRoot[],
   favoriteFolders: LocalPublishedRootSyncFavorite[],
@@ -122,6 +303,46 @@ export function buildLocalPublishedRootSyncPayload(
       favoritePaths,
     }]
   })
+}
+
+export function resolveLocalWorkspaceIdentity({
+  rootId,
+  rootName,
+  rootHandleName,
+  fallbackSessionRootId,
+}: ResolveLocalWorkspaceIdentityParams): LocalWorkspaceIdentity {
+  const resolvedRootId = rootId ?? fallbackSessionRootId ?? 'local-runtime'
+  const resolvedRootName = rootName || rootHandleName || '根目录'
+  return {
+    rootId: resolvedRootId,
+    rootName: resolvedRootName,
+    workspaceKey: `local:${resolvedRootId}`,
+    storageNamespace: 'local-browser',
+  }
+}
+
+export function resolveLocalPublishedRootSyncPlan({
+  isLoopbackUi,
+  isCachedRootsReady,
+  cachedRoots,
+  favoriteFolders,
+  lastSyncedSignature,
+}: ResolveLocalPublishedRootSyncPlanParams): LocalPublishedRootSyncPlan {
+  if (!isLoopbackUi || !isCachedRootsReady) {
+    return { kind: 'skip' }
+  }
+
+  const payload = buildLocalPublishedRootSyncPayload(cachedRoots, favoriteFolders)
+  const signature = JSON.stringify(payload)
+  if (lastSyncedSignature === signature) {
+    return { kind: 'skip' }
+  }
+
+  return {
+    kind: 'sync',
+    payload,
+    signature,
+  }
 }
 
 function normalizeRootRelativePath(path: string): string {
