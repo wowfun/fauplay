@@ -14,6 +14,8 @@ import {
   createRemoteChildDirectoryPath,
   normalizeRemoteRootRelativePath,
   parseRemoteListingItems,
+  resolveRemoteFavoriteFolderMutationPlan,
+  resolveRemoteListingRequestPlan,
   resolveRemoteParentPath,
   toRemoteChildDirectoryNames,
   toRemoteFavoriteFolderEntries,
@@ -107,16 +109,21 @@ export function useRemoteFileSystem({
     targetPath: string,
     flattenView: boolean
   ) => {
-    const normalizedPath = normalizeRemoteRootRelativePath(targetPath)
-    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
-      rootId: configRootId,
-      path: normalizedPath,
+    const plan = resolveRemoteListingRequestPlan({
+      configRootId,
+      targetPath,
       flattenView,
+    })
+    if (plan.kind === 'none') return
+    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
+      rootId: plan.rootId,
+      path: plan.path,
+      flattenView: plan.flattenView,
     }, 120000)
-    setFiles(parseRemoteListingItems(result, configRootId))
-    setCurrentPath(normalizedPath)
-    setIsFlattenView(flattenView)
-    setCurrentConfigRootId(configRootId)
+    setFiles(parseRemoteListingItems(result, plan.rootId))
+    setCurrentPath(plan.path)
+    setIsFlattenView(plan.flattenView)
+    setCurrentConfigRootId(plan.rootId)
   }, [])
 
   useEffect(() => {
@@ -187,13 +194,18 @@ export function useRemoteFileSystem({
   }, [currentPath, navigateToPath])
 
   const listChildDirectories = useCallback(async (targetPath: string): Promise<string[]> => {
-    if (!currentConfigRootId) return []
-    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
-      rootId: currentConfigRootId,
-      path: normalizeRemoteRootRelativePath(targetPath),
+    const plan = resolveRemoteListingRequestPlan({
+      configRootId: currentConfigRootId,
+      targetPath,
       flattenView: false,
+    })
+    if (plan.kind === 'none') return []
+    const result = await callRemoteAccessHttp('/v1/remote/files/list', {
+      rootId: plan.rootId,
+      path: plan.path,
+      flattenView: plan.flattenView,
     }, 120000)
-    return toRemoteChildDirectoryNames(result, currentConfigRootId)
+    return toRemoteChildDirectoryNames(result, plan.rootId)
   }, [currentConfigRootId])
 
   const setFlattenView = useCallback(async (flattenView: boolean) => {
@@ -232,21 +244,20 @@ export function useRemoteFileSystem({
   }, [roots])
 
   const toggleCurrentFolderFavorite = useCallback((): void => {
-    if (!rootId) return
-    const normalizedPath = normalizeRemoteRootRelativePath(currentPath)
-    const configRootId = fromUiRootId(rootId)
-    if (!configRootId) return
+    const plan = resolveRemoteFavoriteFolderMutationPlan({
+      uiRootId: rootId,
+      configRootId: rootId ? fromUiRootId(rootId) : null,
+      currentPath,
+      favoriteFolders,
+      virtualTrashPath: REMOTE_VIRTUAL_TRASH_PATH,
+    })
+    if (plan.kind === 'none') return
 
     const run = async () => {
-      const alreadyFavorited = isFavoriteFolderActive(favoriteFolders, {
-        rootId,
-        path: normalizedPath,
-        virtualTrashPath: REMOTE_VIRTUAL_TRASH_PATH,
-      })
-      if (alreadyFavorited) {
-        await removeRemoteAccessFavorite(configRootId, normalizedPath)
+      if (plan.kind === 'remove') {
+        await removeRemoteAccessFavorite(plan.rootId, plan.path)
       } else {
-        await upsertRemoteAccessFavorite(configRootId, normalizedPath)
+        await upsertRemoteAccessFavorite(plan.rootId, plan.path)
       }
       const items = await loadRemoteAccessFavorites()
       setFavoriteFolders(toFavoriteFolderEntries(roots, items))

@@ -1,4 +1,5 @@
 import type { FavoriteFolderEntry, FileItem } from '../../../types/index.ts'
+import { isFavoriteFolderActive } from './favoriteFolderModel.ts'
 
 export interface RemoteFileSystemRootEntry {
   id: string
@@ -18,6 +19,37 @@ export interface RemoteFavoriteFolderEntriesParams {
   toUiRootId: (rootId: string) => string
 }
 
+export interface ResolveRemoteListingRequestPlanParams {
+  configRootId: string
+  targetPath: string
+  flattenView: boolean
+}
+
+export type RemoteListingRequestPlan =
+  | { kind: 'none' }
+  | {
+    kind: 'list'
+    rootId: string
+    path: string
+    flattenView: boolean
+  }
+
+export interface ResolveRemoteFavoriteFolderMutationPlanParams {
+  uiRootId: string | null | undefined
+  configRootId: string | null | undefined
+  currentPath: string
+  favoriteFolders: FavoriteFolderEntry[]
+  virtualTrashPath: string
+}
+
+export type RemoteFavoriteFolderMutationPlan =
+  | { kind: 'none' }
+  | {
+    kind: 'remove' | 'upsert'
+    rootId: string
+    path: string
+  }
+
 interface RemoteListingItemCandidate {
   name?: unknown
   path?: unknown
@@ -32,6 +64,46 @@ interface RemoteListingItemCandidate {
 
 export function normalizeRemoteRootRelativePath(path: string): string {
   return path.split('/').filter(Boolean).join('/')
+}
+
+export function resolveRemoteListingRequestPlan({
+  configRootId,
+  targetPath,
+  flattenView,
+}: ResolveRemoteListingRequestPlanParams): RemoteListingRequestPlan {
+  const rootId = configRootId.trim()
+  if (!rootId) return { kind: 'none' }
+  return {
+    kind: 'list',
+    rootId,
+    path: normalizeRemoteRootRelativePath(targetPath),
+    flattenView,
+  }
+}
+
+export function resolveRemoteFavoriteFolderMutationPlan({
+  uiRootId,
+  configRootId,
+  currentPath,
+  favoriteFolders,
+  virtualTrashPath,
+}: ResolveRemoteFavoriteFolderMutationPlanParams): RemoteFavoriteFolderMutationPlan {
+  const normalizedUiRootId = uiRootId?.trim() ?? ''
+  const rootId = configRootId?.trim() ?? ''
+  if (!normalizedUiRootId || !rootId) return { kind: 'none' }
+
+  const path = normalizeRemoteRootRelativePath(currentPath)
+  if (path === normalizeRemoteRootRelativePath(virtualTrashPath)) return { kind: 'none' }
+
+  return {
+    kind: isFavoriteFolderActive(favoriteFolders, {
+      rootId: normalizedUiRootId,
+      path,
+      virtualTrashPath,
+    }) ? 'remove' : 'upsert',
+    rootId,
+    path,
+  }
 }
 
 export function createRemoteChildDirectoryPath(currentPath: string, dirName: string): string {

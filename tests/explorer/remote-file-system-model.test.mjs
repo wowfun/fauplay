@@ -5,6 +5,8 @@ import {
   createRemoteChildDirectoryPath,
   normalizeRemoteRootRelativePath,
   parseRemoteListingItems,
+  resolveRemoteFavoriteFolderMutationPlan,
+  resolveRemoteListingRequestPlan,
   resolveRemoteParentPath,
   toRemoteChildDirectoryNames,
   toRemoteFavoriteFolderEntries,
@@ -127,4 +129,66 @@ test('Remote File System Model extracts sorted child directories from a remote L
     '第2组',
     '第10组',
   ])
+})
+
+test('Remote File System Model plans remote Listing requests and Favorite Folder mutations', () => {
+  assert.deepEqual(resolveRemoteListingRequestPlan({
+    configRootId: ' published-root ',
+    targetPath: '/albums//raw/',
+    flattenView: true,
+  }), {
+    kind: 'list',
+    rootId: 'published-root',
+    path: 'albums/raw',
+    flattenView: true,
+  })
+
+  assert.deepEqual(resolveRemoteListingRequestPlan({
+    configRootId: '',
+    targetPath: 'albums',
+    flattenView: false,
+  }), {
+    kind: 'none',
+  })
+
+  const favoriteFolders = [{
+    rootId: 'remote:root-a',
+    rootName: 'Photos',
+    path: 'albums/raw',
+    favoritedAt: 20,
+  }]
+
+  assert.deepEqual(resolveRemoteFavoriteFolderMutationPlan({
+    uiRootId: 'remote:root-a',
+    configRootId: 'root-a',
+    currentPath: '/albums//raw/',
+    favoriteFolders,
+    virtualTrashPath: '@trash',
+  }), {
+    kind: 'remove',
+    rootId: 'root-a',
+    path: 'albums/raw',
+  })
+
+  assert.deepEqual(resolveRemoteFavoriteFolderMutationPlan({
+    uiRootId: 'remote:root-a',
+    configRootId: 'root-a',
+    currentPath: 'clips',
+    favoriteFolders,
+    virtualTrashPath: '@trash',
+  }), {
+    kind: 'upsert',
+    rootId: 'root-a',
+    path: 'clips',
+  })
+
+  assert.deepEqual(resolveRemoteFavoriteFolderMutationPlan({
+    uiRootId: 'remote:root-a',
+    configRootId: 'root-a',
+    currentPath: '@trash',
+    favoriteFolders,
+    virtualTrashPath: '@trash',
+  }), {
+    kind: 'none',
+  })
 })
