@@ -1,5 +1,7 @@
-import type { FileItem } from '../../../types/index.ts'
+import type { FileItem, FilterState } from '../../../types/index.ts'
 import type { ViewportMode } from '../types/presentation.ts'
+
+export const WORKSPACE_TRASH_ROUTE_PATH = '@trash'
 
 export type WorkspaceShellPresentationTransitionIntent =
   | { kind: 'none' }
@@ -24,6 +26,33 @@ export type WorkspaceDirectoryEntryInteractionIntent =
   | { kind: 'navigate-directory'; dirName: string }
   | { kind: 'open-file'; file: FileItem; focusedPath: string; target: 'primary' | 'secondary' }
 
+export type WorkspaceTrashNavigationIntent =
+  | { kind: 'none' }
+  | { kind: 'navigate-to-path'; path: string; resetFlattenView: boolean }
+
+export type WorkspaceShellSurfaceResetIntent =
+  | { kind: 'none' }
+  | { kind: 'reset-directory-surface' }
+  | { kind: 'reset-workspace-surface' }
+
+export interface ResolveWorkspaceShellNavigationContextTransitionParams {
+  previousRootId: string | null
+  currentRootId: string | null
+  previousCurrentPath: string | null
+  currentPath: string | null
+}
+
+export type WorkspaceAnnotationFilterGateIntent =
+  | { kind: 'none' }
+  | { kind: 'reset-annotation-filter'; filter: FilterState }
+
+export interface ResolveWorkspaceAnnotationFilterGateIntentParams {
+  isAnnotationFilterGateResolved: boolean
+  isReviewFilterGateResolved: boolean
+  showAnnotationFilterControls: boolean
+  filter: FilterState
+}
+
 export function resolveWorkspaceShellPresentationTransition({
   previousShellKind,
   currentShellKind,
@@ -40,6 +69,68 @@ export function resolveWorkspaceShellPresentationTransition({
     kind: 'close-preview-pane',
     openFileInLightbox: previewFile ? null : selectedFile,
   }
+}
+
+export function resolveWorkspaceTrashNavigationIntent({
+  hasTrashEntries,
+}: {
+  hasTrashEntries: boolean
+}): WorkspaceTrashNavigationIntent {
+  if (!hasTrashEntries) return { kind: 'none' }
+  return {
+    kind: 'navigate-to-path',
+    path: WORKSPACE_TRASH_ROUTE_PATH,
+    resetFlattenView: true,
+  }
+}
+
+export function resolveWorkspaceShellNavigationContextTransition({
+  previousRootId,
+  currentRootId,
+  previousCurrentPath,
+  currentPath,
+}: ResolveWorkspaceShellNavigationContextTransitionParams): WorkspaceShellSurfaceResetIntent {
+  if (previousRootId !== null && previousRootId !== currentRootId) {
+    return { kind: 'reset-workspace-surface' }
+  }
+
+  if (previousCurrentPath !== null && previousCurrentPath !== currentPath) {
+    return { kind: 'reset-directory-surface' }
+  }
+
+  return { kind: 'none' }
+}
+
+export function resolveWorkspaceAnnotationFilterGateIntent({
+  isAnnotationFilterGateResolved,
+  isReviewFilterGateResolved,
+  showAnnotationFilterControls,
+  filter,
+}: ResolveWorkspaceAnnotationFilterGateIntentParams): WorkspaceAnnotationFilterGateIntent {
+  if (!isAnnotationFilterGateResolved || !isReviewFilterGateResolved || showAnnotationFilterControls) {
+    return { kind: 'none' }
+  }
+  if (isWorkspaceAnnotationFilterAtDefault(filter)) return { kind: 'none' }
+
+  return {
+    kind: 'reset-annotation-filter',
+    filter: {
+      ...filter,
+      annotationFilterMode: 'all',
+      annotationIncludeMatchMode: 'or',
+      annotationIncludeTagKeys: [],
+      annotationExcludeTagKeys: [],
+    },
+  }
+}
+
+function isWorkspaceAnnotationFilterAtDefault(filter: FilterState): boolean {
+  return (
+    filter.annotationFilterMode === 'all'
+    && filter.annotationIncludeMatchMode === 'or'
+    && filter.annotationIncludeTagKeys.length === 0
+    && filter.annotationExcludeTagKeys.length === 0
+  )
 }
 
 export function resolveWorkspaceDirectoryEntryInteraction(

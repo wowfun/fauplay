@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileBrowserGridHandle } from '@/features/explorer/components/FileBrowserGrid'
 import { useShortcutHelpEntries } from '@/features/explorer/hooks/useShortcutHelpEntries'
-import { CompactWorkspaceShell } from '@/features/workspace/components/CompactWorkspaceShell'
-import { WideWorkspaceShell } from '@/features/workspace/components/WideWorkspaceShell'
+import { WorkspaceShellOutlet } from '@/features/workspace/components/WorkspaceShellOutlet'
 import { useInputMode } from '@/features/workspace/hooks/useInputMode'
 import { useViewportMode } from '@/features/workspace/hooks/useViewportMode'
 import {
@@ -22,14 +21,13 @@ import { useWorkspaceTrashAvailability } from '@/features/workspace/hooks/useWor
 import { useWorkspaceDeleteUndoController } from '@/features/workspace/hooks/useWorkspaceDeleteUndoController'
 import { useWorkspaceMutationCommitController } from '@/features/workspace/hooks/useWorkspaceMutationCommitController'
 import { useWorkspaceShellInteractionHandlers } from '@/features/workspace/hooks/useWorkspaceShellInteractionHandlers'
-import {
-  isAnnotationFilterAtDefault,
-  useWorkspaceFilterState,
-} from '@/features/workspace/hooks/useWorkspaceFilterState'
+import { useWorkspaceShellLifecycleEffects } from '@/features/workspace/hooks/useWorkspaceShellLifecycleEffects'
+import { useWorkspaceFilterState } from '@/features/workspace/hooks/useWorkspaceFilterState'
 import { useWorkspaceFileSelectionSummary } from '@/features/workspace/hooks/useWorkspaceFileSelectionSummary'
 import { useWorkspacePathHistory } from '@/features/workspace/hooks/useWorkspacePathHistory'
 import { useKeyboardShortcuts } from '@/config/shortcutStore'
 import { filterWorkspaceFiles } from '@/features/workspace/lib/workspaceFileFiltering'
+import { resolveWorkspaceTrashNavigationIntent } from '@/features/workspace/lib/workspaceShellInteractionModel'
 import {
   type AddressPathHistoryEntry,
   type FavoriteFolderEntry,
@@ -39,7 +37,6 @@ import {
   type ListingQueryState,
   type ThumbnailSizePreset,
 } from '@/types'
-const TRASH_ROUTE_PATH = '@trash'
 
 interface WorkspaceShellProps {
   accessProvider: 'local-browser' | 'remote-readonly'
@@ -410,8 +407,9 @@ export function WorkspaceShell({
   })
 
   const handleOpenTrash = useCallback(() => {
-    if (!hasTrashEntries) return
-    void navigateToPath(TRASH_ROUTE_PATH, { resetFlattenView: true })
+    const intent = resolveWorkspaceTrashNavigationIntent({ hasTrashEntries })
+    if (intent.kind === 'none') return
+    void navigateToPath(intent.path, { resetFlattenView: intent.resetFlattenView })
   }, [hasTrashEntries, navigateToPath])
 
   const {
@@ -438,16 +436,17 @@ export function WorkspaceShell({
     activateProjection: handleActivateProjection,
   })
 
-  useEffect(() => {
-    setDirectorySelectedPaths([])
-    setDirectoryFocusedPath(null)
-  }, [currentPath])
-
-  useEffect(() => {
-    resetProjectionState()
-    setDirectorySelectedPaths([])
-    setDirectoryFocusedPath(null)
-  }, [resetProjectionState, rootId])
+  useWorkspaceShellLifecycleEffects({
+    currentPath,
+    rootId,
+    resetProjectionState,
+    setDirectorySelectedPaths,
+    setDirectoryFocusedPath,
+    isAnnotationFilterGateResolved,
+    isReviewFilterGateResolved,
+    showAnnotationFilterControls,
+    setFilter,
+  })
 
   useEffect(() => {
     void preloadWorkspaceAnnotationFilterSnapshots({
@@ -456,20 +455,6 @@ export function WorkspaceShell({
       rootName,
     })
   }, [rootHandle, rootId, rootName])
-
-  useEffect(() => {
-    if (!isAnnotationFilterGateResolved || !isReviewFilterGateResolved || showAnnotationFilterControls) return
-    setFilter((previous) => {
-      if (isAnnotationFilterAtDefault(previous)) return previous
-      return {
-        ...previous,
-        annotationFilterMode: 'all',
-        annotationIncludeMatchMode: 'or',
-        annotationIncludeTagKeys: [],
-        annotationExcludeTagKeys: [],
-      }
-    })
-  }, [isAnnotationFilterGateResolved, isReviewFilterGateResolved, setFilter, showAnnotationFilterControls])
 
   useWorkspaceSelectionFocusSync({
     selectedFile,
@@ -638,23 +623,14 @@ export function WorkspaceShell({
       },
   }
 
-  if (presentationProfile.shellKind === 'compact') {
-    return (
-      <CompactWorkspaceShell
-        {...commonShellProps}
-        presentationProfile={presentationProfile}
-        canNavigatePreviewBackward={canNavigatePreviewBackward}
-        canNavigatePreviewForward={canNavigatePreviewForward}
-        onNavigatePreviewBackward={handleNavigatePreviewBackward}
-        onNavigatePreviewForward={handleNavigatePreviewForward}
-      />
-    )
-  }
-
   return (
-    <WideWorkspaceShell
-      {...commonShellProps}
+    <WorkspaceShellOutlet
+      shellProps={commonShellProps}
       presentationProfile={presentationProfile}
+      canNavigatePreviewBackward={canNavigatePreviewBackward}
+      canNavigatePreviewForward={canNavigatePreviewForward}
+      onNavigatePreviewBackward={handleNavigatePreviewBackward}
+      onNavigatePreviewForward={handleNavigatePreviewForward}
     />
   )
 }
