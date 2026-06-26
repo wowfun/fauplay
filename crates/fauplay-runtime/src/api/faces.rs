@@ -106,6 +106,25 @@ pub struct FaceSuggestPeopleResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceClusterPendingRequest {
+    pub root_path: PathBuf,
+    pub asset_id: Option<String>,
+    pub limit: usize,
+    pub max_distance: f64,
+    pub min_faces: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceClusterPendingResponse {
+    pub processed: usize,
+    pub assigned: usize,
+    pub created_persons: usize,
+    pub deferred: usize,
+    pub skipped: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PersonSuggestion {
     pub person_id: String,
     pub name: String,

@@ -474,6 +474,71 @@ fn runtime_api_faces_suggests_people() {
 }
 
 #[test]
+fn runtime_api_faces_clusters_pending_faces() {
+    let fixture = Fixture::new("runtime_api_faces_clusters_pending_faces");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    let root_path = fixture.root.join("local-root");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fs::create_dir_all(&root_path).expect("Local Root should be created");
+    write_cluster_face_store(&runtime_home_path, &root_path);
+
+    let runtime = FauplayRuntime::with_runtime_home_path(runtime_home_path);
+    let cluster_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/cluster-pending",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "limit": 10,
+            "maxDistance": 0.01,
+            "minFaces": 3
+        }),
+    );
+
+    assert_eq!(cluster_json["ok"], true);
+    assert_eq!(cluster_json["processed"], 4);
+    assert_eq!(cluster_json["assigned"], 4);
+    assert_eq!(cluster_json["createdPersons"], 1);
+    assert_eq!(cluster_json["deferred"], 0);
+    assert_eq!(cluster_json["skipped"], 0);
+    assert_eq!(cluster_json["failed"], 0);
+
+    let matched_faces_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/list-asset-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "relativePath": "photos/match.jpg"
+        }),
+    );
+    assert_eq!(matched_faces_json["items"][0]["faceId"], "face-match");
+    assert_eq!(matched_faces_json["items"][0]["status"], "assigned");
+    assert_eq!(matched_faces_json["items"][0]["personId"], "person-a");
+    assert_eq!(matched_faces_json["items"][0]["assignedBy"], "auto");
+
+    let people_json = post_runtime_json(
+        runtime,
+        "/v1/faces/list-people",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "scope": "root",
+            "page": 1,
+            "size": 10
+        }),
+    );
+    let people = people_json["items"]
+        .as_array()
+        .expect("people should be an array");
+    let created_person = people
+        .iter()
+        .find(|person| person["personId"].as_str() != Some("person-a"))
+        .expect("cluster should create one Person for a core pending group");
+    assert_eq!(people_json["total"], 2);
+    assert_eq!(created_person["name"], "");
+    assert_eq!(created_person["faceCount"], 3);
+    assert_eq!(created_person["globalFaceCount"], 3);
+}
+
+#[test]
 fn runtime_api_faces_mutates_review_and_assignment_state() {
     let fixture = Fixture::new("runtime_api_faces_mutates_review_and_assignment_state");
     let runtime_home_path = fixture.root.join("runtime-home");
@@ -721,6 +786,117 @@ fn write_people_face_store(runtime_home_path: &Path, root_path: &Path, other_roo
                     "assignedBy": "manual",
                     "updatedAt": 50,
                     "embedding": [0.8, 0.9]
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .expect("face store should be written");
+}
+
+fn write_cluster_face_store(runtime_home_path: &Path, root_path: &Path) {
+    let store_path = runtime_home_path.join("global").join("faces.v1.json");
+    fs::create_dir_all(store_path.parent().unwrap()).expect("face store parent should be created");
+    fs::write(
+        store_path,
+        serde_json::json!({
+            "version": 1,
+            "faces": [
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/ada.jpg",
+                    "assetId": "asset-a",
+                    "faceId": "face-a",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.4 },
+                    "score": 0.91,
+                    "status": "assigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": "person-a",
+                    "personName": "Ada",
+                    "assignedBy": "manual",
+                    "updatedAt": 10,
+                    "embedding": [1.0, 0.0]
+                },
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/match.jpg",
+                    "assetId": "asset-match",
+                    "faceId": "face-match",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.88,
+                    "status": "unassigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": null,
+                    "personName": null,
+                    "assignedBy": null,
+                    "updatedAt": 20,
+                    "embedding": [0.99, 0.01]
+                },
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/new-1.jpg",
+                    "assetId": "asset-new-1",
+                    "faceId": "face-new-1",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.82,
+                    "status": "unassigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": null,
+                    "personName": null,
+                    "assignedBy": null,
+                    "updatedAt": 30,
+                    "embedding": [0.0, 1.0]
+                },
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/new-2.jpg",
+                    "assetId": "asset-new-2",
+                    "faceId": "face-new-2",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.83,
+                    "status": "deferred",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": null,
+                    "personName": null,
+                    "assignedBy": null,
+                    "updatedAt": 40,
+                    "embedding": [0.0, 0.99]
+                },
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/new-3.jpg",
+                    "assetId": "asset-new-3",
+                    "faceId": "face-new-3",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.84,
+                    "status": "unassigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": null,
+                    "personName": null,
+                    "assignedBy": null,
+                    "updatedAt": 50,
+                    "embedding": [0.0, 0.98]
+                },
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/far.jpg",
+                    "assetId": "asset-far",
+                    "faceId": "face-far",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.8,
+                    "status": "manual_unassigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": null,
+                    "personName": null,
+                    "assignedBy": null,
+                    "updatedAt": 60,
+                    "embedding": [-1.0, 0.0]
                 }
             ]
         })

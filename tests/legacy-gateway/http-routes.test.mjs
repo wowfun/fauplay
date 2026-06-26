@@ -24,6 +24,7 @@ const runtimeOwnedLocalRoutes = [
   ['POST', '/v1/faces/list-people'],
   ['POST', '/v1/faces/rename-person'],
   ['POST', '/v1/faces/suggest-people'],
+  ['POST', '/v1/faces/cluster-pending'],
   ['POST', '/v1/faces/merge-people'],
   ['POST', '/v1/faces/assign-faces'],
   ['POST', '/v1/faces/create-person-from-faces'],

@@ -8,13 +8,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
-    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
-    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
-    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
-    PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath, RuntimeError,
+    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
+    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
+    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
+    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
+    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
+    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
+    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, PersonSuggestion,
+    PersonSuggestionFace, PersonSummary, RootRelativePath, RuntimeError,
 };
 
 use super::{
@@ -54,6 +55,19 @@ struct PersonSummaryAccumulator {
     scoped_feature_face_id: Option<String>,
     scoped_feature_asset_path: Option<String>,
     scoped_updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct FaceEmbeddingIndexEntry {
+    face_id: String,
+    embedding: Vec<f64>,
+    person_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FaceClusterMatch {
+    match_count: usize,
+    matched_person_id: Option<String>,
 }
 
 pub(crate) fn save_detected_faces(
@@ -462,6 +476,134 @@ pub(crate) fn suggest_people(
     items.truncate(candidate_size);
 
     Ok(FaceSuggestPeopleResponse { face_id, items })
+}
+
+pub(crate) fn cluster_pending_faces(
+    runtime_home_path: &Path,
+    request: FaceClusterPendingRequest,
+) -> Result<FaceClusterPendingResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let root_path = root_path_key(&request.root_path);
+    let asset_id = request
+        .asset_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let limit = request.limit.clamp(1, 2000);
+    let max_distance = if request.max_distance.is_finite() {
+        request.max_distance.max(0.0)
+    } else {
+        0.5
+    };
+    let min_faces = request.min_faces.max(1);
+    let mut records = read_face_records(&store_path)?;
+    let mut pending_indices = records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| record.root_path == root_path)
+        .filter(|(_, record)| {
+            asset_id
+                .as_ref()
+                .is_none_or(|asset_id| record.asset_id == *asset_id)
+        })
+        .filter(|(_, record)| {
+            matches!(record.status, FaceStatus::Unassigned | FaceStatus::Deferred)
+        })
+        .filter(|(_, record)| !record.embedding.is_empty())
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+
+    pending_indices.sort_by(|left, right| {
+        records[*left]
+            .updated_at_ms
+            .cmp(&records[*right].updated_at_ms)
+            .then_with(|| records[*left].face_id.cmp(&records[*right].face_id))
+    });
+    pending_indices.truncate(limit);
+
+    if pending_indices.is_empty() {
+        return Ok(FaceClusterPendingResponse {
+            processed: 0,
+            assigned: 0,
+            created_persons: 0,
+            deferred: 0,
+            skipped: 0,
+            failed: 0,
+        });
+    }
+
+    let mut embedding_index = records
+        .iter()
+        .filter(|record| record.root_path == root_path)
+        .filter(|record| !record.embedding.is_empty())
+        .map(|record| FaceEmbeddingIndexEntry {
+            face_id: record.face_id.clone(),
+            embedding: record.embedding.clone(),
+            person_id: record.person_id.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut processed = 0usize;
+    let mut assigned = 0usize;
+    let mut created_persons = 0usize;
+    let mut deferred = 0usize;
+    let skipped = 0usize;
+    let failed = 0usize;
+    let mut changed = false;
+
+    for index in pending_indices {
+        processed += 1;
+        let current = records[index].clone();
+        let cluster_match = choose_person_for_face(
+            &current.face_id,
+            &current.embedding,
+            &embedding_index,
+            max_distance,
+        );
+        let mut person_id = cluster_match.matched_person_id;
+
+        if person_id.is_none() && cluster_match.match_count >= min_faces {
+            let created_person_id = create_person_id(&records, now_ms());
+            person_id = Some(created_person_id);
+            created_persons += 1;
+        }
+
+        if let Some(person_id) = person_id {
+            let person_name = person_name_for_id(&records, &person_id).unwrap_or_default();
+            let updated_at_ms = now_ms();
+            assign_face_record(
+                &mut records[index],
+                &person_id,
+                &person_name,
+                "auto",
+                updated_at_ms,
+            );
+            update_embedding_index_person(&mut embedding_index, &current.face_id, Some(&person_id));
+            assigned += 1;
+            changed = true;
+        } else {
+            records[index].status = FaceStatus::Deferred;
+            records[index].updated_at_ms = now_ms();
+            clear_face_assignment(&mut records[index]);
+            update_embedding_index_person(&mut embedding_index, &current.face_id, None);
+            deferred += 1;
+            changed = true;
+        }
+    }
+
+    if changed {
+        write_face_records(&store_path, &records)?;
+    }
+
+    Ok(FaceClusterPendingResponse {
+        processed,
+        assigned,
+        created_persons,
+        deferred,
+        skipped,
+        failed,
+    })
 }
 
 pub(crate) fn merge_people(
@@ -1025,6 +1167,60 @@ fn cosine_distance(left: &[f64], right: &[f64]) -> f64 {
         1.0 - (dot / (left_norm.sqrt() * right_norm.sqrt())).clamp(-1.0, 1.0)
     } else {
         1.0
+    }
+}
+
+fn choose_person_for_face(
+    current_face_id: &str,
+    current_embedding: &[f64],
+    embedding_index: &[FaceEmbeddingIndexEntry],
+    max_distance: f64,
+) -> FaceClusterMatch {
+    let mut matches = embedding_index
+        .iter()
+        .filter_map(|candidate| {
+            let distance = cosine_distance(current_embedding, &candidate.embedding);
+            (distance <= max_distance).then_some((candidate, distance))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|(left, left_distance), (right, right_distance)| {
+        left_distance
+            .partial_cmp(right_distance)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.face_id.cmp(&right.face_id))
+    });
+
+    let matched_person_id = matches.iter().find_map(|(candidate, _)| {
+        if candidate.face_id == current_face_id {
+            return None;
+        }
+        candidate
+            .person_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    });
+
+    FaceClusterMatch {
+        match_count: matches.len(),
+        matched_person_id,
+    }
+}
+
+fn update_embedding_index_person(
+    embedding_index: &mut [FaceEmbeddingIndexEntry],
+    face_id: &str,
+    person_id: Option<&str>,
+) {
+    if let Some(item) = embedding_index
+        .iter_mut()
+        .find(|item| item.face_id == face_id)
+    {
+        item.person_id = person_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
     }
 }
 

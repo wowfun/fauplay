@@ -10,16 +10,17 @@ pub use api::{
     AnnotationTag, AnnotationTagOption, AnnotationTagOptionsRequest, AnnotationTagOptionsResponse,
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
-    FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
-    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
-    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
-    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
-    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
-    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
-    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
-    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
+    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
+    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
+    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
+    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
+    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
+    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FileAnnotationActionSource,
+    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
+    FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
+    FileAnnotationMutationResponse, FileAnnotationPathMapping,
+    FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
@@ -138,6 +139,13 @@ impl FauplayRuntime {
         request: FaceSuggestPeopleRequest,
     ) -> Result<FaceSuggestPeopleResponse, RuntimeError> {
         store::suggest_people(&self.runtime_home_path, request)
+    }
+
+    pub fn cluster_pending_faces(
+        &self,
+        request: FaceClusterPendingRequest,
+    ) -> Result<FaceClusterPendingResponse, RuntimeError> {
+        store::cluster_pending_faces(&self.runtime_home_path, request)
     }
 
     pub fn merge_people(

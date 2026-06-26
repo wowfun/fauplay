@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use crate::{
-    FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
-    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
-    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
-    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
-    FauplayRuntime, PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
+    FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
+    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
+    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
+    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
+    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
+    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
+    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FauplayRuntime,
+    PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
 };
 
 use super::{
@@ -206,6 +207,30 @@ pub(in crate::server) fn handle_suggest_people_json(
     }
 }
 
+pub(in crate::server) fn handle_cluster_pending_faces_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+
+    match runtime.cluster_pending_faces(FaceClusterPendingRequest {
+        root_path: PathBuf::from(root_path),
+        asset_id: json_string_field(&payload, "assetId").map(ToOwned::to_owned),
+        limit: json_usize_field(&payload, "limit").unwrap_or(100),
+        max_distance: json_f64_field(&payload, "maxDistance").unwrap_or(0.5),
+        min_faces: json_usize_field(&payload, "minFaces").unwrap_or(3),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_cluster_pending_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 pub(in crate::server) fn handle_merge_people_json(
     runtime: &FauplayRuntime,
     request: &str,
@@ -275,6 +300,18 @@ fn json_usize_field(payload: &serde_json::Value, key: &str) -> Option<usize> {
     }
 }
 
+fn json_f64_field(payload: &serde_json::Value, key: &str) -> Option<f64> {
+    match payload.get(key) {
+        Some(serde_json::Value::Number(value)) => value.as_f64().filter(|value| value.is_finite()),
+        Some(serde_json::Value::String(value)) => value
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite()),
+        _ => None,
+    }
+}
+
 fn face_detect_asset_response_json(response: FaceDetectAssetResponse) -> String {
     format!(
         "{{\"ok\":true,\"assetId\":\"{}\",\"assetPath\":\"{}\",\"detected\":{},\"created\":{},\"updated\":{},\"skipped\":{},\"faces\":[{}]}}",
@@ -332,6 +369,18 @@ fn face_suggest_people_response_json(response: FaceSuggestPeopleResponse) -> Str
         "{{\"ok\":true,\"faceId\":\"{}\",\"items\":[{}]}}",
         escape_json_string(&response.face_id),
         person_suggestions_json(response.items),
+    )
+}
+
+fn face_cluster_pending_response_json(response: FaceClusterPendingResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"processed\":{},\"assigned\":{},\"createdPersons\":{},\"deferred\":{},\"skipped\":{},\"failed\":{}}}",
+        response.processed,
+        response.assigned,
+        response.created_persons,
+        response.deferred,
+        response.skipped,
+        response.failed,
     )
 }
 

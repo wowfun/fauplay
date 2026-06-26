@@ -5,7 +5,6 @@ import {
   getDetectAssetsJob,
   cancelDetectAssetsJob,
   listDetectAssetsJobItems,
-  clusterPendingFaces,
 } from './data/core.mjs'
 
 export function throwHttpGatewayRouteNotFound(pathname) {
@@ -75,7 +74,6 @@ const httpGatewayRoutes = [
     }
     throwHttpGatewayRouteNotFound(pathname)
   }),
-  createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),
 ]
 
 export function findHttpGatewayRoute(method, pathname) {
