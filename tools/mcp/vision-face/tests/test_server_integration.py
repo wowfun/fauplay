@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -16,12 +17,12 @@ from urllib.request import Request, urlopen
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SERVER_PATH = REPO_ROOT / "tools/mcp/vision-face/server.py"
 DEFAULT_CONFIG_PATH = REPO_ROOT / "tools/mcp/vision-face/config.json"
-DEFAULT_GATEWAY_MCP_CONFIG_PATH = REPO_ROOT / "src/config/mcp.json"
+DEFAULT_RUNTIME_MCP_CONFIG_PATH = REPO_ROOT / "src/config/mcp.json"
 VENV_PYTHON = REPO_ROOT / ".venv/bin/python"
 TEST_ROOT = REPO_ROOT / "_local/test_root"
-GATEWAY_PATH = REPO_ROOT / "tools/legacy-gateway/index.mjs"
-NODE_BINARY = shutil.which("node")
-GATEWAY_PORT = "33210"
+RUNTIME_BINARY = REPO_ROOT / "target/debug/fauplay-runtime"
+CARGO_BINARY = shutil.which("cargo")
+RUNTIME_PORT = "33210"
 VISION_FACE_DIR = REPO_ROOT / "tools/mcp/vision-face"
 if str(VISION_FACE_DIR) not in sys.path:
     sys.path.insert(0, str(VISION_FACE_DIR))
@@ -108,15 +109,15 @@ def json_request(method: str, url: str, payload: dict[str, Any] | None = None) -
     return json.loads(body) if body else {}
 
 
-def write_gateway_mcp_override(
+def write_runtime_mcp_override(
     home_dir: Path,
     enabled_servers: set[str] | None = None,
     vision_face_config_path: Path | None = None,
 ) -> None:
-    config = json.loads(DEFAULT_GATEWAY_MCP_CONFIG_PATH.read_text(encoding="utf-8"))
+    config = json.loads(DEFAULT_RUNTIME_MCP_CONFIG_PATH.read_text(encoding="utf-8"))
     servers = config.get("servers")
     if not isinstance(servers, dict) or len(servers) == 0:
-        raise AssertionError("missing gateway MCP server config")
+        raise AssertionError("missing runtime MCP server config")
 
     enabled = enabled_servers or {"vision-face"}
     override_servers = {}
@@ -134,24 +135,29 @@ def write_gateway_mcp_override(
 
 
 @contextmanager
-def gateway_process(home_dir: Path, vision_face_config_path: Path | None = None):
-    if not NODE_BINARY:
-        raise unittest.SkipTest("missing node")
-    write_gateway_mcp_override(home_dir, vision_face_config_path=vision_face_config_path)
+def runtime_process(home_dir: Path, vision_face_config_path: Path | None = None):
+    if not RUNTIME_BINARY.exists() and not CARGO_BINARY:
+        raise unittest.SkipTest("missing fauplay-runtime binary and cargo")
+    write_runtime_mcp_override(home_dir, vision_face_config_path=vision_face_config_path)
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
-    env["FAUPLAY_GATEWAY_PORT"] = GATEWAY_PORT
+    command = (
+        [str(RUNTIME_BINARY), "serve", f"127.0.0.1:{RUNTIME_PORT}"]
+        if RUNTIME_BINARY.exists()
+        else [str(CARGO_BINARY), "run", "-p", "fauplay-runtime", "--", "serve", f"127.0.0.1:{RUNTIME_PORT}"]
+    )
     process = subprocess.Popen(
-        [NODE_BINARY, str(GATEWAY_PATH)],
+        command,
         cwd=REPO_ROOT,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
     try:
         deadline = time.time() + 30
-        health_url = f"http://127.0.0.1:{GATEWAY_PORT}/v1/health"
+        health_url = f"http://127.0.0.1:{RUNTIME_PORT}/v1/health"
         while time.time() < deadline:
             try:
                 payload = json_request("GET", health_url)
@@ -165,16 +171,22 @@ def gateway_process(home_dir: Path, vision_face_config_path: Path | None = None)
             if process.poll() is not None:
                 stderr = process.stderr.read() if process.stderr is not None else ""
                 stdout = process.stdout.read() if process.stdout is not None else ""
-                raise AssertionError(f"gateway did not become healthy: stdout={stdout} stderr={stderr}")
-            raise AssertionError("gateway did not become healthy within 30s")
+                raise AssertionError(f"runtime did not become healthy: stdout={stdout} stderr={stderr}")
+            raise AssertionError("runtime did not become healthy within 30s")
 
-        yield f"http://127.0.0.1:{GATEWAY_PORT}"
+        yield f"http://127.0.0.1:{RUNTIME_PORT}"
     finally:
-        process.terminate()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             process.wait(timeout=10)
         if process.stdout is not None:
             process.stdout.close()
@@ -298,7 +310,7 @@ class VisionFaceServerTests(unittest.TestCase):
                 home_dir.mkdir(parents=True, exist_ok=True)
 
                 relative_path = image_path.relative_to(TEST_ROOT).as_posix()
-                with gateway_process(home_dir, config_path) as base_url:
+                with runtime_process(home_dir, config_path) as base_url:
                     detect_result = json_request(
                         "POST",
                         f"{base_url}/v1/faces/detect-asset",
@@ -335,7 +347,7 @@ class VisionFaceServerTests(unittest.TestCase):
                     )
                     self.assertGreater(int(people_result.get("total", 0)), 0)
 
-    def test_gateway_list_people_matches_unnamed_person_aliases(self):
+    def test_runtime_list_people_matches_unnamed_person_aliases(self):
         with temp_config_copy({"videoMinScore": 0.7}) as config_path:
             image_path, _ = self.select_detectable_image(config_path)
 
@@ -345,7 +357,7 @@ class VisionFaceServerTests(unittest.TestCase):
                 home_dir.mkdir(parents=True, exist_ok=True)
 
                 relative_path = image_path.relative_to(TEST_ROOT).as_posix()
-                with gateway_process(home_dir, config_path) as base_url:
+                with runtime_process(home_dir, config_path) as base_url:
                     detect_result = json_request(
                         "POST",
                         f"{base_url}/v1/faces/detect-asset",
@@ -399,7 +411,7 @@ class VisionFaceServerTests(unittest.TestCase):
                             filtered_result,
                         )
 
-    def test_gateway_single_unknown_video_run_cluster_defers(self):
+    def test_runtime_single_unknown_video_run_cluster_defers(self):
         with temp_config_copy({"videoMinScore": 0.7}) as config_path:
             image_path, _ = self.select_detectable_image(config_path)
 
@@ -412,7 +424,7 @@ class VisionFaceServerTests(unittest.TestCase):
                 video_path = root_path / "video-single.avi"
                 build_video_from_image(image_path, video_path)
 
-                with gateway_process(home_dir, config_path) as base_url:
+                with runtime_process(home_dir, config_path) as base_url:
                     detect_result = json_request(
                         "POST",
                         f"{base_url}/v1/faces/detect-asset",
@@ -449,7 +461,7 @@ class VisionFaceServerTests(unittest.TestCase):
                     self.assertGreater(int(faces_payload.get("total", 0)), 0)
                     self.assertTrue(all(item.get("status") == "deferred" for item in faces_payload["items"]))
 
-    def test_gateway_video_run_cluster_matches_existing_person(self):
+    def test_runtime_video_run_cluster_matches_existing_person(self):
         with temp_config_copy({"videoMinScore": 0.7}) as config_path:
             image_path, _ = self.select_detectable_image(config_path)
 
@@ -462,7 +474,7 @@ class VisionFaceServerTests(unittest.TestCase):
                 shutil.copyfile(image_path, root_path / "person.jpg")
                 build_video_from_image(image_path, root_path / "person-video.avi")
 
-                with gateway_process(home_dir, config_path) as base_url:
+                with runtime_process(home_dir, config_path) as base_url:
                     image_detect = json_request(
                         "POST",
                         f"{base_url}/v1/faces/detect-asset",
@@ -499,7 +511,7 @@ class VisionFaceServerTests(unittest.TestCase):
                     tags = file_payload.get("tags") or []
                     self.assertTrue(any(tag.get("source") == "vision.face" and tag.get("key") == "person" for tag in tags))
 
-    def test_legacy_video_cluster_strong_evidence_path(self):
+    def test_runtime_video_cluster_strong_evidence_path(self):
         with temp_config_copy({"videoMinScore": 0.7}) as config_path:
             image_path, _ = self.select_detectable_image(config_path)
 
@@ -514,7 +526,7 @@ class VisionFaceServerTests(unittest.TestCase):
                 for index, relative_path in enumerate(relative_paths):
                     build_video_from_image(image_path, root_path / relative_path, frame_count=6 + index)
 
-                with gateway_process(home_dir, config_path) as base_url:
+                with runtime_process(home_dir, config_path) as base_url:
                     for relative_path in relative_paths[:2]:
                         detect_result = json_request(
                             "POST",

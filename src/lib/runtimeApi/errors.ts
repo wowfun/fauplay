@@ -24,11 +24,3 @@ export function createRuntimeRequestTimeoutError(timeoutMs: number): RuntimeMcpE
   const timeoutSec = Math.ceil(timeoutMs / 1000)
   return new RuntimeMcpError(`Runtime API request timed out after ${timeoutSec}s`, 'MCP_CLIENT_TIMEOUT')
 }
-
-export const GatewayMcpError = RuntimeMcpError
-export type GatewayMcpError = RuntimeMcpError
-
-export const GatewayHttpError = RuntimeHttpError
-export type GatewayHttpError = RuntimeHttpError
-
-export const createClientTimeoutError = createRuntimeRequestTimeoutError

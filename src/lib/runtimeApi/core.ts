@@ -15,7 +15,6 @@ export class RuntimeApiError extends Error {
 function getLocalRuntimeBaseUrl(): string {
   return resolveLocalRuntimeBaseUrl({
     VITE_FAUPLAY_RUNTIME_BASE_URL: import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL,
-    VITE_LOCAL_GATEWAY_BASE_URL: import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL,
   }, () => window.location.origin)
 }
 

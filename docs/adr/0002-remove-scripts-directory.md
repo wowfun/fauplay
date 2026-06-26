@@ -4,6 +4,8 @@ status: accepted
 date: 2026-06-26
 ---
 
+Note: ADR 0003 supersedes the temporary `tools/legacy-gateway/` migration location described here.
+
 ## Context
 
 ADR 0001 moved Fauplay toward a required Rust runtime and said product runtime logic must not live under `scripts/`. The remaining `scripts/` tree still mixed development helpers with the legacy Node gateway. That made the migration boundary ambiguous: future work could keep adding code under `scripts/` even though the target architecture is Rust runtime plus TypeScript Web App.

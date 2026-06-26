@@ -9,11 +9,8 @@ import {
 } from './errors.ts'
 
 export {
-  GatewayHttpError,
-  GatewayMcpError,
   RuntimeHttpError,
   RuntimeMcpError,
-  createClientTimeoutError,
   createRuntimeRequestTimeoutError,
 } from './errors.ts'
 
@@ -39,7 +36,6 @@ export function getSameOriginRuntimeBaseUrl(): string {
 export function getLocalRuntimeBaseUrl(): string {
   return resolveLocalRuntimeBaseUrl({
     VITE_FAUPLAY_RUNTIME_BASE_URL: import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL,
-    VITE_LOCAL_GATEWAY_BASE_URL: import.meta.env.VITE_LOCAL_GATEWAY_BASE_URL,
   }, getCurrentOrigin)
 }
 

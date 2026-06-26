@@ -94,7 +94,7 @@ class VisionFaceService:
             raise MCPError(
                 "MCP_TOOL_CALL_FAILED",
                 (
-                    f"operation '{operation}' has moved to Gateway HTTP API; "
+                    f"operation '{operation}' has moved to Runtime HTTP API; "
                     "use /v1/faces/* endpoints instead"
                 ),
             )

@@ -11,21 +11,21 @@ import {
 import {
   readAnnotationTagOptionsFromResult,
   readAnnotationTagViewsFromResult,
-  type AnnotationGatewayTagOptionRecord,
-  type AnnotationGatewayTagRecord,
-  type AnnotationGatewayFileTagView,
+  type AnnotationTagOptionRecord,
+  type AnnotationTagRecord,
+  type AnnotationFileTagView,
 } from './annotationTagModel.ts'
 
 const DEFAULT_TAG_QUERY_PAGE_SIZE = 1000
 const DEFAULT_TAG_QUERY_MAX_PAGE = 10000
 
-interface GatewayTagQueryResult {
-  items?: AnnotationGatewayFileTagView[]
+interface AnnotationTagQueryResult {
+  items?: AnnotationFileTagView[]
   total?: number
 }
 
-interface GatewayFileTagResult {
-  file?: AnnotationGatewayFileTagView | null
+interface AnnotationFileTagResult {
+  file?: AnnotationFileTagView | null
 }
 
 export type AnnotationHttpCaller = <T>(request: AnnotationHttpRequest) => Promise<T>
@@ -58,9 +58,9 @@ export async function loadAnnotationTagViews({
   callAnnotationHttp,
   pageSize = DEFAULT_TAG_QUERY_PAGE_SIZE,
   maxPage = DEFAULT_TAG_QUERY_MAX_PAGE,
-}: LoadAnnotationTagViewsParams): Promise<AnnotationGatewayFileTagView[]> {
+}: LoadAnnotationTagViewsParams): Promise<AnnotationFileTagView[]> {
   let progress = createAnnotationTagQueryPageProgress()
-  const items: AnnotationGatewayFileTagView[] = []
+  const items: AnnotationFileTagView[] = []
 
   while (progress.shouldContinue) {
     const request = buildAnnotationTagQueryRequest({
@@ -70,7 +70,7 @@ export async function loadAnnotationTagViews({
     })
     if (!request) return items
 
-    const result = await callAnnotationHttp<GatewayTagQueryResult>(request)
+    const result = await callAnnotationHttp<AnnotationTagQueryResult>(request)
     const batch = readAnnotationTagViewsFromResult(result)
     items.push(...batch)
 
@@ -91,14 +91,14 @@ export async function loadAnnotationFileTags({
   target,
   relativePath,
   callAnnotationHttp,
-}: LoadAnnotationFileTagsParams): Promise<AnnotationGatewayTagRecord[]> {
+}: LoadAnnotationFileTagsParams): Promise<AnnotationTagRecord[]> {
   const request = buildAnnotationFileTagsRequest({
     target,
     relativePath,
   })
   if (!request) return []
 
-  const result = await callAnnotationHttp<GatewayFileTagResult>(request)
+  const result = await callAnnotationHttp<AnnotationFileTagResult>(request)
   const fileView = isRecord(result.file) ? result.file : null
   return fileView && Array.isArray(fileView.tags) ? fileView.tags : []
 }
@@ -107,7 +107,7 @@ export async function loadGlobalAnnotationTagOptionRecords({
   remoteReadonlyActive,
   activeRemoteWorkspace,
   callAnnotationHttp,
-}: LoadGlobalAnnotationTagOptionRecordsParams): Promise<AnnotationGatewayTagOptionRecord[]> {
+}: LoadGlobalAnnotationTagOptionRecordsParams): Promise<AnnotationTagOptionRecord[]> {
   const request = buildGlobalAnnotationTagOptionsRequest({
     remoteReadonlyActive,
     activeRemoteWorkspace,

@@ -20,7 +20,7 @@ export interface StoredAnnotationTagRecord {
   updatedAt: number
 }
 
-export interface AnnotationGatewayTagRecord {
+export interface AnnotationTagRecord {
   key?: string
   value?: string
   source?: string
@@ -28,13 +28,13 @@ export interface AnnotationGatewayTagRecord {
   updatedAt?: number
 }
 
-export interface AnnotationGatewayTagOptionRecord extends AnnotationGatewayTagRecord {
+export interface AnnotationTagOptionRecord extends AnnotationTagRecord {
   fileCount?: number
 }
 
-export interface AnnotationGatewayFileTagView {
+export interface AnnotationFileTagView {
   relativePath?: string
-  tags?: AnnotationGatewayTagRecord[]
+  tags?: AnnotationTagRecord[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -221,7 +221,7 @@ export function buildAnnotationFilterTagOptions(
 }
 
 export function buildGlobalAnnotationTagOptions(
-  optionRecords: AnnotationGatewayTagOptionRecord[]
+  optionRecords: AnnotationTagOptionRecord[]
 ): AnnotationFilterTagOption[] {
   const entryByTagKey = new Map<string, {
     key: string
@@ -275,27 +275,27 @@ export function buildGlobalAnnotationTagOptions(
   return options
 }
 
-export function readAnnotationTagViewsFromResult(rawResult: unknown): AnnotationGatewayFileTagView[] {
+export function readAnnotationTagViewsFromResult(rawResult: unknown): AnnotationFileTagView[] {
   if (!isRecord(rawResult)) return []
   if (!Array.isArray(rawResult.items)) return []
-  return rawResult.items.filter((item): item is AnnotationGatewayFileTagView => isRecord(item))
+  return rawResult.items.filter((item): item is AnnotationFileTagView => isRecord(item))
 }
 
-export function readAnnotationTagOptionsFromResult(rawResult: unknown): AnnotationGatewayTagOptionRecord[] {
+export function readAnnotationTagOptionsFromResult(rawResult: unknown): AnnotationTagOptionRecord[] {
   if (Array.isArray(rawResult)) {
-    return rawResult.filter((item): item is AnnotationGatewayTagOptionRecord => isRecord(item))
+    return rawResult.filter((item): item is AnnotationTagOptionRecord => isRecord(item))
   }
   if (!isRecord(rawResult)) return []
   if (Array.isArray(rawResult.items)) {
-    return rawResult.items.filter((item): item is AnnotationGatewayTagOptionRecord => isRecord(item))
+    return rawResult.items.filter((item): item is AnnotationTagOptionRecord => isRecord(item))
   }
   if (Array.isArray(rawResult.options)) {
-    return rawResult.options.filter((item): item is AnnotationGatewayTagOptionRecord => isRecord(item))
+    return rawResult.options.filter((item): item is AnnotationTagOptionRecord => isRecord(item))
   }
   return []
 }
 
-export function buildAnnotationPathSnapshotFromTagViews(tagViews: AnnotationGatewayFileTagView[]) {
+export function buildAnnotationPathSnapshotFromTagViews(tagViews: AnnotationFileTagView[]) {
   const rawTagsByPath: Record<string, StoredAnnotationTagRecord[]> = {}
   const byPathUpdatedAt: Record<string, number> = {}
 

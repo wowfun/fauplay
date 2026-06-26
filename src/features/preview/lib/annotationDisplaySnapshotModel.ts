@@ -4,7 +4,7 @@ import {
   buildAnnotationPathStateFromTags,
   getStoredAnnotationTagsUpdatedAt,
   META_ANNOTATION_SOURCE,
-  type AnnotationGatewayFileTagView,
+  type AnnotationFileTagView,
   type StoredAnnotationTagRecord,
 } from './annotationTagModel.ts'
 import {
@@ -69,7 +69,7 @@ export interface AnnotationDisplayPathRollbackState {
 export type AnnotationDisplaySnapshotAction =
   | { type: 'mark-loading' }
   | { type: 'mark-root-unavailable'; nowMs: number }
-  | { type: 'apply-root-tag-views'; tagViews: AnnotationGatewayFileTagView[]; nowMs: number }
+  | { type: 'apply-root-tag-views'; tagViews: AnnotationFileTagView[]; nowMs: number }
   | { type: 'apply-root-load-error'; nowMs: number }
   | { type: 'apply-file-tags'; relativePath: string; tags: unknown[]; nowMs: number }
   | { type: 'set-meta-value'; relativePath: string; key: string; value: string; nowMs: number }

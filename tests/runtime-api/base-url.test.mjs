@@ -10,19 +10,18 @@ test('local runtime URL config prefers the Fauplay Runtime env var', () => {
   assert.equal(
     resolveLocalRuntimeBaseUrl({
       VITE_FAUPLAY_RUNTIME_BASE_URL: ' http://127.0.0.1:4100 ',
-      VITE_LOCAL_GATEWAY_BASE_URL: 'http://127.0.0.1:3210',
     }, () => 'https://ui.local'),
     'http://127.0.0.1:4100',
   )
 })
 
-test('local runtime URL config keeps the legacy gateway env var as a migration fallback', () => {
+test('local runtime URL config ignores the removed gateway env var', () => {
   assert.equal(
     resolveLocalRuntimeBaseUrl({
       VITE_FAUPLAY_RUNTIME_BASE_URL: ' ',
       VITE_LOCAL_GATEWAY_BASE_URL: ' http://127.0.0.1:3210 ',
     }, () => 'https://ui.local'),
-    'http://127.0.0.1:3210',
+    DEFAULT_LOCAL_RUNTIME_BASE_URL,
   )
 })
 

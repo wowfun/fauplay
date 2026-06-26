@@ -62,7 +62,6 @@ interface RuntimeClientAdapter {
 
 interface ViteRuntimeEnv {
   VITE_FAUPLAY_RUNTIME_BASE_URL?: string
-  VITE_LOCAL_GATEWAY_BASE_URL?: string
 }
 
 export function createRuntimePluginCapabilityClient(
@@ -188,7 +187,6 @@ function getViteRuntimeEnv(): ViteRuntimeEnv {
   const meta = import.meta as ImportMeta & { env?: ViteRuntimeEnv }
   return {
     VITE_FAUPLAY_RUNTIME_BASE_URL: meta.env?.VITE_FAUPLAY_RUNTIME_BASE_URL,
-    VITE_LOCAL_GATEWAY_BASE_URL: meta.env?.VITE_LOCAL_GATEWAY_BASE_URL,
   }
 }
 
