@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use crate::{
     FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
-    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, FauplayRuntime,
-    RootRelativePath,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    FauplayRuntime, PersonSummary, RootRelativePath,
 };
 
 use super::{
@@ -116,6 +117,67 @@ pub(in crate::server) fn handle_list_review_faces_json(
     }
 }
 
+pub(in crate::server) fn handle_list_people_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let page = json_usize_field(&payload, "page").unwrap_or(1).max(1);
+    let size = json_usize_field(&payload, "size")
+        .unwrap_or(100)
+        .clamp(1, 500);
+    let Some(scope) = parse_face_scope(json_string_field(&payload, "scope")) else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"scope must be \\\"root\\\" or \\\"global\\\"\"}",
+        );
+    };
+
+    match runtime.list_people(FaceListPeopleRequest {
+        root_path: PathBuf::from(root_path),
+        scope,
+        query: json_string_field(&payload, "query").map(ToOwned::to_owned),
+        page,
+        size,
+    }) {
+        Ok(response) => http_response(200, "OK", &face_list_people_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_rename_person_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let Some(person_id) = json_string_field(&payload, "personId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"personId is required\"}");
+    };
+    let name = json_string_field(&payload, "name").unwrap_or_default();
+
+    match runtime.rename_person(FaceRenamePersonRequest {
+        root_path: PathBuf::from(root_path),
+        person_id: person_id.to_owned(),
+        name: name.to_owned(),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_rename_person_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 fn face_root_relative_path(payload: &serde_json::Value) -> Option<&str> {
     json_string_field(payload, "relativePath")
         .or_else(|| json_string_field(payload, "rootRelativePath"))
@@ -165,12 +227,51 @@ fn face_list_review_faces_response_json(response: FaceListReviewFacesResponse) -
     )
 }
 
+fn face_list_people_response_json(response: FaceListPeopleResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"scope\":\"{}\",\"page\":{},\"size\":{},\"total\":{},\"items\":[{}]}}",
+        face_scope_json(response.scope),
+        response.page,
+        response.size,
+        response.total,
+        person_summaries_json(response.items),
+    )
+}
+
+fn face_rename_person_response_json(response: FaceRenamePersonResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"person\":{}}}",
+        person_summary_json(response.person),
+    )
+}
+
 fn face_records_json(records: Vec<FaceRecord>) -> String {
     records
         .into_iter()
         .map(face_record_json)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn person_summaries_json(items: Vec<PersonSummary>) -> String {
+    items
+        .into_iter()
+        .map(person_summary_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn person_summary_json(person: PersonSummary) -> String {
+    format!(
+        "{{\"personId\":\"{}\",\"name\":\"{}\",\"faceCount\":{},\"globalFaceCount\":{},\"featureFaceId\":{},\"featureAssetPath\":{},\"updatedAt\":{}}}",
+        escape_json_string(&person.person_id),
+        escape_json_string(&person.name),
+        person.face_count,
+        person.global_face_count,
+        optional_string_json(person.feature_face_id.as_deref()),
+        optional_string_json(person.feature_asset_path.as_deref()),
+        person.updated_at_ms,
+    )
 }
 
 fn face_record_json(record: FaceRecord) -> String {
@@ -215,6 +316,15 @@ fn optional_u64_json(value: Option<u64>) -> String {
 fn face_scope_json(value: FaceScope) -> &'static str {
     match value {
         FaceScope::Root => "root",
+        FaceScope::Global => "global",
+    }
+}
+
+fn parse_face_scope(value: Option<&str>) -> Option<FaceScope> {
+    match value.unwrap_or("root") {
+        "root" => Some(FaceScope::Root),
+        "global" => Some(FaceScope::Global),
+        _ => None,
     }
 }
 

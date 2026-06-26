@@ -18,7 +18,6 @@ export {
   saveDetectedFaces,
   clusterPendingFaces,
   listPeople,
-  renamePerson,
   mergePeople,
   listAssetFaces,
   suggestPeople,

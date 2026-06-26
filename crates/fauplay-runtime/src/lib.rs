@@ -11,12 +11,13 @@ pub use api::{
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
-    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, FileAnnotationActionSource,
-    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
-    FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
-    FileAnnotationMutationResponse, FileAnnotationPathMapping,
-    FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
+    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
+    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
+    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
@@ -30,7 +31,7 @@ pub use api::{
     GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
-    MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
+    MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse, PersonSummary,
     RememberedDeviceAdminEntry, RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry,
     RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
@@ -113,6 +114,20 @@ impl FauplayRuntime {
         request: FaceListReviewFacesRequest,
     ) -> Result<FaceListReviewFacesResponse, RuntimeError> {
         store::list_review_faces(&self.runtime_home_path, request)
+    }
+
+    pub fn list_people(
+        &self,
+        request: FaceListPeopleRequest,
+    ) -> Result<FaceListPeopleResponse, RuntimeError> {
+        store::list_people(&self.runtime_home_path, request)
+    }
+
+    pub fn rename_person(
+        &self,
+        request: FaceRenamePersonRequest,
+    ) -> Result<FaceRenamePersonResponse, RuntimeError> {
+        store::rename_person(&self.runtime_home_path, request)
     }
 
     pub fn load_global_shortcut_config(

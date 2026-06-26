@@ -21,6 +21,8 @@ const runtimeOwnedLocalRoutes = [
   ['POST', '/v1/faces/detect-asset'],
   ['POST', '/v1/faces/list-asset-faces'],
   ['POST', '/v1/faces/list-review-faces'],
+  ['POST', '/v1/faces/list-people'],
+  ['POST', '/v1/faces/rename-person'],
 ]
 
 test('Legacy Gateway HTTP route registry does not expose Runtime-owned local capabilities', () => {

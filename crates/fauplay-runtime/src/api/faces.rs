@@ -52,6 +52,47 @@ pub struct FaceListReviewFacesResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceListPeopleRequest {
+    pub root_path: PathBuf,
+    pub scope: FaceScope,
+    pub query: Option<String>,
+    pub page: usize,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceListPeopleResponse {
+    pub scope: FaceScope,
+    pub page: usize,
+    pub size: usize,
+    pub total: usize,
+    pub items: Vec<PersonSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersonSummary {
+    pub person_id: String,
+    pub name: String,
+    pub face_count: usize,
+    pub global_face_count: usize,
+    pub feature_face_id: Option<String>,
+    pub feature_asset_path: Option<String>,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceRenamePersonRequest {
+    pub root_path: PathBuf,
+    pub person_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceRenamePersonResponse {
+    pub person: PersonSummary,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceRecord {
     pub face_id: String,
     pub asset_id: String,
@@ -93,6 +134,7 @@ pub enum FaceStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaceScope {
     Root,
+    Global,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

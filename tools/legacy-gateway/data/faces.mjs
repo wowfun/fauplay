@@ -68,14 +68,6 @@ export const cancelDetectAssetsJob = faceScanRuntime.cancelDetectAssetsJob
 export const listDetectAssetsJobItems = faceScanRuntime.listDetectAssetsJobItems
 export const detectAssets = faceScanRuntime.detectAssets
 
-function representativeFilePathSubquery() {
-  return `
-    SELECT assetId, MIN(absolutePath) AS absolutePath
-    FROM file
-    GROUP BY assetId
-  `
-}
-
 function parsePeopleScope(params) {
   const rawScope = typeof params?.scope === 'string' ? params.scope.trim() : 'global'
   if (rawScope !== 'global' && rawScope !== 'root') {
@@ -560,60 +552,6 @@ export async function listPeople(params) {
       items: filteredItems.slice(offset, offset + size),
     }
   })
-}
-
-export async function renamePerson(params) {
-  const personId = typeof params.personId === 'string' ? params.personId.trim() : ''
-  const name = typeof params.name === 'string' ? params.name.trim() : ''
-  const rootPath = resolveOptionalRootPath(params.rootPath)
-  if (!personId) throw new Error('personId is required')
-
-  return withDb(async (db) => (
-    withTransaction(db, async () => {
-      const ts = nowTs()
-      const cursor = db.prepare('UPDATE person SET name = ?, updatedAt = ? WHERE id = ?').run(name, ts, personId)
-      if (Number(cursor?.changes ?? 0) === 0) {
-        throw createFaceError('PERSON_NOT_FOUND', `person not found: ${personId}`)
-      }
-
-      const assetRows = db.prepare(`
-        SELECT DISTINCT face.assetId AS assetId
-        FROM face
-        INNER JOIN person_face ON person_face.faceId = face.id
-        WHERE person_face.personId = ?
-      `).all(personId)
-      syncVisionFaceTags(db, assetRows.map((row) => row.assetId))
-
-      const row = db.prepare(`
-        SELECT
-          person.id AS id,
-          person.name AS name,
-          person.faceCount AS faceCount,
-          person.featureFaceId AS featureFaceId,
-          person.updatedAt AS updatedAt,
-          file_path.absolutePath AS featureAbsolutePath
-        FROM person
-        LEFT JOIN face ON face.id = person.featureFaceId
-        LEFT JOIN (${representativeFilePathSubquery()}) AS file_path ON file_path.assetId = face.assetId
-        WHERE person.id = ?
-      `).get(personId)
-
-      return {
-        ok: true,
-        person: {
-          personId: row.id,
-          name: row.name,
-          faceCount: Number(row.faceCount ?? 0),
-          globalFaceCount: Number(row.faceCount ?? 0),
-          featureFaceId: row.featureFaceId,
-          featureAssetPath: typeof row.featureAbsolutePath === 'string'
-            ? toDisplayPath(rootPath, row.featureAbsolutePath)
-            : null,
-          updatedAt: Number(row.updatedAt ?? 0),
-        },
-      }
-    })
-  ))
 }
 
 export async function mergePeople(params) {

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -7,9 +8,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
-    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, RootRelativePath,
-    RuntimeError,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    PersonSummary, RootRelativePath, RuntimeError,
 };
 
 use super::{
@@ -35,6 +37,20 @@ struct FaceRecordData {
     assigned_by: Option<String>,
     updated_at_ms: u64,
     embedding: Vec<f64>,
+}
+
+#[derive(Debug, Clone)]
+struct PersonSummaryAccumulator {
+    person_id: String,
+    name: String,
+    face_count: usize,
+    global_face_count: usize,
+    feature_face_id: Option<String>,
+    feature_asset_path: Option<String>,
+    updated_at_ms: u64,
+    scoped_feature_face_id: Option<String>,
+    scoped_feature_asset_path: Option<String>,
+    scoped_updated_at_ms: u64,
 }
 
 pub(crate) fn save_detected_faces(
@@ -188,6 +204,175 @@ pub(crate) fn list_review_faces(
         total,
         items,
     })
+}
+
+pub(crate) fn list_people(
+    runtime_home_path: &Path,
+    request: FaceListPeopleRequest,
+) -> Result<FaceListPeopleResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let root_path = root_path_key(&request.root_path);
+    let scope = request.scope;
+    let page = request.page.max(1);
+    let size = request.size.clamp(1, 500);
+    let offset = page.saturating_sub(1).saturating_mul(size);
+    let query = request
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase());
+    let mut people = BTreeMap::<String, PersonSummaryAccumulator>::new();
+
+    for record in read_face_records(&store_path)? {
+        let Some(person_id) = record
+            .person_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if RootRelativePath::try_from(record.root_relative_path.as_str()).is_err() {
+            continue;
+        }
+        let in_scope = scope == FaceScope::Global || record.root_path == root_path;
+        let display_path = face_record_display_path(&root_path, &record);
+        let entry =
+            people
+                .entry(person_id.to_owned())
+                .or_insert_with(|| PersonSummaryAccumulator {
+                    person_id: person_id.to_owned(),
+                    name: record.person_name.clone().unwrap_or_default(),
+                    face_count: 0,
+                    global_face_count: 0,
+                    feature_face_id: None,
+                    feature_asset_path: None,
+                    updated_at_ms: 0,
+                    scoped_feature_face_id: None,
+                    scoped_feature_asset_path: None,
+                    scoped_updated_at_ms: 0,
+                });
+
+        entry.global_face_count += 1;
+        if entry.name.is_empty() {
+            entry.name = record.person_name.clone().unwrap_or_default();
+        }
+        if record.updated_at_ms > entry.updated_at_ms
+            || (record.updated_at_ms == entry.updated_at_ms
+                && entry
+                    .feature_face_id
+                    .as_ref()
+                    .is_none_or(|face_id| record.face_id < *face_id))
+        {
+            entry.feature_face_id = Some(record.face_id.clone());
+            entry.feature_asset_path = Some(display_path.clone());
+            entry.updated_at_ms = record.updated_at_ms;
+        }
+        if in_scope {
+            entry.face_count += 1;
+            if record.updated_at_ms > entry.scoped_updated_at_ms
+                || (record.updated_at_ms == entry.scoped_updated_at_ms
+                    && entry
+                        .scoped_feature_face_id
+                        .as_ref()
+                        .is_none_or(|face_id| record.face_id < *face_id))
+            {
+                entry.scoped_feature_face_id = Some(record.face_id.clone());
+                entry.scoped_feature_asset_path = Some(display_path);
+                entry.scoped_updated_at_ms = record.updated_at_ms;
+            }
+        }
+    }
+
+    let mut items = people
+        .into_values()
+        .filter(|person| person.face_count > 0)
+        .filter(|person| {
+            query
+                .as_ref()
+                .is_none_or(|query| person_summary_matches_query(person, query))
+        })
+        .map(|person| PersonSummary {
+            person_id: person.person_id,
+            name: person.name,
+            face_count: person.face_count,
+            global_face_count: person.global_face_count,
+            feature_face_id: match scope {
+                FaceScope::Root => person.scoped_feature_face_id,
+                FaceScope::Global => person.feature_face_id,
+            },
+            feature_asset_path: match scope {
+                FaceScope::Root => person.scoped_feature_asset_path,
+                FaceScope::Global => person.feature_asset_path,
+            },
+            updated_at_ms: match scope {
+                FaceScope::Root => person.scoped_updated_at_ms,
+                FaceScope::Global => person.updated_at_ms,
+            },
+        })
+        .collect::<Vec<_>>();
+
+    items.sort_by(|left, right| {
+        right
+            .face_count
+            .cmp(&left.face_count)
+            .then_with(|| right.global_face_count.cmp(&left.global_face_count))
+            .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms))
+            .then_with(|| left.person_id.cmp(&right.person_id))
+    });
+
+    let total = items.len();
+    let items = items.into_iter().skip(offset).take(size).collect();
+
+    Ok(FaceListPeopleResponse {
+        scope,
+        page,
+        size,
+        total,
+        items,
+    })
+}
+
+pub(crate) fn rename_person(
+    runtime_home_path: &Path,
+    request: FaceRenamePersonRequest,
+) -> Result<FaceRenamePersonResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let person_id = request.person_id.trim().to_owned();
+    if person_id.is_empty() {
+        return Err(RuntimeError::invalid_detected_face("personId is required"));
+    }
+    let mut records = read_face_records(&store_path)?;
+    let mut found = false;
+    for record in &mut records {
+        if record.person_id.as_deref() == Some(person_id.as_str()) {
+            record.person_name = Some(request.name.trim().to_owned());
+            found = true;
+        }
+    }
+    if !found {
+        return Err(RuntimeError::runtime_capability(format!(
+            "person not found: {person_id}"
+        )));
+    }
+    write_face_records(&store_path, &records)?;
+
+    let person = list_people(
+        runtime_home_path,
+        FaceListPeopleRequest {
+            root_path: request.root_path,
+            scope: FaceScope::Root,
+            query: Some(person_id.clone()),
+            page: 1,
+            size: 500,
+        },
+    )?
+    .items
+    .into_iter()
+    .find(|person| person.person_id == person_id)
+    .ok_or_else(|| RuntimeError::runtime_capability(format!("person not found: {person_id}")))?;
+
+    Ok(FaceRenamePersonResponse { person })
 }
 
 fn faces_path(runtime_home_path: &Path) -> PathBuf {
@@ -429,6 +614,21 @@ fn face_review_status_order(status: FaceStatus) -> u8 {
         FaceStatus::Ignored => 3,
         FaceStatus::Assigned => 4,
     }
+}
+
+fn face_record_display_path(display_root_path: &str, record: &FaceRecordData) -> String {
+    if record.root_path == display_root_path {
+        return record.root_relative_path.clone();
+    }
+
+    PathBuf::from(&record.root_path)
+        .join(&record.root_relative_path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn person_summary_matches_query(person: &PersonSummaryAccumulator, query: &str) -> bool {
+    person.person_id.to_lowercase().contains(query) || person.name.to_lowercase().contains(query)
 }
 
 fn face_media_type_json(value: FaceMediaType) -> &'static str {

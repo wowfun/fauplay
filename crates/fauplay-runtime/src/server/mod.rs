@@ -59,6 +59,10 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/faces/list-review-faces")) => {
             faces::handle_list_review_faces_json(runtime, request)
         }
+        Some(("POST", "/v1/faces/list-people")) => faces::handle_list_people_json(runtime, request),
+        Some(("POST", "/v1/faces/rename-person")) => {
+            faces::handle_rename_person_json(runtime, request)
+        }
         Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
             remembered_devices::handle_rename_remembered_device(runtime, target, request)
         }
@@ -235,6 +239,8 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/faces/detect-asset"
             | "/v1/faces/list-asset-faces"
             | "/v1/faces/list-review-faces"
+            | "/v1/faces/list-people"
+            | "/v1/faces/rename-person"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"
