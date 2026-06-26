@@ -488,6 +488,48 @@ impl FauplayRuntime {
         store::remove_remote_shared_favorite(&self.runtime_home_path, request)
     }
 
+    pub fn list_remote_favorites(&self) -> Result<RemoteSharedFavoritesResponse, RuntimeError> {
+        let remote_root_ids = self
+            .load_remote_access_config()?
+            .roots
+            .into_iter()
+            .map(|root| root.id)
+            .collect::<HashSet<_>>();
+        let response = self.list_remote_shared_favorites()?;
+        Ok(RemoteSharedFavoritesResponse {
+            items: response
+                .items
+                .into_iter()
+                .filter(|item| remote_root_ids.contains(item.root_id.trim()))
+                .collect(),
+        })
+    }
+
+    pub fn upsert_remote_favorite(
+        &self,
+        request: RemoteSharedFavoriteUpsertRequest,
+    ) -> Result<RemoteSharedFavorite, RuntimeError> {
+        let root_id = request.root_id.trim().to_owned();
+        self.resolve_remote_root_path(&root_id)?;
+        self.upsert_remote_shared_favorite(RemoteSharedFavoriteUpsertRequest {
+            root_id,
+            path: request.path,
+            favorited_at_ms: None,
+        })
+    }
+
+    pub fn remove_remote_favorite(
+        &self,
+        request: RemoteSharedFavoriteRemoveRequest,
+    ) -> Result<RemoteSharedFavoriteRemoveResponse, RuntimeError> {
+        let root_id = request.root_id.trim().to_owned();
+        self.resolve_remote_root_path(&root_id)?;
+        self.remove_remote_shared_favorite(RemoteSharedFavoriteRemoveRequest {
+            root_id,
+            path: request.path,
+        })
+    }
+
     pub fn list_remote_roots(&self) -> Result<RemoteRootsResponse, RuntimeError> {
         let config = self.load_remote_access_config()?;
         Ok(RemoteRootsResponse {

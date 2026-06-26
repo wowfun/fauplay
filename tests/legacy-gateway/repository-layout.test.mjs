@@ -141,6 +141,32 @@ test('Legacy Gateway no longer owns Remote Access tag data reads', async () => {
   assert.equal(serverSource.includes('getRemoteReadonlyFileTags'), false)
 })
 
+test('Legacy Gateway no longer owns Remote Access Favorite Folder data reads', async () => {
+  const remoteFileAccessSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-file-access.mjs', import.meta.url),
+    'utf8',
+  )
+  const remoteReadonlySource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(remoteReadonlySource.includes('listRemoteReadonlyFavorites'), false)
+  assert.equal(remoteReadonlySource.includes('upsertRemoteReadonlyFavorite'), false)
+  assert.equal(remoteReadonlySource.includes('removeRemoteReadonlyFavorite'), false)
+  assert.equal(remoteReadonlySource.includes('toRemoteReadonlyFavorite'), false)
+  assert.equal(remoteReadonlySource.includes('normalizeRemoteFavoritePath'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/shared-favorites'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/shared-favorites/upsert'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/shared-favorites/remove'), false)
+  assert.equal(serverSource.includes('listRemoteReadonlyFavorites'), false)
+  assert.equal(serverSource.includes('upsertRemoteReadonlyFavorite'), false)
+  assert.equal(serverSource.includes('removeRemoteReadonlyFavorite'), false)
+})
+
 test('Legacy Gateway no longer owns Remote Access face people data reads', async () => {
   const remoteReadonlySource = await readFile(
     new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),

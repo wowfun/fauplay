@@ -621,6 +621,131 @@ fn runtime_api_remote_annotation_tags_resolve_remote_roots_without_host_paths() 
 }
 
 #[test]
+fn runtime_api_remote_favorites_are_session_protected_and_resolve_remote_roots() {
+    let fixture =
+        Fixture::new("runtime_api_remote_favorites_are_session_protected_and_resolve_remote_roots");
+    fixture.create_dir("Shared Root/albums");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+    fixture.write_file(
+        ".runtime-home/global/remote-shared-favorites.v1.json",
+        r#"{
+  "version": 1,
+  "items": [
+    {"rootId":"shared-root","path":"albums/old","favoritedAtMs":20},
+    {"rootId":"stale-root","path":"stale","favoritedAtMs":30}
+  ]
+}"#,
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let unauthorized_response = send_remote_favorites_list_request(&address, None);
+    server.join().expect("server thread should finish");
+    assert!(
+        unauthorized_response.starts_with("HTTP/1.1 401 Unauthorized\r\n"),
+        "Remote Favorites should require a Remote Access session: {unauthorized_response}"
+    );
+
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let list_response = send_remote_favorites_list_request(&address, Some(&session_cookie_pair));
+    server.join().expect("server thread should finish");
+    assert!(
+        list_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Favorites list should be served by the Runtime: {list_response}"
+    );
+    let list_payload = response_json(&list_response);
+    assert_eq!(list_payload["ok"], true);
+    assert_eq!(list_payload["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list_payload["items"][0]["rootId"], "shared-root");
+    assert_eq!(list_payload["items"][0]["path"], "albums/old");
+    assert_eq!(list_payload["items"][0]["favoritedAtMs"], 20);
+
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let upsert_response = send_remote_favorite_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/favorites/upsert",
+        r#"{"rootId":"shared-root","path":"albums\\new","favoritedAtMs":1}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        upsert_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Favorite upsert should be served by the Runtime: {upsert_response}"
+    );
+    let upsert_payload = response_json(&upsert_response);
+    assert_eq!(upsert_payload["ok"], true);
+    assert_eq!(upsert_payload["item"]["rootId"], "shared-root");
+    assert_eq!(upsert_payload["item"]["path"], "albums/new");
+    assert!(
+        upsert_payload["item"]["favoritedAtMs"]
+            .as_u64()
+            .unwrap_or_default()
+            > 1,
+        "Remote Favorite upsert should use the Runtime clock, not caller-supplied timestamps: {upsert_payload}"
+    );
+
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let remove_response = send_remote_favorite_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/favorites/remove",
+        r#"{"rootId":"shared-root","path":"albums/old"}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        remove_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Favorite remove should be served by the Runtime: {remove_response}"
+    );
+    assert_eq!(
+        response_json(&remove_response),
+        serde_json::json!({"ok": true})
+    );
+
+    let (address, server) = serve_runtime_once(runtime);
+    let final_list_response =
+        send_remote_favorites_list_request(&address, Some(&session_cookie_pair));
+    server.join().expect("server thread should finish");
+    let final_list_payload = response_json(&final_list_response);
+    let final_paths = final_list_payload["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(final_paths, vec!["albums/new"]);
+    assert!(
+        !list_response.contains(&shared_root_json)
+            && !upsert_response.contains(&shared_root_json)
+            && !final_list_response.contains(&shared_root_json),
+        "Remote Favorite responses must not expose Remote Root host paths"
+    );
+}
+
+#[test]
 fn runtime_api_returns_remote_access_config_without_exposing_token() {
     let fixture = Fixture::new("runtime_api_returns_remote_access_config_without_exposing_token");
     fixture.create_dir("Shared Root");

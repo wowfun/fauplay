@@ -11,7 +11,9 @@ use crate::{
     RemoteFileAnnotationQueryRequest, RemoteFileAnnotationReadRequest, RemoteFileContentRequest,
     RemoteFileContentResponse, RemoteFileListRequest, RemoteFileListResponse,
     RemoteFileThumbnailRequest, RemoteFileThumbnailResponse, RemoteListingEntry,
-    RemoteRootsResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse, RootRelativePath,
+    RemoteRootsResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RemoteTextPreviewRequest,
+    RemoteTextPreviewResponse, RootRelativePath,
 };
 
 use super::{
@@ -419,6 +421,84 @@ pub(in crate::server) fn handle_remote_tag_file(
     }
 }
 
+pub(in crate::server) fn handle_remote_favorites_list(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+
+    match runtime.list_remote_favorites() {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &remote_favorites_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_favorite_upsert(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let path = json_string_field(&payload, "path").unwrap_or_default();
+
+    match runtime.upsert_remote_favorite(RemoteSharedFavoriteUpsertRequest {
+        root_id: root_id.to_owned(),
+        path: path.to_owned(),
+        favorited_at_ms: None,
+    }) {
+        Ok(item) => http_response_with_headers(
+            200,
+            "OK",
+            &format!("{{\"ok\":true,\"item\":{}}}", remote_favorite_json(item)),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_favorite_remove(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let path = json_string_field(&payload, "path").unwrap_or_default();
+
+    match runtime.remove_remote_favorite(RemoteSharedFavoriteRemoveRequest {
+        root_id: root_id.to_owned(),
+        path: path.to_owned(),
+    }) {
+        Ok(_) => http_response_with_headers(200, "OK", "{\"ok\":true}", headers),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
 fn remote_access_config_json(response: RemoteAccessConfigResponse) -> String {
     let roots = response
         .roots
@@ -530,7 +610,10 @@ fn remote_error_response(
             headers,
         );
     }
-    if message.contains("required") || message.contains("invalid Root-relative Path") {
+    if message.contains("required")
+        || message.contains("invalid Root-relative Path")
+        || message.contains("invalid Favorite Folder path")
+    {
         return http_response_with_headers(400, "Bad Request", &error_json(&message), headers);
     }
     if message.contains("relativePath must point to a file") {
@@ -683,6 +766,25 @@ fn remote_file_annotation_file_json(file: FileAnnotationFile) -> String {
         "{{\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"tags\":[{tags}]}}",
         escape_json_string(&root_relative_path),
         escape_json_string(&root_relative_path),
+    )
+}
+
+fn remote_favorites_response_json(response: RemoteSharedFavoritesResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(remote_favorite_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{\"ok\":true,\"items\":[{items}]}}")
+}
+
+fn remote_favorite_json(item: RemoteSharedFavorite) -> String {
+    format!(
+        "{{\"rootId\":\"{}\",\"path\":\"{}\",\"favoritedAtMs\":{}}}",
+        escape_json_string(&item.root_id),
+        escape_json_string(&item.path),
+        item.favorited_at_ms,
     )
 }
 

@@ -351,8 +351,8 @@ export async function readRuntimeRemoteFileAnnotation(runtimeBaseUrl, payload, o
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/file', payload, options)
 }
 
-export async function readRuntimeRemoteSharedFavorites(runtimeBaseUrl, options = {}) {
-  return getRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites', options)
+export async function readRuntimeRemoteFavorites(runtimeBaseUrl, options = {}) {
+  return getRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/favorites', options)
 }
 
 export async function readRuntimeRemoteAccessConfig(runtimeBaseUrl, options = {}) {
@@ -411,25 +411,12 @@ export async function logoutRuntimeRemoteAccessSession(runtimeBaseUrl, options =
   }, options)
 }
 
-export async function upsertRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {
-  const rootId = normalizeRequiredStringInput(options.rootId, 'rootId')
-  const path = typeof options.path === 'string' ? options.path : ''
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites/upsert', {
-    rootId,
-    path,
-    ...(typeof options.favoritedAtMs === 'number' && Number.isFinite(options.favoritedAtMs)
-      ? { favoritedAtMs: options.favoritedAtMs }
-      : {}),
-  }, options)
+export async function upsertRuntimeRemoteFavorite(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/favorites/upsert', payload, options)
 }
 
-export async function removeRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {
-  const rootId = normalizeRequiredStringInput(options.rootId, 'rootId')
-  const path = typeof options.path === 'string' ? options.path : ''
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites/remove', {
-    rootId,
-    path,
-  }, options)
+export async function removeRuntimeRemoteFavorite(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/favorites/remove', payload, options)
 }
 
 export function sendRuntimeFileContentResponse(res, runtimeResponse, options = {}) {

@@ -53,12 +53,13 @@ test('Remote Access Favorite Folders are served through Fauplay Runtime', async 
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie || '',
         body,
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
 
-      if (req.method === 'GET' && req.url === '/v1/remote/shared-favorites') {
+      if (req.method === 'GET' && req.url === '/v1/remote/favorites') {
         res.end(JSON.stringify({
           ok: true,
           items: [
@@ -67,17 +68,12 @@ test('Remote Access Favorite Folders are served through Fauplay Runtime', async 
               path: 'albums/runtime',
               favoritedAtMs: 100,
             },
-            {
-              rootId: 'stale-root',
-              path: 'stale',
-              favoritedAtMs: 200,
-            },
           ],
         }))
         return
       }
 
-      if (req.method === 'POST' && req.url === '/v1/remote/shared-favorites/upsert') {
+      if (req.method === 'POST' && req.url === '/v1/remote/favorites/upsert') {
         res.end(JSON.stringify({
           ok: true,
           item: {
@@ -89,10 +85,9 @@ test('Remote Access Favorite Folders are served through Fauplay Runtime', async 
         return
       }
 
-      if (req.method === 'POST' && req.url === '/v1/remote/shared-favorites/remove') {
+      if (req.method === 'POST' && req.url === '/v1/remote/favorites/remove') {
         res.end(JSON.stringify({
           ok: true,
-          removed: true,
         }))
         return
       }
@@ -148,22 +143,27 @@ test('Remote Access Favorite Folders are served through Fauplay Runtime', async 
     const observedRequests = runtimeRequests.map((request) => ({
       method: request.method,
       url: request.url,
+      cookie: request.cookie,
       body: request.body ? JSON.parse(request.body) : null,
     }))
     assert.equal(observedRequests.length, 3)
     assert.deepEqual(observedRequests[0], {
       method: 'GET',
-      url: '/v1/remote/shared-favorites',
+      url: '/v1/remote/favorites',
+      cookie: sessionCookie,
       body: null,
     })
     assert.equal(observedRequests[1].method, 'POST')
-    assert.equal(observedRequests[1].url, '/v1/remote/shared-favorites/upsert')
-    assert.equal(observedRequests[1].body.rootId, 'root-a')
-    assert.equal(observedRequests[1].body.path, 'albums/new')
-    assert.equal(typeof observedRequests[1].body.favoritedAtMs, 'number')
+    assert.equal(observedRequests[1].url, '/v1/remote/favorites/upsert')
+    assert.equal(observedRequests[1].cookie, sessionCookie)
+    assert.deepEqual(observedRequests[1].body, {
+      rootId: 'root-a',
+      path: 'albums/new',
+    })
     assert.deepEqual(observedRequests[2], {
       method: 'POST',
-      url: '/v1/remote/shared-favorites/remove',
+      url: '/v1/remote/favorites/remove',
+      cookie: sessionCookie,
       body: {
         rootId: 'root-a',
         path: 'albums/runtime',

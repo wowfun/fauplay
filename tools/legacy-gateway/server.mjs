@@ -7,6 +7,9 @@ import {
 import {
   appendRemoteRuntimeSetCookies,
   ensureRemoteReadonlySessionAuthorized,
+  forwardRemoteReadonlyFavoriteRemove,
+  forwardRemoteReadonlyFavorites,
+  forwardRemoteReadonlyFavoriteUpsert,
   forwardRemoteReadonlyFileContent,
   forwardRemoteReadonlyFileList,
   forwardRemoteReadonlyFileThumbnail,
@@ -21,13 +24,10 @@ import {
 import {
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
-  listRemoteReadonlyFavorites,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
   loadRemoteReadonlyConfig,
-  removeRemoteReadonlyFavorite,
   resolveRemoteRoot,
-  upsertRemoteReadonlyFavorite,
 } from './remote-readonly.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
@@ -210,15 +210,7 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'GET' && pathname === '/v1/remote/favorites') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
-        const items = await listRemoteReadonlyFavorites(currentRemoteReadonlyConfig, runtimeBaseUrl)
-        sendJson(res, 200, { ok: true, items })
+        await forwardRemoteReadonlyFavorites(req, res, runtimeBaseUrl)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -227,19 +219,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/favorites/upsert') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        const item = await upsertRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
-        sendJson(res, 200, { ok: true, item })
+        await forwardRemoteReadonlyFavoriteUpsert(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -248,19 +232,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/favorites/remove') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        await removeRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
-        sendJson(res, 200, { ok: true })
+        await forwardRemoteReadonlyFavoriteRemove(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }

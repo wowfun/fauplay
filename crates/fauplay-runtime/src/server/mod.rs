@@ -119,6 +119,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/remote/tags/file")) => {
             remote_access::handle_remote_tag_file(runtime, request)
         }
+        Some(("GET", "/v1/remote/favorites")) => {
+            remote_access::handle_remote_favorites_list(runtime, request)
+        }
+        Some(("POST", "/v1/remote/favorites/upsert")) => {
+            remote_access::handle_remote_favorite_upsert(runtime, request)
+        }
+        Some(("POST", "/v1/remote/favorites/remove")) => {
+            remote_access::handle_remote_favorite_remove(runtime, request)
+        }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
         }
@@ -453,6 +462,9 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/remote/tags/options"
             | "/v1/remote/tags/query"
             | "/v1/remote/tags/file"
+            | "/v1/remote/favorites"
+            | "/v1/remote/favorites/upsert"
+            | "/v1/remote/favorites/remove"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

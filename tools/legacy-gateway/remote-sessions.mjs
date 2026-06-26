@@ -5,11 +5,14 @@ import {
   readRuntimeRemoteFileContent,
   readRuntimeRemoteFileList,
   readRuntimeRemoteFileThumbnail,
+  readRuntimeRemoteFavorites,
   queryRuntimeRemoteFileAnnotations,
+  removeRuntimeRemoteFavorite,
   readRuntimeRemoteFileAnnotation,
   readRuntimeRemoteRoots,
   readRuntimeRemoteTagOptions,
   readRuntimeRemoteTextPreview,
+  upsertRuntimeRemoteFavorite,
 } from './remote-file-access.mjs'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 
@@ -120,6 +123,33 @@ export async function forwardRemoteReadonlyTagQuery(req, res, runtimeBaseUrl, pa
 
 export async function forwardRemoteReadonlyTagFile(req, res, runtimeBaseUrl, payload = {}) {
   const result = await readRuntimeRemoteFileAnnotation(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyFavorites(req, res, runtimeBaseUrl) {
+  const result = await readRuntimeRemoteFavorites(runtimeBaseUrl, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyFavoriteUpsert(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await upsertRuntimeRemoteFavorite(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyFavoriteRemove(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await removeRuntimeRemoteFavorite(runtimeBaseUrl, payload, {
     cookieHeader: readHeader(req, 'cookie'),
     userAgent: readHeader(req, 'user-agent'),
     forwardedFor: readRemoteReadonlyClientId(req),
