@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import {
   parseByteRangeHeader,
   sendFileStreamResponse,
-} from '../../scripts/gateway/file-stream-response.mjs'
+} from '../../tools/legacy-gateway/file-stream-response.mjs'
 
 describe('file stream responses', () => {
   let tempDir = ''

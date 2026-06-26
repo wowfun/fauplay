@@ -8,7 +8,7 @@ import {
   createMcpServerRegistry,
   formatMcpConfigSourceLog,
   resolveConfigPath,
-} from '../../scripts/gateway/mcp-config.mjs'
+} from '../../tools/legacy-gateway/mcp-config.mjs'
 
 describe('MCP config registry', () => {
   let tempDir = ''

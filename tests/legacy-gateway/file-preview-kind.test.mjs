@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   getMimeType,
   getPreviewKind,
-} from '../../scripts/gateway/data/file-preview-kind.mjs'
+} from '../../tools/legacy-gateway/data/file-preview-kind.mjs'
 
 describe('file preview classification', () => {
   test('classifies image, video, text, and unsupported files from extensions', () => {

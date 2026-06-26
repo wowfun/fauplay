@@ -42,7 +42,7 @@ export {
 } from './faces-mutations.mjs'
 
 const execFileAsync = promisify(execFile)
-const FACE_CROP_SCRIPT_PATH = path.resolve(process.cwd(), 'scripts', 'gateway', 'face_crop.py')
+const FACE_CROP_SCRIPT_PATH = path.resolve(process.cwd(), 'tools', 'legacy-gateway', 'face_crop.py')
 const FACE_CROP_SIZE_DEFAULT = 160
 const FACE_CROP_SIZE_MIN = 48
 const FACE_CROP_SIZE_MAX = 512
