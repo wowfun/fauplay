@@ -12,9 +12,10 @@ pub use api::{
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
-    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
-    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
     FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
     FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
     FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
@@ -32,14 +33,15 @@ pub use api::{
     GlobalTrashRestoreResponse, GlobalTrashTextPreviewRequest, ListDirectoryRequest,
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
-    MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse, PersonSummary,
-    RememberedDeviceAdminEntry, RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry,
-    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RootMoveBatchFailureReason,
-    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
-    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
+    PersonSuggestion, PersonSuggestionFace, PersonSummary, RememberedDeviceAdminEntry,
+    RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
+    RemotePublishedRootSyncResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
+    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
+    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashEntry,
+    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem,
+    RootTrashMutationResponse, RootTrashRequest, RuntimeError, TextPreviewRequest,
+    TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -129,6 +131,20 @@ impl FauplayRuntime {
         request: FaceRenamePersonRequest,
     ) -> Result<FaceRenamePersonResponse, RuntimeError> {
         store::rename_person(&self.runtime_home_path, request)
+    }
+
+    pub fn suggest_people(
+        &self,
+        request: FaceSuggestPeopleRequest,
+    ) -> Result<FaceSuggestPeopleResponse, RuntimeError> {
+        store::suggest_people(&self.runtime_home_path, request)
+    }
+
+    pub fn merge_people(
+        &self,
+        request: FaceMergePeopleRequest,
+    ) -> Result<FaceMergePeopleResponse, RuntimeError> {
+        store::merge_people(&self.runtime_home_path, request)
     }
 
     pub fn mutate_faces(

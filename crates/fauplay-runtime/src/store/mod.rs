@@ -17,8 +17,8 @@ mod remembered_devices;
 mod remote_published_roots;
 
 pub(crate) use faces::{
-    list_asset_faces, list_people, list_review_faces, mutate_faces, rename_person,
-    save_detected_faces,
+    list_asset_faces, list_people, list_review_faces, merge_people, mutate_faces, rename_person,
+    save_detected_faces, suggest_people,
 };
 pub(crate) use file_annotations::{
     bind_file_annotation_tag, cleanup_missing_files, list_annotation_tag_options,

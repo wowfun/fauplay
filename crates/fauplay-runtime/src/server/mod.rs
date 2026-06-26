@@ -63,6 +63,12 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/faces/rename-person")) => {
             faces::handle_rename_person_json(runtime, request)
         }
+        Some(("POST", "/v1/faces/suggest-people")) => {
+            faces::handle_suggest_people_json(runtime, request)
+        }
+        Some(("POST", "/v1/faces/merge-people")) => {
+            faces::handle_merge_people_json(runtime, request)
+        }
         Some(("POST", "/v1/faces/assign-faces")) => {
             faces::handle_mutate_faces_json(runtime, request, FaceMutationAction::AssignFaces)
         }
@@ -263,6 +269,8 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/faces/list-review-faces"
             | "/v1/faces/list-people"
             | "/v1/faces/rename-person"
+            | "/v1/faces/suggest-people"
+            | "/v1/faces/merge-people"
             | "/v1/faces/assign-faces"
             | "/v1/faces/create-person-from-faces"
             | "/v1/faces/unassign-faces"

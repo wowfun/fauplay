@@ -93,6 +93,53 @@ pub struct FaceRenamePersonResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceSuggestPeopleRequest {
+    pub root_path: PathBuf,
+    pub face_id: String,
+    pub candidate_size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceSuggestPeopleResponse {
+    pub face_id: String,
+    pub items: Vec<PersonSuggestion>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersonSuggestion {
+    pub person_id: String,
+    pub name: String,
+    pub score: f64,
+    pub distance: f64,
+    pub supporting_face: PersonSuggestionFace,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersonSuggestionFace {
+    pub face_id: String,
+    pub asset_id: String,
+    pub asset_path: Option<String>,
+    pub media_type: FaceMediaType,
+    pub frame_ts_ms: Option<u64>,
+    pub bounding_box: FaceBoundingBox,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceMergePeopleRequest {
+    pub root_path: PathBuf,
+    pub target_person_id: String,
+    pub source_person_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceMergePeopleResponse {
+    pub target_person_id: String,
+    pub merged: usize,
+    pub source_person_ids: Vec<String>,
+    pub skipped_source_person_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceMutateFacesRequest {
     pub root_path: PathBuf,
     pub action: FaceMutationAction,

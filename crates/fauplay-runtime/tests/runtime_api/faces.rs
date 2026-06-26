@@ -360,6 +360,120 @@ fn runtime_api_faces_lists_people_from_runtime_home() {
 }
 
 #[test]
+fn runtime_api_faces_merges_people() {
+    let fixture = Fixture::new("runtime_api_faces_merges_people");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    let root_path = fixture.root.join("local-root");
+    let other_root_path = fixture.root.join("other-root");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fs::create_dir_all(&root_path).expect("Local Root should be created");
+    fs::create_dir_all(&other_root_path).expect("other Local Root should be created");
+    write_people_face_store(&runtime_home_path, &root_path, &other_root_path);
+
+    let runtime = FauplayRuntime::with_runtime_home_path(runtime_home_path);
+    let merge_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/merge-people",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "targetPersonId": "person-a",
+            "sourcePersonIds": ["person-b", "missing-person", "person-a"]
+        }),
+    );
+
+    assert_eq!(merge_json["ok"], true);
+    assert_eq!(merge_json["targetPersonId"], "person-a");
+    assert_eq!(merge_json["merged"], 1);
+    assert_eq!(
+        merge_json["sourcePersonIds"],
+        serde_json::json!(["person-b"])
+    );
+    assert_eq!(
+        merge_json["skippedSourcePersonIds"],
+        serde_json::json!(["missing-person"])
+    );
+
+    let people_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/list-people",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "scope": "root",
+            "page": 1,
+            "size": 10
+        }),
+    );
+    assert_eq!(people_json["total"], 1);
+    assert_eq!(people_json["items"][0]["personId"], "person-a");
+    assert_eq!(people_json["items"][0]["name"], "Ada");
+    assert_eq!(people_json["items"][0]["faceCount"], 3);
+    assert_eq!(people_json["items"][0]["globalFaceCount"], 4);
+
+    let merged_faces_json = post_runtime_json(
+        runtime,
+        "/v1/faces/list-asset-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "personId": "person-a"
+        }),
+    );
+    let merged_face = merged_faces_json["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["faceId"] == "face-b"))
+        .expect("merged source face should be listed for target person");
+    assert_eq!(merged_faces_json["total"], 3);
+    assert_eq!(merged_face["personId"], "person-a");
+    assert_eq!(merged_face["personName"], "Ada");
+    assert_eq!(merged_face["assignedBy"], "merge");
+}
+
+#[test]
+fn runtime_api_faces_suggests_people() {
+    let fixture = Fixture::new("runtime_api_faces_suggests_people");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    let root_path = fixture.root.join("local-root");
+    let other_root_path = fixture.root.join("other-root");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fs::create_dir_all(&root_path).expect("Local Root should be created");
+    fs::create_dir_all(&other_root_path).expect("other Local Root should be created");
+    write_people_face_store(&runtime_home_path, &root_path, &other_root_path);
+
+    let runtime = FauplayRuntime::with_runtime_home_path(runtime_home_path);
+    let suggestions_json = post_runtime_json(
+        runtime,
+        "/v1/faces/suggest-people",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceId": "face-unassigned",
+            "candidateSize": 2
+        }),
+    );
+
+    assert_eq!(suggestions_json["ok"], true);
+    assert_eq!(suggestions_json["faceId"], "face-unassigned");
+    let suggestions = suggestions_json["items"]
+        .as_array()
+        .expect("suggestions should be an array");
+    assert_eq!(suggestions.len(), 2);
+    assert_eq!(suggestions[0]["personId"], "person-a");
+    assert_eq!(suggestions[0]["name"], "Ada");
+    assert_eq!(suggestions[0]["supportingFace"]["faceId"], "face-a-outside");
+    assert_eq!(
+        suggestions[0]["supportingFace"]["assetPath"],
+        other_root_path
+            .join("photos/outside.jpg")
+            .display()
+            .to_string()
+    );
+    assert_eq!(suggestions[1]["personId"], "person-b");
+    assert_eq!(suggestions[1]["supportingFace"]["faceId"], "face-b");
+    assert_eq!(
+        suggestions[1]["supportingFace"]["boundingBox"],
+        serde_json::json!({ "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 })
+    );
+}
+
+#[test]
 fn runtime_api_faces_mutates_review_and_assignment_state() {
     let fixture = Fixture::new("runtime_api_faces_mutates_review_and_assignment_state");
     let runtime_home_path = fixture.root.join("runtime-home");

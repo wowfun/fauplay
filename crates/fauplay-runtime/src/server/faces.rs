@@ -3,10 +3,11 @@ use std::path::PathBuf;
 use crate::{
     FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
-    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
-    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
-    FauplayRuntime, PersonSummary, RootRelativePath,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
+    FauplayRuntime, PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
 };
 
 use super::{
@@ -180,6 +181,60 @@ pub(in crate::server) fn handle_rename_person_json(
     }
 }
 
+pub(in crate::server) fn handle_suggest_people_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let Some(face_id) = json_string_field(&payload, "faceId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"faceId is required\"}");
+    };
+
+    match runtime.suggest_people(FaceSuggestPeopleRequest {
+        root_path: PathBuf::from(root_path),
+        face_id: face_id.to_owned(),
+        candidate_size: json_usize_field(&payload, "candidateSize").unwrap_or(6),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_suggest_people_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_merge_people_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let Some(target_person_id) = json_string_field(&payload, "targetPersonId") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"targetPersonId is required\"}",
+        );
+    };
+
+    match runtime.merge_people(FaceMergePeopleRequest {
+        root_path: PathBuf::from(root_path),
+        target_person_id: target_person_id.to_owned(),
+        source_person_ids: json_string_array_field(&payload, "sourcePersonIds"),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_merge_people_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 pub(in crate::server) fn handle_mutate_faces_json(
     runtime: &FauplayRuntime,
     request: &str,
@@ -272,6 +327,24 @@ fn face_rename_person_response_json(response: FaceRenamePersonResponse) -> Strin
     )
 }
 
+fn face_suggest_people_response_json(response: FaceSuggestPeopleResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"faceId\":\"{}\",\"items\":[{}]}}",
+        escape_json_string(&response.face_id),
+        person_suggestions_json(response.items),
+    )
+}
+
+fn face_merge_people_response_json(response: FaceMergePeopleResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"targetPersonId\":\"{}\",\"merged\":{},\"sourcePersonIds\":{},\"skippedSourcePersonIds\":{}}}",
+        escape_json_string(&response.target_person_id),
+        response.merged,
+        string_array_json(response.source_person_ids),
+        string_array_json(response.skipped_source_person_ids),
+    )
+}
+
 fn face_mutate_faces_response_json(response: FaceMutateFacesResponse) -> String {
     format!(
         "{{\"ok\":true,\"action\":\"{}\",\"total\":{},\"succeeded\":{},\"failed\":{},\"items\":[{}],\"targetPersonId\":{},\"personId\":{}}}",
@@ -299,6 +372,51 @@ fn person_summaries_json(items: Vec<PersonSummary>) -> String {
         .map(person_summary_json)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn person_suggestions_json(items: Vec<PersonSuggestion>) -> String {
+    items
+        .into_iter()
+        .map(person_suggestion_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn person_suggestion_json(item: PersonSuggestion) -> String {
+    format!(
+        "{{\"personId\":\"{}\",\"name\":\"{}\",\"score\":{},\"distance\":{},\"supportingFace\":{}}}",
+        escape_json_string(&item.person_id),
+        escape_json_string(&item.name),
+        item.score,
+        item.distance,
+        person_suggestion_face_json(item.supporting_face),
+    )
+}
+
+fn person_suggestion_face_json(face: PersonSuggestionFace) -> String {
+    format!(
+        "{{\"faceId\":\"{}\",\"assetId\":\"{}\",\"assetPath\":{},\"mediaType\":\"{}\",\"frameTsMs\":{},\"boundingBox\":{{\"x1\":{},\"y1\":{},\"x2\":{},\"y2\":{}}}}}",
+        escape_json_string(&face.face_id),
+        escape_json_string(&face.asset_id),
+        optional_string_json(face.asset_path.as_deref()),
+        face_media_type_json(face.media_type),
+        optional_u64_json(face.frame_ts_ms),
+        face.bounding_box.x1,
+        face.bounding_box.y1,
+        face.bounding_box.x2,
+        face.bounding_box.y2,
+    )
+}
+
+fn string_array_json(items: Vec<String>) -> String {
+    format!(
+        "[{}]",
+        items
+            .into_iter()
+            .map(|item| format!("\"{}\"", escape_json_string(&item)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 fn person_summary_json(person: PersonSummary) -> String {

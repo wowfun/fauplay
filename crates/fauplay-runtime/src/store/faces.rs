@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -9,10 +10,11 @@ use sha2::{Digest, Sha256};
 use crate::{
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
-    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
-    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
-    PersonSummary, RootRelativePath, RuntimeError,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
+    PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath, RuntimeError,
 };
 
 use super::{
@@ -374,6 +376,153 @@ pub(crate) fn rename_person(
     .ok_or_else(|| RuntimeError::runtime_capability(format!("person not found: {person_id}")))?;
 
     Ok(FaceRenamePersonResponse { person })
+}
+
+pub(crate) fn suggest_people(
+    runtime_home_path: &Path,
+    request: FaceSuggestPeopleRequest,
+) -> Result<FaceSuggestPeopleResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let root_path = root_path_key(&request.root_path);
+    let face_id = request.face_id.trim().to_owned();
+    if face_id.is_empty() {
+        return Err(RuntimeError::invalid_detected_face("faceId is required"));
+    }
+
+    let records = read_face_records(&store_path)?;
+    let Some(source) = records
+        .iter()
+        .find(|record| record.root_path == root_path && record.face_id == face_id)
+    else {
+        return Err(RuntimeError::runtime_capability(format!(
+            "face not found: {face_id}"
+        )));
+    };
+    if source.embedding.is_empty() {
+        return Err(RuntimeError::runtime_capability(format!(
+            "face embedding not found: {face_id}"
+        )));
+    }
+
+    let candidate_size = request.candidate_size.clamp(1, 20);
+    let mut candidates = BTreeMap::<String, PersonSuggestion>::new();
+
+    for record in &records {
+        let Some(person_id) = record
+            .person_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if record.face_id == face_id
+            || record.embedding.is_empty()
+            || RootRelativePath::try_from(record.root_relative_path.as_str()).is_err()
+        {
+            continue;
+        }
+
+        let distance = cosine_distance(&source.embedding, &record.embedding);
+        let suggestion = PersonSuggestion {
+            person_id: person_id.to_owned(),
+            name: record.person_name.clone().unwrap_or_default(),
+            score: (1.0 - distance).max(0.0),
+            distance,
+            supporting_face: PersonSuggestionFace {
+                face_id: record.face_id.clone(),
+                asset_id: record.asset_id.clone(),
+                asset_path: Some(face_record_display_path(&root_path, record)),
+                media_type: record.media_type,
+                frame_ts_ms: record.frame_ts_ms,
+                bounding_box: record.bounding_box.clone(),
+            },
+        };
+
+        let should_replace = candidates
+            .get(person_id)
+            .is_none_or(|existing| person_suggestion_is_better(&suggestion, existing));
+        if should_replace {
+            candidates.insert(person_id.to_owned(), suggestion);
+        }
+    }
+
+    let mut items = candidates.into_values().collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        left.distance
+            .partial_cmp(&right.distance)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.person_id.cmp(&right.person_id))
+            .then_with(|| {
+                left.supporting_face
+                    .face_id
+                    .cmp(&right.supporting_face.face_id)
+            })
+    });
+    items.truncate(candidate_size);
+
+    Ok(FaceSuggestPeopleResponse { face_id, items })
+}
+
+pub(crate) fn merge_people(
+    runtime_home_path: &Path,
+    request: FaceMergePeopleRequest,
+) -> Result<FaceMergePeopleResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let mut records = read_face_records(&store_path)?;
+    let target_person_id = request.target_person_id.trim().to_owned();
+    if target_person_id.is_empty() {
+        return Err(RuntimeError::invalid_detected_face(
+            "targetPersonId is required",
+        ));
+    }
+    let source_person_ids =
+        normalize_source_person_ids(&request.source_person_ids, &target_person_id);
+    if source_person_ids.is_empty() {
+        return Err(RuntimeError::invalid_detected_face(
+            "sourcePersonIds must contain at least one non-target personId",
+        ));
+    }
+    if !person_exists(&records, &target_person_id) {
+        return Err(RuntimeError::runtime_capability(format!(
+            "target person not found: {target_person_id}"
+        )));
+    }
+
+    let target_person_name = person_name_for_id(&records, &target_person_id).unwrap_or_default();
+    let updated_at_ms = now_ms();
+    let mut merged = Vec::new();
+    let mut skipped = Vec::new();
+
+    for source_person_id in source_person_ids {
+        if !person_exists(&records, &source_person_id) {
+            skipped.push(source_person_id);
+            continue;
+        }
+
+        for record in &mut records {
+            if record.person_id.as_deref() == Some(source_person_id.as_str()) {
+                record.person_id = Some(target_person_id.clone());
+                record.person_name = Some(target_person_name.clone());
+                record.assigned_by = Some("merge".to_owned());
+                record.status = FaceStatus::Assigned;
+                record.updated_at_ms = updated_at_ms;
+            }
+        }
+        merged.push(source_person_id);
+    }
+
+    if !merged.is_empty() {
+        write_face_records(&store_path, &records)?;
+    }
+
+    let merged_count = merged.len();
+    Ok(FaceMergePeopleResponse {
+        target_person_id,
+        merged: merged_count,
+        source_person_ids: merged,
+        skipped_source_person_ids: skipped,
+    })
 }
 
 pub(crate) fn mutate_faces(
@@ -862,6 +1011,37 @@ fn face_record_display_path(display_root_path: &str, record: &FaceRecordData) ->
         .replace('\\', "/")
 }
 
+fn cosine_distance(left: &[f64], right: &[f64]) -> f64 {
+    let mut dot = 0.0;
+    let mut left_norm = 0.0;
+    let mut right_norm = 0.0;
+    for (left, right) in left.iter().zip(right.iter()) {
+        dot += left * right;
+        left_norm += left * left;
+        right_norm += right * right;
+    }
+
+    if left_norm > 0.0 && right_norm > 0.0 {
+        1.0 - (dot / (left_norm.sqrt() * right_norm.sqrt())).clamp(-1.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn person_suggestion_is_better(candidate: &PersonSuggestion, existing: &PersonSuggestion) -> bool {
+    candidate
+        .distance
+        .partial_cmp(&existing.distance)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| {
+            candidate
+                .supporting_face
+                .face_id
+                .cmp(&existing.supporting_face.face_id)
+        })
+        == Ordering::Less
+}
+
 fn normalize_face_ids(face_ids: &[String]) -> Result<Vec<String>, RuntimeError> {
     let mut normalized = Vec::new();
     for face_id in face_ids {
@@ -879,6 +1059,24 @@ fn normalize_face_ids(face_ids: &[String]) -> Result<Vec<String>, RuntimeError> 
     }
 
     Ok(normalized)
+}
+
+fn normalize_source_person_ids(
+    source_person_ids: &[String],
+    target_person_id: &str,
+) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for person_id in source_person_ids {
+        let person_id = person_id.trim();
+        if person_id.is_empty()
+            || person_id == target_person_id
+            || normalized.iter().any(|item| item == person_id)
+        {
+            continue;
+        }
+        normalized.push(person_id.to_owned());
+    }
+    normalized
 }
 
 fn find_root_scoped_face_index(

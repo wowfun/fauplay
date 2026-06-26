@@ -18,9 +18,7 @@ export {
   saveDetectedFaces,
   clusterPendingFaces,
   listPeople,
-  mergePeople,
   listAssetFaces,
-  suggestPeople,
   getFaceCrop,
   callVisionInference,
 } from './faces.mjs'
