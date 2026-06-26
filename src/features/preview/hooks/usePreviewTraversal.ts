@@ -2,29 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildPreviewMediaCollection,
   canNavigatePreviewMedia,
-  clampAutoPlayIntervalSec,
-  DEFAULT_AUTOPLAY_INTERVAL_SEC,
   getPreviewMediaIndex,
-  normalizeVideoPlaybackRate,
-  normalizeVideoSeekStepSec,
-  nextVideoPlaybackRate,
   resolvePreviewFilteredFilesChangePlan,
   resolvePreviewMediaNavigation,
   resolvePreviewPlaybackOrderTogglePlan,
   resolvePreviewShuffleMediaSetSyncPlan,
   type PreviewNavigateDirection,
 } from '@/features/preview/lib/previewTraversalModel'
-import {
-  readPreviewPlaybackPreferences,
-  savePreviewPlaybackPreferences,
-  type PreviewPlaybackPreferencesStorage,
-} from '@/features/preview/lib/previewPlaybackPreferences'
-import {
-  resolvePreviewAutoPlayAdvanceIntent,
-  resolvePreviewAutoPlayEligibility,
-  resolvePreviewAutoPlayGateIntent,
-  resolvePreviewAutoPlayTimerPlan,
-} from '@/features/preview/lib/previewAutoPlayModel'
+import { usePreviewPlaybackSettings } from '@/features/preview/hooks/usePreviewPlaybackSettings'
+import { usePreviewAutoPlayController } from '@/features/preview/hooks/usePreviewAutoPlayController'
 import {
   resolvePreviewFullscreenFromPaneIntent,
   resolvePreviewModalOpenIntent,
@@ -34,7 +20,6 @@ import {
   type PreviewSurfaceSelectionIntent,
 } from '@/features/preview/lib/previewSurfaceActionModel'
 import type { FileItem } from '@/types'
-import type { PlaybackOrder } from '@/features/preview/types/playback'
 
 const WRAP_AT_BOUNDARY = true
 
@@ -45,40 +30,26 @@ interface UsePreviewTraversalOptions {
   filteredFiles: FileItem[]
 }
 
-function getPreviewPlaybackPreferencesStorage(): PreviewPlaybackPreferencesStorage | null {
-  if (typeof window === 'undefined') return null
-  return window.localStorage
-}
-
-function readPersistedPreviewPlaybackPreferences() {
-  return readPreviewPlaybackPreferences(getPreviewPlaybackPreferencesStorage())
-}
-
-function savePersistedPreviewPlaybackPreferences(preferences: {
-  videoSeekStepSec: number
-  videoPlaybackRate: number
-  playbackOrder: PlaybackOrder
-  faceBboxVisible: boolean
-}): void {
-  savePreviewPlaybackPreferences(getPreviewPlaybackPreferencesStorage(), preferences)
-}
-
 export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOptions) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null)
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null)
   const [showPreviewPane, setShowPreviewPane] = useState(false)
   const [previewAutoPlayOnOpen, setPreviewAutoPlayOnOpen] = useState(false)
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState(false)
-  const [autoPlayIntervalSec, setAutoPlayIntervalSec] = useState(DEFAULT_AUTOPLAY_INTERVAL_SEC)
-  const [initialPlaybackPreferences] = useState(readPersistedPreviewPlaybackPreferences)
-  const [videoSeekStepSec, setVideoSeekStepSec] = useState<number>(() => initialPlaybackPreferences.videoSeekStepSec)
-  const [videoPlaybackRate, setVideoPlaybackRateState] = useState<number>(() => initialPlaybackPreferences.videoPlaybackRate)
-  const [faceBboxVisible, setFaceBboxVisible] = useState<boolean>(() => initialPlaybackPreferences.faceBboxVisible)
-  const [autoPlayPausedByVisibility, setAutoPlayPausedByVisibility] = useState(false)
-  const [playbackOrder, setPlaybackOrder] = useState<PlaybackOrder>(() => initialPlaybackPreferences.playbackOrder)
+  const {
+    autoPlayIntervalSec,
+    videoSeekStepSec,
+    videoPlaybackRate,
+    faceBboxVisible,
+    playbackOrder,
+    setPlaybackOrder,
+    setAutoPlayInterval,
+    setVideoSeekStep,
+    setVideoPlaybackRate,
+    cycleVideoPlaybackRate,
+    toggleFaceBboxVisible,
+  } = usePreviewPlaybackSettings()
   const [shuffleQueue, setShuffleQueue] = useState<string[]>([])
   const [shuffleHistory, setShuffleHistory] = useState<string[]>([])
-  const autoPlayTimerRef = useRef<number | null>(null)
   const preferredPreviewPathRef = useRef<string | null>(null)
 
   const mediaCollection = useMemo(
@@ -182,11 +153,21 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
   const activeMediaFile = previewFile ?? (showPreviewPane ? selectedFile : null)
   const activeMediaIndex = getMediaIndex(activeMediaFile)
   const hasActiveMediaPreview = activeMediaIndex >= 0
-  const isAutoPlayEligible = resolvePreviewAutoPlayEligibility({
+  const advanceAutoPlayMedia = useCallback(() => {
+    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
+  }, [activeMediaFile, navigateMedia])
+  const {
     autoPlayEnabled,
-    pausedByVisibility: autoPlayPausedByVisibility,
+    toggleAutoPlay,
+    handleAutoPlayVideoEnded,
+    handleAutoPlayVideoPlaybackError,
+  } = usePreviewAutoPlayController({
+    activeMediaFile,
+    autoPlayIntervalSec,
     hasActiveMediaPreview,
+    hasOpenPreview,
     mediaCount: mediaFiles.length,
+    onAdvance: advanceAutoPlayMedia,
   })
 
   const showFileInPane = useCallback((file: FileItem) => {
@@ -222,10 +203,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     applyModalOpenIntent(resolvePreviewFullscreenFromPaneIntent({ selectedFile }))
   }, [applyModalOpenIntent, selectedFile])
 
-  const toggleAutoPlay = useCallback(() => {
-    setAutoPlayEnabled((previous) => !previous)
-  }, [])
-
   const togglePlaybackOrder = useCallback(() => {
     const togglePlan = resolvePreviewPlaybackOrderTogglePlan({
       collection: mediaCollection,
@@ -248,45 +225,8 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     activeMediaFile,
     mediaCollection,
     previewFile,
+    setPlaybackOrder,
   ])
-
-  const setAutoPlayInterval = useCallback((value: number) => {
-    setAutoPlayIntervalSec(clampAutoPlayIntervalSec(value))
-  }, [])
-
-  const setVideoSeekStep = useCallback((value: number) => {
-    setVideoSeekStepSec(normalizeVideoSeekStepSec(value))
-  }, [])
-
-  const setVideoPlaybackRate = useCallback((value: number) => {
-    setVideoPlaybackRateState(normalizeVideoPlaybackRate(value))
-  }, [])
-
-  const cycleVideoPlaybackRate = useCallback(() => {
-    setVideoPlaybackRateState((previous) => nextVideoPlaybackRate(previous))
-  }, [])
-
-  const toggleFaceBboxVisible = useCallback(() => {
-    setFaceBboxVisible((previous) => !previous)
-  }, [])
-
-  const handleAutoPlayVideoEnded = useCallback(() => {
-    const intent = resolvePreviewAutoPlayAdvanceIntent({
-      isAutoPlayEligible,
-      activeFile: activeMediaFile,
-    })
-    if (intent.kind === 'none') return
-    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
-  }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
-
-  const handleAutoPlayVideoPlaybackError = useCallback(() => {
-    const intent = resolvePreviewAutoPlayAdvanceIntent({
-      isAutoPlayEligible,
-      activeFile: activeMediaFile,
-    })
-    if (intent.kind === 'none') return
-    navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
-  }, [isAutoPlayEligible, activeMediaFile, navigateMedia])
 
   useEffect(() => {
     const changePlan = resolvePreviewFilteredFilesChangePlan({
@@ -360,81 +300,6 @@ export function usePreviewTraversal({ filteredFiles }: UsePreviewTraversalOption
     shuffleHistory,
     previewFile,
     showPreviewPane,
-  ])
-
-  useEffect(() => {
-    const gateIntent = resolvePreviewAutoPlayGateIntent({
-      autoPlayEnabled,
-      hasOpenPreview,
-      hasActiveMediaPreview,
-    })
-    if (gateIntent.kind === 'disable-autoplay') {
-      setAutoPlayEnabled(false)
-    }
-  }, [autoPlayEnabled, hasActiveMediaPreview, hasOpenPreview])
-
-  useEffect(() => {
-    savePersistedPreviewPlaybackPreferences({
-      videoSeekStepSec,
-      videoPlaybackRate,
-      playbackOrder,
-      faceBboxVisible,
-    })
-  }, [faceBboxVisible, playbackOrder, videoPlaybackRate, videoSeekStepSec])
-
-  useEffect(() => {
-    const syncVisibilityState = () => {
-      setAutoPlayPausedByVisibility(document.visibilityState !== 'visible')
-    }
-
-    const handleBlur = () => {
-      setAutoPlayPausedByVisibility(true)
-    }
-
-    const handleFocus = () => {
-      syncVisibilityState()
-    }
-
-    syncVisibilityState()
-    document.addEventListener('visibilitychange', syncVisibilityState)
-    window.addEventListener('blur', handleBlur)
-    window.addEventListener('focus', handleFocus)
-
-    return () => {
-      document.removeEventListener('visibilitychange', syncVisibilityState)
-      window.removeEventListener('blur', handleBlur)
-      window.removeEventListener('focus', handleFocus)
-    }
-  }, [])
-
-  const clearAutoPlayTimer = useCallback(() => {
-    if (autoPlayTimerRef.current !== null) {
-      window.clearTimeout(autoPlayTimerRef.current)
-      autoPlayTimerRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    clearAutoPlayTimer()
-
-    const timerPlan = resolvePreviewAutoPlayTimerPlan({
-      isAutoPlayEligible,
-      activeFile: activeMediaFile,
-      intervalSec: autoPlayIntervalSec,
-    })
-    if (timerPlan.kind === 'none') return
-
-    autoPlayTimerRef.current = window.setTimeout(() => {
-      navigateMedia(activeMediaFile, 'next', { source: 'autoplay', wrap: WRAP_AT_BOUNDARY })
-    }, timerPlan.delayMs)
-
-    return clearAutoPlayTimer
-  }, [
-    clearAutoPlayTimer,
-    isAutoPlayEligible,
-    activeMediaFile,
-    autoPlayIntervalSec,
-    navigateMedia,
   ])
 
   return {
