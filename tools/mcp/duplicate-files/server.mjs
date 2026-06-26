@@ -149,7 +149,7 @@ async function handleRequest(request) {
     }
 
     const error = new Error(
-      'data.findDuplicateFiles has moved to Gateway HTTP API; use /v1/files/duplicates/query instead',
+      'data.findDuplicateFiles has moved to Fauplay Runtime API; use /v1/duplicate-files instead',
     )
     error.code = 'MCP_TOOL_CALL_FAILED'
     throw error

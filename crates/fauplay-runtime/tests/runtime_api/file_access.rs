@@ -43,6 +43,40 @@ fn runtime_api_returns_text_preview() {
 }
 
 #[test]
+fn runtime_api_returns_absolute_text_preview() {
+    let fixture = Fixture::new("runtime_api_returns_absolute_text_preview");
+    fixture.write_file("notes.txt", "hello runtime");
+    let absolute_path = fixture.root.join("notes.txt");
+
+    let (address, server) = serve_runtime_once(FauplayRuntime::new());
+
+    let response =
+        send_absolute_text_preview_request(&address, &absolute_path.display().to_string(), 1024);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"status\":\"ready\""),
+        "response should report ready status: {response}"
+    );
+    assert!(
+        response.contains("\"content\":\"hello runtime\""),
+        "response should include preview content: {response}"
+    );
+    assert!(
+        response.contains("\"fileSizeBytes\":13"),
+        "response should include file size: {response}"
+    );
+    assert!(
+        response.contains("\"sizeLimitBytes\":1024"),
+        "response should include size limit: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_reports_text_preview_too_large() {
     let fixture = Fixture::new("runtime_api_reports_text_preview_too_large");
     fixture.write_file("notes.txt", "hello runtime");
@@ -149,6 +183,68 @@ fn runtime_api_returns_file_content() {
     assert!(
         response.ends_with(b"<svg>runtime</svg>"),
         "response body should include file content: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_returns_absolute_file_content() {
+    let fixture = Fixture::new("runtime_api_returns_absolute_file_content");
+    fixture.write_file("diagram.svg", "<svg>runtime</svg>");
+    let absolute_path = fixture.root.join("diagram.svg");
+
+    let (address, server) = serve_runtime_once(FauplayRuntime::new());
+
+    let response =
+        send_absolute_file_content_request(&address, &absolute_path.display().to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Type: image/svg+xml\r\n".len())
+            .any(|window| window == b"Content-Type: image/svg+xml\r\n"),
+        "response should include SVG content type: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"<svg>runtime</svg>"),
+        "response body should include file content: {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+#[test]
+fn runtime_api_returns_absolute_file_thumbnail() {
+    let fixture = Fixture::new("runtime_api_returns_absolute_file_thumbnail");
+    fixture.write_file("photo.jpg", "jpeg bytes");
+    let absolute_path = fixture.root.join("photo.jpg");
+
+    let (address, server) = serve_runtime_once(FauplayRuntime::new());
+
+    let response =
+        send_absolute_file_thumbnail_request(&address, &absolute_path.display().to_string());
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "response should be OK: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response
+            .windows(b"Content-Type: image/jpeg\r\n".len())
+            .any(|window| window == b"Content-Type: image/jpeg\r\n"),
+        "response should include JPEG content type: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(
+        response.ends_with(b"jpeg bytes"),
+        "response body should include thumbnail bytes: {}",
         String::from_utf8_lossy(&response)
     );
 }

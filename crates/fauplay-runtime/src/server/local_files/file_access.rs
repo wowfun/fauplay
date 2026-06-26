@@ -8,7 +8,7 @@ use crate::{
 
 use super::super::{
     HttpResponse, error_json, escape_json_string, file_content_response, http_response,
-    parse_file_content_range, text_preview_response_json,
+    json_string_field, parse_file_content_range, parse_json_body, text_preview_response_json,
 };
 
 pub(in crate::server) fn handle_text_preview(
@@ -47,6 +47,37 @@ pub(in crate::server) fn handle_text_preview(
     }
 }
 
+pub(in crate::server) fn handle_absolute_text_preview_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(absolute_path) = json_string_field(&payload, "absolutePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"absolutePath is required\"}",
+        );
+    };
+    let size_limit_bytes = payload
+        .get("sizeLimitBytes")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| *value > 0)
+        .unwrap_or(64 * 1024);
+
+    match runtime.read_absolute_text_preview(PathBuf::from(absolute_path), size_limit_bytes) {
+        Ok(response) => http_response(200, "OK", &text_preview_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
 pub(in crate::server) fn handle_file_content(
     runtime: &FauplayRuntime,
     query: &HashMap<String, String>,
@@ -70,6 +101,32 @@ pub(in crate::server) fn handle_file_content(
         root_relative_path,
         range: range_header.and_then(parse_file_content_range),
     }) {
+        Ok(response) => file_content_response(response),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+pub(in crate::server) fn handle_absolute_file_content(
+    runtime: &FauplayRuntime,
+    query: &HashMap<String, String>,
+    range_header: Option<&str>,
+) -> HttpResponse {
+    let Some(absolute_path) = query.get("absolutePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"absolutePath is required\"}",
+        );
+    };
+
+    match runtime.read_absolute_file_content(
+        PathBuf::from(absolute_path),
+        range_header.and_then(parse_file_content_range),
+    ) {
         Ok(response) => file_content_response(response),
         Err(error) => http_response(
             500,

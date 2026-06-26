@@ -102,9 +102,28 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             let query = parse_query_string(&target["/v1/text-preview?".len()..]);
             local_files::handle_text_preview(runtime, &query)
         }
+        Some(("POST", "/v1/files/text-preview")) => {
+            local_files::handle_absolute_text_preview_json(runtime, request)
+        }
         Some(("GET", target)) if target.starts_with("/v1/file-content?") => {
             let query = parse_query_string(&target["/v1/file-content?".len()..]);
             local_files::handle_file_content(runtime, &query, parse_header_value(request, "range"))
+        }
+        Some(("GET", target)) if target.starts_with("/v1/files/content?") => {
+            let query = parse_query_string(&target["/v1/files/content?".len()..]);
+            local_files::handle_absolute_file_content(
+                runtime,
+                &query,
+                parse_header_value(request, "range"),
+            )
+        }
+        Some(("GET", target)) if target.starts_with("/v1/files/thumbnail?") => {
+            let query = parse_query_string(&target["/v1/files/thumbnail?".len()..]);
+            local_files::handle_absolute_file_content(
+                runtime,
+                &query,
+                parse_header_value(request, "range"),
+            )
         }
         Some(("GET", target)) if target.starts_with("/v1/file-metadata?") => {
             let query = parse_query_string(&target["/v1/file-metadata?".len()..]);
@@ -185,7 +204,10 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/global-trash/move"
             | "/v1/global-trash/restore"
             | "/v1/text-preview"
+            | "/v1/files/text-preview"
             | "/v1/file-content"
+            | "/v1/files/content"
+            | "/v1/files/thumbnail"
             | "/v1/file-metadata"
             | "/v1/duplicate-files"
             | "/v1/file-annotations"

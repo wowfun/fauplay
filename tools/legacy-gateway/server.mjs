@@ -36,7 +36,6 @@ import {
 } from './remote-sessions.mjs'
 import {
   batchRebindPaths,
-  readFileContentByAbsolutePath,
   getFaceCrop,
   ingestClassificationResult,
 } from './data/core.mjs'
@@ -427,17 +426,6 @@ async function handleMcpRequest(runtime, request, sessions, sessionId) {
   }
 
   throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Unsupported MCP method: ${request.method}`, 404)
-}
-
-async function sendFileContentBinaryResponse(res, absolutePath) {
-  try {
-    const result = await readFileContentByAbsolutePath({
-      absolutePath,
-    })
-    sendBinary(res, 200, result.body, result.contentType)
-  } catch (error) {
-    sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-  }
 }
 
 export async function startGatewayServer(options = {}) {
@@ -933,18 +921,6 @@ export async function startGatewayServer(options = {}) {
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
       }
-      return
-    }
-
-    if (method === 'GET' && pathname === '/v1/files/content') {
-      const absolutePath = requestUrl.searchParams.get('absolutePath')
-      await sendFileContentBinaryResponse(res, absolutePath)
-      return
-    }
-
-    if (method === 'GET' && pathname === '/v1/files/thumbnail') {
-      const absolutePath = requestUrl.searchParams.get('absolutePath')
-      await sendFileContentBinaryResponse(res, absolutePath)
       return
     }
 

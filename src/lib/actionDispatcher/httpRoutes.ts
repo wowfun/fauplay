@@ -1,4 +1,4 @@
-import { isObjectArray, isStringArray, toArgsWithoutOperation } from './pathArgs'
+import { isObjectArray, isStringArray, toArgsWithoutOperation } from './pathArgs.ts'
 
 export interface DispatchHttpRoute {
   method?: 'POST' | 'PUT' | 'PATCH'
@@ -60,15 +60,6 @@ export function resolveDispatchHttpRoute(toolName: string, args: Record<string, 
       }
     }
     return null
-  }
-
-  if (toolName === 'data.findDuplicateFiles') {
-    return {
-      method: 'POST',
-      endpointPath: '/v1/files/duplicates/query',
-      payload,
-      timeoutMs: 120000,
-    }
   }
 
   if (toolName === 'vision.face') {

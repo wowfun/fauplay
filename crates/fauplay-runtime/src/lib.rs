@@ -109,11 +109,27 @@ impl FauplayRuntime {
         media::read_text_preview(request)
     }
 
+    pub fn read_absolute_text_preview(
+        &self,
+        file_path: PathBuf,
+        size_limit_bytes: u64,
+    ) -> Result<TextPreviewResponse, RuntimeError> {
+        media::read_text_preview_at_path(file_path, size_limit_bytes)
+    }
+
     pub fn read_file_content(
         &self,
         request: FileContentRequest,
     ) -> Result<FileContentResponse, RuntimeError> {
         media::read_file_content(request)
+    }
+
+    pub fn read_absolute_file_content(
+        &self,
+        file_path: PathBuf,
+        range: Option<FileContentRangeRequest>,
+    ) -> Result<FileContentResponse, RuntimeError> {
+        media::read_file_content_at_path(file_path, range)
     }
 
     pub fn read_global_trash_file_content(

@@ -37,15 +37,19 @@ test('runtime API dev proxy keeps only remote routes on the legacy gateway by de
   )
 })
 
-test('runtime API dev proxy keeps a legacy all-gateway override for migration checks', () => {
+test('runtime API dev proxy ignores the removed all-gateway migration override', () => {
   assert.deepEqual(
     resolveRuntimeApiDevProxyConfig({
       FAUPLAY_DEV_PROXY_RUNTIME_API: '1',
       FAUPLAY_DEV_PROXY_ALL_GATEWAY: 'true',
     }),
     {
-      '/v1': {
+      '/v1/remote': {
         target: DEFAULT_DEV_GATEWAY_TARGET,
+        changeOrigin: false,
+      },
+      '/v1': {
+        target: DEFAULT_DEV_RUNTIME_TARGET,
         changeOrigin: false,
       },
     },
