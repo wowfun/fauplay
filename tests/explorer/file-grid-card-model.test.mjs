@@ -139,6 +139,28 @@ test('File Grid Card Model plans runtime and file-access thumbnail sources', () 
     fileAccessThumbnail: true,
     pipelineThumbnail: false,
   })
+
+  assert.deepEqual(resolveFileGridCardThumbnailPlan({
+    file: file('deleted.jpg', {
+      path: 'deleted.jpg',
+      sourceType: 'global_recycle',
+      size: 42,
+      lastModifiedMs: 100,
+    }),
+    rootHandleAvailable: false,
+    thumbnailSizePreset: '256',
+  }), {
+    isDirectory: false,
+    previewKind: 'image',
+    mediaType: 'image',
+    fileLastModifiedMs: 100,
+    requestIdentity: 'deleted.jpg::42::100::image::256',
+    runtimeContentSource: 'global-trash',
+    runtimeImageThumbnail: true,
+    runtimeVideoThumbnail: false,
+    fileAccessThumbnail: false,
+    pipelineThumbnail: false,
+  })
 })
 
 test('File Grid Card Model keeps non-media and directory items on placeholders', () => {
@@ -369,6 +391,28 @@ test('File Grid Card Model resolves thumbnail source URLs from the thumbnail pla
     runtimeVideoThumbnailSourceUrl: null,
     fileAccessThumbnailUrl: '/file-access/remote.jpg',
     directThumbnailUrl: '/file-access/remote.jpg',
+    hasDirectThumbnailSource: true,
+  })
+
+  const globalTrashImagePlan = resolveFileGridCardThumbnailPlan({
+    file: file('deleted.jpg', {
+      path: 'deleted.jpg',
+      sourceType: 'global_recycle',
+    }),
+    rootHandleAvailable: false,
+    thumbnailSizePreset: '256',
+  })
+  assert.deepEqual(resolveFileGridCardThumbnailSourceUrls({
+    thumbnailPlan: globalTrashImagePlan,
+    runtimeLocalFileContentUrl: '/runtime/local/deleted.jpg',
+    runtimeGlobalTrashFileContentUrl: '/runtime/trash/deleted.jpg',
+    fileAccessThumbnailUrl: '/file-access/deleted.jpg',
+  }), {
+    runtimeFileContentUrl: '/runtime/trash/deleted.jpg',
+    runtimeThumbnailUrl: '/runtime/trash/deleted.jpg',
+    runtimeVideoThumbnailSourceUrl: null,
+    fileAccessThumbnailUrl: null,
+    directThumbnailUrl: '/runtime/trash/deleted.jpg',
     hasDirectThumbnailSource: true,
   })
 })
