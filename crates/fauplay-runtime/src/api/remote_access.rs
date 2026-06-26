@@ -1,4 +1,6 @@
-use super::{DirectoryEntryKind, ListingQuery, RootRelativePath};
+use super::{
+    DirectoryEntryKind, FileContentResponse, ListingQuery, RootRelativePath, TextPreviewResponse,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteRootEntry {
@@ -42,4 +44,47 @@ pub struct RemoteFileListResponse {
     pub items: Vec<RemoteListingEntry>,
     pub is_truncated: bool,
     pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFileContentRequest {
+    pub root_id: String,
+    pub path: RootRelativePath,
+    pub range_header: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteFileContentResponse {
+    Content {
+        content: FileContentResponse,
+        last_modified_ms: Option<u64>,
+    },
+    RangeNotSatisfiable {
+        total_size: u64,
+        last_modified_ms: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteTextPreviewRequest {
+    pub root_id: String,
+    pub path: RootRelativePath,
+    pub size_limit_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteTextPreviewResponse {
+    pub preview: TextPreviewResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFileThumbnailRequest {
+    pub root_id: String,
+    pub path: RootRelativePath,
+    pub size_preset: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFileThumbnailResponse {
+    pub content: FileContentResponse,
 }

@@ -1,20 +1,27 @@
+use std::collections::HashMap;
+use std::time::{Duration, UNIX_EPOCH};
+
 use crate::{
     DirectoryEntryKind, FauplayRuntime, ListingEntryFilter, ListingOrder, ListingQuery,
     ListingSortDirection, ListingSortKey, RemoteAccessConfigResponse,
     RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
     RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemoteFileListRequest, RemoteFileListResponse, RemoteListingEntry, RemoteRootsResponse,
+    RemoteFileContentRequest, RemoteFileContentResponse, RemoteFileListRequest,
+    RemoteFileListResponse, RemoteFileThumbnailRequest, RemoteFileThumbnailResponse,
+    RemoteListingEntry, RemoteRootsResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse,
     RootRelativePath,
 };
 
 use super::{
-    HttpResponse, error_json, escape_json_string, http_response, http_response_with_headers,
-    json_bool_field, json_string_field, json_string_or_default, optional_usize_json,
-    parse_header_value, parse_json_body,
+    HttpResponse, binary_response_with_headers, error_json, escape_json_string, http_response,
+    http_response_with_headers, json_bool_field, json_string_field, json_string_or_default,
+    optional_usize_json, parse_header_value, parse_json_body, text_preview_response_json,
 };
 
 const REMOTE_SESSION_COOKIE_NAME: &str = "__Host-fauplay-remote-session";
 const REMOTE_REMEMBER_DEVICE_COOKIE_NAME: &str = "__Host-fauplay-remote-remember-device";
+const REMOTE_CONTENT_CACHE_CONTROL: &str = "private, no-store";
+const REMOTE_DERIVATIVE_CACHE_CONTROL: &str = "private, max-age=300";
 
 pub(in crate::server) fn handle_remote_access_config(runtime: &FauplayRuntime) -> HttpResponse {
     match runtime.load_remote_access_config() {
@@ -176,6 +183,124 @@ pub(in crate::server) fn handle_remote_file_list(
     }
 }
 
+pub(in crate::server) fn handle_remote_file_content(
+    runtime: &FauplayRuntime,
+    request: &str,
+    query: &HashMap<String, String>,
+    range_header: Option<&str>,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let Some(root_id) = query
+        .get("rootId")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let path = query
+        .get("relativePath")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let path = match RootRelativePath::try_from(path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+
+    match runtime.read_remote_file_content(RemoteFileContentRequest {
+        root_id: root_id.to_owned(),
+        path,
+        range_header: range_header.map(ToOwned::to_owned),
+    }) {
+        Ok(response) => remote_file_content_http_response(response, headers),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_file_thumbnail(
+    runtime: &FauplayRuntime,
+    request: &str,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let Some(root_id) = query
+        .get("rootId")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let path = query
+        .get("relativePath")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let path = match RootRelativePath::try_from(path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+
+    match runtime.read_remote_file_thumbnail(RemoteFileThumbnailRequest {
+        root_id: root_id.to_owned(),
+        path,
+        size_preset: query
+            .get("sizePreset")
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+    }) {
+        Ok(response) => remote_thumbnail_http_response(response, headers),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_text_preview(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let Some(relative_path) = json_string_field(&payload, "relativePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"relativePath is required\"}",
+        );
+    };
+    let path = match RootRelativePath::try_from(relative_path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+    let size_limit_bytes = payload
+        .get("sizeLimitBytes")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| *value > 0)
+        .unwrap_or(64 * 1024);
+
+    match runtime.read_remote_text_preview(RemoteTextPreviewRequest {
+        root_id: root_id.to_owned(),
+        path,
+        size_limit_bytes,
+    }) {
+        Ok(response) => remote_text_preview_http_response(response, headers),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
 fn remote_access_config_json(response: RemoteAccessConfigResponse) -> String {
     let roots = response
         .roots
@@ -273,10 +398,123 @@ fn remote_error_response(
     if message.contains("Unknown Remote Root") {
         return http_response_with_headers(404, "Not Found", &error_json(&message), headers);
     }
+    if message.to_ascii_lowercase().contains("not found") {
+        return http_response_with_headers(404, "Not Found", &error_json(&message), headers);
+    }
+    if message.contains("escapes Remote Root") {
+        return http_response_with_headers(403, "Forbidden", &error_json(&message), headers);
+    }
+    if message.contains("exceeds remote budget") {
+        return http_response_with_headers(
+            422,
+            "Unprocessable Entity",
+            &error_json(&message),
+            headers,
+        );
+    }
     if message.contains("required") || message.contains("invalid Root-relative Path") {
         return http_response_with_headers(400, "Bad Request", &error_json(&message), headers);
     }
+    if message.contains("relativePath must point to a file") {
+        return http_response_with_headers(400, "Bad Request", &error_json(&message), headers);
+    }
     http_response_with_headers(500, "Internal Server Error", &error_json(&message), headers)
+}
+
+fn remote_file_content_http_response(
+    response: RemoteFileContentResponse,
+    headers: Vec<(String, String)>,
+) -> HttpResponse {
+    match response {
+        RemoteFileContentResponse::Content {
+            content,
+            last_modified_ms,
+        } => {
+            let mut headers = remote_file_content_headers(headers, last_modified_ms);
+            headers.push(("Accept-Ranges".to_owned(), "bytes".to_owned()));
+            if let Some(range) = content.range {
+                headers.push((
+                    "Content-Range".to_owned(),
+                    format!(
+                        "bytes {}-{}/{}",
+                        range.start, range.end_inclusive, content.total_size
+                    ),
+                ));
+                return binary_response_with_headers(
+                    206,
+                    "Partial Content",
+                    &content.content_type,
+                    content.bytes,
+                    headers,
+                );
+            }
+
+            binary_response_with_headers(200, "OK", &content.content_type, content.bytes, headers)
+        }
+        RemoteFileContentResponse::RangeNotSatisfiable {
+            total_size,
+            last_modified_ms,
+        } => {
+            let mut headers = remote_file_content_headers(headers, last_modified_ms);
+            headers.push(("Accept-Ranges".to_owned(), "bytes".to_owned()));
+            headers.push(("Content-Range".to_owned(), format!("bytes */{total_size}")));
+            binary_response_with_headers(
+                416,
+                "Range Not Satisfiable",
+                "application/octet-stream",
+                Vec::new(),
+                headers,
+            )
+        }
+    }
+}
+
+fn remote_thumbnail_http_response(
+    response: RemoteFileThumbnailResponse,
+    headers: Vec<(String, String)>,
+) -> HttpResponse {
+    let mut headers = headers;
+    headers.push((
+        "Cache-Control".to_owned(),
+        REMOTE_DERIVATIVE_CACHE_CONTROL.to_owned(),
+    ));
+    headers.push(("Accept-Ranges".to_owned(), "bytes".to_owned()));
+    binary_response_with_headers(
+        200,
+        "OK",
+        &response.content.content_type,
+        response.content.bytes,
+        headers,
+    )
+}
+
+fn remote_text_preview_http_response(
+    response: RemoteTextPreviewResponse,
+    headers: Vec<(String, String)>,
+) -> HttpResponse {
+    http_response_with_headers(
+        200,
+        "OK",
+        &text_preview_response_json(response.preview),
+        headers,
+    )
+}
+
+fn remote_file_content_headers(
+    mut headers: Vec<(String, String)>,
+    last_modified_ms: Option<u64>,
+) -> Vec<(String, String)> {
+    headers.push((
+        "Cache-Control".to_owned(),
+        REMOTE_CONTENT_CACHE_CONTROL.to_owned(),
+    ));
+    if let Some(last_modified_ms) = last_modified_ms {
+        headers.push((
+            "Last-Modified".to_owned(),
+            httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_millis(last_modified_ms)),
+        ));
+    }
+    headers
 }
 
 fn remote_roots_json(response: RemoteRootsResponse) -> String {

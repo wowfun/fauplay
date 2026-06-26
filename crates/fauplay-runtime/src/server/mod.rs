@@ -21,8 +21,8 @@ mod runtime_config;
 pub use http::{serve_http, serve_one_http_request};
 
 use http::{
-    HttpResponse, binary_response, file_content_response, http_response,
-    http_response_with_headers, parse_file_content_range, parse_header_value,
+    HttpResponse, binary_response, binary_response_with_headers, file_content_response,
+    http_response, http_response_with_headers, parse_file_content_range, parse_header_value,
     parse_http_request_line,
 };
 use request::{
@@ -81,6 +81,34 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("GET", "/v1/remote/roots")) => remote_access::handle_remote_roots(runtime, request),
         Some(("POST", "/v1/remote/files/list")) => {
             remote_access::handle_remote_file_list(runtime, request)
+        }
+        Some(("GET", target))
+            if target == "/v1/remote/files/content"
+                || target.starts_with("/v1/remote/files/content?") =>
+        {
+            let query = target
+                .strip_prefix("/v1/remote/files/content?")
+                .map(parse_query_string)
+                .unwrap_or_default();
+            remote_access::handle_remote_file_content(
+                runtime,
+                request,
+                &query,
+                parse_header_value(request, "range"),
+            )
+        }
+        Some(("GET", target))
+            if target == "/v1/remote/files/thumbnail"
+                || target.starts_with("/v1/remote/files/thumbnail?") =>
+        {
+            let query = target
+                .strip_prefix("/v1/remote/files/thumbnail?")
+                .map(parse_query_string)
+                .unwrap_or_default();
+            remote_access::handle_remote_file_thumbnail(runtime, request, &query)
+        }
+        Some(("POST", "/v1/remote/files/text-preview")) => {
+            remote_access::handle_remote_text_preview(runtime, request)
         }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
@@ -410,6 +438,9 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/remote/session/logout"
             | "/v1/remote/roots"
             | "/v1/remote/files/list"
+            | "/v1/remote/files/content"
+            | "/v1/remote/files/thumbnail"
+            | "/v1/remote/files/text-preview"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

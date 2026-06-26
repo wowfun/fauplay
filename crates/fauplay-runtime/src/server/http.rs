@@ -218,7 +218,7 @@ pub(super) fn binary_response(
     binary_response_with_headers(status_code, reason, content_type, body, Vec::new())
 }
 
-fn binary_response_with_headers(
+pub(super) fn binary_response_with_headers(
     status_code: u16,
     reason: &'static str,
     content_type: &str,

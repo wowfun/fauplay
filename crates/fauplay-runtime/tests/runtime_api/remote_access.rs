@@ -267,6 +267,254 @@ fn runtime_api_remote_file_list_resolves_remote_roots_and_projects_listing_items
 }
 
 #[test]
+fn runtime_api_remote_file_content_serves_ranges_and_rejects_invalid_ranges() {
+    let fixture =
+        Fixture::new("runtime_api_remote_file_content_serves_ranges_and_rejects_invalid_ranges");
+    fixture.create_dir("Shared Root");
+    fixture.write_file("Shared Root/sample.txt", "abcdef");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let query = "rootId=shared-root&relativePath=sample.txt";
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let response = send_remote_file_content_request(
+        &address,
+        Some(&session_cookie_pair),
+        query,
+        Some("bytes=1-3"),
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+        "Remote File Content should serve byte ranges: {response}"
+    );
+    assert_eq!(
+        response_header(&response, "Content-Type").as_deref(),
+        Some("text/plain; charset=utf-8")
+    );
+    assert_eq!(
+        response_header(&response, "Content-Range").as_deref(),
+        Some("bytes 1-3/6")
+    );
+    assert_eq!(
+        response_header(&response, "Cache-Control").as_deref(),
+        Some("private, no-store")
+    );
+    assert!(
+        response_header(&response, "Last-Modified").is_some(),
+        "Remote File Content should expose Last-Modified for cache validation: {response}"
+    );
+    assert_eq!(response_body(&response), "bcd");
+
+    let (address, server) = serve_runtime_once(runtime);
+    let invalid_response = send_remote_file_content_request(
+        &address,
+        Some(&session_cookie_pair),
+        query,
+        Some("bytes=99-100"),
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        invalid_response.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"),
+        "Remote File Content should reject invalid ranges before streaming: {invalid_response}"
+    );
+    assert_eq!(
+        response_header(&invalid_response, "Content-Range").as_deref(),
+        Some("bytes */6")
+    );
+    assert_eq!(response_body(&invalid_response), "");
+}
+
+#[test]
+fn runtime_api_remote_text_preview_resolves_remote_roots_without_absolute_paths() {
+    let fixture = Fixture::new(
+        "runtime_api_remote_text_preview_resolves_remote_roots_without_absolute_paths",
+    );
+    fixture.create_dir("Shared Root");
+    fixture.write_file("Shared Root/sample.txt", "runtime preview content");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_remote_text_preview_request(
+        &address,
+        Some(&session_cookie_pair),
+        r#"{"rootId":"shared-root","relativePath":"sample.txt","sizeLimitBytes":64}"#,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Text Preview should be served by the Runtime: {response}"
+    );
+    let payload = response_json(&response);
+    assert_eq!(payload["status"], "ready");
+    assert_eq!(payload["content"], "runtime preview content");
+    assert_eq!(payload["fileSizeBytes"], 23);
+    assert_eq!(payload["sizeLimitBytes"], 64);
+    assert!(
+        !response.contains(&shared_root_json),
+        "Remote Text Preview response must not expose host paths: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_remote_thumbnail_rejects_sources_over_remote_budget() {
+    let fixture = Fixture::new("runtime_api_remote_thumbnail_rejects_sources_over_remote_budget");
+    fixture.create_dir("Shared Root");
+    let large_source_path = fixture.root.join("Shared Root/large.bin");
+    std::fs::File::create(&large_source_path)
+        .expect("large fixture source should be created")
+        .set_len(33 * 1024 * 1024)
+        .expect("large fixture source should be sized");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_remote_thumbnail_request(
+        &address,
+        Some(&session_cookie_pair),
+        "rootId=shared-root&relativePath=large.bin&sizePreset=small",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 422 Unprocessable Entity\r\n"),
+        "Remote Thumbnail should reject sources over the remote budget: {response}"
+    );
+    assert!(
+        response.contains("Thumbnail source exceeds remote budget"),
+        "Remote Thumbnail budget errors should be explicit: {response}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_api_remote_file_content_rejects_symlink_escape() {
+    let fixture = Fixture::new("runtime_api_remote_file_content_rejects_symlink_escape");
+    fixture.create_dir("Shared Root");
+    fixture.write_file("outside.txt", "outside secret");
+    std::os::unix::fs::symlink(
+        fixture.root.join("outside.txt"),
+        fixture.root.join("Shared Root/escape.txt"),
+    )
+    .expect("fixture symlink should be created");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_remote_file_content_request(
+        &address,
+        Some(&session_cookie_pair),
+        "rootId=shared-root&relativePath=escape.txt",
+        None,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 403 Forbidden\r\n"),
+        "Remote File Content should reject symlink escapes from a Remote Root: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_returns_remote_access_config_without_exposing_token() {
     let fixture = Fixture::new("runtime_api_returns_remote_access_config_without_exposing_token");
     fixture.create_dir("Shared Root");
@@ -462,4 +710,19 @@ fn response_json(response: &str) -> Value {
         .nth(1)
         .expect("HTTP response should contain a body");
     serde_json::from_str(body).expect("HTTP response body should be JSON")
+}
+
+fn response_body(response: &str) -> &str {
+    response
+        .split("\r\n\r\n")
+        .nth(1)
+        .expect("HTTP response should contain a body")
+}
+
+fn response_header(response: &str, header_name: &str) -> Option<String> {
+    response.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(header_name)
+            .then(|| value.trim().to_owned())
+    })
 }

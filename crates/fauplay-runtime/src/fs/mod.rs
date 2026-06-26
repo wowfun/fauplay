@@ -20,7 +20,7 @@ pub(crate) use root_trash::{list_root_trash, move_to_root_trash, restore_from_ro
 
 const RESERVED_FOLDER_NAMES: &[&str] = &[ROOT_TRASH_FOLDER_NAME];
 
-fn modified_timestamp_ms(metadata: &fs::Metadata) -> Option<u64> {
+pub(crate) fn modified_timestamp_ms(metadata: &fs::Metadata) -> Option<u64> {
     let duration = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
     u64::try_from(duration.as_millis()).ok()
 }

@@ -44,16 +44,18 @@ pub use api::{
     RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
     RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
     RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemoteFileListRequest, RemoteFileListResponse, RemoteListingEntry, RemotePublishedRoot,
-    RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
-    RemotePublishedRootsResponse, RemoteRootEntry, RemoteRootsResponse, RemoteSharedFavorite,
-    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
-    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
-    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
-    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
-    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
-    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
-    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    RemoteFileContentRequest, RemoteFileContentResponse, RemoteFileListRequest,
+    RemoteFileListResponse, RemoteFileThumbnailRequest, RemoteFileThumbnailResponse,
+    RemoteListingEntry, RemotePublishedRoot, RemotePublishedRootSyncEntry,
+    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
+    RemoteRootEntry, RemoteRootsResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
+    RemoteSharedFavoriteRemoveResponse, RemoteSharedFavoriteUpsertRequest,
+    RemoteSharedFavoritesResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse,
+    RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,
+    RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode,
+    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
+    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
+    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::collections::HashSet;
@@ -553,6 +555,100 @@ impl FauplayRuntime {
         })
     }
 
+    pub fn read_remote_file_content(
+        &self,
+        request: RemoteFileContentRequest,
+    ) -> Result<RemoteFileContentResponse, RuntimeError> {
+        let resource = self.resolve_remote_file_resource(&request.root_id, &request.path)?;
+        let Some(range) =
+            resolve_remote_file_content_range(request.range_header.as_deref(), resource.size_bytes)
+        else {
+            return Ok(RemoteFileContentResponse::RangeNotSatisfiable {
+                total_size: resource.size_bytes,
+                last_modified_ms: resource.last_modified_ms,
+            });
+        };
+
+        if range
+            .requested_byte_count
+            .is_some_and(|byte_count| byte_count > remote_max_range_bytes())
+        {
+            return Err(RuntimeError::runtime_capability(
+                "Requested media range exceeds remote budget",
+            ));
+        }
+
+        let content = media::read_file_content_at_path(resource.absolute_path, range.request)?;
+        Ok(RemoteFileContentResponse::Content {
+            content,
+            last_modified_ms: resource.last_modified_ms,
+        })
+    }
+
+    pub fn read_remote_text_preview(
+        &self,
+        request: RemoteTextPreviewRequest,
+    ) -> Result<RemoteTextPreviewResponse, RuntimeError> {
+        let resource = self.resolve_remote_file_resource(&request.root_id, &request.path)?;
+        let preview =
+            media::read_text_preview_at_path(resource.absolute_path, request.size_limit_bytes)?;
+        Ok(RemoteTextPreviewResponse { preview })
+    }
+
+    pub fn read_remote_file_thumbnail(
+        &self,
+        request: RemoteFileThumbnailRequest,
+    ) -> Result<RemoteFileThumbnailResponse, RuntimeError> {
+        let resource = self.resolve_remote_file_resource(&request.root_id, &request.path)?;
+        if resource.size_bytes > remote_thumbnail_source_max_bytes() {
+            return Err(RuntimeError::runtime_capability(
+                "Thumbnail source exceeds remote budget",
+            ));
+        }
+
+        let _size_preset = request.size_preset;
+        let content = media::read_file_content_at_path(resource.absolute_path, None)?;
+        Ok(RemoteFileThumbnailResponse { content })
+    }
+
+    fn resolve_remote_file_resource(
+        &self,
+        root_id: &str,
+        root_relative_path: &RootRelativePath,
+    ) -> Result<RemoteFileResource, RuntimeError> {
+        let config = self.load_remote_access_config()?;
+        let root_id = root_id.trim();
+        if root_id.is_empty() {
+            return Err(RuntimeError::runtime_capability("rootId is required"));
+        }
+        let Some(root) = config.roots.into_iter().find(|root| root.id == root_id) else {
+            return Err(RuntimeError::runtime_capability("Unknown Remote Root"));
+        };
+
+        let candidate_path = root.path.join(root_relative_path.as_path());
+        let absolute_path = std::fs::canonicalize(&candidate_path)
+            .map_err(|error| RuntimeError::read_file(&candidate_path, error))?;
+        if !absolute_path.starts_with(&root.real_path) {
+            return Err(RuntimeError::runtime_capability(
+                "Remote File path escapes Remote Root",
+            ));
+        }
+
+        let metadata = std::fs::metadata(&absolute_path)
+            .map_err(|error| RuntimeError::read_file(&absolute_path, error))?;
+        if !metadata.is_file() {
+            return Err(RuntimeError::runtime_capability(
+                "relativePath must point to a file",
+            ));
+        }
+
+        Ok(RemoteFileResource {
+            absolute_path,
+            size_bytes: metadata.len(),
+            last_modified_ms: fs::modified_timestamp_ms(&metadata),
+        })
+    }
+
     pub fn list_global_trash(
         &self,
         request: GlobalTrashListRequest,
@@ -847,4 +943,92 @@ fn preview_kind_for_name(name: &str) -> &'static str {
         | "java" | "go" | "rs" | "vue" | "svelte" => "text",
         _ => "unsupported",
     }
+}
+
+struct RemoteFileResource {
+    absolute_path: PathBuf,
+    size_bytes: u64,
+    last_modified_ms: Option<u64>,
+}
+
+struct RemoteContentRange {
+    request: Option<FileContentRangeRequest>,
+    requested_byte_count: Option<u64>,
+}
+
+fn resolve_remote_file_content_range(
+    range_header: Option<&str>,
+    total_size_bytes: u64,
+) -> Option<RemoteContentRange> {
+    let Some(range_header) = range_header
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Some(RemoteContentRange {
+            request: None,
+            requested_byte_count: None,
+        });
+    };
+    let range_spec = range_header.strip_prefix("bytes=")?;
+    if range_spec.contains(',') || total_size_bytes == 0 {
+        return None;
+    }
+    let (start_raw, end_raw) = range_spec.split_once('-')?;
+    if start_raw.is_empty() && end_raw.is_empty() {
+        return None;
+    }
+
+    if start_raw.is_empty() {
+        let suffix_length = end_raw.parse::<u64>().ok()?;
+        if suffix_length == 0 {
+            return None;
+        }
+        let requested_byte_count = suffix_length.min(total_size_bytes);
+        return Some(RemoteContentRange {
+            request: Some(FileContentRangeRequest::Suffix {
+                length: suffix_length,
+            }),
+            requested_byte_count: Some(requested_byte_count),
+        });
+    }
+
+    let start = start_raw.parse::<u64>().ok()?;
+    let end = if end_raw.is_empty() {
+        total_size_bytes.saturating_sub(1)
+    } else {
+        end_raw
+            .parse::<u64>()
+            .ok()?
+            .min(total_size_bytes.saturating_sub(1))
+    };
+    if start >= total_size_bytes || end < start {
+        return None;
+    }
+
+    Some(RemoteContentRange {
+        request: Some(FileContentRangeRequest::Exact {
+            start,
+            end_inclusive: end,
+        }),
+        requested_byte_count: Some(end - start + 1),
+    })
+}
+
+fn remote_max_range_bytes() -> u64 {
+    read_positive_integer_env("FAUPLAY_REMOTE_MAX_RANGE_BYTES", 16 * 1024 * 1024)
+}
+
+fn remote_thumbnail_source_max_bytes() -> u64 {
+    read_positive_integer_env(
+        "FAUPLAY_REMOTE_THUMBNAIL_SOURCE_MAX_BYTES",
+        32 * 1024 * 1024,
+    )
+}
+
+fn read_positive_integer_env(name: &str, fallback: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
 }
