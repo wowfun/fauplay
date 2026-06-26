@@ -1,22 +1,19 @@
 import http from 'node:http'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 import {
-  parseRemoteByteRangeHeader,
   readRuntimeFaceCrop,
-  readRuntimeFileContent,
-  readRuntimeFileThumbnail,
-  readRuntimeTextPreview,
-  sendRemoteRangeNotSatisfiable,
   sendRuntimeFileContentResponse,
 } from './remote-file-access.mjs'
 import {
   appendRemoteRuntimeSetCookies,
-  createRemoteBudgetExceededError,
   ensureRemoteReadonlySessionAuthorized,
+  forwardRemoteReadonlyFileContent,
   forwardRemoteReadonlyFileList,
+  forwardRemoteReadonlyFileThumbnail,
   forwardRemoteReadonlyRoots,
   forwardRemoteReadonlySessionLogin,
   forwardRemoteReadonlySessionLogout,
+  forwardRemoteReadonlyTextPreview,
 } from './remote-sessions.mjs'
 import {
   formatRemoteAccessConfigSourceLog,
@@ -30,8 +27,6 @@ import {
   queryRemoteReadonlyFilesByTags,
   removeRemoteReadonlyFavorite,
   resolveRemoteRoot,
-  resolveRemoteReadonlyFileResource,
-  resolveRemoteReadonlyThumbnailResource,
   upsertRemoteReadonlyFavorite,
 } from './remote-readonly.mjs'
 
@@ -39,14 +34,7 @@ const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_RUNTIME_BASE_URL = 'http://127.0.0.1:3211'
 const GATEWAY_VERSION = '0.2.0'
-const REMOTE_CONTENT_CACHE_CONTROL = 'private, no-store'
 const REMOTE_DERIVATIVE_CACHE_CONTROL = 'private, max-age=300'
-const REMOTE_MAX_RANGE_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_MAX_RANGE_BYTES', 16 * 1024 * 1024)
-
-function readPositiveIntegerEnv(name, fallback) {
-  const raw = Number.parseInt(process.env[name] || '', 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback
-}
 
 function resolveRuntimeBaseUrl(env = process.env) {
   const raw = (
@@ -310,43 +298,10 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'GET' && pathname === '/v1/remote/files/content') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
-        const resource = await resolveRemoteReadonlyFileResource(currentRemoteReadonlyConfig, {
+        await forwardRemoteReadonlyFileContent(req, res, runtimeBaseUrl, {
           rootId: requestUrl.searchParams.get('rootId'),
           relativePath: requestUrl.searchParams.get('relativePath'),
         })
-        const requestedRange = parseRemoteByteRangeHeader(req.headers.range, resource.sizeBytes)
-        if (requestedRange && requestedRange.invalid === true) {
-          sendRemoteRangeNotSatisfiable(res, resource.sizeBytes, {
-            cacheControl: REMOTE_CONTENT_CACHE_CONTROL,
-            lastModifiedMs: resource.lastModifiedMs,
-          })
-          return
-        }
-        if (
-          requestedRange
-          && requestedRange.end - requestedRange.start + 1 > REMOTE_MAX_RANGE_BYTES
-        ) {
-          throw createRemoteBudgetExceededError('Requested media range exceeds remote budget')
-        }
-        const result = await readRuntimeFileContent(runtimeBaseUrl, {
-          absolutePath: resource.absolutePath,
-          rangeHeader: req.headers.range,
-        })
-        sendRuntimeFileContentResponse(
-          res,
-          result,
-          {
-            cacheControl: REMOTE_CONTENT_CACHE_CONTROL,
-            lastModifiedMs: resource.lastModifiedMs,
-          },
-        )
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -355,24 +310,10 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'GET' && pathname === '/v1/remote/files/thumbnail') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
-        const resource = await resolveRemoteReadonlyThumbnailResource(currentRemoteReadonlyConfig, {
+        await forwardRemoteReadonlyFileThumbnail(req, res, runtimeBaseUrl, {
           rootId: requestUrl.searchParams.get('rootId'),
           relativePath: requestUrl.searchParams.get('relativePath'),
           sizePreset: requestUrl.searchParams.get('sizePreset'),
-        })
-        const result = await readRuntimeFileThumbnail(runtimeBaseUrl, {
-          absolutePath: resource.absolutePath,
-          sizePreset: requestUrl.searchParams.get('sizePreset'),
-        })
-        sendRuntimeFileContentResponse(res, result, {
-          cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
         })
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
@@ -395,25 +336,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/files/text-preview') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        const resource = await resolveRemoteReadonlyFileResource(currentRemoteReadonlyConfig, {
-          rootId: payload.rootId,
-          relativePath: payload.relativePath,
-        })
-        sendJson(res, 200, await readRuntimeTextPreview(runtimeBaseUrl, {
-          absolutePath: resource.absolutePath,
-          ...(typeof payload.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: payload.sizeLimitBytes } : {}),
-        }))
+        await forwardRemoteReadonlyTextPreview(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }

@@ -54,6 +54,7 @@ test('Remote Access text preview is served through Fauplay Runtime', async () =>
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie,
         body,
       })
       res.statusCode = 200
@@ -105,9 +106,11 @@ test('Remote Access text preview is served through Fauplay Runtime', async () =>
     })
     assert.equal(runtimeRequests.length, 1)
     assert.equal(runtimeRequests[0].method, 'POST')
-    assert.equal(runtimeRequests[0].url, '/v1/files/text-preview')
+    assert.equal(runtimeRequests[0].url, '/v1/remote/files/text-preview')
+    assert.equal(runtimeRequests[0].cookie, sessionCookie)
     assert.deepEqual(JSON.parse(runtimeRequests[0].body), {
-      absolutePath: path.join(remoteRoot, 'sample.txt'),
+      rootId: 'root-a',
+      relativePath: 'sample.txt',
       sizeLimitBytes: 42,
     })
   } finally {

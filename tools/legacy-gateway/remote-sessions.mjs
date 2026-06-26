@@ -2,8 +2,11 @@ import {
   authorizeRuntimeRemoteAccessSession,
   loginRuntimeRemoteAccessSession,
   logoutRuntimeRemoteAccessSession,
+  readRuntimeRemoteFileContent,
   readRuntimeRemoteFileList,
+  readRuntimeRemoteFileThumbnail,
   readRuntimeRemoteRoots,
+  readRuntimeRemoteTextPreview,
 } from './remote-file-access.mjs'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 
@@ -12,13 +15,6 @@ function createRemoteUnauthorizedError(setCookies = []) {
   error.code = 'REMOTE_UNAUTHORIZED'
   error.statusCode = 401
   error.setCookies = setCookies
-  return error
-}
-
-export function createRemoteBudgetExceededError(message = 'Remote request exceeds configured budget') {
-  const error = new Error(message)
-  error.code = 'REMOTE_BUDGET_EXCEEDED'
-  error.statusCode = 422
   return error
 }
 
@@ -68,6 +64,39 @@ export async function forwardRemoteReadonlyFileList(req, res, runtimeBaseUrl, pa
   sendRuntimeSessionExchangeResponse(res, result)
 }
 
+export async function forwardRemoteReadonlyFileContent(req, res, runtimeBaseUrl, query = {}) {
+  const result = await readRuntimeRemoteFileContent(runtimeBaseUrl, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+    rangeHeader: readHeader(req, 'range'),
+    rootId: query.rootId,
+    relativePath: query.relativePath,
+  })
+  sendRuntimeBinaryExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyFileThumbnail(req, res, runtimeBaseUrl, query = {}) {
+  const result = await readRuntimeRemoteFileThumbnail(runtimeBaseUrl, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+    rootId: query.rootId,
+    relativePath: query.relativePath,
+    sizePreset: query.sizePreset,
+  })
+  sendRuntimeBinaryExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyTextPreview(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await readRuntimeRemoteTextPreview(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
 export async function ensureRemoteReadonlySessionAuthorized(
   remoteConfig,
   req,
@@ -101,6 +130,29 @@ function sendRuntimeSessionExchangeResponse(res, result) {
   res.statusCode = result.statusCode
   res.setHeader('Content-Type', result.contentType || 'application/json')
   res.end(result.body)
+}
+
+function sendRuntimeBinaryExchangeResponse(res, result) {
+  appendRemoteRuntimeSetCookies(res, result.setCookies)
+  const body = Buffer.isBuffer(result.body)
+    ? result.body
+    : Buffer.from(result.body ?? [])
+  res.statusCode = result.statusCode
+  res.setHeader('Content-Type', result.contentType || 'application/octet-stream')
+  res.setHeader('Content-Length', String(body.length))
+  if (result.acceptRanges) {
+    res.setHeader('Accept-Ranges', result.acceptRanges)
+  }
+  if (result.cacheControl) {
+    res.setHeader('Cache-Control', result.cacheControl)
+  }
+  if (result.contentRange) {
+    res.setHeader('Content-Range', result.contentRange)
+  }
+  if (result.lastModified) {
+    res.setHeader('Last-Modified', result.lastModified)
+  }
+  res.end(body)
 }
 
 function appendSetCookieHeader(res, cookieValue) {

@@ -53,11 +53,21 @@ test('Remote Access file content is served through Fauplay Runtime', async () =>
       runtimeRequests.push({
         url: req.url,
         range: req.headers.range,
+        cookie: req.headers.cookie,
       })
+      if (req.headers.range === 'bytes=99-100') {
+        res.statusCode = 416
+        res.setHeader('Accept-Ranges', 'bytes')
+        res.setHeader('Content-Range', 'bytes */6')
+        res.setHeader('Cache-Control', 'private, no-store')
+        res.end()
+        return
+      }
       res.statusCode = 206
       res.setHeader('Content-Type', 'text/plain; charset=utf-8')
       res.setHeader('Accept-Ranges', 'bytes')
       res.setHeader('Content-Range', 'bytes 1-3/6')
+      res.setHeader('Cache-Control', 'private, no-store')
       res.setHeader('Content-Length', '3')
       res.end('XYZ')
     })
@@ -108,9 +118,12 @@ test('Remote Access file content is served through Fauplay Runtime', async () =>
     assert.equal(await response.text(), 'XYZ')
     assert.equal(runtimeRequests.length, 1)
     assert.equal(runtimeRequests[0].range, 'bytes=1-3')
+    assert.equal(runtimeRequests[0].cookie, sessionCookie)
     const runtimeRequestUrl = new URL(runtimeRequests[0].url, runtimeAddress)
-    assert.equal(runtimeRequestUrl.pathname, '/v1/files/content')
-    assert.equal(runtimeRequestUrl.searchParams.get('absolutePath'), path.join(remoteRoot, 'sample.txt'))
+    assert.equal(runtimeRequestUrl.pathname, '/v1/remote/files/content')
+    assert.equal(runtimeRequestUrl.searchParams.get('rootId'), 'root-a')
+    assert.equal(runtimeRequestUrl.searchParams.get('relativePath'), 'sample.txt')
+    assert.equal(runtimeRequestUrl.searchParams.has('absolutePath'), false)
 
     const invalidRangeResponse = await fetch(`${gatewayAddress}/v1/remote/files/content?rootId=root-a&relativePath=sample.txt`, {
       headers: {
@@ -121,7 +134,13 @@ test('Remote Access file content is served through Fauplay Runtime', async () =>
     assert.equal(invalidRangeResponse.status, 416)
     assert.equal(invalidRangeResponse.headers.get('content-range'), 'bytes */6')
     assert.equal(await invalidRangeResponse.text(), '')
-    assert.equal(runtimeRequests.length, 1)
+    assert.equal(runtimeRequests.length, 2)
+    assert.equal(runtimeRequests[1].range, 'bytes=99-100')
+    const invalidRuntimeRequestUrl = new URL(runtimeRequests[1].url, runtimeAddress)
+    assert.equal(invalidRuntimeRequestUrl.pathname, '/v1/remote/files/content')
+    assert.equal(invalidRuntimeRequestUrl.searchParams.get('rootId'), 'root-a')
+    assert.equal(invalidRuntimeRequestUrl.searchParams.get('relativePath'), 'sample.txt')
+    assert.equal(invalidRuntimeRequestUrl.searchParams.has('absolutePath'), false)
   } finally {
     if (gatewayServer) await closeServer(gatewayServer)
     if (runtimeServer) await closeServer(runtimeServer)

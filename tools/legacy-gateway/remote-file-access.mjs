@@ -22,14 +22,6 @@ function normalizeRuntimeBaseUrl(runtimeBaseUrl) {
   return normalizedBaseUrl
 }
 
-function normalizeAbsolutePathInput(absolutePath) {
-  const normalizedAbsolutePath = typeof absolutePath === 'string' ? absolutePath.trim() : ''
-  if (!normalizedAbsolutePath) {
-    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'absolutePath is required', 400)
-  }
-  return normalizedAbsolutePath
-}
-
 function normalizeRequiredStringInput(value, fieldName) {
   const normalizedValue = typeof value === 'string' ? value.trim() : ''
   if (!normalizedValue) {
@@ -168,6 +160,51 @@ async function getRuntimeJsonExchange(runtimeBaseUrl, pathname, options = {}) {
   }
 }
 
+async function getRuntimeBinaryExchange(runtimeBaseUrl, pathname, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
+  appendRuntimeQueryParams(endpoint, options.query)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const headers = {
+    ...(typeof options.cookieHeader === 'string' && options.cookieHeader.trim()
+      ? { Cookie: options.cookieHeader.trim() }
+      : {}),
+    ...(typeof options.userAgent === 'string' && options.userAgent.trim()
+      ? { 'User-Agent': options.userAgent.trim() }
+      : {}),
+    ...(typeof options.forwardedFor === 'string' && options.forwardedFor.trim()
+      ? { 'X-Forwarded-For': options.forwardedFor.trim() }
+      : {}),
+    ...(typeof options.rangeHeader === 'string' && options.rangeHeader.trim()
+      ? { Range: options.rangeHeader.trim() }
+      : {}),
+  }
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    })
+    return {
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      setCookies: responseSetCookies(response),
+      acceptRanges: response.headers.get('accept-ranges'),
+      cacheControl: response.headers.get('cache-control'),
+      contentRange: response.headers.get('content-range'),
+      lastModified: response.headers.get('last-modified'),
+      body: Buffer.from(await response.arrayBuffer()),
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, pathname)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 async function postRuntimeJsonExchange(runtimeBaseUrl, pathname, payload, options = {}) {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
   const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
@@ -210,151 +247,27 @@ async function postRuntimeJsonExchange(runtimeBaseUrl, pathname, payload, option
   }
 }
 
+function appendRuntimeQueryParams(endpoint, query) {
+  if (!query || typeof query !== 'object') {
+    return
+  }
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value !== 'string') {
+      continue
+    }
+    const normalizedValue = value.trim()
+    if (normalizedValue) {
+      endpoint.searchParams.set(key, normalizedValue)
+    }
+  }
+}
+
 function responseSetCookies(response) {
   if (typeof response.headers.getSetCookie === 'function') {
     return response.headers.getSetCookie()
   }
   const raw = response.headers.get('set-cookie') ?? ''
   return raw.split(/,\s*(?=__Host-fauplay-remote-)/).filter(Boolean)
-}
-
-export function parseRemoteByteRangeHeader(rangeHeader, totalSizeBytes) {
-  if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
-    return null
-  }
-
-  if (!rangeHeader.startsWith('bytes=')) {
-    return { invalid: true }
-  }
-
-  if (!Number.isFinite(totalSizeBytes) || totalSizeBytes <= 0) {
-    return { invalid: true }
-  }
-
-  const rawRanges = rangeHeader.slice('bytes='.length).split(',').map((value) => value.trim()).filter(Boolean)
-  if (rawRanges.length !== 1) {
-    return { invalid: true }
-  }
-
-  const [startPart = '', endPart = ''] = rawRanges[0].split('-', 2)
-  if (!startPart && !endPart) {
-    return { invalid: true }
-  }
-
-  if (!startPart) {
-    const suffixLength = Number.parseInt(endPart, 10)
-    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
-      return { invalid: true }
-    }
-    const clampedLength = Math.min(suffixLength, totalSizeBytes)
-    return {
-      start: totalSizeBytes - clampedLength,
-      end: totalSizeBytes - 1,
-    }
-  }
-
-  const start = Number.parseInt(startPart, 10)
-  const end = endPart ? Number.parseInt(endPart, 10) : totalSizeBytes - 1
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= totalSizeBytes) {
-    return { invalid: true }
-  }
-
-  return {
-    start,
-    end: Math.min(end, totalSizeBytes - 1),
-  }
-}
-
-export function sendRemoteRangeNotSatisfiable(res, totalSizeBytes, options = {}) {
-  res.statusCode = 416
-  res.setHeader('Accept-Ranges', 'bytes')
-  res.setHeader('Content-Range', `bytes */${Math.max(0, totalSizeBytes)}`)
-  res.setHeader('Cache-Control', options.cacheControl || 'no-store')
-  if (typeof options.lastModifiedMs === 'number' && options.lastModifiedMs > 0) {
-    res.setHeader('Last-Modified', new Date(options.lastModifiedMs).toUTCString())
-  }
-  res.end()
-}
-
-export async function readRuntimeFileContent(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
-
-  const endpoint = new URL('/v1/files/content', `${normalizedBaseUrl}/`)
-  endpoint.searchParams.set('absolutePath', absolutePath)
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-  const headers = {}
-  if (typeof options.rangeHeader === 'string' && options.rangeHeader.trim()) {
-    headers.Range = options.rangeHeader.trim()
-  }
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-    })
-    const body = Buffer.from(await response.arrayBuffer())
-    if (!response.ok && response.status !== 206) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime file content request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    return {
-      statusCode: response.status,
-      contentType: response.headers.get('content-type') || 'application/octet-stream',
-      acceptRanges: response.headers.get('accept-ranges') || 'bytes',
-      contentRange: response.headers.get('content-range'),
-      body,
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, 'file content')
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-export async function readRuntimeFileThumbnail(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
-  const endpoint = new URL('/v1/files/thumbnail', `${normalizedBaseUrl}/`)
-  endpoint.searchParams.set('absolutePath', absolutePath)
-  if (typeof options.sizePreset === 'string' && options.sizePreset.trim()) {
-    endpoint.searchParams.set('sizePreset', options.sizePreset.trim())
-  }
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'GET',
-      signal: controller.signal,
-    })
-    const body = Buffer.from(await response.arrayBuffer())
-    if (!response.ok) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime thumbnail request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    return {
-      statusCode: response.status,
-      contentType: response.headers.get('content-type') || 'application/octet-stream',
-      acceptRanges: response.headers.get('accept-ranges') || 'bytes',
-      contentRange: response.headers.get('content-range'),
-      body,
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, 'thumbnail')
-  } finally {
-    clearTimeout(timeoutId)
-  }
 }
 
 export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
@@ -468,6 +381,31 @@ export async function readRuntimeRemoteFileList(runtimeBaseUrl, payload, options
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/files/list', payload, options)
 }
 
+export async function readRuntimeRemoteFileContent(runtimeBaseUrl, options = {}) {
+  return getRuntimeBinaryExchange(runtimeBaseUrl, '/v1/remote/files/content', {
+    ...options,
+    query: {
+      rootId: options.rootId,
+      relativePath: options.relativePath,
+    },
+  })
+}
+
+export async function readRuntimeRemoteFileThumbnail(runtimeBaseUrl, options = {}) {
+  return getRuntimeBinaryExchange(runtimeBaseUrl, '/v1/remote/files/thumbnail', {
+    ...options,
+    query: {
+      rootId: options.rootId,
+      relativePath: options.relativePath,
+      sizePreset: options.sizePreset,
+    },
+  })
+}
+
+export async function readRuntimeRemoteTextPreview(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/files/text-preview', payload, options)
+}
+
 export async function loginRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/login', {
     rememberDevice: options.rememberDevice === true,
@@ -506,51 +444,6 @@ export async function removeRuntimeRemoteSharedFavorite(runtimeBaseUrl, options 
     rootId,
     path,
   }, options)
-}
-
-export async function readRuntimeTextPreview(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
-  const endpoint = new URL('/v1/files/text-preview', `${normalizedBaseUrl}/`)
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-  const payload = {
-    absolutePath,
-    ...(typeof options.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: options.sizeLimitBytes } : {}),
-  }
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-    const body = await response.text()
-    if (!response.ok) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime text preview request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    try {
-      return body ? JSON.parse(body) : {}
-    } catch (error) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime text preview response was not valid JSON: ${error.message}`,
-        502,
-      )
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, 'text preview')
-  } finally {
-    clearTimeout(timeoutId)
-  }
 }
 
 export function sendRuntimeFileContentResponse(res, runtimeResponse, options = {}) {

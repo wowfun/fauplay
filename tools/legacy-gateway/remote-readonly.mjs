@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
   listRuntimeAssetFaces,
@@ -12,9 +11,7 @@ import {
   removeRuntimeRemoteSharedFavorite,
   upsertRuntimeRemoteSharedFavorite,
 } from './remote-file-access.mjs'
-import { statWithDrvfsRetry } from './drvfs.mjs'
 
-const REMOTE_THUMBNAIL_SOURCE_MAX_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_THUMBNAIL_SOURCE_MAX_BYTES', 32 * 1024 * 1024)
 const REMOTE_READONLY_HOST_PATH_FIELDS = new Set([
   'absolutePath',
   'rootPath',
@@ -27,11 +24,6 @@ function createRemoteError(code, message, statusCode) {
   error.code = code
   error.statusCode = statusCode
   return error
-}
-
-function readPositiveIntegerEnv(name, fallback) {
-  const raw = Number.parseInt(process.env[name] || '', 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback
 }
 
 function isObjectRecord(value) {
@@ -96,24 +88,6 @@ function normalizeRelativePath(input, fieldName = 'relativePath') {
   return normalized.join('/')
 }
 
-function resolvePathWithinRoot(rootPath, relativePath) {
-  const target = normalizeAbsolutePath(path.resolve(rootPath, ...relativePath.split('/')))
-  const relative = path.relative(rootPath, target)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw createRemoteError('REMOTE_PATH_OUT_OF_ROOT', 'relativePath escapes rootPath', 403)
-  }
-  return target
-}
-
-function pathMatchesRoot(rootPath, absolutePath) {
-  if (!rootPath) return true
-  return absolutePath === rootPath || absolutePath.startsWith(`${rootPath}/`)
-}
-
-function statPath(targetPath, options) {
-  return statWithDrvfsRetry(targetPath, options)
-}
-
 function normalizeOptionalRemotePath(value, fieldName = 'relativePath') {
   if (typeof value !== 'string') {
     return ''
@@ -130,23 +104,6 @@ function normalizeRemoteFavoritePath(value) {
     throw createRemoteError('REMOTE_INVALID_PARAMS', 'path must be a string', 400)
   }
   return normalizeOptionalRemotePath(value, 'path')
-}
-
-async function resolveRealPathWithinRoot(root, targetPath) {
-  let realPath = ''
-  try {
-    realPath = normalizeAbsolutePath(await fs.realpath(targetPath))
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      throw createRemoteError('REMOTE_FILE_NOT_FOUND', 'Target path not found', 404)
-    }
-    throw error
-  }
-
-  if (!pathMatchesRoot(root.realPath, realPath)) {
-    throw createRemoteError('REMOTE_PATH_OUT_OF_ROOT', 'Target path escapes remote root', 403)
-  }
-  return realPath
 }
 
 function toRemoteReadonlyConfigSource(item) {
@@ -224,34 +181,6 @@ export function resolveRemoteRoot(remoteConfig, rootId) {
   return match
 }
 
-async function resolveRemoteAbsolutePath(remoteConfig, rootId, relativePath, fieldName = 'relativePath') {
-  const root = resolveRemoteRoot(remoteConfig, rootId)
-  const normalizedRelativePath = normalizeOptionalRemotePath(relativePath, fieldName)
-  const candidatePath = normalizedRelativePath
-    ? resolvePathWithinRoot(root.path, normalizedRelativePath)
-    : root.path
-  const realPath = await resolveRealPathWithinRoot(root, candidatePath)
-  return {
-    root,
-    relativePath: normalizedRelativePath,
-    absolutePath: realPath,
-  }
-}
-
-export async function resolveRemoteReadonlyFileResource(remoteConfig, query = {}) {
-  const target = await resolveRemoteAbsolutePath(remoteConfig, query.rootId, query.relativePath)
-  const statResult = await statPath(target.absolutePath)
-  if (!statResult.isFile()) {
-    throw createRemoteError('REMOTE_NOT_FILE', 'relativePath must point to a file', 400)
-  }
-
-  return {
-    ...target,
-    sizeBytes: Number(statResult.size) || 0,
-    lastModifiedMs: Number.isFinite(Number(statResult.mtimeMs)) ? Math.trunc(Number(statResult.mtimeMs)) : 0,
-  }
-}
-
 function toRemoteReadonlyFavorite(item, allowedRootIds) {
   if (!isObjectRecord(item)) return null
   const rootId = typeof item.rootId === 'string' ? item.rootId.trim() : ''
@@ -315,18 +244,6 @@ export async function removeRemoteReadonlyFavorite(remoteConfig, payload = {}, r
 function toFiniteNumber(value) {
   const next = Number(value)
   return Number.isFinite(next) ? next : undefined
-}
-
-export async function resolveRemoteReadonlyThumbnailResource(remoteConfig, query = {}) {
-  const target = await resolveRemoteReadonlyFileResource(remoteConfig, query)
-  if (target.sizeBytes > REMOTE_THUMBNAIL_SOURCE_MAX_BYTES) {
-    throw createRemoteError(
-      'REMOTE_BUDGET_EXCEEDED',
-      'Thumbnail source exceeds remote budget',
-      422,
-    )
-  }
-  return target
 }
 
 function toRemoteReadonlyTagRecord(tag) {

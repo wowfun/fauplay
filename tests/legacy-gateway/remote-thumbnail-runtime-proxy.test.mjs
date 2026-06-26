@@ -53,9 +53,11 @@ test('Remote Access thumbnail content is served through Fauplay Runtime', async 
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie,
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Cache-Control', 'private, max-age=300')
       res.setHeader('Content-Length', String(Buffer.byteLength('runtime-thumbnail')))
       res.end('runtime-thumbnail')
     })
@@ -87,10 +89,13 @@ test('Remote Access thumbnail content is served through Fauplay Runtime', async 
     assert.equal(await response.text(), 'runtime-thumbnail')
     assert.equal(runtimeRequests.length, 1)
     assert.equal(runtimeRequests[0].method, 'GET')
+    assert.equal(runtimeRequests[0].cookie, sessionCookie)
     const runtimeRequestUrl = new URL(runtimeRequests[0].url, runtimeAddress)
-    assert.equal(runtimeRequestUrl.pathname, '/v1/files/thumbnail')
-    assert.equal(runtimeRequestUrl.searchParams.get('absolutePath'), path.join(remoteRoot, 'image.png'))
+    assert.equal(runtimeRequestUrl.pathname, '/v1/remote/files/thumbnail')
+    assert.equal(runtimeRequestUrl.searchParams.get('rootId'), 'root-a')
+    assert.equal(runtimeRequestUrl.searchParams.get('relativePath'), 'image.png')
     assert.equal(runtimeRequestUrl.searchParams.get('sizePreset'), 'small')
+    assert.equal(runtimeRequestUrl.searchParams.has('absolutePath'), false)
   } finally {
     if (gatewayServer) await closeServer(gatewayServer)
     if (runtimeServer) await closeServer(runtimeServer)

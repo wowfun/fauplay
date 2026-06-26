@@ -213,6 +213,34 @@ test('Legacy Gateway no longer owns local text preview file reads', async () => 
   assert.equal(serverSource.includes('readRemoteReadonlyThumbnailContent'), false)
 })
 
+test('Legacy Gateway no longer resolves Remote Access file bytes with host paths', async () => {
+  const remoteFileAccessSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-file-access.mjs', import.meta.url),
+    'utf8',
+  )
+  const remoteReadonlySource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+
+  assert.equal(remoteFileAccessSource.includes('parseRemoteByteRangeHeader'), false)
+  assert.equal(remoteFileAccessSource.includes('readRuntimeFileContent'), false)
+  assert.equal(remoteFileAccessSource.includes('readRuntimeFileThumbnail'), false)
+  assert.equal(remoteFileAccessSource.includes('readRuntimeTextPreview'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/files/content'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/files/thumbnail'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/files/text-preview'), false)
+  assert.equal(remoteReadonlySource.includes('resolveRemoteReadonlyFileResource'), false)
+  assert.equal(remoteReadonlySource.includes('resolveRemoteReadonlyThumbnailResource'), false)
+  assert.equal(serverSource.includes('parseRemoteByteRangeHeader'), false)
+  assert.equal(serverSource.includes('resolveRemoteReadonlyFileResource'), false)
+  assert.equal(serverSource.includes('resolveRemoteReadonlyThumbnailResource'), false)
+})
+
 test('Legacy Gateway no longer keeps the old local data layer', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data', import.meta.url), constants.F_OK),
