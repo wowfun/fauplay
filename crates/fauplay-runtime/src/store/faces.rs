@@ -43,6 +43,30 @@ struct FaceRecordData {
     embedding: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct FaceStoreData {
+    faces: Vec<FaceRecordData>,
+    asset_detections: Vec<FaceAssetDetectionData>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FaceAssetDetection {
+    pub asset_id: String,
+    pub media_type: FaceMediaType,
+    pub face_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct FaceAssetDetectionData {
+    root_path: String,
+    root_relative_path: String,
+    asset_id: String,
+    media_type: FaceMediaType,
+    status: String,
+    face_count: usize,
+    updated_at_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 struct PersonSummaryAccumulator {
     person_id: String,
@@ -86,7 +110,7 @@ pub(crate) fn save_detected_faces(
     }
 
     let store_path = faces_path(runtime_home_path);
-    let mut records = read_face_records(&store_path)?;
+    let mut store = read_face_store(&store_path)?;
     let root_path = root_path_key(&request.root_path);
     let root_relative_path = root_relative_path_key(&request.root_relative_path);
     let asset_id = asset_id(&root_path, &root_relative_path);
@@ -97,7 +121,7 @@ pub(crate) fn save_detected_faces(
         .cloned()
         .unwrap_or_default();
 
-    records.retain(|record| {
+    store.faces.retain(|record| {
         !(record.root_path == root_path && record.root_relative_path == root_relative_path)
     });
 
@@ -113,16 +137,34 @@ pub(crate) fn save_detected_faces(
         ) else {
             continue;
         };
-        records.push(record.clone());
+        store.faces.push(record.clone());
         created_records.push(record);
     }
-
-    write_face_records(&store_path, &records)?;
 
     let faces = created_records
         .iter()
         .filter_map(face_record_from_data)
         .collect::<Vec<_>>();
+    let media_type = created_records
+        .first()
+        .map(|record| record.media_type)
+        .or_else(|| face_media_type_from_root_relative_path(&request.root_relative_path))
+        .unwrap_or(FaceMediaType::Image);
+
+    store.asset_detections.retain(|record| {
+        !(record.root_path == root_path && record.root_relative_path == root_relative_path)
+    });
+    store.asset_detections.push(FaceAssetDetectionData {
+        root_path,
+        root_relative_path,
+        asset_id: asset_id.clone(),
+        media_type,
+        status: "success".to_owned(),
+        face_count: faces.len(),
+        updated_at_ms,
+    });
+
+    write_face_store(&store_path, &store)?;
 
     Ok(FaceDetectAssetResponse {
         asset_id,
@@ -133,6 +175,42 @@ pub(crate) fn save_detected_faces(
         skipped: payloads.len().saturating_sub(faces.len()),
         faces,
     })
+}
+
+pub(crate) fn get_asset_face_detection(
+    runtime_home_path: &Path,
+    root_path: &Path,
+    root_relative_path: &RootRelativePath,
+) -> Result<Option<FaceAssetDetection>, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let store = read_face_store(&store_path)?;
+    let root_path = root_path_key(root_path);
+    let root_relative_path = root_relative_path_key(root_relative_path);
+
+    if let Some(record) = store.asset_detections.iter().find(|record| {
+        record.root_path == root_path
+            && record.root_relative_path == root_relative_path
+            && record.status == "success"
+    }) {
+        return Ok(Some(FaceAssetDetection {
+            asset_id: record.asset_id.clone(),
+            media_type: record.media_type,
+            face_count: record.face_count,
+        }));
+    }
+
+    let mut matching_faces = store.faces.iter().filter(|record| {
+        record.root_path == root_path && record.root_relative_path == root_relative_path
+    });
+    let Some(first_face) = matching_faces.next() else {
+        return Ok(None);
+    };
+    let face_count = 1 + matching_faces.count();
+    Ok(Some(FaceAssetDetection {
+        asset_id: first_face.asset_id.clone(),
+        media_type: first_face.media_type,
+        face_count,
+    }))
 }
 
 pub(crate) fn list_asset_faces(
@@ -908,9 +986,15 @@ fn faces_path(runtime_home_path: &Path) -> PathBuf {
 }
 
 fn read_face_records(path: &Path) -> Result<Vec<FaceRecordData>, RuntimeError> {
+    Ok(read_face_store(path)?.faces)
+}
+
+fn read_face_store(path: &Path) -> Result<FaceStoreData, RuntimeError> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(FaceStoreData::default());
+        }
         Err(error) => return Err(RuntimeError::read_file(path, error)),
     };
     let value = serde_json::from_str::<Value>(&raw)
@@ -920,18 +1004,42 @@ fn read_face_records(path: &Path) -> Result<Vec<FaceRecordData>, RuntimeError> {
         .and_then(Value::as_array)
         .ok_or_else(|| RuntimeError::invalid_runtime_home_file(path, "faces must be an array"))?;
 
-    Ok(faces
-        .iter()
-        .filter_map(face_record_data_from_value)
-        .collect())
+    let asset_detections = match value.get("assetDetections") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(face_asset_detection_data_from_value)
+            .collect(),
+        Some(_) => {
+            return Err(RuntimeError::invalid_runtime_home_file(
+                path,
+                "assetDetections must be an array",
+            ));
+        }
+        None => Vec::new(),
+    };
+
+    Ok(FaceStoreData {
+        faces: faces
+            .iter()
+            .filter_map(face_record_data_from_value)
+            .collect(),
+        asset_detections,
+    })
 }
 
 fn write_face_records(path: &Path, records: &[FaceRecordData]) -> Result<(), RuntimeError> {
+    let mut store = read_face_store(path)?;
+    store.faces = records.to_vec();
+    write_face_store(path, &store)
+}
+
+fn write_face_store(path: &Path, store: &FaceStoreData) -> Result<(), RuntimeError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| RuntimeError::write_file(parent, source))?;
     }
 
-    let faces = records
+    let faces = store
+        .faces
         .iter()
         .map(|record| {
             serde_json::json!({
@@ -957,9 +1065,25 @@ fn write_face_records(path: &Path, records: &[FaceRecordData]) -> Result<(), Run
             })
         })
         .collect::<Vec<_>>();
+    let asset_detections = store
+        .asset_detections
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "rootPath": record.root_path,
+                "rootRelativePath": record.root_relative_path,
+                "assetId": record.asset_id,
+                "mediaType": face_media_type_json(record.media_type),
+                "status": record.status,
+                "faceCount": record.face_count,
+                "updatedAt": record.updated_at_ms,
+            })
+        })
+        .collect::<Vec<_>>();
     let raw = serde_json::to_string(&serde_json::json!({
         "version": 1,
         "faces": faces,
+        "assetDetections": asset_detections,
     }))
     .map_err(|error| RuntimeError::invalid_runtime_home_file(path, &error.to_string()))?;
 
@@ -1063,6 +1187,22 @@ fn face_record_data_from_value(value: &Value) -> Option<FaceRecordData> {
     })
 }
 
+fn face_asset_detection_data_from_value(value: &Value) -> Option<FaceAssetDetectionData> {
+    let object = value.as_object()?;
+    Some(FaceAssetDetectionData {
+        root_path: string_value(object.get("rootPath")).filter(|value| !value.is_empty())?,
+        root_relative_path: string_value(object.get("rootRelativePath"))
+            .filter(|value| !value.is_empty())?,
+        asset_id: string_value(object.get("assetId")).filter(|value| !value.is_empty())?,
+        media_type: parse_face_media_type(object.get("mediaType").and_then(Value::as_str)),
+        status: string_value(object.get("status"))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "success".to_owned()),
+        face_count: object.get("faceCount").and_then(Value::as_u64).unwrap_or(0) as usize,
+        updated_at_ms: object.get("updatedAt").and_then(Value::as_u64).unwrap_or(0),
+    })
+}
+
 fn face_record_from_data(record: &FaceRecordData) -> Option<FaceRecord> {
     Some(FaceRecord {
         face_id: record.face_id.clone(),
@@ -1110,6 +1250,38 @@ fn parse_face_media_type(value: Option<&str>) -> FaceMediaType {
         Some("video") => FaceMediaType::Video,
         _ => FaceMediaType::Image,
     }
+}
+
+fn face_media_type_from_root_relative_path(
+    root_relative_path: &RootRelativePath,
+) -> Option<FaceMediaType> {
+    let path = root_relative_path.to_string();
+    let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    if matches!(
+        extension.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico"
+    ) {
+        return Some(FaceMediaType::Image);
+    }
+    if matches!(
+        extension.as_str(),
+        "avi"
+            | "flv"
+            | "m4v"
+            | "mkv"
+            | "mov"
+            | "mp4"
+            | "mpeg"
+            | "mpg"
+            | "ogg"
+            | "ts"
+            | "webm"
+            | "wmv"
+    ) {
+        return Some(FaceMediaType::Video);
+    }
+
+    None
 }
 
 fn parse_face_status(value: Option<&str>) -> FaceStatus {

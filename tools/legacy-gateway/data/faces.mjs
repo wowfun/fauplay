@@ -58,7 +58,6 @@ export const createDetectAssetsJob = faceScanRuntime.createDetectAssetsJob
 export const getDetectAssetsJob = faceScanRuntime.getDetectAssetsJob
 export const cancelDetectAssetsJob = faceScanRuntime.cancelDetectAssetsJob
 export const listDetectAssetsJobItems = faceScanRuntime.listDetectAssetsJobItems
-export const detectAssets = faceScanRuntime.detectAssets
 
 function parsePeopleScope(params) {
   const rawScope = typeof params?.scope === 'string' ? params.scope.trim() : 'global'

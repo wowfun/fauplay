@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use crate::{
     FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
-    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
-    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
-    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
-    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
-    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
-    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FauplayRuntime,
-    PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
+    FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
+    FaceDetectAssetsRequest, FaceDetectAssetsResponse, FaceListAssetFacesRequest,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
+    FauplayRuntime, PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
 };
 
 use super::{
@@ -44,6 +45,47 @@ pub(in crate::server) fn handle_detect_asset_faces_json(
         root_relative_path,
     }) {
         Ok(response) => http_response(200, "OK", &face_detect_asset_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_detect_assets_faces_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+
+    let mut root_relative_paths = Vec::new();
+    for value in json_string_array_field(&payload, "relativePaths") {
+        match RootRelativePath::try_from(value.as_str()) {
+            Ok(path) => root_relative_paths.push(path),
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        }
+    }
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"relativePaths must contain at least one path\"}",
+        );
+    }
+
+    match runtime.detect_assets_faces(FaceDetectAssetsRequest {
+        root_path: PathBuf::from(root_path),
+        root_relative_paths,
+        only_undetected: json_bool_field_default_true(&payload, "onlyUndetected"),
+        run_cluster: json_bool_field_default_true(&payload, "runCluster"),
+        pre_cluster: json_bool_field_default_true(&payload, "preCluster"),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_detect_assets_response_json(response)),
         Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
     }
 }
@@ -325,6 +367,26 @@ fn face_detect_asset_response_json(response: FaceDetectAssetResponse) -> String 
     )
 }
 
+fn face_detect_assets_response_json(response: FaceDetectAssetsResponse) -> String {
+    format!(
+        "{{\"ok\":{},\"total\":{},\"unique\":{},\"scanned\":{},\"skipped\":{},\"failed\":{},\"detectedFaces\":{},\"preCluster\":{},\"postCluster\":{},\"items\":[{}]}}",
+        if response.failed == 0 {
+            "true"
+        } else {
+            "false"
+        },
+        response.total,
+        response.unique,
+        response.scanned,
+        response.skipped,
+        response.failed,
+        response.detected_faces,
+        optional_face_cluster_pending_response_json(response.pre_cluster),
+        optional_face_cluster_pending_response_json(response.post_cluster),
+        face_detect_assets_items_json(response.items),
+    )
+}
+
 fn face_list_asset_faces_response_json(response: FaceListAssetFacesResponse) -> String {
     format!(
         "{{\"ok\":true,\"scope\":\"{}\",\"total\":{},\"items\":[{}]}}",
@@ -384,6 +446,14 @@ fn face_cluster_pending_response_json(response: FaceClusterPendingResponse) -> S
     )
 }
 
+fn optional_face_cluster_pending_response_json(
+    response: Option<FaceClusterPendingResponse>,
+) -> String {
+    response
+        .map(face_cluster_pending_response_json)
+        .unwrap_or_else(|| "null".to_owned())
+}
+
 fn face_merge_people_response_json(response: FaceMergePeopleResponse) -> String {
     format!(
         "{{\"ok\":true,\"targetPersonId\":\"{}\",\"merged\":{},\"sourcePersonIds\":{},\"skippedSourcePersonIds\":{}}}",
@@ -413,6 +483,30 @@ fn face_records_json(records: Vec<FaceRecord>) -> String {
         .map(face_record_json)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn face_detect_assets_items_json(items: Vec<FaceDetectAssetsItem>) -> String {
+    items
+        .into_iter()
+        .map(face_detect_assets_item_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn face_detect_assets_item_json(item: FaceDetectAssetsItem) -> String {
+    format!(
+        "{{\"ok\":{},\"status\":\"{}\",\"reasonCode\":{},\"relativePath\":\"{}\",\"assetId\":{},\"mediaType\":{},\"faceCount\":{},\"detected\":{},\"inferenceDetected\":{},\"error\":{}}}",
+        if item.ok { "true" } else { "false" },
+        face_detect_assets_item_status_json(item.status),
+        optional_string_json(item.reason_code.as_deref()),
+        escape_json_string(&item.root_relative_path.to_string()),
+        optional_string_json(item.asset_id.as_deref()),
+        optional_face_media_type_json(item.media_type),
+        optional_usize_json(item.face_count),
+        optional_usize_json(item.detected),
+        optional_usize_json(item.inference_detected),
+        optional_string_json(item.error.as_deref()),
+    )
 }
 
 fn person_summaries_json(items: Vec<PersonSummary>) -> String {
@@ -542,6 +636,19 @@ fn optional_u64_json(value: Option<u64>) -> String {
         .unwrap_or_else(|| "null".to_owned())
 }
 
+fn optional_usize_json(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_owned())
+}
+
+fn json_bool_field_default_true(payload: &serde_json::Value, key: &str) -> bool {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
 fn face_scope_json(value: FaceScope) -> &'static str {
     match value {
         FaceScope::Root => "root",
@@ -579,6 +686,12 @@ fn face_media_type_json(value: FaceMediaType) -> &'static str {
     }
 }
 
+fn optional_face_media_type_json(value: Option<FaceMediaType>) -> String {
+    value
+        .map(|value| format!("\"{}\"", face_media_type_json(value)))
+        .unwrap_or_else(|| "null".to_owned())
+}
+
 fn face_status_json(value: FaceStatus) -> &'static str {
     match value {
         FaceStatus::Assigned => "assigned",
@@ -586,6 +699,14 @@ fn face_status_json(value: FaceStatus) -> &'static str {
         FaceStatus::Deferred => "deferred",
         FaceStatus::ManualUnassigned => "manual_unassigned",
         FaceStatus::Ignored => "ignored",
+    }
+}
+
+fn face_detect_assets_item_status_json(value: FaceDetectAssetsItemStatus) -> &'static str {
+    match value {
+        FaceDetectAssetsItemStatus::Detected => "detected",
+        FaceDetectAssetsItemStatus::Skipped => "skipped",
+        FaceDetectAssetsItemStatus::Failed => "failed",
     }
 }
 

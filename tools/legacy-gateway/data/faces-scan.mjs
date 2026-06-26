@@ -64,15 +64,6 @@ function createFaceScanState() {
   }
 }
 
-function createFaceScanSummary() {
-  return {
-    scanned: 0,
-    skipped: 0,
-    failed: 0,
-    detectedFaces: 0,
-  }
-}
-
 function applyFaceScanItemToSummary(summary, item) {
   if (item?.status === 'detected') {
     summary.scanned += 1
@@ -515,62 +506,9 @@ export function createFaceScanRuntime({
     return readFaceScanJobItemsPage(getFaceScanJobOrThrow(jobId), params)
   }
 
-  async function detectAssets(runtime, params) {
-    const rootPath = resolveRootPath(params.rootPath)
-    const relativePaths = normalizeRelativePathList(params.relativePaths)
-    if (relativePaths.length === 0) {
-      throw new Error('relativePaths must contain at least one path')
-    }
-
-    const onlyUndetected = params.onlyUndetected !== false
-    const runCluster = params.runCluster !== false
-    const preClusterEnabled = runCluster && params.preCluster !== false
-    const items = []
-    const state = createFaceScanState()
-    const summary = createFaceScanSummary()
-
-    const preCluster = preClusterEnabled
-      ? await clusterPendingFaces({
-        limit: FACE_SCAN_CLUSTER_LIMIT,
-        minFaces: FACE_SCAN_CLUSTER_MIN_FACES,
-      })
-      : null
-
-    for (const relativePath of relativePaths) {
-      const item = await scanFaceAssetItem(runtime, {
-        rootPath,
-        relativePath,
-        onlyUndetected,
-      }, state)
-      applyFaceScanItemToSummary(summary, item)
-      items.push(item)
-    }
-
-    const postCluster = runCluster && summary.detectedFaces > 0
-      ? await clusterPendingFaces({
-        limit: Math.max(1, summary.detectedFaces),
-        minFaces: FACE_SCAN_CLUSTER_MIN_FACES,
-      })
-      : null
-
-    return {
-      ok: summary.failed === 0,
-      total: relativePaths.length,
-      unique: state.seenPaths.size,
-      scanned: summary.scanned,
-      skipped: summary.skipped,
-      failed: summary.failed,
-      detectedFaces: summary.detectedFaces,
-      preCluster,
-      postCluster,
-      items,
-    }
-  }
-
   return {
     cancelDetectAssetsJob,
     createDetectAssetsJob,
-    detectAssets,
     getDetectAssetsJob,
     listDetectAssetsJobItems,
   }

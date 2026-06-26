@@ -11,16 +11,17 @@ pub use api::{
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
-    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
-    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
-    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
-    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
-    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
-    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FileAnnotationActionSource,
-    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
-    FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
-    FileAnnotationMutationResponse, FileAnnotationPathMapping,
-    FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
+    FaceDetectAssetsRequest, FaceDetectAssetsResponse, FaceListAssetFacesRequest,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
+    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
+    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
+    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
+    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
@@ -45,6 +46,7 @@ pub use api::{
     TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -104,6 +106,146 @@ impl FauplayRuntime {
             }),
         )?;
         store::save_detected_faces(&self.runtime_home_path, request, inference)
+    }
+
+    pub fn detect_assets_faces(
+        &self,
+        request: FaceDetectAssetsRequest,
+    ) -> Result<FaceDetectAssetsResponse, RuntimeError> {
+        if request.root_relative_paths.is_empty() {
+            return Err(RuntimeError::invalid_detected_face(
+                "relativePaths must contain at least one path",
+            ));
+        }
+
+        let pre_cluster = if request.run_cluster && request.pre_cluster {
+            Some(self.cluster_pending_faces(FaceClusterPendingRequest {
+                root_path: request.root_path.clone(),
+                asset_id: None,
+                limit: 2000,
+                max_distance: 0.5,
+                min_faces: 3,
+            })?)
+        } else {
+            None
+        };
+
+        let total = request.root_relative_paths.len();
+        let mut seen_paths = HashSet::<String>::new();
+        let mut scanned = 0usize;
+        let mut skipped = 0usize;
+        let mut failed = 0usize;
+        let mut detected_faces = 0usize;
+        let mut items = Vec::new();
+
+        for root_relative_path in request.root_relative_paths {
+            let path_key = root_relative_path.to_string();
+            if !seen_paths.insert(path_key) {
+                skipped += 1;
+                items.push(face_detect_assets_skipped_item(
+                    root_relative_path,
+                    "DUPLICATE_PATH",
+                    None,
+                    None,
+                    None,
+                ));
+                continue;
+            }
+
+            let media_type = match face_scan_media_type(&root_relative_path) {
+                Some(media_type) => media_type,
+                None => {
+                    skipped += 1;
+                    items.push(face_detect_assets_skipped_item(
+                        root_relative_path,
+                        "UNSUPPORTED_MEDIA",
+                        None,
+                        None,
+                        None,
+                    ));
+                    continue;
+                }
+            };
+
+            if request.only_undetected {
+                if let Some(existing) = store::get_asset_face_detection(
+                    &self.runtime_home_path,
+                    &request.root_path,
+                    &root_relative_path,
+                )? {
+                    skipped += 1;
+                    items.push(face_detect_assets_skipped_item(
+                        root_relative_path,
+                        "ALREADY_DETECTED",
+                        Some(existing.asset_id),
+                        Some(existing.media_type),
+                        Some(existing.face_count),
+                    ));
+                    continue;
+                }
+            }
+
+            match self.detect_asset_faces(FaceDetectAssetRequest {
+                root_path: request.root_path.clone(),
+                root_relative_path: root_relative_path.clone(),
+            }) {
+                Ok(response) => {
+                    scanned += 1;
+                    detected_faces += response.created;
+                    items.push(FaceDetectAssetsItem {
+                        ok: true,
+                        status: FaceDetectAssetsItemStatus::Detected,
+                        reason_code: None,
+                        root_relative_path,
+                        asset_id: Some(response.asset_id),
+                        media_type: Some(media_type),
+                        face_count: None,
+                        detected: Some(response.created),
+                        inference_detected: Some(response.detected),
+                        error: None,
+                    });
+                }
+                Err(error) => {
+                    failed += 1;
+                    items.push(FaceDetectAssetsItem {
+                        ok: false,
+                        status: FaceDetectAssetsItemStatus::Failed,
+                        reason_code: Some("DETECT_FAILED".to_owned()),
+                        root_relative_path,
+                        asset_id: None,
+                        media_type: Some(media_type),
+                        face_count: None,
+                        detected: None,
+                        inference_detected: None,
+                        error: Some(error.to_string()),
+                    });
+                }
+            }
+        }
+
+        let post_cluster = if request.run_cluster && detected_faces > 0 {
+            Some(self.cluster_pending_faces(FaceClusterPendingRequest {
+                root_path: request.root_path,
+                asset_id: None,
+                limit: detected_faces.max(1),
+                max_distance: 0.5,
+                min_faces: 3,
+            })?)
+        } else {
+            None
+        };
+
+        Ok(FaceDetectAssetsResponse {
+            total,
+            unique: seen_paths.len(),
+            scanned,
+            skipped,
+            failed,
+            detected_faces,
+            pre_cluster,
+            post_cluster,
+            items,
+        })
     }
 
     pub fn list_asset_faces(
@@ -432,4 +574,55 @@ impl Default for FauplayRuntime {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn face_detect_assets_skipped_item(
+    root_relative_path: RootRelativePath,
+    reason_code: &str,
+    asset_id: Option<String>,
+    media_type: Option<FaceMediaType>,
+    face_count: Option<usize>,
+) -> FaceDetectAssetsItem {
+    FaceDetectAssetsItem {
+        ok: true,
+        status: FaceDetectAssetsItemStatus::Skipped,
+        reason_code: Some(reason_code.to_owned()),
+        root_relative_path,
+        asset_id,
+        media_type,
+        face_count,
+        detected: None,
+        inference_detected: None,
+        error: None,
+    }
+}
+
+fn face_scan_media_type(root_relative_path: &RootRelativePath) -> Option<FaceMediaType> {
+    let path = root_relative_path.to_string();
+    let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    if matches!(
+        extension.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico"
+    ) {
+        return Some(FaceMediaType::Image);
+    }
+    if matches!(
+        extension.as_str(),
+        "avi"
+            | "flv"
+            | "m4v"
+            | "mkv"
+            | "mov"
+            | "mp4"
+            | "mpeg"
+            | "mpg"
+            | "ogg"
+            | "ts"
+            | "webm"
+            | "wmv"
+    ) {
+        return Some(FaceMediaType::Video);
+    }
+
+    None
 }

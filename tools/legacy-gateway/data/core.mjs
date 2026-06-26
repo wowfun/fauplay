@@ -10,7 +10,6 @@ export {
   ingestClassificationResult,
 } from './tags.mjs'
 export {
-  detectAssets,
   createDetectAssetsJob,
   getDetectAssetsJob,
   cancelDetectAssetsJob,

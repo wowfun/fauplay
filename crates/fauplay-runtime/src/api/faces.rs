@@ -20,6 +20,49 @@ pub struct FaceDetectAssetResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsRequest {
+    pub root_path: PathBuf,
+    pub root_relative_paths: Vec<RootRelativePath>,
+    pub only_undetected: bool,
+    pub run_cluster: bool,
+    pub pre_cluster: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsResponse {
+    pub total: usize,
+    pub unique: usize,
+    pub scanned: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub detected_faces: usize,
+    pub pre_cluster: Option<FaceClusterPendingResponse>,
+    pub post_cluster: Option<FaceClusterPendingResponse>,
+    pub items: Vec<FaceDetectAssetsItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsItem {
+    pub ok: bool,
+    pub status: FaceDetectAssetsItemStatus,
+    pub reason_code: Option<String>,
+    pub root_relative_path: RootRelativePath,
+    pub asset_id: Option<String>,
+    pub media_type: Option<FaceMediaType>,
+    pub face_count: Option<usize>,
+    pub detected: Option<usize>,
+    pub inference_detected: Option<usize>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceDetectAssetsItemStatus {
+    Detected,
+    Skipped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceListAssetFacesRequest {
     pub root_path: PathBuf,
     pub root_relative_path: Option<RootRelativePath>,

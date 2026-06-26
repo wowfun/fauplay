@@ -1,6 +1,5 @@
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 import {
-  detectAssets,
   createDetectAssetsJob,
   getDetectAssetsJob,
   cancelDetectAssetsJob,
@@ -52,7 +51,6 @@ function parseFaceScanJobPath(pathname) {
 }
 
 const httpGatewayRoutes = [
-  createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets', ({ runtime, payload }) => detectAssets(runtime, payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs', ({ runtime, payload }) => createDetectAssetsJob(runtime, payload)),
   createPrefixHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/', ({ pathname, requestUrl }) => {
     const { jobId, action } = parseFaceScanJobPath(pathname)

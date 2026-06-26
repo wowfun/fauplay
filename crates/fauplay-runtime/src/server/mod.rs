@@ -53,6 +53,9 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/faces/detect-asset")) => {
             faces::handle_detect_asset_faces_json(runtime, request)
         }
+        Some(("POST", "/v1/faces/detect-assets")) => {
+            faces::handle_detect_assets_faces_json(runtime, request)
+        }
         Some(("POST", "/v1/faces/list-asset-faces")) => {
             faces::handle_list_asset_faces_json(runtime, request)
         }
@@ -268,6 +271,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
             | "/v1/mcp"
             | "/v1/faces/detect-asset"
+            | "/v1/faces/detect-assets"
             | "/v1/faces/list-asset-faces"
             | "/v1/faces/list-review-faces"
             | "/v1/faces/list-people"

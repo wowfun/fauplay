@@ -198,6 +198,259 @@ rl.on('line', (line) => {
 }
 
 #[test]
+fn runtime_api_faces_detects_assets_batch_through_runtime_mcp() {
+    let fixture = Fixture::new("runtime_api_faces_detects_assets_batch_through_runtime_mcp");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fixture.write_file("local-root/photos/ada.jpg", "fake image bytes");
+    fixture.write_file("local-root/docs/readme.txt", "not media");
+    fixture.write_file(
+        "mock-vision-face-server.mjs",
+        r#"
+import readline from 'node:readline'
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+
+rl.on('line', (line) => {
+  const request = JSON.parse(line)
+  if (request.method === 'tools/list') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        tools: [{
+          name: 'vision.face',
+          description: 'Detect faces',
+          inputSchema: { type: 'object' }
+        }]
+      }
+    }) + '\n')
+    return
+  }
+
+  if (request.method === 'tools/call' && request.params?.name === 'vision.face') {
+    const args = request.params.arguments ?? {}
+    if (args.operation !== 'detectAsset' || args.relativePath !== 'photos/ada.jpg') {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32602,
+          message: 'unexpected vision.face arguments',
+          data: { code: 'MCP_INVALID_PARAMS' }
+        }
+      }) + '\n')
+      return
+    }
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        faces: [{
+          boundingBox: { x1: 0.2, y1: 0.2, x2: 0.5, y2: 0.8 },
+          score: 0.98,
+          mediaType: 'image',
+          embedding: [0.4, 0.5, 0.6]
+        }]
+      }
+    }) + '\n')
+    return
+  }
+
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0',
+    id: request.id,
+    error: {
+      code: -32000,
+      message: 'unknown tool',
+      data: { code: 'MCP_TOOL_NOT_FOUND' }
+    }
+  }) + '\n')
+})
+"#,
+    );
+    let mock_server_path = fixture.root.join("mock-vision-face-server.mjs");
+    let config_path = fixture.root.join("mcp.json");
+    fs::write(
+        &config_path,
+        serde_json::json!({
+            "servers": {
+                "vision": {
+                    "type": "stdio",
+                    "command": "node",
+                    "args": [mock_server_path.display().to_string()],
+                    "callTimeoutMs": 2000,
+                    "initTimeoutMs": 2000
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("MCP config should be written");
+
+    let runtime =
+        FauplayRuntime::with_runtime_home_path_and_mcp_config_path(runtime_home_path, config_path);
+    let root_path = fixture.root.join("local-root");
+    let detect_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/detect-assets",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "relativePaths": [
+                "photos/ada.jpg",
+                "photos/ada.jpg",
+                "docs/readme.txt"
+            ],
+            "runCluster": false
+        }),
+    );
+
+    assert_eq!(detect_json["ok"], true);
+    assert_eq!(detect_json["total"], 3);
+    assert_eq!(detect_json["unique"], 2);
+    assert_eq!(detect_json["scanned"], 1);
+    assert_eq!(detect_json["skipped"], 2);
+    assert_eq!(detect_json["failed"], 0);
+    assert_eq!(detect_json["detectedFaces"], 1);
+    assert_eq!(detect_json["preCluster"], serde_json::Value::Null);
+    assert_eq!(detect_json["postCluster"], serde_json::Value::Null);
+    assert_eq!(detect_json["items"][0]["status"], "detected");
+    assert_eq!(detect_json["items"][0]["relativePath"], "photos/ada.jpg");
+    assert_eq!(detect_json["items"][0]["mediaType"], "image");
+    assert_eq!(detect_json["items"][0]["detected"], 1);
+    assert_eq!(detect_json["items"][1]["status"], "skipped");
+    assert_eq!(detect_json["items"][1]["reasonCode"], "DUPLICATE_PATH");
+    assert_eq!(detect_json["items"][2]["status"], "skipped");
+    assert_eq!(detect_json["items"][2]["reasonCode"], "UNSUPPORTED_MEDIA");
+
+    let list_json = post_runtime_json(
+        runtime,
+        "/v1/faces/list-asset-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "relativePath": "photos/ada.jpg"
+        }),
+    );
+    assert_eq!(list_json["total"], 1);
+    assert_eq!(list_json["items"][0]["score"], 0.98);
+}
+
+#[test]
+fn runtime_api_faces_detect_assets_skips_assets_after_zero_face_detection() {
+    let fixture =
+        Fixture::new("runtime_api_faces_detect_assets_skips_assets_after_zero_face_detection");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fixture.write_file("local-root/photos/empty.jpg", "fake image bytes");
+    fixture.write_file(
+        "mock-vision-face-server.mjs",
+        r#"
+import readline from 'node:readline'
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+let detectCalls = 0
+
+rl.on('line', (line) => {
+  const request = JSON.parse(line)
+  if (request.method === 'tools/list') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        tools: [{
+          name: 'vision.face',
+          description: 'Detect faces',
+          inputSchema: { type: 'object' }
+        }]
+      }
+    }) + '\n')
+    return
+  }
+
+  if (request.method === 'tools/call' && request.params?.name === 'vision.face') {
+    const args = request.params.arguments ?? {}
+    detectCalls += 1
+    if (args.operation !== 'detectAsset' || args.relativePath !== 'photos/empty.jpg' || detectCalls > 1) {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32602,
+          message: 'unexpected repeated vision.face call',
+          data: { code: 'MCP_INVALID_PARAMS' }
+        }
+      }) + '\n')
+      return
+    }
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: { faces: [] }
+    }) + '\n')
+    return
+  }
+
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0',
+    id: request.id,
+    error: {
+      code: -32000,
+      message: 'unknown tool',
+      data: { code: 'MCP_TOOL_NOT_FOUND' }
+    }
+  }) + '\n')
+})
+"#,
+    );
+    let mock_server_path = fixture.root.join("mock-vision-face-server.mjs");
+    let config_path = fixture.root.join("mcp.json");
+    fs::write(
+        &config_path,
+        serde_json::json!({
+            "servers": {
+                "vision": {
+                    "type": "stdio",
+                    "command": "node",
+                    "args": [mock_server_path.display().to_string()],
+                    "callTimeoutMs": 2000,
+                    "initTimeoutMs": 2000
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("MCP config should be written");
+
+    let runtime =
+        FauplayRuntime::with_runtime_home_path_and_mcp_config_path(runtime_home_path, config_path);
+    let root_path = fixture.root.join("local-root");
+    let request = serde_json::json!({
+        "rootPath": root_path.display().to_string(),
+        "relativePaths": ["photos/empty.jpg"],
+        "runCluster": false
+    });
+
+    let first_json = post_runtime_json(runtime.clone(), "/v1/faces/detect-assets", request.clone());
+    assert_eq!(first_json["ok"], true);
+    assert_eq!(first_json["scanned"], 1);
+    assert_eq!(first_json["skipped"], 0);
+    assert_eq!(first_json["detectedFaces"], 0);
+    assert_eq!(first_json["items"][0]["status"], "detected");
+    assert_eq!(first_json["items"][0]["detected"], 0);
+    assert_eq!(first_json["items"][0]["inferenceDetected"], 0);
+
+    let second_json = post_runtime_json(runtime, "/v1/faces/detect-assets", request);
+    assert_eq!(second_json["ok"], true);
+    assert_eq!(second_json["scanned"], 0);
+    assert_eq!(second_json["skipped"], 1);
+    assert_eq!(second_json["detectedFaces"], 0);
+    assert_eq!(second_json["items"][0]["status"], "skipped");
+    assert_eq!(second_json["items"][0]["reasonCode"], "ALREADY_DETECTED");
+    assert_eq!(second_json["items"][0]["mediaType"], "image");
+    assert_eq!(second_json["items"][0]["faceCount"], 0);
+}
+
+#[test]
 fn runtime_api_faces_lists_people_from_runtime_home() {
     let fixture = Fixture::new("runtime_api_faces_lists_people_from_runtime_home");
     let runtime_home_path = fixture.root.join("runtime-home");
