@@ -30,6 +30,7 @@ test('Remote File System Model parses valid remote Listing entries and drops inv
         path: 'media/clips/',
         kind: 'directory',
         isEmpty: true,
+        entryCount: 3,
       },
       {
         name: 'broken',
@@ -51,6 +52,7 @@ test('Remote File System Model parses valid remote Listing entries and drops inv
     kind: 'file',
     remoteRootId: 'published-root',
     isEmpty: undefined,
+    entryCount: undefined,
     size: 1024,
     lastModifiedMs: 1767225600000,
     lastModified: new Date(1767225600000),
@@ -64,6 +66,7 @@ test('Remote File System Model parses valid remote Listing entries and drops inv
     kind: 'directory',
     remoteRootId: 'published-root',
     isEmpty: true,
+    entryCount: 3,
     size: undefined,
     lastModifiedMs: undefined,
     lastModified: undefined,

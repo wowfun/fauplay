@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { readRuntimeDirectoryListing } from './remote-file-access.mjs'
 import {
   getFileTags,
   listAssetFaces,
@@ -10,7 +11,6 @@ import {
   queryFilesByTags,
 } from './data/core.mjs'
 import {
-  isSkippableFsError,
   normalizeAbsolutePath,
   normalizeRelativePath,
   pathMatchesRoot,
@@ -18,105 +18,12 @@ import {
   resolveRootPath,
   statPath,
 } from './data/common.mjs'
+import { getMimeType, getPreviewKind } from './data/file-preview-kind.mjs'
 
 const PROJECT_ROOT = process.cwd()
-const HIDDEN_SYSTEM_DIRECTORIES = new Set(['.trash'])
 const DEFAULT_REMOTE_ACCESS_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'remote-access.json')
 const GLOBAL_REMOTE_ACCESS_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'remote-access.json')
-const REMOTE_FLATTEN_VIEW_MAX_FILES = readPositiveIntegerEnv('FAUPLAY_REMOTE_FLATTEN_VIEW_MAX_FILES', 5000)
-const REMOTE_FLATTEN_VIEW_MAX_DIRECTORIES = readPositiveIntegerEnv('FAUPLAY_REMOTE_FLATTEN_VIEW_MAX_DIRECTORIES', 1000)
 const REMOTE_THUMBNAIL_SOURCE_MAX_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_THUMBNAIL_SOURCE_MAX_BYTES', 32 * 1024 * 1024)
-const PREVIEW_KIND_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'])
-const PREVIEW_KIND_VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'])
-const PREVIEW_KIND_TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'markdown',
-  'json',
-  'yaml',
-  'yml',
-  'xml',
-  'csv',
-  'log',
-  'js',
-  'jsx',
-  'ts',
-  'tsx',
-  'css',
-  'scss',
-  'less',
-  'html',
-  'htm',
-  'py',
-  'sh',
-  'bash',
-  'zsh',
-  'ini',
-  'conf',
-  'toml',
-  'sql',
-  'c',
-  'cc',
-  'cpp',
-  'h',
-  'hpp',
-  'java',
-  'go',
-  'rs',
-  'vue',
-  'svelte',
-])
-const MIME_BY_EXTENSION = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  ico: 'image/x-icon',
-  avif: 'image/avif',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mov: 'video/quicktime',
-  avi: 'video/x-msvideo',
-  mkv: 'video/x-matroska',
-  ogg: 'video/ogg',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  yaml: 'application/yaml',
-  yml: 'application/yaml',
-  xml: 'application/xml',
-  csv: 'text/csv',
-  log: 'text/plain',
-  js: 'text/javascript',
-  jsx: 'text/javascript',
-  ts: 'text/typescript',
-  tsx: 'text/typescript',
-  css: 'text/css',
-  scss: 'text/x-scss',
-  less: 'text/x-less',
-  html: 'text/html',
-  htm: 'text/html',
-  py: 'text/x-python',
-  sh: 'text/x-shellscript',
-  bash: 'text/x-shellscript',
-  zsh: 'text/x-shellscript',
-  ini: 'text/plain',
-  conf: 'text/plain',
-  toml: 'application/toml',
-  sql: 'application/sql',
-  c: 'text/x-c',
-  cc: 'text/x-c++',
-  cpp: 'text/x-c++',
-  h: 'text/x-c',
-  hpp: 'text/x-c++',
-  java: 'text/x-java-source',
-  go: 'text/x-go',
-  rs: 'text/x-rust',
-}
 function createRemoteError(code, message, statusCode) {
   const error = new Error(message)
   error.code = code
@@ -183,22 +90,6 @@ function normalizeOptionalRemotePath(value, fieldName = 'relativePath') {
     return ''
   }
   return normalizeRelativePath(trimmed, fieldName)
-}
-
-function getFileExtension(name) {
-  return String(name || '').split('.').pop()?.toLowerCase() || ''
-}
-
-function getPreviewKind(name) {
-  const ext = getFileExtension(name)
-  if (PREVIEW_KIND_IMAGE_EXTS.has(ext)) return 'image'
-  if (PREVIEW_KIND_VIDEO_EXTS.has(ext)) return 'video'
-  if (PREVIEW_KIND_TEXT_EXTS.has(ext)) return 'text'
-  return 'unsupported'
-}
-
-function getMimeType(name) {
-  return MIME_BY_EXTENSION[getFileExtension(name)] || 'application/octet-stream'
 }
 
 async function fileExists(targetPath) {
@@ -288,169 +179,6 @@ function isTokenMatch(expected, received) {
     return false
   }
   return timingSafeEqual(expectedBuffer, receivedBuffer)
-}
-
-async function directoryHasVisibleChildren(root, directoryPath) {
-  const entries = await readDirectoryEntries(directoryPath, { allowSkip: true })
-  if (!entries) {
-    return false
-  }
-  for (const entry of entries) {
-    if (entry.name === '.' || entry.name === '..') continue
-    if (entry.isDirectory() && HIDDEN_SYSTEM_DIRECTORIES.has(entry.name)) {
-      continue
-    }
-    const childPath = path.join(directoryPath, entry.name)
-    try {
-      const realPath = normalizeAbsolutePath(await fs.realpath(childPath))
-      if (!pathMatchesRoot(root.realPath, realPath)) {
-        continue
-      }
-    } catch {
-      continue
-    }
-    return true
-  }
-  return false
-}
-
-async function readDirectoryEntries(directoryPath, { allowSkip = false } = {}) {
-  try {
-    return await fs.readdir(directoryPath, { withFileTypes: true })
-  } catch (error) {
-    if (isSkippableFsError(error)) {
-      if (allowSkip) {
-        return null
-      }
-      throw createRemoteError(
-        'REMOTE_DIRECTORY_UNAVAILABLE',
-        'Remote directory is temporarily unavailable',
-        422,
-      )
-    }
-    throw error
-  }
-}
-
-function createDirectoryTraversalBudget(flattenView) {
-  if (!flattenView) return null
-  return {
-    remainingFiles: REMOTE_FLATTEN_VIEW_MAX_FILES,
-    remainingDirectories: REMOTE_FLATTEN_VIEW_MAX_DIRECTORIES,
-  }
-}
-
-function consumeTraversalBudget(budget, field, message) {
-  if (!budget) return
-  if (budget[field] <= 0) {
-    throw createRemoteError('REMOTE_BUDGET_EXCEEDED', message, 422)
-  }
-  budget[field] -= 1
-}
-
-async function readDirectoryItemsRecursive(
-  root,
-  currentRelativePath,
-  flattenView,
-  traversalBudget = null,
-  options = {},
-) {
-  const allowUnreadableDirectorySkip = options.allowUnreadableDirectorySkip === true
-  const currentAbsolutePath = currentRelativePath
-    ? resolvePathWithinRoot(root.path, currentRelativePath)
-    : root.path
-  const currentRealPath = await resolveRealPathWithinRoot(root, currentAbsolutePath)
-  const statResult = await statPath(currentRealPath)
-  if (!statResult.isDirectory()) {
-    throw createRemoteError('REMOTE_NOT_DIRECTORY', 'path must point to a directory', 400)
-  }
-
-  const items = []
-  const entries = await readDirectoryEntries(currentRealPath, {
-    allowSkip: allowUnreadableDirectorySkip,
-  })
-  if (!entries) {
-    return items
-  }
-
-  for (const entry of entries) {
-    if (entry.name === '.' || entry.name === '..') continue
-    if (entry.isDirectory() && HIDDEN_SYSTEM_DIRECTORIES.has(entry.name)) {
-      continue
-    }
-
-    const absolutePath = path.join(currentRealPath, entry.name)
-    let realPath = ''
-    try {
-      realPath = normalizeAbsolutePath(await fs.realpath(absolutePath))
-    } catch {
-      continue
-    }
-    if (!pathMatchesRoot(root.realPath, realPath)) {
-      continue
-    }
-
-    const itemRelativePath = currentRelativePath
-      ? `${currentRelativePath}/${entry.name}`
-      : entry.name
-
-    if (entry.isDirectory()) {
-      if (!flattenView) {
-        items.push({
-          name: entry.name,
-          path: itemRelativePath,
-          kind: 'directory',
-          isEmpty: !(await directoryHasVisibleChildren(root, realPath)),
-        })
-        continue
-      }
-
-      consumeTraversalBudget(
-        traversalBudget,
-        'remainingDirectories',
-        'Remote directory traversal budget exceeded',
-      )
-      const nestedItems = await readDirectoryItemsRecursive(
-        root,
-        itemRelativePath,
-        flattenView,
-        traversalBudget,
-        { allowUnreadableDirectorySkip: true },
-      )
-      items.push(...nestedItems)
-      continue
-    }
-
-    if (!entry.isFile()) {
-      continue
-    }
-
-    consumeTraversalBudget(
-      traversalBudget,
-      'remainingFiles',
-      'Remote file traversal budget exceeded',
-    )
-    let fileStat = null
-    try {
-      fileStat = await statPath(realPath)
-    } catch (error) {
-      if (isSkippableFsError(error)) {
-        continue
-      }
-      throw error
-    }
-    items.push({
-      name: entry.name,
-      path: itemRelativePath,
-      kind: 'file',
-      size: Number(fileStat.size) || 0,
-      lastModifiedMs: Number.isFinite(Number(fileStat.mtimeMs)) ? Math.trunc(Number(fileStat.mtimeMs)) : 0,
-      mimeType: getMimeType(entry.name),
-      previewKind: getPreviewKind(entry.name),
-    })
-  }
-
-  return items
 }
 
 function stripAbsolutePathFromTagQueryResult(result) {
@@ -574,18 +302,70 @@ export function listRemoteReadonlyRoots(remoteConfig) {
   }))
 }
 
-export async function listRemoteReadonlyFiles(remoteConfig, payload = {}) {
+function toFiniteNumber(value) {
+  const next = Number(value)
+  return Number.isFinite(next) ? next : undefined
+}
+
+function toRemoteReadonlyListingItems(runtimeListing) {
+  const entries = Array.isArray(runtimeListing?.entries) ? runtimeListing.entries : []
+  return entries.flatMap((entry) => {
+    if (!isObjectRecord(entry)) return []
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    const rootRelativePath = typeof entry.rootRelativePath === 'string'
+      ? normalizeOptionalRemotePath(entry.rootRelativePath, 'rootRelativePath')
+      : ''
+    const kind = entry.kind === 'directory' ? 'directory' : entry.kind === 'file' ? 'file' : null
+    if (!name || !rootRelativePath || !kind) return []
+
+    const item = {
+      name,
+      path: rootRelativePath,
+      kind,
+      displayPath: rootRelativePath,
+    }
+    if (kind === 'directory') {
+      if (typeof entry.isEmpty === 'boolean') {
+        item.isEmpty = entry.isEmpty
+      }
+      const entryCount = toFiniteNumber(entry.entryCount)
+      if (typeof entryCount === 'number') {
+        item.entryCount = entryCount
+      }
+      return [item]
+    }
+
+    const size = toFiniteNumber(entry.size)
+    if (typeof size === 'number') {
+      item.size = size
+    }
+    const lastModifiedMs = toFiniteNumber(entry.lastModifiedMs)
+    if (typeof lastModifiedMs === 'number') {
+      item.lastModifiedMs = lastModifiedMs
+    }
+    item.mimeType = getMimeType(name)
+    item.previewKind = getPreviewKind(name)
+    return [item]
+  })
+}
+
+export async function listRemoteReadonlyFiles(remoteConfig, payload = {}, runtimeBaseUrl) {
   const root = resolveRemoteRoot(remoteConfig, payload.rootId)
   const targetPath = normalizeOptionalRemotePath(payload.path, 'path')
   const flattenView = payload.flattenView === true
-  const traversalBudget = createDirectoryTraversalBudget(flattenView)
-  const items = await readDirectoryItemsRecursive(root, targetPath, flattenView, traversalBudget)
+  const runtimeListing = await readRuntimeDirectoryListing(runtimeBaseUrl, {
+    rootPath: root.path,
+    rootRelativePath: targetPath,
+    flattened: flattenView,
+  })
   return {
     ok: true,
     rootId: root.id,
     path: targetPath,
     flattenView,
-    items,
+    items: toRemoteReadonlyListingItems(runtimeListing),
+    isTruncated: runtimeListing?.isTruncated === true,
+    nextOffset: toFiniteNumber(runtimeListing?.nextOffset) ?? null,
   }
 }
 

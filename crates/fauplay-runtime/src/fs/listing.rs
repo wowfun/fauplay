@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{
     DirectoryEntry, DirectoryEntryKind, ListDirectoryRequest, ListDirectoryResponse,
@@ -15,7 +15,8 @@ const DIRECTORY_ENTRY_COUNT_LIMIT: usize = 100;
 pub(crate) fn list_local_directory(
     request: ListDirectoryRequest,
 ) -> Result<ListDirectoryResponse, RuntimeError> {
-    let directory_path = request.root_path.join(request.root_relative_path.as_path());
+    let directory_path =
+        resolve_listing_directory_path(&request.root_path, &request.root_relative_path)?;
     let mut entries = Vec::new();
 
     if request.flattened {
@@ -38,6 +39,25 @@ pub(crate) fn list_local_directory(
         request.entry_offset,
         request.entry_limit,
     ))
+}
+
+fn resolve_listing_directory_path(
+    root_path: &Path,
+    root_relative_path: &RootRelativePath,
+) -> Result<PathBuf, RuntimeError> {
+    let directory_path = root_path.join(root_relative_path.as_path());
+    let root_real_path = fs::canonicalize(root_path)
+        .map_err(|source| RuntimeError::read_directory(root_path, source))?;
+    let directory_real_path = fs::canonicalize(&directory_path)
+        .map_err(|source| RuntimeError::read_directory(&directory_path, source))?;
+
+    if !directory_real_path.starts_with(&root_real_path) {
+        return Err(RuntimeError::invalid_root_relative_path(
+            root_relative_path.as_path(),
+        ));
+    }
+
+    Ok(directory_real_path)
 }
 
 fn paged_response(

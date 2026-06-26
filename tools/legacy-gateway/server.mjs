@@ -561,7 +561,7 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyFiles(currentRemoteReadonlyConfig, payload))
+        sendJson(res, 200, await listRemoteReadonlyFiles(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
       }

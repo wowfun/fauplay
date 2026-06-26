@@ -1,3 +1,7 @@
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs as unix_fs;
+
 use fauplay_runtime::FauplayRuntime;
 
 use super::support::*;
@@ -309,6 +313,45 @@ fn runtime_api_rejects_root_relative_path_escape() {
     assert!(
         response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
         "response should reject invalid Root-relative Path: {response}"
+    );
+    assert!(
+        response.contains("Root-relative Path"),
+        "response should name the invalid domain term: {response}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_api_rejects_listing_symlink_escape() {
+    let fixture = Fixture::new("runtime_api_rejects_listing_symlink_escape");
+    let outside_root = fixture
+        .root
+        .parent()
+        .expect("fixture root should have a parent")
+        .join("runtime_api_rejects_listing_symlink_escape_outside");
+    let _ = fs::remove_dir_all(&outside_root);
+    fs::create_dir_all(&outside_root).expect("outside fixture directory should be created");
+    fs::write(outside_root.join("secret.txt"), "secret")
+        .expect("outside fixture file should be written");
+    unix_fs::symlink(&outside_root, fixture.root.join("linked"))
+        .expect("fixture symlink should be created");
+
+    let (address, server) = serve_runtime_once(FauplayRuntime::new());
+
+    let response = send_list_request_with_root_relative_path(
+        &address,
+        &fixture.root.display().to_string(),
+        "linked",
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+        "response should reject a symlink escape: {response}"
+    );
+    assert!(
+        !response.contains("secret.txt"),
+        "response should not list files outside the Local Root: {response}"
     );
     assert!(
         response.contains("Root-relative Path"),

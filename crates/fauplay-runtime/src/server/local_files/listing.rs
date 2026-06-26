@@ -37,6 +37,9 @@ pub(in crate::server) fn handle_list_local_directory(
         query: parse_listing_query(query),
     }) {
         Ok(response) => http_response(200, "OK", &list_directory_response_json(response)),
+        Err(error) if error.to_string().contains("Root-relative Path") => {
+            http_response(400, "Bad Request", &error_json(&error.to_string()))
+        }
         Err(error) => http_response(
             500,
             "Internal Server Error",

@@ -88,6 +88,17 @@ test('Legacy Gateway no longer owns Remote Access file streaming', async () => {
   assert.equal(serverSource.includes('parseByteRangeHeader'), false)
 })
 
+test('Legacy Gateway no longer owns Remote Access directory traversal', async () => {
+  const remoteReadonlySource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(remoteReadonlySource.includes('readDirectoryItemsRecursive'), false)
+  assert.equal(remoteReadonlySource.includes('createDirectoryTraversalBudget'), false)
+  assert.equal(remoteReadonlySource.includes('REMOTE_FLATTEN_VIEW_MAX_FILES'), false)
+  assert.equal(remoteReadonlySource.includes('HIDDEN_SYSTEM_DIRECTORIES'), false)
+})
+
 test('Legacy Gateway no longer owns local text preview file reads', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),

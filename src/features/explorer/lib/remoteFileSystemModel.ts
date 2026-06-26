@@ -55,6 +55,7 @@ interface RemoteListingItemCandidate {
   path?: unknown
   kind?: unknown
   isEmpty?: unknown
+  entryCount?: unknown
   size?: unknown
   lastModifiedMs?: unknown
   mimeType?: unknown
@@ -171,6 +172,9 @@ function parseRemoteListingItem(item: unknown, configRootId: string): FileItem[]
   const lastModifiedMs = Number.isFinite(Number(candidate.lastModifiedMs))
     ? Number(candidate.lastModifiedMs)
     : undefined
+  const entryCount = kind === 'directory' && Number.isFinite(Number(candidate.entryCount))
+    ? Number(candidate.entryCount)
+    : undefined
 
   return [{
     name,
@@ -178,6 +182,7 @@ function parseRemoteListingItem(item: unknown, configRootId: string): FileItem[]
     kind,
     remoteRootId: configRootId,
     isEmpty: typeof candidate.isEmpty === 'boolean' ? candidate.isEmpty : undefined,
+    entryCount,
     size: Number.isFinite(Number(candidate.size)) ? Number(candidate.size) : undefined,
     lastModifiedMs,
     lastModified: typeof lastModifiedMs === 'number' ? new Date(lastModifiedMs) : undefined,

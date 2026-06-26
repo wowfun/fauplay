@@ -238,6 +238,51 @@ export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
   }
 }
 
+export async function readRuntimeDirectoryListing(runtimeBaseUrl, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  const endpoint = new URL('/v1/local-directory', `${normalizedBaseUrl}/`)
+  endpoint.searchParams.set('rootPath', rootPath)
+  endpoint.searchParams.set(
+    'rootRelativePath',
+    typeof options.rootRelativePath === 'string' ? options.rootRelativePath.trim() : '',
+  )
+  if (options.flattened === true) {
+    endpoint.searchParams.set('flattened', 'true')
+  }
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    const body = await response.text()
+    if (!response.ok) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime directory listing request failed: ${response.status}`,
+        response.status,
+      )
+    }
+    try {
+      return body ? JSON.parse(body) : {}
+    } catch (error) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime directory listing response was not valid JSON: ${error.message}`,
+        502,
+      )
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, 'directory listing')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export async function readRuntimeTextPreview(runtimeBaseUrl, options = {}) {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
   const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
