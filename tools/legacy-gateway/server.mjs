@@ -1,33 +1,22 @@
 import http from 'node:http'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 import {
-  createRuntimeRememberedDevice,
   parseRemoteByteRangeHeader,
   readRuntimeFaceCrop,
   readRuntimeFileContent,
   readRuntimeFileThumbnail,
   readRuntimeTextPreview,
-  revokeAllRuntimeRememberedDevices,
-  revokeRuntimeRememberedDevice,
-  rotateRuntimeRememberedDevice,
   sendRemoteRangeNotSatisfiable,
   sendRuntimeFileContentResponse,
 } from './remote-file-access.mjs'
 import {
-  clearRemoteReadonlyLoginFailures,
-  clearRemoteReadonlySession,
-  clearRemoteRememberedDevice,
+  appendRemoteRuntimeSetCookies,
   createRemoteBudgetExceededError,
-  ensureRemoteReadonlyLoginAllowed,
   ensureRemoteReadonlySessionAuthorized,
-  issueRemoteReadonlySession,
-  issueRemoteRememberedDevice,
-  normalizeRememberedDeviceLabel,
-  readRemoteReadonlyClientId,
-  registerRemoteReadonlyLoginFailure,
+  forwardRemoteReadonlySessionLogin,
+  forwardRemoteReadonlySessionLogout,
 } from './remote-sessions.mjs'
 import {
-  ensureRemoteReadonlyAuthorized,
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
   getRemoteReadonlyFileTags,
@@ -105,12 +94,9 @@ function normalizeBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
 }
 
-async function sendRemoteReadonlyError(res, remoteSessions, remoteRememberedDevices, req, error) {
+async function sendRemoteReadonlyError(res, error) {
   const statusCode = resolveErrorStatusCode(error)
-  if (statusCode === 401) {
-    clearRemoteReadonlySession(res, remoteSessions, req)
-    await clearRemoteRememberedDevice(res, remoteSessions, remoteRememberedDevices, req)
-  }
+  appendRemoteRuntimeSetCookies(res, Array.isArray(error?.setCookies) ? error.setCookies : [])
   sendJson(res, statusCode, toHttpErrorBody(error))
 }
 
@@ -142,71 +128,6 @@ function toHttpErrorBody(error) {
   }
 }
 
-function toRuntimeRememberedDeviceCredential(value) {
-  if (!isObjectRecord(value)) return null
-  const id = typeof value.id === 'string' ? value.id.trim() : ''
-  const cookieValue = typeof value.cookieValue === 'string' ? value.cookieValue.trim() : ''
-  const expiresAtMs = Number(value.expiresAtMs)
-  if (!id || !cookieValue || !Number.isFinite(expiresAtMs)) return null
-  return {
-    id,
-    cookieValue,
-    label: typeof value.label === 'string' ? value.label : '',
-    autoLabel: typeof value.autoLabel === 'string' ? value.autoLabel : '',
-    userAgentSummary: typeof value.userAgentSummary === 'string' ? value.userAgentSummary : '',
-    expiresAtMs,
-  }
-}
-
-function toRuntimeRememberedDeviceIds(value) {
-  return Array.isArray(value)
-    ? value
-      .filter((item) => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter(Boolean)
-    : []
-}
-
-function createRuntimeRememberedDeviceAdapter(runtimeBaseUrl) {
-  return {
-    async create(nowMs = Date.now(), options = {}) {
-      void nowMs
-      const result = await createRuntimeRememberedDevice(runtimeBaseUrl, {
-        label: typeof options.label === 'string' ? options.label : '',
-        userAgent: typeof options.userAgent === 'string' ? options.userAgent : '',
-      })
-      const device = toRuntimeRememberedDeviceCredential(result?.device)
-      if (!device) {
-        throw createMcpRuntimeError(
-          'REMOTE_RUNTIME_RESPONSE_ERROR',
-          'Runtime returned an invalid Remembered Device',
-          502,
-        )
-      }
-      return device
-    },
-    async rotate(cookieValue) {
-      try {
-        const result = await rotateRuntimeRememberedDevice(runtimeBaseUrl, { cookieValue })
-        return toRuntimeRememberedDeviceCredential(result?.device)
-      } catch (error) {
-        if (resolveErrorStatusCode(error) === 404) {
-          return null
-        }
-        throw error
-      }
-    },
-    async revoke(cookieValue) {
-      const result = await revokeRuntimeRememberedDevice(runtimeBaseUrl, { cookieValue })
-      return toRuntimeRememberedDeviceIds(result?.revokedDeviceIds)
-    },
-    async clearAll() {
-      await revokeAllRuntimeRememberedDevices(runtimeBaseUrl)
-      return []
-    },
-  }
-}
-
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
@@ -217,10 +138,6 @@ export async function startGatewayServer(options = {}) {
   let remoteReadonlyConfig = await loadRemoteReadonlyConfig(runtimeBaseUrl)
   let remoteReadonlyConfigFingerprint = remoteReadonlyConfig.fingerprint
 
-  const remoteReadonlySessions = new Map()
-  const remoteReadonlyLoginAttempts = new Map()
-  const remoteRememberedDevices = createRuntimeRememberedDeviceAdapter(runtimeBaseUrl)
-
   const refreshRemoteReadonlyConfigIfNeeded = async () => {
     const nextConfig = await loadRemoteReadonlyConfig(runtimeBaseUrl)
     if (nextConfig.fingerprint === remoteReadonlyConfigFingerprint) {
@@ -228,9 +145,6 @@ export async function startGatewayServer(options = {}) {
       return remoteReadonlyConfig
     }
 
-    remoteReadonlySessions.clear()
-    remoteReadonlyLoginAttempts.clear()
-    await remoteRememberedDevices.clearAll()
     remoteReadonlyConfig = nextConfig
     remoteReadonlyConfigFingerprint = nextConfig.fingerprint
     return remoteReadonlyConfig
@@ -269,43 +183,14 @@ export async function startGatewayServer(options = {}) {
     }
 
     if (method === 'POST' && pathname === '/v1/remote/session/login') {
-      const remoteClientId = readRemoteReadonlyClientId(req)
       try {
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        const rememberDevice = normalizeBoolean(payload.rememberDevice)
-        const rememberDeviceLabel = rememberDevice
-          ? normalizeRememberedDeviceLabel(payload.rememberDeviceLabel)
-          : ''
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        const nowMs = Date.now()
-        ensureRemoteReadonlyLoginAllowed(remoteReadonlyLoginAttempts, remoteClientId)
-        await ensureRemoteReadonlyAuthorized(currentRemoteReadonlyConfig, req.headers, runtimeBaseUrl)
-        clearRemoteReadonlyLoginFailures(remoteReadonlyLoginAttempts, remoteClientId)
-        let rememberedDeviceId = null
-        if (rememberDevice) {
-          const rememberedDevice = await issueRemoteRememberedDevice(
-            res,
-            remoteReadonlySessions,
-            remoteRememberedDevices,
-            req,
-            nowMs,
-            { label: rememberDeviceLabel },
-          )
-          rememberedDeviceId = rememberedDevice.id
-        } else {
-          await clearRemoteRememberedDevice(res, remoteReadonlySessions, remoteRememberedDevices, req)
-        }
-        issueRemoteReadonlySession(res, remoteReadonlySessions, req, nowMs, { rememberedDeviceId })
-        res.statusCode = 204
-        res.end()
+        await refreshRemoteReadonlyConfigIfNeeded()
+        await forwardRemoteReadonlySessionLogin(req, res, runtimeBaseUrl, payload)
       } catch (error) {
-        if (resolveErrorStatusCode(error) === 401) {
-          registerRemoteReadonlyLoginFailure(remoteReadonlyLoginAttempts, remoteClientId)
-        }
-        clearRemoteReadonlySession(res, remoteReadonlySessions, req)
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
       }
       return
@@ -317,12 +202,8 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        clearRemoteReadonlySession(res, remoteReadonlySessions, req)
-        if (normalizeBoolean(payload.forgetDevice)) {
-          await clearRemoteRememberedDevice(res, remoteReadonlySessions, remoteRememberedDevices, req)
-        }
-        sendJson(res, 200, {
-          ok: true,
+        await forwardRemoteReadonlySessionLogout(req, res, runtimeBaseUrl, {
+          forgetDevice: normalizeBoolean(payload.forgetDevice),
         })
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
@@ -337,15 +218,14 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         sendJson(res, 200, {
           ok: true,
           items: listRemoteReadonlyRoots(currentRemoteReadonlyConfig),
         })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -357,13 +237,12 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const items = await listRemoteReadonlyFavorites(currentRemoteReadonlyConfig, runtimeBaseUrl)
         sendJson(res, 200, { ok: true, items })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -375,8 +254,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -385,7 +263,7 @@ export async function startGatewayServer(options = {}) {
         const item = await upsertRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
         sendJson(res, 200, { ok: true, item })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -397,8 +275,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -407,7 +284,7 @@ export async function startGatewayServer(options = {}) {
         await removeRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
         sendJson(res, 200, { ok: true })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -419,8 +296,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const faceId = decodeURIComponent(pathname.slice('/v1/remote/faces/crops/'.length))
         const rootId = requestUrl.searchParams.get('rootId')
@@ -437,7 +313,7 @@ export async function startGatewayServer(options = {}) {
           cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
         })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -449,8 +325,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const resource = await resolveRemoteReadonlyFileResource(currentRemoteReadonlyConfig, {
           rootId: requestUrl.searchParams.get('rootId'),
@@ -483,7 +358,7 @@ export async function startGatewayServer(options = {}) {
           },
         )
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -495,8 +370,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const resource = await resolveRemoteReadonlyThumbnailResource(currentRemoteReadonlyConfig, {
           rootId: requestUrl.searchParams.get('rootId'),
@@ -511,7 +385,7 @@ export async function startGatewayServer(options = {}) {
           cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
         })
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -523,8 +397,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -532,7 +405,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await listRemoteReadonlyFiles(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -544,8 +417,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -560,7 +432,7 @@ export async function startGatewayServer(options = {}) {
           ...(typeof payload.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: payload.sizeLimitBytes } : {}),
         }))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -572,8 +444,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -581,7 +452,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await listRemoteReadonlyTagOptions(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -593,8 +464,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -602,7 +472,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await queryRemoteReadonlyFilesByTags(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -614,8 +484,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -623,7 +492,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await getRemoteReadonlyFileTags(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -635,8 +504,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -644,7 +512,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await listRemoteReadonlyPeople(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }
@@ -656,8 +524,7 @@ export async function startGatewayServer(options = {}) {
           currentRemoteReadonlyConfig,
           req,
           res,
-          remoteReadonlySessions,
-          remoteRememberedDevices,
+          runtimeBaseUrl,
         )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
@@ -665,7 +532,7 @@ export async function startGatewayServer(options = {}) {
         }
         sendJson(res, 200, await listRemoteReadonlyPersonFaces(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
-        await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
+        await sendRemoteReadonlyError(res, error)
       }
       return
     }

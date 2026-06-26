@@ -161,3 +161,32 @@ pub struct RemoteAccessConfigResponse {
 pub struct RemoteAccessTokenVerifyRequest {
     pub bearer_token: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessSessionLoginRequest {
+    pub bearer_token: String,
+    pub remember_device: bool,
+    pub remember_device_label: String,
+    pub remembered_device_cookie: String,
+    pub user_agent: String,
+    pub client_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessSessionAuthorizeRequest {
+    pub session_cookie: String,
+    pub remembered_device_cookie: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessSessionLogoutRequest {
+    pub session_cookie: String,
+    pub remembered_device_cookie: String,
+    pub forget_device: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessSessionResponse {
+    pub authorized: bool,
+    pub set_cookies: Vec<String>,
+}

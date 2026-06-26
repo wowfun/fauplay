@@ -42,9 +42,11 @@ pub use api::{
     RememberedDeviceCreateRequest, RememberedDeviceCredential, RememberedDeviceRevokeRequest,
     RememberedDeviceRevokeResponse, RememberedDeviceRotateRequest, RememberedDevicesAdminResponse,
     RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
-    RemoteAccessTokenVerifyRequest, RemotePublishedRoot, RemotePublishedRootSyncEntry,
-    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
-    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
+    RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
+    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
+    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
     RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
@@ -61,6 +63,7 @@ pub struct FauplayRuntime {
     runtime_home_path: PathBuf,
     mcp_runtime: mcp::McpRuntime,
     face_scan_jobs: tasks::FaceScanJobs,
+    remote_access_sessions: store::RemoteAccessSessions,
 }
 
 impl FauplayRuntime {
@@ -84,6 +87,7 @@ impl FauplayRuntime {
         Self {
             mcp_runtime: mcp::McpRuntime::new(runtime_home_path.clone(), mcp_config_path.into()),
             face_scan_jobs: tasks::FaceScanJobs::default(),
+            remote_access_sessions: store::RemoteAccessSessions::default(),
             runtime_home_path,
         }
     }
@@ -421,6 +425,30 @@ impl FauplayRuntime {
         request: RemoteAccessTokenVerifyRequest,
     ) -> Result<bool, RuntimeError> {
         store::verify_remote_access_token(&self.runtime_home_path, request)
+    }
+
+    pub fn login_remote_access_session(
+        &self,
+        request: RemoteAccessSessionLoginRequest,
+    ) -> Result<RemoteAccessSessionResponse, RuntimeError> {
+        self.remote_access_sessions
+            .login(&self.runtime_home_path, request)
+    }
+
+    pub fn authorize_remote_access_session(
+        &self,
+        request: RemoteAccessSessionAuthorizeRequest,
+    ) -> Result<RemoteAccessSessionResponse, RuntimeError> {
+        self.remote_access_sessions
+            .authorize(&self.runtime_home_path, request)
+    }
+
+    pub fn logout_remote_access_session(
+        &self,
+        request: RemoteAccessSessionLogoutRequest,
+    ) -> Result<RemoteAccessSessionResponse, RuntimeError> {
+        self.remote_access_sessions
+            .logout(&self.runtime_home_path, request)
     }
 
     pub fn sync_remote_published_roots(

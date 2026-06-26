@@ -131,6 +131,56 @@ async function getRuntimeJson(runtimeBaseUrl, pathname, options = {}) {
   }
 }
 
+async function postRuntimeJsonExchange(runtimeBaseUrl, pathname, payload, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(typeof options.authorization === 'string' && options.authorization.trim()
+      ? { Authorization: options.authorization.trim() }
+      : {}),
+    ...(typeof options.cookieHeader === 'string' && options.cookieHeader.trim()
+      ? { Cookie: options.cookieHeader.trim() }
+      : {}),
+    ...(typeof options.userAgent === 'string' && options.userAgent.trim()
+      ? { 'User-Agent': options.userAgent.trim() }
+      : {}),
+    ...(typeof options.forwardedFor === 'string' && options.forwardedFor.trim()
+      ? { 'X-Forwarded-For': options.forwardedFor.trim() }
+      : {}),
+  }
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    return {
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'application/json',
+      setCookies: responseSetCookies(response),
+      body: await response.text(),
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, pathname)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+function responseSetCookies(response) {
+  if (typeof response.headers.getSetCookie === 'function') {
+    return response.headers.getSetCookie()
+  }
+  const raw = response.headers.get('set-cookie') ?? ''
+  return raw.split(/,\s*(?=__Host-fauplay-remote-)/).filter(Boolean)
+}
+
 export function parseRemoteByteRangeHeader(rangeHeader, totalSizeBytes) {
   if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
     return null
@@ -418,34 +468,23 @@ export async function readRuntimeRemoteAccessConfig(runtimeBaseUrl, options = {}
   return getRuntimeJson(runtimeBaseUrl, '/v1/remote/access/config', options)
 }
 
-export async function verifyRuntimeRemoteAccessToken(runtimeBaseUrl, options = {}) {
-  const bearerToken = normalizeRequiredStringInput(options.bearerToken, 'bearerToken')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/access/authorize', { bearerToken }, options)
-}
-
-export async function createRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/create', {
-    label: typeof options.label === 'string' ? options.label : '',
-    userAgent: typeof options.userAgent === 'string' ? options.userAgent : '',
+export async function loginRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/login', {
+    rememberDevice: options.rememberDevice === true,
+    rememberDeviceLabel: typeof options.rememberDeviceLabel === 'string'
+      ? options.rememberDeviceLabel
+      : '',
   }, options)
 }
 
-export async function rotateRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
-  const cookieValue = normalizeRequiredStringInput(options.cookieValue, 'cookieValue')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/rotate', {
-    cookieValue,
-  }, options)
+export async function authorizeRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/authorize', {}, options)
 }
 
-export async function revokeRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
-  const cookieValue = typeof options.cookieValue === 'string' ? options.cookieValue : ''
-  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/revoke', {
-    cookieValue,
+export async function logoutRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/logout', {
+    forgetDevice: options.forgetDevice === true,
   }, options)
-}
-
-export async function revokeAllRuntimeRememberedDevices(runtimeBaseUrl, options = {}) {
-  return postRuntimeJson(runtimeBaseUrl, '/v1/admin/remembered-devices/revoke-all', {}, options)
 }
 
 export async function upsertRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {

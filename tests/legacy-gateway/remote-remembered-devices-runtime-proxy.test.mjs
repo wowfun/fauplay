@@ -57,47 +57,6 @@ test('Remote Access Remembered Devices are served through Fauplay Runtime', asyn
       })
       res.setHeader('Content-Type', 'application/json')
 
-      if (req.method === 'POST' && req.url === '/v1/remote/remembered-devices/create') {
-        res.statusCode = 200
-        res.end(JSON.stringify({
-          ok: true,
-          device: {
-            id: 'runtime-device-a',
-            cookieValue: 'runtime-device-a.secret-create',
-            label: 'Desk Device',
-            autoLabel: 'Chrome · Linux',
-            userAgentSummary: 'Linux · Chrome',
-            expiresAtMs: 4102444800000,
-          },
-        }))
-        return
-      }
-
-      if (req.method === 'POST' && req.url === '/v1/remote/remembered-devices/rotate') {
-        res.statusCode = 200
-        res.end(JSON.stringify({
-          ok: true,
-          device: {
-            id: 'runtime-device-a',
-            cookieValue: 'runtime-device-a.secret-rotate',
-            label: 'Desk Device',
-            autoLabel: 'Chrome · Linux',
-            userAgentSummary: 'Linux · Chrome',
-            expiresAtMs: 4102444800000,
-          },
-        }))
-        return
-      }
-
-      if (req.method === 'POST' && req.url === '/v1/remote/remembered-devices/revoke') {
-        res.statusCode = 200
-        res.end(JSON.stringify({
-          ok: true,
-          revokedDeviceIds: ['runtime-device-a'],
-        }))
-        return
-      }
-
       res.statusCode = 404
       res.end(JSON.stringify({ ok: false, error: 'unexpected Runtime path' }))
     })
@@ -172,30 +131,7 @@ test('Remote Access Remembered Devices are served through Fauplay Runtime', asyn
         url: request.url,
         body: request.body ? JSON.parse(request.body) : null,
       }))
-    assert.deepEqual(rememberedRequests, [
-      {
-        method: 'POST',
-        url: '/v1/remote/remembered-devices/create',
-        body: {
-          label: 'Desk Device',
-          userAgent: 'FauplayTest Chrome/126 Linux',
-        },
-      },
-      {
-        method: 'POST',
-        url: '/v1/remote/remembered-devices/rotate',
-        body: {
-          cookieValue: 'runtime-device-a.secret-create',
-        },
-      },
-      {
-        method: 'POST',
-        url: '/v1/remote/remembered-devices/revoke',
-        body: {
-          cookieValue: 'runtime-device-a.secret-rotate',
-        },
-      },
-    ])
+    assert.deepEqual(rememberedRequests, [])
   } finally {
     if (gatewayServer) await closeServer(gatewayServer)
     if (runtimeServer) await closeServer(runtimeServer)

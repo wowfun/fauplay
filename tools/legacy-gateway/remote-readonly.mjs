@@ -12,7 +12,6 @@ import {
   readRuntimeTagOptions,
   removeRuntimeRemoteSharedFavorite,
   upsertRuntimeRemoteSharedFavorite,
-  verifyRuntimeRemoteAccessToken,
 } from './remote-file-access.mjs'
 import { statWithDrvfsRetry } from './drvfs.mjs'
 
@@ -259,15 +258,6 @@ async function resolveRealPathWithinRoot(root, targetPath) {
   return realPath
 }
 
-function readBearerToken(headers) {
-  const raw = headers?.authorization
-  const header = Array.isArray(raw) ? raw[0] : raw
-  if (typeof header !== 'string') return ''
-  const trimmed = header.trim()
-  if (!trimmed.startsWith('Bearer ')) return ''
-  return trimmed.slice('Bearer '.length).trim()
-}
-
 function toRemoteReadonlyConfigSource(item) {
   if (!isObjectRecord(item)) return null
   const label = typeof item.label === 'string' ? item.label.trim() : ''
@@ -328,26 +318,6 @@ export function getRemoteReadonlyCapabilities(remoteConfig) {
     authMode: 'session-cookie',
     loginMode: 'bearer-token-exchange',
     readOnly: true,
-  }
-}
-
-export async function ensureRemoteReadonlyAuthorized(remoteConfig, headers, runtimeBaseUrl) {
-  if (remoteConfig.enabled !== true || remoteConfig.authConfigured !== true) {
-    throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
-  }
-
-  const receivedToken = readBearerToken(headers)
-  if (!receivedToken) {
-    throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
-  }
-
-  try {
-    await verifyRuntimeRemoteAccessToken(runtimeBaseUrl, { bearerToken: receivedToken })
-  } catch (error) {
-    if (error?.statusCode === 401) {
-      throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
-    }
-    throw error
   }
 }
 

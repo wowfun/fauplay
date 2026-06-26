@@ -147,6 +147,9 @@ test('Legacy Gateway no longer owns Remembered Device storage', async () => {
   assert.equal(serverSource.includes('remembered-devices.mjs'), false)
   assert.equal(remoteSessionsSource.includes('remembered-devices.mjs'), false)
   assert.equal(remoteSessionsSource.includes('DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS'), false)
+  assert.equal(remoteSessionsSource.includes('randomUUID'), false)
+  assert.equal(remoteSessionsSource.includes('remoteSessions'), false)
+  assert.equal(remoteSessionsSource.includes('loginAttempts'), false)
 })
 
 test('Legacy Gateway no longer owns Remote Access host config or token verification', async () => {
@@ -169,7 +172,20 @@ test('Legacy Gateway no longer owns Remote Access host config or token verificat
   assert.equal(remoteReadonlySource.includes('isTokenMatch'), false)
   assert.equal(remoteSessionsSource.includes('remoteConfig.token'), false)
   assert.equal(remoteReadonlySource.includes('readRuntimeRemoteAccessConfig'), true)
-  assert.equal(remoteReadonlySource.includes('verifyRuntimeRemoteAccessToken'), true)
+  assert.equal(remoteReadonlySource.includes('verifyRuntimeRemoteAccessToken'), false)
+})
+
+test('Legacy Gateway no longer bridges Remote Access Remembered Device credentials directly', async () => {
+  const remoteFileAccessSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-file-access.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(remoteFileAccessSource.includes('createRuntimeRememberedDevice'), false)
+  assert.equal(remoteFileAccessSource.includes('rotateRuntimeRememberedDevice'), false)
+  assert.equal(remoteFileAccessSource.includes('revokeRuntimeRememberedDevice'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/remembered-devices/create'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/remembered-devices/rotate'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/remote/remembered-devices/revoke'), false)
 })
 
 test('Legacy Gateway no longer owns local text preview file reads', async () => {

@@ -45,12 +45,18 @@ export async function handleRuntimeRemoteAccessHostRequest(req, res, {
   config,
   expectedToken = 'secret-token',
 } = {}) {
+  const sessionState = config.__sessionState ??= {
+    sessionCookie: '__Host-fauplay-remote-session=runtime-session',
+    rememberCookie: '__Host-fauplay-remote-remember-device=runtime-device-a.secret-create',
+    rotatedRememberCookie: '__Host-fauplay-remote-remember-device=runtime-device-a.secret-rotate',
+  }
+
   if (req.method === 'GET' && req.url === '/v1/remote/access/config') {
     sendJson(res, 200, config)
     return true
   }
 
-  if (req.method === 'POST' && req.url === '/v1/remote/access/authorize') {
+  if (req.method === 'POST' && req.url === '/v1/remote/session/login') {
     const body = await readRequestBody(req)
     let payload = {}
     try {
@@ -64,16 +70,68 @@ export async function handleRuntimeRemoteAccessHostRequest(req, res, {
       return true
     }
 
-    if (payload?.bearerToken === expectedToken) {
-      sendJson(res, 200, { ok: true })
+    if (req.headers.authorization !== `Bearer ${expectedToken}`) {
+      sendJsonWithCookies(res, 401, {
+        ok: false,
+        error: 'Unauthorized',
+        code: 'REMOTE_UNAUTHORIZED',
+      }, [expiredSessionCookie()])
       return true
     }
 
-    sendJson(res, 401, {
+    const cookies = [sessionCookie(sessionState.sessionCookie)]
+    if (payload?.rememberDevice === true) {
+      cookies.push(sessionCookie(sessionState.rememberCookie))
+    }
+    res.statusCode = 204
+    res.setHeader('Set-Cookie', cookies)
+    res.end()
+    return true
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/remote/session/authorize') {
+    await readRequestBody(req)
+    const cookieHeader = req.headers.cookie ?? ''
+    if (cookieHeader.includes(sessionState.sessionCookie)) {
+      res.statusCode = 204
+      res.end()
+      return true
+    }
+    if (cookieHeader.includes(sessionState.rememberCookie)) {
+      sendNoContentWithCookies(res, [
+        sessionCookie(sessionState.rotatedRememberCookie),
+        sessionCookie(sessionState.sessionCookie),
+      ])
+      return true
+    }
+
+    sendJsonWithCookies(res, 401, {
       ok: false,
       error: 'Unauthorized',
       code: 'REMOTE_UNAUTHORIZED',
-    })
+    }, [expiredSessionCookie(), expiredRememberCookie()])
+    return true
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/remote/session/logout') {
+    const body = await readRequestBody(req)
+    let payload = {}
+    try {
+      payload = body ? JSON.parse(body) : {}
+    } catch {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'Invalid JSON',
+        code: 'REMOTE_INVALID_PARAMS',
+      })
+      return true
+    }
+
+    const cookies = [expiredSessionCookie()]
+    if (payload?.forgetDevice === true) {
+      cookies.push(expiredRememberCookie())
+    }
+    sendJsonWithCookies(res, 200, { ok: true }, cookies)
     return true
   }
 
@@ -84,6 +142,31 @@ function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(payload))
+}
+
+function sendJsonWithCookies(res, statusCode, payload, cookies) {
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'application/json')
+  res.setHeader('Set-Cookie', cookies)
+  res.end(JSON.stringify(payload))
+}
+
+function sendNoContentWithCookies(res, cookies) {
+  res.statusCode = 204
+  res.setHeader('Set-Cookie', cookies)
+  res.end()
+}
+
+function sessionCookie(cookiePair) {
+  return `${cookiePair}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`
+}
+
+function expiredSessionCookie() {
+  return '__Host-fauplay-remote-session=; Path=/; HttpOnly; Secure; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0'
+}
+
+function expiredRememberCookie() {
+  return '__Host-fauplay-remote-remember-device=; Path=/; HttpOnly; Secure; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0'
 }
 
 async function readRequestBody(req) {

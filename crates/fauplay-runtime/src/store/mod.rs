@@ -16,6 +16,7 @@ mod local_root_bindings;
 mod remembered_devices;
 mod remote_access;
 mod remote_published_roots;
+mod remote_sessions;
 
 pub(crate) use faces::{
     FaceCropSource, cluster_pending_faces, get_asset_face_detection, list_asset_faces, list_people,
@@ -42,6 +43,7 @@ pub(crate) use remote_published_roots::{
     list_remote_shared_favorites, list_resolved_remote_published_roots,
     remove_remote_shared_favorite, sync_remote_published_roots, upsert_remote_shared_favorite,
 };
+pub(crate) use remote_sessions::RemoteAccessSessions;
 
 const GLOBAL_CONFIG_FOLDER_NAME: &str = "global";
 const SHORTCUTS_CONFIG_FILENAME: &str = "shortcuts.json";

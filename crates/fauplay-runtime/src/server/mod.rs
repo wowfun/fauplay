@@ -69,6 +69,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/remote/access/authorize")) => {
             remote_access::handle_remote_access_authorize(runtime, request)
         }
+        Some(("POST", "/v1/remote/session/login")) => {
+            remote_access::handle_remote_session_login(runtime, request)
+        }
+        Some(("POST", "/v1/remote/session/authorize")) => {
+            remote_access::handle_remote_session_authorize(runtime, request)
+        }
+        Some(("POST", "/v1/remote/session/logout")) => {
+            remote_access::handle_remote_session_logout(runtime, request)
+        }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
         }
@@ -392,6 +401,9 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/admin/remote-published-roots/resolved"
             | "/v1/remote/access/config"
             | "/v1/remote/access/authorize"
+            | "/v1/remote/session/login"
+            | "/v1/remote/session/authorize"
+            | "/v1/remote/session/logout"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

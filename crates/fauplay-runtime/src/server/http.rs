@@ -164,7 +164,7 @@ pub(super) struct HttpResponse {
 impl HttpResponse {
     fn into_bytes(self) -> Vec<u8> {
         let mut response = format!(
-            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Range, mcp-session-id\r\nAccess-Control-Expose-Headers: mcp-session-id\r\n",
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Range, Authorization, mcp-session-id\r\nAccess-Control-Expose-Headers: mcp-session-id\r\n",
             self.status_code,
             self.reason,
             self.content_type
