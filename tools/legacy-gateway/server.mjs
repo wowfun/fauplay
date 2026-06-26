@@ -10,7 +10,6 @@ import {
 import {
   findHttpGatewayRoute,
   handleHttpGatewayRoute,
-  throwHttpGatewayRouteNotFound,
 } from './http-routes.mjs'
 import {
   createMcpServerRegistry,
@@ -21,7 +20,6 @@ import {
 import {
   clearRemoteReadonlyLoginFailures,
   clearRemoteReadonlySession,
-  clearRemoteReadonlySessionsByRememberedDeviceIds,
   clearRemoteRememberedDevice,
   createRemoteBudgetExceededError,
   ensureLoopbackAdminRequest,
@@ -35,7 +33,6 @@ import {
   REMOTE_REMEMBER_DEVICE_TTL_MS,
 } from './remote-sessions.mjs'
 import {
-  batchRebindPaths,
   getFaceCrop,
   ingestClassificationResult,
 } from './data/core.mjs'
@@ -165,28 +162,6 @@ function normalizeRemoteFavoritePath(value) {
     }
   }
   return segments.join('/')
-}
-
-function parseBatchRenameRebindMappings(toolResult) {
-  if (!isObjectRecord(toolResult)) return []
-  const items = Array.isArray(toolResult.items) ? toolResult.items : []
-  const mappings = []
-  for (const item of items) {
-    if (!isObjectRecord(item)) continue
-    if (item.ok !== true || item.skipped === true) continue
-    const fromRelativePath = typeof item.relativePath === 'string' ? item.relativePath.trim() : ''
-    const toRelativePath = typeof item.nextRelativePath === 'string' ? item.nextRelativePath.trim() : ''
-    if (!fromRelativePath || !toRelativePath || fromRelativePath === toRelativePath) continue
-    mappings.push({ fromRelativePath, toRelativePath })
-  }
-  return mappings
-}
-
-function appendPostProcessWarning(result, warning) {
-  if (!isObjectRecord(result)) return result
-  const previous = typeof result.postProcessWarning === 'string' ? result.postProcessWarning : ''
-  result.postProcessWarning = previous ? `${previous}; ${warning}` : warning
-  return result
 }
 
 function parseJsonRpcRequest(payload) {
@@ -324,52 +299,8 @@ async function postProcessClassificationToolCall(toolName, toolArgs, result) {
   })
 }
 
-async function postProcessBatchRenameToolCall(toolName, toolArgs, result) {
-  if (toolName !== 'fs.batchRename' || !isObjectRecord(toolArgs) || !isObjectRecord(result)) {
-    return
-  }
-
-  const confirm = toolArgs.confirm === true
-  const renamed = Number(result.renamed ?? 0)
-
-  if (!confirm || renamed <= 0) {
-    return
-  }
-
-  const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath.trim() : ''
-  const mappings = parseBatchRenameRebindMappings(result)
-
-  if (!rootPath) {
-    appendPostProcessWarning(result, 'batchRebindPaths skipped: missing rootPath')
-    return
-  }
-
-  if (mappings.length === 0) {
-    return
-  }
-
-  try {
-    const rebindResult = await batchRebindPaths({
-      rootPath,
-      mappings,
-    })
-    result.rebindResult = rebindResult
-    if (Number(rebindResult?.failed ?? 0) > 0) {
-      appendPostProcessWarning(
-        result,
-        `batchRebindPaths completed with ${rebindResult.failed} failed item(s)`,
-      )
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : 'unknown error'
-    console.warn(`[gateway] fs.batchRename post-process batchRebindPaths failed: ${reason}`)
-    appendPostProcessWarning(result, `batchRebindPaths failed: ${reason}`)
-  }
-}
-
 async function postProcessToolCallResult(toolName, toolArgs, result) {
   await postProcessClassificationToolCall(toolName, toolArgs, result)
-  await postProcessBatchRenameToolCall(toolName, toolArgs, result)
 }
 
 async function handleMcpRequest(runtime, request, sessions, sessionId) {
@@ -506,86 +437,6 @@ export async function startGatewayServer(options = {}) {
         status: 'ok',
       })
       return
-    }
-
-    if (method === 'GET' && pathname === '/v1/admin/remembered-devices') {
-      try {
-        ensureLoopbackAdminRequest(req, requestHostname, pathname)
-        await refreshRemoteReadonlyConfigIfNeeded()
-        const items = await remoteRememberedDevices.list()
-        sendJson(res, 200, { items })
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
-      return
-    }
-
-    if (method === 'POST' && pathname === '/v1/admin/remembered-devices/revoke-all') {
-      try {
-        ensureLoopbackAdminRequest(req, requestHostname, pathname)
-        await refreshRemoteReadonlyConfigIfNeeded()
-        const revokedDeviceIds = await remoteRememberedDevices.clearAll()
-        clearRemoteReadonlySessionsByRememberedDeviceIds(remoteReadonlySessions, revokedDeviceIds)
-        sendJson(res, 200, { ok: true })
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
-      return
-    }
-
-    if (pathname.startsWith('/v1/admin/remembered-devices/')) {
-      if (method === 'PATCH') {
-        try {
-          ensureLoopbackAdminRequest(req, requestHostname, pathname)
-          await refreshRemoteReadonlyConfigIfNeeded()
-          const rawDeviceId = pathname.slice('/v1/admin/remembered-devices/'.length)
-          let deviceId = ''
-          try {
-            deviceId = rawDeviceId ? decodeURIComponent(rawDeviceId).trim() : ''
-          } catch {
-            throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'deviceId must be valid', 400)
-          }
-          if (!deviceId || deviceId.includes('/')) {
-            throwHttpGatewayRouteNotFound(pathname)
-          }
-          const payload = await readJsonBody(req)
-          if (!isObjectRecord(payload)) {
-            throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
-          }
-          const label = normalizeRememberedDeviceLabel(payload.label, { required: true })
-          await remoteRememberedDevices.renameById(deviceId, label)
-          sendJson(res, 200, { ok: true })
-        } catch (error) {
-          sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-        }
-        return
-      }
-
-      if (method === 'DELETE') {
-        try {
-          ensureLoopbackAdminRequest(req, requestHostname, pathname)
-          await refreshRemoteReadonlyConfigIfNeeded()
-          const rawDeviceId = pathname.slice('/v1/admin/remembered-devices/'.length)
-          let deviceId = ''
-          try {
-            deviceId = rawDeviceId ? decodeURIComponent(rawDeviceId).trim() : ''
-          } catch {
-            throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'deviceId must be valid', 400)
-          }
-          if (!deviceId || deviceId.includes('/')) {
-            throwHttpGatewayRouteNotFound(pathname)
-          }
-          const revokedDeviceIds = await remoteRememberedDevices.revokeById(deviceId)
-          if (revokedDeviceIds.length === 0) {
-            throwHttpGatewayRouteNotFound(pathname)
-          }
-          clearRemoteReadonlySessionsByRememberedDeviceIds(remoteReadonlySessions, revokedDeviceIds)
-          sendJson(res, 200, { ok: true })
-        } catch (error) {
-          sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-        }
-        return
-      }
     }
 
     if (method === 'POST' && pathname === '/v1/admin/remote-published-roots/sync-from-local-browser') {

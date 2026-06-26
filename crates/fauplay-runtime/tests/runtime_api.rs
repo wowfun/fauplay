@@ -12,6 +12,8 @@ mod local_directory;
 mod local_root_bindings;
 #[path = "runtime_api/process.rs"]
 mod process;
+#[path = "runtime_api/remembered_devices.rs"]
+mod remembered_devices;
 #[path = "runtime_api/root_operations.rs"]
 mod root_operations;
 #[path = "runtime_api/runtime_config.rs"]

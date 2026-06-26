@@ -54,5 +54,5 @@ pub use root_operations::{
 };
 pub use runtime_home::{
     GlobalShortcutConfigResponse, LocalRootBinding, LocalRootBindingUpsertRequest,
-    LocalRootBindingsResponse,
+    LocalRootBindingsResponse, RememberedDeviceAdminEntry, RememberedDevicesAdminResponse,
 };

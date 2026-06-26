@@ -28,11 +28,12 @@ pub use api::{
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
     MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
-    RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,
-    RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode,
-    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
-    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
-    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    RememberedDeviceAdminEntry, RememberedDevicesAdminResponse, RootMoveBatchFailureReason,
+    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
+    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
+    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
+    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::path::PathBuf;
@@ -72,6 +73,26 @@ impl FauplayRuntime {
         request: LocalRootBindingUpsertRequest,
     ) -> Result<LocalRootBinding, RuntimeError> {
         store::upsert_local_root_binding(&self.runtime_home_path, request)
+    }
+
+    pub fn list_remembered_devices(&self) -> Result<RememberedDevicesAdminResponse, RuntimeError> {
+        store::list_remembered_devices(&self.runtime_home_path)
+    }
+
+    pub fn rename_remembered_device(
+        &self,
+        device_id: String,
+        label: String,
+    ) -> Result<bool, RuntimeError> {
+        store::rename_remembered_device(&self.runtime_home_path, &device_id, &label)
+    }
+
+    pub fn revoke_remembered_device(&self, device_id: String) -> Result<bool, RuntimeError> {
+        store::revoke_remembered_device(&self.runtime_home_path, &device_id)
+    }
+
+    pub fn revoke_all_remembered_devices(&self) -> Result<(), RuntimeError> {
+        store::revoke_all_remembered_devices(&self.runtime_home_path)
     }
 
     pub fn list_global_trash(

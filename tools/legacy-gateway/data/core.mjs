@@ -1,9 +1,5 @@
 export { resolveRootPath, normalizeRelativePath } from './common.mjs'
 export {
-  batchRebindPaths,
-  cleanupMissingFiles,
-} from './bindings.mjs'
-export {
   setAnnotationValue,
   setLocalDataValue,
   bindAnnotationTag,

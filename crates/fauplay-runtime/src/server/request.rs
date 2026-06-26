@@ -168,7 +168,7 @@ pub(super) fn query_values<'a>(query: &'a [(String, String)], key: &str) -> Vec<
         .collect()
 }
 
-fn percent_decode(value: &str) -> String {
+pub(super) fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;

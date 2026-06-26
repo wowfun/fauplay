@@ -9,6 +9,7 @@ mod http;
 mod local_files;
 mod local_root_bindings;
 mod missing_files;
+mod remembered_devices;
 mod request;
 mod root_operations;
 mod runtime_config;
@@ -23,7 +24,7 @@ use request::{
     first_query_value, http_request_body, json_bool_field, json_i64_or_default,
     json_mapping_path_field, json_root_relative_path_values, json_string_array_field,
     json_string_field, json_string_or_default, json_usize_or_default, parse_json_body,
-    parse_query_pairs, parse_query_string, query_values,
+    parse_query_pairs, parse_query_string, percent_decode, query_values,
 };
 
 fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse {
@@ -35,6 +36,18 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         ),
         Some(("GET", "/v1/config/shortcuts")) => {
             runtime_config::handle_global_shortcut_config(runtime)
+        }
+        Some(("GET", "/v1/admin/remembered-devices")) => {
+            remembered_devices::handle_list_remembered_devices(runtime)
+        }
+        Some(("POST", "/v1/admin/remembered-devices/revoke-all")) => {
+            remembered_devices::handle_revoke_all_remembered_devices(runtime)
+        }
+        Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
+            remembered_devices::handle_rename_remembered_device(runtime, target, request)
+        }
+        Some(("DELETE", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
+            remembered_devices::handle_revoke_remembered_device(runtime, target)
         }
         Some(("GET", target))
             if target == "/v1/local-root-bindings"
@@ -192,10 +205,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
 }
 
 fn is_preflight_target(target: &str) -> bool {
+    if target.starts_with("/v1/admin/remembered-devices/") {
+        return true;
+    }
+
     matches!(
         target,
         "/v1/local-directory"
             | "/v1/config/shortcuts"
+            | "/v1/admin/remembered-devices"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"

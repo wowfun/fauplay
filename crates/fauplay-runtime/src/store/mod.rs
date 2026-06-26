@@ -12,6 +12,7 @@ mod file_index;
 mod global_trash;
 mod global_trash_records;
 mod local_root_bindings;
+mod remembered_devices;
 
 pub(crate) use file_annotations::{
     bind_file_annotation_tag, cleanup_missing_files, list_annotation_tag_options,
@@ -23,6 +24,10 @@ pub(crate) use global_trash::{
     global_trash_file_path, list_global_trash, move_to_global_trash, restore_global_trash,
 };
 pub(crate) use local_root_bindings::{list_local_root_bindings, upsert_local_root_binding};
+pub(crate) use remembered_devices::{
+    list_remembered_devices, rename_remembered_device, revoke_all_remembered_devices,
+    revoke_remembered_device,
+};
 
 const GLOBAL_CONFIG_FOLDER_NAME: &str = "global";
 const SHORTCUTS_CONFIG_FILENAME: &str = "shortcuts.json";

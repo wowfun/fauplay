@@ -362,7 +362,8 @@ fn runtime_api_allows_browser_preflight_requests() {
         "preflight should allow browser origins: {response}"
     );
     assert!(
-        response.contains("Access-Control-Allow-Methods: GET, POST, PUT, PATCH, OPTIONS\r\n"),
+        response
+            .contains("Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\n"),
         "preflight should allow Runtime API methods: {response}"
     );
 }

@@ -36,3 +36,32 @@ test('Dispatch HTTP Routes still map File Annotation operations to Runtime API r
     },
   )
 })
+
+test('Dispatch HTTP Routes keep Root-relative annotation rebinds on the Runtime API', () => {
+  assert.deepEqual(
+    resolveDispatchHttpRoute('local.data', {
+      operation: 'batchRebindPaths',
+      rootPath: '/media/root',
+      mappings: [
+        {
+          fromRelativePath: 'albums/old.jpg',
+          toRelativePath: 'albums/new.jpg',
+        },
+      ],
+    }),
+    {
+      method: 'PATCH',
+      endpointPath: '/v1/files/relative-paths',
+      payload: {
+        rootPath: '/media/root',
+        mappings: [
+          {
+            fromRelativePath: 'albums/old.jpg',
+            toRelativePath: 'albums/new.jpg',
+          },
+        ],
+      },
+      timeoutMs: 120000,
+    },
+  )
+})
