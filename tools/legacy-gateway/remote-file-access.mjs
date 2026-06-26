@@ -349,6 +349,31 @@ export async function readRuntimeFileAnnotation(runtimeBaseUrl, options = {}) {
   }, options)
 }
 
+export async function listRuntimePeople(runtimeBaseUrl, options = {}) {
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/faces/list-people', {
+    rootPath,
+    scope: 'root',
+    ...(typeof options.query === 'string' ? { query: options.query } : {}),
+    ...(typeof options.page !== 'undefined' ? { page: options.page } : {}),
+    ...(typeof options.size !== 'undefined' ? { size: options.size } : {}),
+  }, options)
+}
+
+export async function listRuntimeAssetFaces(runtimeBaseUrl, options = {}) {
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  const personId = typeof options.personId === 'string' ? options.personId.trim() : ''
+  const relativePath = typeof options.relativePath === 'string' ? options.relativePath.trim() : ''
+  if (!personId && !relativePath) {
+    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'personId or relativePath is required', 400)
+  }
+  return postRuntimeJson(runtimeBaseUrl, '/v1/faces/list-asset-faces', {
+    rootPath,
+    ...(personId ? { personId } : {}),
+    ...(relativePath ? { relativePath } : {}),
+  }, options)
+}
+
 export async function readRuntimeTextPreview(runtimeBaseUrl, options = {}) {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
   const absolutePath = normalizeAbsolutePathInput(options.absolutePath)

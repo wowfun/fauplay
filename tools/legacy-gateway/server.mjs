@@ -673,7 +673,7 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyPeople(currentRemoteReadonlyConfig, payload))
+        sendJson(res, 200, await listRemoteReadonlyPeople(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
       }
@@ -694,7 +694,7 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyPersonFaces(currentRemoteReadonlyConfig, payload))
+        sendJson(res, 200, await listRemoteReadonlyPersonFaces(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
       }

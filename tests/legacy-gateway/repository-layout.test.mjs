@@ -110,6 +110,16 @@ test('Legacy Gateway no longer owns Remote Access tag data reads', async () => {
   assert.equal(remoteReadonlySource.includes('stripAbsolutePathFromTagQueryResult'), false)
 })
 
+test('Legacy Gateway no longer owns Remote Access face people data reads', async () => {
+  const remoteReadonlySource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(remoteReadonlySource.includes("from './data/core.mjs'"), false)
+  assert.equal(remoteReadonlySource.includes('listPeople({'), false)
+  assert.equal(remoteReadonlySource.includes('listAssetFaces({'), false)
+})
+
 test('Legacy Gateway no longer owns local text preview file reads', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),
