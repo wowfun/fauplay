@@ -14,6 +14,39 @@ function isAbortError(error) {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
+function normalizeRuntimeBaseUrl(runtimeBaseUrl) {
+  const normalizedBaseUrl = String(runtimeBaseUrl || '').trim().replace(/\/+$/, '')
+  if (!normalizedBaseUrl) {
+    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'Fauplay Runtime base URL is required', 502)
+  }
+  return normalizedBaseUrl
+}
+
+function normalizeAbsolutePathInput(absolutePath) {
+  const normalizedAbsolutePath = typeof absolutePath === 'string' ? absolutePath.trim() : ''
+  if (!normalizedAbsolutePath) {
+    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'absolutePath is required', 400)
+  }
+  return normalizedAbsolutePath
+}
+
+function resolveRuntimeTimeout(options = {}) {
+  return typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : DEFAULT_RUNTIME_CONTENT_TIMEOUT_MS
+}
+
+function rethrowRuntimeTimeout(error, timeoutMs, operation) {
+  if (isAbortError(error)) {
+    throw createMcpRuntimeError(
+      'RUNTIME_HTTP_TIMEOUT',
+      `Fauplay Runtime ${operation} request timed out after ${timeoutMs}ms`,
+      504,
+    )
+  }
+  throw error
+}
+
 export function parseRemoteByteRangeHeader(rangeHeader, totalSizeBytes) {
   if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
     return null
@@ -73,21 +106,13 @@ export function sendRemoteRangeNotSatisfiable(res, totalSizeBytes, options = {})
 }
 
 export async function readRuntimeFileContent(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = String(runtimeBaseUrl || '').trim().replace(/\/+$/, '')
-  if (!normalizedBaseUrl) {
-    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'Fauplay Runtime base URL is required', 502)
-  }
-  const absolutePath = typeof options.absolutePath === 'string' ? options.absolutePath.trim() : ''
-  if (!absolutePath) {
-    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'absolutePath is required', 400)
-  }
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
 
   const endpoint = new URL('/v1/files/content', `${normalizedBaseUrl}/`)
   endpoint.searchParams.set('absolutePath', absolutePath)
   const controller = new AbortController()
-  const timeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-    ? options.timeoutMs
-    : DEFAULT_RUNTIME_CONTENT_TIMEOUT_MS
+  const timeoutMs = resolveRuntimeTimeout(options)
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   const headers = {}
   if (typeof options.rangeHeader === 'string' && options.rangeHeader.trim()) {
@@ -116,14 +141,91 @@ export async function readRuntimeFileContent(runtimeBaseUrl, options = {}) {
       body,
     }
   } catch (error) {
-    if (isAbortError(error)) {
+    rethrowRuntimeTimeout(error, timeoutMs, 'file content')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function readRuntimeFileThumbnail(runtimeBaseUrl, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
+  const endpoint = new URL('/v1/files/thumbnail', `${normalizedBaseUrl}/`)
+  endpoint.searchParams.set('absolutePath', absolutePath)
+  if (typeof options.sizePreset === 'string' && options.sizePreset.trim()) {
+    endpoint.searchParams.set('sizePreset', options.sizePreset.trim())
+  }
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    const body = Buffer.from(await response.arrayBuffer())
+    if (!response.ok) {
       throw createMcpRuntimeError(
-        'RUNTIME_HTTP_TIMEOUT',
-        `Fauplay Runtime file content request timed out after ${timeoutMs}ms`,
-        504,
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime thumbnail request failed: ${response.status}`,
+        response.status,
       )
     }
-    throw error
+    return {
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      acceptRanges: response.headers.get('accept-ranges') || 'bytes',
+      contentRange: response.headers.get('content-range'),
+      body,
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, 'thumbnail')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function readRuntimeTextPreview(runtimeBaseUrl, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const absolutePath = normalizeAbsolutePathInput(options.absolutePath)
+  const endpoint = new URL('/v1/files/text-preview', `${normalizedBaseUrl}/`)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const payload = {
+    absolutePath,
+    ...(typeof options.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: options.sizeLimitBytes } : {}),
+  }
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    const body = await response.text()
+    if (!response.ok) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime text preview request failed: ${response.status}`,
+        response.status,
+      )
+    }
+    try {
+      return body ? JSON.parse(body) : {}
+    } catch (error) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime text preview response was not valid JSON: ${error.message}`,
+        502,
+      )
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, 'text preview')
   } finally {
     clearTimeout(timeoutId)
   }

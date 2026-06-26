@@ -9,7 +9,6 @@ import {
   listPeople,
   listTagOptions,
   queryFilesByTags,
-  readFileTextPreview,
 } from './data/core.mjs'
 import {
   isSkippableFsError,
@@ -25,7 +24,6 @@ const PROJECT_ROOT = process.cwd()
 const HIDDEN_SYSTEM_DIRECTORIES = new Set(['.trash'])
 const DEFAULT_REMOTE_ACCESS_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'remote-access.json')
 const GLOBAL_REMOTE_ACCESS_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'remote-access.json')
-const REMOTE_THUMBNAIL_CACHE_MAX_ENTRIES = 128
 const REMOTE_FLATTEN_VIEW_MAX_FILES = readPositiveIntegerEnv('FAUPLAY_REMOTE_FLATTEN_VIEW_MAX_FILES', 5000)
 const REMOTE_FLATTEN_VIEW_MAX_DIRECTORIES = readPositiveIntegerEnv('FAUPLAY_REMOTE_FLATTEN_VIEW_MAX_DIRECTORIES', 1000)
 const REMOTE_THUMBNAIL_SOURCE_MAX_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_THUMBNAIL_SOURCE_MAX_BYTES', 32 * 1024 * 1024)
@@ -120,8 +118,6 @@ const MIME_BY_EXTENSION = {
   go: 'text/x-go',
   rs: 'text/x-rust',
 }
-const remoteThumbnailCache = new Map()
-
 function createRemoteError(code, message, statusCode) {
   const error = new Error(message)
   error.code = code
@@ -204,19 +200,6 @@ function getPreviewKind(name) {
 
 function getMimeType(name) {
   return MIME_BY_EXTENSION[getFileExtension(name)] || 'application/octet-stream'
-}
-
-function touchThumbnailCacheEntry(cacheKey, value) {
-  if (remoteThumbnailCache.has(cacheKey)) {
-    remoteThumbnailCache.delete(cacheKey)
-  }
-  remoteThumbnailCache.set(cacheKey, value)
-
-  while (remoteThumbnailCache.size > REMOTE_THUMBNAIL_CACHE_MAX_ENTRIES) {
-    const oldestKey = remoteThumbnailCache.keys().next().value
-    if (!oldestKey) break
-    remoteThumbnailCache.delete(oldestKey)
-  }
 }
 
 async function fileExists(targetPath) {
@@ -607,15 +590,7 @@ export async function listRemoteReadonlyFiles(remoteConfig, payload = {}) {
   }
 }
 
-export async function readRemoteReadonlyTextPreview(remoteConfig, payload = {}) {
-  const target = await resolveRemoteAbsolutePath(remoteConfig, payload.rootId, payload.relativePath)
-  return readFileTextPreview({
-    absolutePath: target.absolutePath,
-    ...(typeof payload.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: payload.sizeLimitBytes } : {}),
-  })
-}
-
-export async function readRemoteReadonlyThumbnailContent(remoteConfig, query = {}) {
+export async function resolveRemoteReadonlyThumbnailResource(remoteConfig, query = {}) {
   const target = await resolveRemoteReadonlyFileResource(remoteConfig, query)
   if (target.sizeBytes > REMOTE_THUMBNAIL_SOURCE_MAX_BYTES) {
     throw createRemoteError(
@@ -624,28 +599,7 @@ export async function readRemoteReadonlyThumbnailContent(remoteConfig, query = {
       422,
     )
   }
-  const sizePreset = typeof query.sizePreset === 'string' && query.sizePreset.trim()
-    ? query.sizePreset.trim()
-    : 'auto'
-  const cacheKey = [
-    target.absolutePath,
-    target.sizeBytes,
-    target.lastModifiedMs,
-    sizePreset,
-  ].join(':')
-  const cached = remoteThumbnailCache.get(cacheKey)
-  if (cached) {
-    touchThumbnailCacheEntry(cacheKey, cached)
-    return cached
-  }
-
-  const body = await fs.readFile(target.absolutePath)
-  const next = {
-    body,
-    contentType: target.contentType,
-  }
-  touchThumbnailCacheEntry(cacheKey, next)
-  return next
+  return target
 }
 
 export async function listRemoteReadonlyTagOptions(remoteConfig, payload = {}) {

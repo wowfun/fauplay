@@ -17,6 +17,3 @@ export {
   getFaceCrop,
   callVisionInference,
 } from './faces.mjs'
-export {
-  readFileTextPreview,
-} from './files.mjs'

@@ -81,3 +81,14 @@ test('Legacy Gateway no longer owns Remote Access file streaming', async () => {
   assert.equal(serverSource.includes('sendFileStreamResponse'), false)
   assert.equal(serverSource.includes('parseByteRangeHeader'), false)
 })
+
+test('Legacy Gateway no longer owns local text preview file reads', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
+  const serverSource = await readFile(new URL('../../tools/legacy-gateway/server.mjs', import.meta.url), 'utf8')
+  assert.equal(serverSource.includes('readRemoteReadonlyTextPreview'), false)
+  assert.equal(serverSource.includes('readRemoteReadonlyThumbnailContent'), false)
+})

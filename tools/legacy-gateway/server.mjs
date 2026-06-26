@@ -9,9 +9,11 @@ import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
   parseRemoteByteRangeHeader,
   readRuntimeFileContent,
+  readRuntimeFileThumbnail,
+  readRuntimeTextPreview,
   sendRemoteRangeNotSatisfiable,
   sendRuntimeFileContentResponse,
-} from './remote-file-content.mjs'
+} from './remote-file-access.mjs'
 import {
   findHttpGatewayRoute,
   handleHttpGatewayRoute,
@@ -43,9 +45,8 @@ import {
   loadRemoteReadonlyConfig,
   queryRemoteReadonlyFilesByTags,
   readRemoteReadonlyFaceCrop,
-  readRemoteReadonlyThumbnailContent,
-  readRemoteReadonlyTextPreview,
   resolveRemoteReadonlyFileResource,
+  resolveRemoteReadonlyThumbnailResource,
 } from './remote-readonly.mjs'
 import {
   createRemoteRememberedDeviceStore,
@@ -525,12 +526,16 @@ export async function startGatewayServer(options = {}) {
           remoteReadonlySessions,
           remoteRememberedDevices,
         )
-        const result = await readRemoteReadonlyThumbnailContent(currentRemoteReadonlyConfig, {
+        const resource = await resolveRemoteReadonlyThumbnailResource(currentRemoteReadonlyConfig, {
           rootId: requestUrl.searchParams.get('rootId'),
           relativePath: requestUrl.searchParams.get('relativePath'),
           sizePreset: requestUrl.searchParams.get('sizePreset'),
         })
-        sendBinary(res, 200, result.body, result.contentType, {
+        const result = await readRuntimeFileThumbnail(runtimeBaseUrl, {
+          absolutePath: resource.absolutePath,
+          sizePreset: requestUrl.searchParams.get('sizePreset'),
+        })
+        sendRuntimeFileContentResponse(res, result, {
           cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
         })
       } catch (error) {
@@ -589,7 +594,14 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await readRemoteReadonlyTextPreview(currentRemoteReadonlyConfig, payload))
+        const resource = await resolveRemoteReadonlyFileResource(currentRemoteReadonlyConfig, {
+          rootId: payload.rootId,
+          relativePath: payload.relativePath,
+        })
+        sendJson(res, 200, await readRuntimeTextPreview(runtimeBaseUrl, {
+          absolutePath: resource.absolutePath,
+          ...(typeof payload.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: payload.sizeLimitBytes } : {}),
+        }))
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
       }
