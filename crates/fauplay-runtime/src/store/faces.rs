@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 use crate::{
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
+    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
     FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
     PersonSummary, RootRelativePath, RuntimeError,
 };
@@ -375,6 +376,240 @@ pub(crate) fn rename_person(
     Ok(FaceRenamePersonResponse { person })
 }
 
+pub(crate) fn mutate_faces(
+    runtime_home_path: &Path,
+    request: FaceMutateFacesRequest,
+) -> Result<FaceMutateFacesResponse, RuntimeError> {
+    let face_ids = normalize_face_ids(&request.face_ids)?;
+    let root_path = root_path_key(&request.root_path);
+    let store_path = faces_path(runtime_home_path);
+    let mut records = read_face_records(&store_path)?;
+    let mut items = Vec::new();
+    let updated_at_ms = now_ms();
+    let mut created_person_id = None;
+
+    let target_person = request
+        .target_person_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let target_person_name = target_person
+        .as_deref()
+        .and_then(|person_id| person_name_for_id(&records, person_id));
+
+    if request.action == FaceMutationAction::AssignFaces && target_person.is_none() {
+        return Err(RuntimeError::invalid_detected_face(
+            "targetPersonId is required",
+        ));
+    }
+
+    if request.action == FaceMutationAction::AssignFaces
+        && !person_exists(&records, target_person.as_deref().unwrap_or_default())
+    {
+        let person_id = target_person.clone().unwrap_or_default();
+        return Ok(summarize_face_mutation(
+            request.action,
+            face_ids
+                .into_iter()
+                .map(|face_id| {
+                    face_mutation_failure(
+                        &face_id,
+                        None,
+                        "PERSON_NOT_FOUND",
+                        &format!("person not found: {person_id}"),
+                    )
+                })
+                .collect(),
+            target_person,
+            None,
+        ));
+    }
+
+    for face_id in face_ids {
+        let Some(index) = find_root_scoped_face_index(&records, &root_path, &face_id) else {
+            items.push(face_mutation_failure(
+                &face_id,
+                None,
+                "FACE_NOT_FOUND",
+                &format!("face not found: {face_id}"),
+            ));
+            continue;
+        };
+
+        let previous = records[index].clone();
+        match request.action {
+            FaceMutationAction::AssignFaces => {
+                let target_person_id = target_person.as_deref().unwrap_or_default();
+                if previous.status == FaceStatus::Ignored {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "ignored face must be restored before assignment",
+                    ));
+                    continue;
+                }
+                if previous.person_id.as_deref() == Some(target_person_id) {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_ALREADY_ASSIGNED_TO_TARGET",
+                        "face is already assigned to target person",
+                    ));
+                    continue;
+                }
+
+                assign_face_record(
+                    &mut records[index],
+                    target_person_id,
+                    target_person_name.as_deref().unwrap_or_default(),
+                    "manual",
+                    updated_at_ms,
+                );
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::Assigned,
+                    Some(target_person_id.to_owned()),
+                ));
+            }
+            FaceMutationAction::CreatePersonFromFaces => {
+                if previous.status == FaceStatus::Ignored {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "ignored face must be restored before assignment",
+                    ));
+                    continue;
+                }
+                let person_id = created_person_id
+                    .get_or_insert_with(|| create_person_id(&records, updated_at_ms))
+                    .clone();
+                let person_name = request.name.as_deref().map(str::trim).unwrap_or_default();
+                assign_face_record(
+                    &mut records[index],
+                    &person_id,
+                    person_name,
+                    "manual",
+                    updated_at_ms,
+                );
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::Assigned,
+                    Some(person_id),
+                ));
+            }
+            FaceMutationAction::UnassignFaces => {
+                if previous.status == FaceStatus::Ignored {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "ignored face cannot be manually unassigned",
+                    ));
+                    continue;
+                }
+                if previous.status == FaceStatus::ManualUnassigned && previous.person_id.is_none() {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "face is already manual_unassigned",
+                    ));
+                    continue;
+                }
+
+                clear_face_assignment(&mut records[index]);
+                records[index].status = FaceStatus::ManualUnassigned;
+                records[index].updated_at_ms = updated_at_ms;
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::ManualUnassigned,
+                    None,
+                ));
+            }
+            FaceMutationAction::IgnoreFaces => {
+                if previous.status == FaceStatus::Ignored {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_ALREADY_IGNORED",
+                        "face is already ignored",
+                    ));
+                    continue;
+                }
+
+                clear_face_assignment(&mut records[index]);
+                records[index].status = FaceStatus::Ignored;
+                records[index].updated_at_ms = updated_at_ms;
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::Ignored,
+                    None,
+                ));
+            }
+            FaceMutationAction::RestoreIgnoredFaces => {
+                if previous.status != FaceStatus::Ignored {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "only ignored faces can be restored",
+                    ));
+                    continue;
+                }
+
+                clear_face_assignment(&mut records[index]);
+                records[index].status = FaceStatus::ManualUnassigned;
+                records[index].updated_at_ms = updated_at_ms;
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::ManualUnassigned,
+                    None,
+                ));
+            }
+            FaceMutationAction::RequeueFaces => {
+                if previous.status != FaceStatus::ManualUnassigned {
+                    items.push(face_mutation_failure(
+                        &face_id,
+                        Some(&previous),
+                        "FACE_STATE_CONFLICT",
+                        "only manual_unassigned faces can be requeued",
+                    ));
+                    continue;
+                }
+
+                clear_face_assignment(&mut records[index]);
+                records[index].status = FaceStatus::Deferred;
+                records[index].updated_at_ms = updated_at_ms;
+                items.push(face_mutation_success(
+                    &face_id,
+                    &previous,
+                    FaceStatus::Deferred,
+                    None,
+                ));
+            }
+        }
+    }
+
+    if items.iter().any(|item| item.ok) {
+        write_face_records(&store_path, &records)?;
+    }
+
+    Ok(summarize_face_mutation(
+        request.action,
+        items,
+        target_person,
+        created_person_id,
+    ))
+}
+
 fn faces_path(runtime_home_path: &Path) -> PathBuf {
     runtime_home_path
         .join(GLOBAL_CONFIG_FOLDER_NAME)
@@ -625,6 +860,140 @@ fn face_record_display_path(display_root_path: &str, record: &FaceRecordData) ->
         .join(&record.root_relative_path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+fn normalize_face_ids(face_ids: &[String]) -> Result<Vec<String>, RuntimeError> {
+    let mut normalized = Vec::new();
+    for face_id in face_ids {
+        let face_id = face_id.trim();
+        if face_id.is_empty() || normalized.iter().any(|item| item == face_id) {
+            continue;
+        }
+        normalized.push(face_id.to_owned());
+    }
+
+    if normalized.is_empty() {
+        return Err(RuntimeError::invalid_detected_face(
+            "faceIds must contain at least one faceId",
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn find_root_scoped_face_index(
+    records: &[FaceRecordData],
+    root_path: &str,
+    face_id: &str,
+) -> Option<usize> {
+    records
+        .iter()
+        .position(|record| record.root_path == root_path && record.face_id == face_id)
+}
+
+fn person_exists(records: &[FaceRecordData], person_id: &str) -> bool {
+    records
+        .iter()
+        .any(|record| record.person_id.as_deref() == Some(person_id))
+}
+
+fn person_name_for_id(records: &[FaceRecordData], person_id: &str) -> Option<String> {
+    records
+        .iter()
+        .filter(|record| record.person_id.as_deref() == Some(person_id))
+        .find_map(|record| {
+            record
+                .person_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn create_person_id(records: &[FaceRecordData], updated_at_ms: u64) -> String {
+    let mut candidate = format!("person-{updated_at_ms}");
+    let mut suffix = 1usize;
+    while person_exists(records, &candidate) {
+        suffix += 1;
+        candidate = format!("person-{updated_at_ms}-{suffix}");
+    }
+    candidate
+}
+
+fn assign_face_record(
+    record: &mut FaceRecordData,
+    person_id: &str,
+    person_name: &str,
+    assigned_by: &str,
+    updated_at_ms: u64,
+) {
+    record.person_id = Some(person_id.to_owned());
+    record.person_name = Some(person_name.to_owned());
+    record.assigned_by = Some(assigned_by.to_owned());
+    record.status = FaceStatus::Assigned;
+    record.updated_at_ms = updated_at_ms;
+}
+
+fn clear_face_assignment(record: &mut FaceRecordData) {
+    record.person_id = None;
+    record.person_name = None;
+    record.assigned_by = None;
+}
+
+fn face_mutation_failure(
+    face_id: &str,
+    previous: Option<&FaceRecordData>,
+    reason_code: &str,
+    error: &str,
+) -> FaceMutationItem {
+    FaceMutationItem {
+        face_id: face_id.to_owned(),
+        ok: false,
+        previous_status: previous.map(|record| record.status),
+        previous_person_id: previous.and_then(|record| record.person_id.clone()),
+        next_status: previous.map(|record| record.status),
+        next_person_id: previous.and_then(|record| record.person_id.clone()),
+        reason_code: Some(reason_code.to_owned()),
+        error: Some(error.to_owned()),
+    }
+}
+
+fn face_mutation_success(
+    face_id: &str,
+    previous: &FaceRecordData,
+    next_status: FaceStatus,
+    next_person_id: Option<String>,
+) -> FaceMutationItem {
+    FaceMutationItem {
+        face_id: face_id.to_owned(),
+        ok: true,
+        previous_status: Some(previous.status),
+        previous_person_id: previous.person_id.clone(),
+        next_status: Some(next_status),
+        next_person_id,
+        reason_code: None,
+        error: None,
+    }
+}
+
+fn summarize_face_mutation(
+    action: FaceMutationAction,
+    items: Vec<FaceMutationItem>,
+    target_person_id: Option<String>,
+    person_id: Option<String>,
+) -> FaceMutateFacesResponse {
+    let succeeded = items.iter().filter(|item| item.ok).count();
+    let failed = items.len().saturating_sub(succeeded);
+    FaceMutateFacesResponse {
+        action,
+        total: items.len(),
+        succeeded,
+        failed,
+        items,
+        target_person_id,
+        person_id,
+    }
 }
 
 fn person_summary_matches_query(person: &PersonSummaryAccumulator, query: &str) -> bool {

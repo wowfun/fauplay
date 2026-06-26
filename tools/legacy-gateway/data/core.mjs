@@ -21,12 +21,6 @@ export {
   mergePeople,
   listAssetFaces,
   suggestPeople,
-  assignFaces,
-  createPersonFromFaces,
-  unassignFaces,
-  ignoreFaces,
-  restoreIgnoredFaces,
-  requeueFaces,
   getFaceCrop,
   callVisionInference,
 } from './faces.mjs'

@@ -12,7 +12,8 @@ pub use api::{
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
+    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
     FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
     FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
     FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
@@ -128,6 +129,13 @@ impl FauplayRuntime {
         request: FaceRenamePersonRequest,
     ) -> Result<FaceRenamePersonResponse, RuntimeError> {
         store::rename_person(&self.runtime_home_path, request)
+    }
+
+    pub fn mutate_faces(
+        &self,
+        request: FaceMutateFacesRequest,
+    ) -> Result<FaceMutateFacesResponse, RuntimeError> {
+        store::mutate_faces(&self.runtime_home_path, request)
     }
 
     pub fn load_global_shortcut_config(

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{FauplayRuntime, TextPreviewStatus};
+use crate::{FaceMutationAction, FauplayRuntime, TextPreviewStatus};
 
 mod faces;
 mod file_annotations;
@@ -62,6 +62,28 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/faces/list-people")) => faces::handle_list_people_json(runtime, request),
         Some(("POST", "/v1/faces/rename-person")) => {
             faces::handle_rename_person_json(runtime, request)
+        }
+        Some(("POST", "/v1/faces/assign-faces")) => {
+            faces::handle_mutate_faces_json(runtime, request, FaceMutationAction::AssignFaces)
+        }
+        Some(("POST", "/v1/faces/create-person-from-faces")) => faces::handle_mutate_faces_json(
+            runtime,
+            request,
+            FaceMutationAction::CreatePersonFromFaces,
+        ),
+        Some(("POST", "/v1/faces/unassign-faces")) => {
+            faces::handle_mutate_faces_json(runtime, request, FaceMutationAction::UnassignFaces)
+        }
+        Some(("POST", "/v1/faces/ignore-faces")) => {
+            faces::handle_mutate_faces_json(runtime, request, FaceMutationAction::IgnoreFaces)
+        }
+        Some(("POST", "/v1/faces/restore-ignored-faces")) => faces::handle_mutate_faces_json(
+            runtime,
+            request,
+            FaceMutationAction::RestoreIgnoredFaces,
+        ),
+        Some(("POST", "/v1/faces/requeue-faces")) => {
+            faces::handle_mutate_faces_json(runtime, request, FaceMutationAction::RequeueFaces)
         }
         Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
             remembered_devices::handle_rename_remembered_device(runtime, target, request)
@@ -241,6 +263,12 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/faces/list-review-faces"
             | "/v1/faces/list-people"
             | "/v1/faces/rename-person"
+            | "/v1/faces/assign-faces"
+            | "/v1/faces/create-person-from-faces"
+            | "/v1/faces/unassign-faces"
+            | "/v1/faces/ignore-faces"
+            | "/v1/faces/restore-ignored-faces"
+            | "/v1/faces/requeue-faces"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"

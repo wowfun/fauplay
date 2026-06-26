@@ -93,6 +93,38 @@ pub struct FaceRenamePersonResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceMutateFacesRequest {
+    pub root_path: PathBuf,
+    pub action: FaceMutationAction,
+    pub face_ids: Vec<String>,
+    pub target_person_id: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceMutateFacesResponse {
+    pub action: FaceMutationAction,
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub items: Vec<FaceMutationItem>,
+    pub target_person_id: Option<String>,
+    pub person_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceMutationItem {
+    pub face_id: String,
+    pub ok: bool,
+    pub previous_status: Option<FaceStatus>,
+    pub previous_person_id: Option<String>,
+    pub next_status: Option<FaceStatus>,
+    pub next_person_id: Option<String>,
+    pub reason_code: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceRecord {
     pub face_id: String,
     pub asset_id: String,
@@ -141,4 +173,14 @@ pub enum FaceScope {
 pub enum FaceReviewBucket {
     Unassigned,
     Ignored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceMutationAction {
+    AssignFaces,
+    CreatePersonFromFaces,
+    UnassignFaces,
+    IgnoreFaces,
+    RestoreIgnoredFaces,
+    RequeueFaces,
 }

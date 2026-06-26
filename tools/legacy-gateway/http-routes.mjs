@@ -5,15 +5,9 @@ import {
   getDetectAssetsJob,
   cancelDetectAssetsJob,
   listDetectAssetsJobItems,
-  assignFaces,
   clusterPendingFaces,
-  createPersonFromFaces,
-  ignoreFaces,
   mergePeople,
-  requeueFaces,
-  restoreIgnoredFaces,
   suggestPeople,
-  unassignFaces,
 } from './data/core.mjs'
 
 export function throwHttpGatewayRouteNotFound(pathname) {
@@ -86,12 +80,6 @@ const httpGatewayRoutes = [
   createExactHttpGatewayRoute('POST', '/v1/faces/cluster-pending', ({ payload }) => clusterPendingFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/merge-people', ({ payload }) => mergePeople(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/suggest-people', ({ payload }) => suggestPeople(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/assign-faces', ({ payload }) => assignFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/create-person-from-faces', ({ payload }) => createPersonFromFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/unassign-faces', ({ payload }) => unassignFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/ignore-faces', ({ payload }) => ignoreFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/restore-ignored-faces', ({ payload }) => restoreIgnoredFaces(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/requeue-faces', ({ payload }) => requeueFaces(payload)),
 ]
 
 export function findHttpGatewayRoute(method, pathname) {

@@ -32,14 +32,6 @@ import {
   getFaceScanMediaType,
   markAssetFaceDetection,
 } from './faces-scan.mjs'
-export {
-  assignFaces,
-  createPersonFromFaces,
-  ignoreFaces,
-  requeueFaces,
-  restoreIgnoredFaces,
-  unassignFaces,
-} from './faces-mutations.mjs'
 
 const execFileAsync = promisify(execFile)
 const FACE_CROP_SCRIPT_PATH = path.resolve(process.cwd(), 'tools', 'legacy-gateway', 'face_crop.py')

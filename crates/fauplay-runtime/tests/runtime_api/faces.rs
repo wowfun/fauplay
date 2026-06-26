@@ -359,6 +359,167 @@ fn runtime_api_faces_lists_people_from_runtime_home() {
     assert_eq!(renamed_faces_json["items"][0]["personName"], "Dr Ada");
 }
 
+#[test]
+fn runtime_api_faces_mutates_review_and_assignment_state() {
+    let fixture = Fixture::new("runtime_api_faces_mutates_review_and_assignment_state");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    let root_path = fixture.root.join("local-root");
+    let other_root_path = fixture.root.join("other-root");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fs::create_dir_all(&root_path).expect("Local Root should be created");
+    fs::create_dir_all(&other_root_path).expect("other Local Root should be created");
+    write_people_face_store(&runtime_home_path, &root_path, &other_root_path);
+
+    let runtime = FauplayRuntime::with_runtime_home_path(runtime_home_path);
+    let create_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/create-person-from-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-unassigned"],
+            "name": "New Person"
+        }),
+    );
+
+    assert_eq!(create_json["ok"], true);
+    assert_eq!(create_json["action"], "createPersonFromFaces");
+    assert_eq!(create_json["succeeded"], 1);
+    assert_eq!(create_json["failed"], 0);
+    let created_person_id = create_json["personId"]
+        .as_str()
+        .expect("create-person-from-faces should return a personId")
+        .to_owned();
+    assert_eq!(
+        create_json["items"][0]["nextPersonId"],
+        serde_json::Value::String(created_person_id.clone())
+    );
+
+    let created_faces_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/list-asset-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "personId": created_person_id
+        }),
+    );
+    assert_eq!(created_faces_json["total"], 1);
+    assert_eq!(created_faces_json["items"][0]["faceId"], "face-unassigned");
+    assert_eq!(created_faces_json["items"][0]["personName"], "New Person");
+
+    let assign_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/assign-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b"],
+            "targetPersonId": "person-a"
+        }),
+    );
+    assert_eq!(assign_json["ok"], true);
+    assert_eq!(assign_json["action"], "assignFaces");
+    assert_eq!(assign_json["items"][0]["previousPersonId"], "person-b");
+    assert_eq!(assign_json["items"][0]["nextStatus"], "assigned");
+    assert_eq!(assign_json["items"][0]["nextPersonId"], "person-a");
+
+    let unassign_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/unassign-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b"]
+        }),
+    );
+    assert_eq!(unassign_json["ok"], true);
+    assert_eq!(unassign_json["action"], "unassignFaces");
+    assert_eq!(unassign_json["items"][0]["previousPersonId"], "person-a");
+    assert_eq!(unassign_json["items"][0]["nextStatus"], "manual_unassigned");
+    assert_eq!(
+        unassign_json["items"][0]["nextPersonId"],
+        serde_json::Value::Null
+    );
+
+    let ignore_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/ignore-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b", "missing-face"]
+        }),
+    );
+    assert_eq!(ignore_json["ok"], true);
+    assert_eq!(ignore_json["action"], "ignoreFaces");
+    assert_eq!(ignore_json["succeeded"], 1);
+    assert_eq!(ignore_json["failed"], 1);
+    assert_eq!(ignore_json["items"][0]["nextStatus"], "ignored");
+    assert_eq!(ignore_json["items"][1]["reasonCode"], "FACE_NOT_FOUND");
+
+    let assign_ignored_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/assign-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b"],
+            "targetPersonId": "person-a"
+        }),
+    );
+    assert_eq!(assign_ignored_json["ok"], true);
+    assert_eq!(assign_ignored_json["succeeded"], 0);
+    assert_eq!(assign_ignored_json["failed"], 1);
+    assert_eq!(assign_ignored_json["items"][0]["previousStatus"], "ignored");
+    assert_eq!(
+        assign_ignored_json["items"][0]["reasonCode"],
+        "FACE_STATE_CONFLICT"
+    );
+
+    let restore_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/restore-ignored-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b"]
+        }),
+    );
+    assert_eq!(restore_json["ok"], true);
+    assert_eq!(restore_json["action"], "restoreIgnoredFaces");
+    assert_eq!(restore_json["items"][0]["previousStatus"], "ignored");
+    assert_eq!(restore_json["items"][0]["nextStatus"], "manual_unassigned");
+
+    let requeue_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/requeue-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "faceIds": ["face-b"]
+        }),
+    );
+    assert_eq!(requeue_json["ok"], true);
+    assert_eq!(requeue_json["action"], "requeueFaces");
+    assert_eq!(
+        requeue_json["items"][0]["previousStatus"],
+        "manual_unassigned"
+    );
+    assert_eq!(requeue_json["items"][0]["nextStatus"], "deferred");
+
+    let review_json = post_runtime_json(
+        runtime,
+        "/v1/faces/list-review-faces",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "bucket": "unassigned",
+            "page": 1,
+            "size": 10
+        }),
+    );
+    assert!(
+        review_json["items"]
+            .as_array()
+            .expect("review items should be an array")
+            .iter()
+            .any(|item| item["faceId"] == "face-b" && item["status"] == "deferred"),
+        "requeued face should be visible in the unassigned review bucket: {review_json}"
+    );
+}
+
 fn write_people_face_store(runtime_home_path: &Path, root_path: &Path, other_root_path: &Path) {
     let store_path = runtime_home_path.join("global").join("faces.v1.json");
     fs::create_dir_all(store_path.parent().unwrap()).expect("face store parent should be created");
@@ -469,6 +630,23 @@ fn send_json_request(address: &str, method: &str, path: &str, body: &str) -> Str
         .read_to_string(&mut response)
         .expect("response should be readable");
     response
+}
+
+fn post_runtime_json(
+    runtime: FauplayRuntime,
+    path: &str,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let body = body.to_string();
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_json_request(&address, "POST", path, &body);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "{path} should be handled by the Rust Runtime: {response}"
+    );
+    response_json(&response)
 }
 
 fn response_json(response: &str) -> serde_json::Value {

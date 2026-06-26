@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use crate::{
     FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
     FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceRecord,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMutateFacesRequest,
+    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
     FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
     FauplayRuntime, PersonSummary, RootRelativePath,
 };
 
 use super::{
-    HttpResponse, error_json, escape_json_string, http_response, json_string_field, parse_json_body,
+    HttpResponse, error_json, escape_json_string, http_response, json_string_array_field,
+    json_string_field, parse_json_body,
 };
 
 pub(in crate::server) fn handle_detect_asset_faces_json(
@@ -178,6 +180,31 @@ pub(in crate::server) fn handle_rename_person_json(
     }
 }
 
+pub(in crate::server) fn handle_mutate_faces_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+    action: FaceMutationAction,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+
+    match runtime.mutate_faces(FaceMutateFacesRequest {
+        root_path: PathBuf::from(root_path),
+        action,
+        face_ids: json_string_array_field(&payload, "faceIds"),
+        target_person_id: json_string_field(&payload, "targetPersonId").map(ToOwned::to_owned),
+        name: json_string_field(&payload, "name").map(ToOwned::to_owned),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_mutate_faces_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 fn face_root_relative_path(payload: &serde_json::Value) -> Option<&str> {
     json_string_field(payload, "relativePath")
         .or_else(|| json_string_field(payload, "rootRelativePath"))
@@ -245,6 +272,19 @@ fn face_rename_person_response_json(response: FaceRenamePersonResponse) -> Strin
     )
 }
 
+fn face_mutate_faces_response_json(response: FaceMutateFacesResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"action\":\"{}\",\"total\":{},\"succeeded\":{},\"failed\":{},\"items\":[{}],\"targetPersonId\":{},\"personId\":{}}}",
+        face_mutation_action_json(response.action),
+        response.total,
+        response.succeeded,
+        response.failed,
+        face_mutation_items_json(response.items),
+        optional_string_json(response.target_person_id.as_deref()),
+        optional_string_json(response.person_id.as_deref()),
+    )
+}
+
 fn face_records_json(records: Vec<FaceRecord>) -> String {
     records
         .into_iter()
@@ -271,6 +311,28 @@ fn person_summary_json(person: PersonSummary) -> String {
         optional_string_json(person.feature_face_id.as_deref()),
         optional_string_json(person.feature_asset_path.as_deref()),
         person.updated_at_ms,
+    )
+}
+
+fn face_mutation_items_json(items: Vec<FaceMutationItem>) -> String {
+    items
+        .into_iter()
+        .map(face_mutation_item_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn face_mutation_item_json(item: FaceMutationItem) -> String {
+    format!(
+        "{{\"faceId\":\"{}\",\"ok\":{},\"previousStatus\":{},\"previousPersonId\":{},\"nextStatus\":{},\"nextPersonId\":{},\"reasonCode\":{},\"error\":{}}}",
+        escape_json_string(&item.face_id),
+        if item.ok { "true" } else { "false" },
+        optional_face_status_json(item.previous_status),
+        optional_string_json(item.previous_person_id.as_deref()),
+        optional_face_status_json(item.next_status),
+        optional_string_json(item.next_person_id.as_deref()),
+        optional_string_json(item.reason_code.as_deref()),
+        optional_string_json(item.error.as_deref()),
     )
 }
 
@@ -357,5 +419,22 @@ fn face_status_json(value: FaceStatus) -> &'static str {
         FaceStatus::Deferred => "deferred",
         FaceStatus::ManualUnassigned => "manual_unassigned",
         FaceStatus::Ignored => "ignored",
+    }
+}
+
+fn optional_face_status_json(value: Option<FaceStatus>) -> String {
+    value
+        .map(|value| format!("\"{}\"", face_status_json(value)))
+        .unwrap_or_else(|| "null".to_owned())
+}
+
+fn face_mutation_action_json(value: FaceMutationAction) -> &'static str {
+    match value {
+        FaceMutationAction::AssignFaces => "assignFaces",
+        FaceMutationAction::CreatePersonFromFaces => "createPersonFromFaces",
+        FaceMutationAction::UnassignFaces => "unassignFaces",
+        FaceMutationAction::IgnoreFaces => "ignoreFaces",
+        FaceMutationAction::RestoreIgnoredFaces => "restoreIgnoredFaces",
+        FaceMutationAction::RequeueFaces => "requeueFaces",
     }
 }
