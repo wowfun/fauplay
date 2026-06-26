@@ -16,6 +16,19 @@ import {
   subscribeAnnotationSchemaStore,
   withDefaultActiveField,
 } from '@/features/plugin-runtime/utils/annotationSchema'
+import {
+  addAnnotationQuickTagDraftField,
+  addAnnotationQuickTagDraftValue,
+  cloneAnnotationQuickTagDraftSchema,
+  createEmptyAnnotationQuickTagDraftSchema,
+  moveAnnotationQuickTagDraftField,
+  moveAnnotationQuickTagDraftValue,
+  removeAnnotationQuickTagDraftField,
+  removeAnnotationQuickTagDraftValue,
+  resolveAnnotationQuickTagValueButtons,
+  updateAnnotationQuickTagDraftField,
+  updateAnnotationQuickTagDraftValue,
+} from '@/features/plugin-runtime/lib/annotationQuickTagDraftModel'
 
 interface AnnotationQuickTagPanelProps {
   rootId?: string | null
@@ -28,85 +41,6 @@ interface AnnotationQuickTagPanelProps {
   }) => void
 }
 
-const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-
-function cloneSchema(schema: AnnotationSchemaConfig): AnnotationSchemaConfig {
-  return {
-    version: 1,
-    defaultActiveFieldKey: schema.defaultActiveFieldKey,
-    fields: schema.fields.map((field) => ({
-      key: field.key,
-      label: field.label,
-      values: [...field.values],
-    })),
-  }
-}
-
-function createEmptyDraftSchema(): AnnotationSchemaConfig {
-  return {
-    version: 1,
-    fields: [],
-  }
-}
-
-function addDraftField(schema: AnnotationSchemaConfig): AnnotationSchemaConfig {
-  const next = cloneSchema(schema)
-  const nextIndex = next.fields.length + 1
-  const defaultKey = `field${nextIndex}`
-  next.fields.push({
-    key: defaultKey,
-    label: `字段 ${nextIndex}`,
-    values: ['value1'],
-  })
-  if (!next.defaultActiveFieldKey) {
-    next.defaultActiveFieldKey = defaultKey
-  }
-  return next
-}
-
-function replaceFieldAt(
-  schema: AnnotationSchemaConfig,
-  fieldIndex: number,
-  updater: (current: AnnotationSchemaConfig['fields'][number]) => AnnotationSchemaConfig['fields'][number]
-): AnnotationSchemaConfig {
-  const next = cloneSchema(schema)
-  const current = next.fields[fieldIndex]
-  if (!current) return next
-  next.fields[fieldIndex] = updater(current)
-  return next
-}
-
-function moveField(schema: AnnotationSchemaConfig, fromIndex: number, toIndex: number): AnnotationSchemaConfig {
-  const next = cloneSchema(schema)
-  if (fromIndex < 0 || fromIndex >= next.fields.length || toIndex < 0 || toIndex >= next.fields.length) {
-    return next
-  }
-  const [field] = next.fields.splice(fromIndex, 1)
-  next.fields.splice(toIndex, 0, field)
-  return next
-}
-
-function removeField(schema: AnnotationSchemaConfig, fieldIndex: number): AnnotationSchemaConfig {
-  const next = cloneSchema(schema)
-  const removed = next.fields[fieldIndex]
-  if (!removed) return next
-  next.fields.splice(fieldIndex, 1)
-  if (next.defaultActiveFieldKey === removed.key) {
-    next.defaultActiveFieldKey = next.fields[0]?.key
-  }
-  return next
-}
-
-function moveValue(values: string[], fromIndex: number, toIndex: number): string[] {
-  if (fromIndex < 0 || fromIndex >= values.length || toIndex < 0 || toIndex >= values.length) {
-    return values
-  }
-  const next = [...values]
-  const [value] = next.splice(fromIndex, 1)
-  next.splice(toIndex, 0, value)
-  return next
-}
-
 export function AnnotationQuickTagPanel({
   rootId,
   targetPath,
@@ -115,7 +49,9 @@ export function AnnotationQuickTagPanel({
 }: AnnotationQuickTagPanelProps) {
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editorScope, setEditorScope] = useState<AnnotationSchemaSource>('root')
-  const [draftSchema, setDraftSchema] = useState<AnnotationSchemaConfig>(createEmptyDraftSchema)
+  const [draftSchema, setDraftSchema] = useState<AnnotationSchemaConfig>(
+    createEmptyAnnotationQuickTagDraftSchema
+  )
   const schemaStoreVersion = useSyncExternalStore(
     subscribeAnnotationSchemaStore,
     getAnnotationSchemaStoreVersion,
@@ -131,13 +67,10 @@ export function AnnotationQuickTagPanel({
   }, [rootId])
 
   const activeField = useMemo(() => getActiveField(resolved.schema), [resolved.schema])
-  const valueButtons = useMemo(() => {
-    if (!activeField) return []
-    return activeField.values.slice(0, DIGITS.length).map((value, index) => ({
-      digit: DIGITS[index],
-      value,
-    }))
-  }, [activeField])
+  const valueButtons = useMemo(
+    () => resolveAnnotationQuickTagValueButtons(activeField),
+    [activeField]
+  )
 
   const isLightbox = surfaceVariant === 'preview-lightbox'
   const containerClassName = isLightbox
@@ -149,10 +82,10 @@ export function AnnotationQuickTagPanel({
     const defaultScope: AnnotationSchemaSource = rootId ? resolved.source : 'global'
     setEditorScope(defaultScope)
     if (defaultScope === 'global') {
-      setDraftSchema(cloneSchema(loadGlobalAnnotationSchema()))
+      setDraftSchema(cloneAnnotationQuickTagDraftSchema(loadGlobalAnnotationSchema()))
     } else {
       const rootSchema = rootId ? loadRootAnnotationSchema(rootId) : null
-      setDraftSchema(cloneSchema(rootSchema ?? resolved.schema))
+      setDraftSchema(cloneAnnotationQuickTagDraftSchema(rootSchema ?? resolved.schema))
     }
     setIsEditorOpen(true)
   }
@@ -261,10 +194,10 @@ export function AnnotationQuickTagPanel({
                   const nextScope = event.currentTarget.value === 'root' ? 'root' : 'global'
                   setEditorScope(nextScope)
                   if (nextScope === 'global') {
-                    setDraftSchema(cloneSchema(loadGlobalAnnotationSchema()))
+                    setDraftSchema(cloneAnnotationQuickTagDraftSchema(loadGlobalAnnotationSchema()))
                   } else if (rootId) {
                     const rootSchema = loadRootAnnotationSchema(rootId)
-                    setDraftSchema(cloneSchema(rootSchema ?? resolved.schema))
+                    setDraftSchema(cloneAnnotationQuickTagDraftSchema(rootSchema ?? resolved.schema))
                   }
                 }}
               >
@@ -278,7 +211,7 @@ export function AnnotationQuickTagPanel({
                 variant="outline"
                 className="h-7 px-2 text-xs"
                 onClick={() => {
-                  setDraftSchema((prev) => addDraftField(prev))
+                  setDraftSchema((prev) => addAnnotationQuickTagDraftField(prev))
                 }}
               >
                 添加字段
@@ -297,10 +230,9 @@ export function AnnotationQuickTagPanel({
                     placeholder="字段 key"
                     onChange={(event) => {
                       const value = event.currentTarget.value
-                      setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                        ...current,
+                      setDraftSchema((prev) => updateAnnotationQuickTagDraftField(prev, fieldIndex, {
                         key: value,
-                      })))
+                      }))
                     }}
                   />
                   <input
@@ -310,10 +242,9 @@ export function AnnotationQuickTagPanel({
                     placeholder="字段名称"
                     onChange={(event) => {
                       const value = event.currentTarget.value
-                      setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                        ...current,
+                      setDraftSchema((prev) => updateAnnotationQuickTagDraftField(prev, fieldIndex, {
                         label: value,
-                      })))
+                      }))
                     }}
                   />
                 </div>
@@ -328,14 +259,12 @@ export function AnnotationQuickTagPanel({
                         placeholder="枚举值"
                         onChange={(event) => {
                           const nextValue = event.currentTarget.value
-                          setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => {
-                            const nextValues = [...current.values]
-                            nextValues[valueIndex] = nextValue
-                            return {
-                              ...current,
-                              values: nextValues,
-                            }
-                          }))
+                          setDraftSchema((prev) => updateAnnotationQuickTagDraftValue(
+                            prev,
+                            fieldIndex,
+                            valueIndex,
+                            nextValue
+                          ))
                         }}
                       />
                       <Button
@@ -344,10 +273,12 @@ export function AnnotationQuickTagPanel({
                         className="h-8 px-2 text-xs"
                         disabled={valueIndex === 0}
                         onClick={() => {
-                          setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                            ...current,
-                            values: moveValue(current.values, valueIndex, valueIndex - 1),
-                          })))
+                          setDraftSchema((prev) => moveAnnotationQuickTagDraftValue(
+                            prev,
+                            fieldIndex,
+                            valueIndex,
+                            valueIndex - 1
+                          ))
                         }}
                       >
                         ↑
@@ -358,10 +289,12 @@ export function AnnotationQuickTagPanel({
                         className="h-8 px-2 text-xs"
                         disabled={valueIndex >= field.values.length - 1}
                         onClick={() => {
-                          setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                            ...current,
-                            values: moveValue(current.values, valueIndex, valueIndex + 1),
-                          })))
+                          setDraftSchema((prev) => moveAnnotationQuickTagDraftValue(
+                            prev,
+                            fieldIndex,
+                            valueIndex,
+                            valueIndex + 1
+                          ))
                         }}
                       >
                         ↓
@@ -371,10 +304,11 @@ export function AnnotationQuickTagPanel({
                         variant="outline"
                         className="h-8 px-2 text-xs"
                         onClick={() => {
-                          setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                            ...current,
-                            values: current.values.filter((_, index) => index !== valueIndex),
-                          })))
+                          setDraftSchema((prev) => removeAnnotationQuickTagDraftValue(
+                            prev,
+                            fieldIndex,
+                            valueIndex
+                          ))
                         }}
                       >
                         删除
@@ -389,10 +323,7 @@ export function AnnotationQuickTagPanel({
                     variant="outline"
                     className="h-7 px-2 text-xs"
                     onClick={() => {
-                      setDraftSchema((prev) => replaceFieldAt(prev, fieldIndex, (current) => ({
-                        ...current,
-                        values: [...current.values, `value${current.values.length + 1}`],
-                      })))
+                      setDraftSchema((prev) => addAnnotationQuickTagDraftValue(prev, fieldIndex))
                     }}
                   >
                     添加枚举值
@@ -405,7 +336,7 @@ export function AnnotationQuickTagPanel({
                       className="h-7 px-2 text-xs"
                       disabled={fieldIndex === 0}
                       onClick={() => {
-                        setDraftSchema((prev) => moveField(prev, fieldIndex, fieldIndex - 1))
+                        setDraftSchema((prev) => moveAnnotationQuickTagDraftField(prev, fieldIndex, fieldIndex - 1))
                       }}
                     >
                       字段上移
@@ -416,7 +347,7 @@ export function AnnotationQuickTagPanel({
                       className="h-7 px-2 text-xs"
                       disabled={fieldIndex >= draftSchema.fields.length - 1}
                       onClick={() => {
-                        setDraftSchema((prev) => moveField(prev, fieldIndex, fieldIndex + 1))
+                        setDraftSchema((prev) => moveAnnotationQuickTagDraftField(prev, fieldIndex, fieldIndex + 1))
                       }}
                     >
                       字段下移
@@ -426,7 +357,7 @@ export function AnnotationQuickTagPanel({
                       variant="outline"
                       className="h-7 px-2 text-xs"
                       onClick={() => {
-                        setDraftSchema((prev) => removeField(prev, fieldIndex))
+                        setDraftSchema((prev) => removeAnnotationQuickTagDraftField(prev, fieldIndex))
                       }}
                     >
                       删除字段
