@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildPreviewMediaCollection,
+  canNavigatePreviewMedia,
   clampAutoPlayIntervalSec,
   normalizePreviewPath,
   normalizeVideoPlaybackRate,
@@ -46,6 +47,28 @@ test('Preview Traversal Model builds a media-only collection with stable lookup 
   assert.equal(collection.mediaIndexByPath.get('albums/cover.jpg'), 1)
   assert.equal(collection.mediaFileByPath.get('albums/clip.mp4')?.name, 'clip.mp4')
   assert.equal(collection.mediaSetKey, 'albums/clip.mp4\u0000albums/cover.jpg')
+})
+
+test('Preview Traversal Model reports media navigation availability from the media collection', () => {
+  const singleMediaFiles = [
+    directory('albums/raw'),
+    file('albums/cover.jpg'),
+    file('albums/notes.md'),
+  ]
+  const singleMediaCollection = buildPreviewMediaCollection(singleMediaFiles)
+
+  assert.equal(canNavigatePreviewMedia(singleMediaCollection, singleMediaFiles[1]), false)
+
+  const mediaFiles = [
+    file('albums/a.jpg'),
+    file('albums/b.mp4'),
+    directory('albums/raw'),
+  ]
+  const mediaCollection = buildPreviewMediaCollection(mediaFiles)
+
+  assert.equal(canNavigatePreviewMedia(mediaCollection, mediaFiles[0]), true)
+  assert.equal(canNavigatePreviewMedia(mediaCollection, mediaFiles[2]), false)
+  assert.equal(canNavigatePreviewMedia(mediaCollection, file('albums/missing.jpg')), false)
 })
 
 test('Preview Traversal Model resolves sequential media navigation with boundary wrapping', () => {
