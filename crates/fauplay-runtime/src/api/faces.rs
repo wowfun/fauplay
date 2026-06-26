@@ -22,7 +22,8 @@ pub struct FaceDetectAssetResponse {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaceListAssetFacesRequest {
     pub root_path: PathBuf,
-    pub root_relative_path: RootRelativePath,
+    pub root_relative_path: Option<RootRelativePath>,
+    pub person_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

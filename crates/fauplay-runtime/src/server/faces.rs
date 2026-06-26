@@ -53,21 +53,28 @@ pub(in crate::server) fn handle_list_asset_faces_json(
     let Some(root_path) = json_string_field(&payload, "rootPath") else {
         return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
     };
-    let Some(root_relative_path) = face_root_relative_path(&payload) else {
+    let root_relative_path = match face_root_relative_path(&payload) {
+        Some(root_relative_path) => match RootRelativePath::try_from(root_relative_path) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        },
+        None => None,
+    };
+    let person_id = json_string_field(&payload, "personId").map(ToOwned::to_owned);
+    if root_relative_path.is_none() && person_id.is_none() {
         return http_response(
             400,
             "Bad Request",
-            "{\"error\":\"relativePath is required\"}",
+            "{\"error\":\"relativePath or personId is required\"}",
         );
-    };
-    let root_relative_path = match RootRelativePath::try_from(root_relative_path) {
-        Ok(path) => path,
-        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
-    };
+    }
 
     match runtime.list_asset_faces(FaceListAssetFacesRequest {
         root_path: PathBuf::from(root_path),
         root_relative_path,
+        person_id,
     }) {
         Ok(response) => http_response(200, "OK", &face_list_asset_faces_response_json(response)),
         Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),

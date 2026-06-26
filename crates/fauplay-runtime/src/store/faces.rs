@@ -107,11 +107,33 @@ pub(crate) fn list_asset_faces(
 ) -> Result<FaceListAssetFacesResponse, RuntimeError> {
     let store_path = faces_path(runtime_home_path);
     let root_path = root_path_key(&request.root_path);
-    let root_relative_path = root_relative_path_key(&request.root_relative_path);
+    let root_relative_path = request
+        .root_relative_path
+        .as_ref()
+        .map(root_relative_path_key);
+    let person_id = request
+        .person_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if root_relative_path.is_none() && person_id.is_none() {
+        return Err(RuntimeError::invalid_detected_face(
+            "relativePath or personId is required",
+        ));
+    }
     let mut items = read_face_records(&store_path)?
         .into_iter()
+        .filter(|record| record.root_path == root_path)
         .filter(|record| {
-            record.root_path == root_path && record.root_relative_path == root_relative_path
+            root_relative_path
+                .as_ref()
+                .is_none_or(|path| record.root_relative_path == *path)
+        })
+        .filter(|record| {
+            person_id
+                .as_ref()
+                .is_none_or(|person_id| record.person_id.as_ref() == Some(person_id))
         })
         .filter_map(|record| face_record_from_data(&record))
         .collect::<Vec<_>>();

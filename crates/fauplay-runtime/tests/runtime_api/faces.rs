@@ -129,7 +129,7 @@ rl.on('line', (line) => {
         "relativePath": "photos/ada.jpg"
     })
     .to_string();
-    let (address, server) = serve_runtime_once(runtime);
+    let (address, server) = serve_runtime_once(runtime.clone());
     let list_response =
         send_json_request(&address, "POST", "/v1/faces/list-asset-faces", &list_body);
     server.join().expect("server thread should finish");
@@ -145,6 +145,29 @@ rl.on('line', (line) => {
     assert_eq!(list_json["items"][0]["assetPath"], "photos/ada.jpg");
     assert_eq!(list_json["items"][0]["score"], 0.97);
     assert_eq!(list_json["items"][0]["personId"], serde_json::Value::Null);
+
+    let list_person_body = serde_json::json!({
+        "rootPath": root_path.display().to_string(),
+        "personId": "person-without-faces"
+    })
+    .to_string();
+    let (address, server) = serve_runtime_once(runtime);
+    let list_person_response = send_json_request(
+        &address,
+        "POST",
+        "/v1/faces/list-asset-faces",
+        &list_person_body,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        list_person_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "person-scoped list-asset-faces should be a Runtime-owned request shape: {list_person_response}"
+    );
+    assert_eq!(
+        response_json(&list_person_response)["items"],
+        serde_json::json!([])
+    );
 }
 
 fn send_json_request(address: &str, method: &str, path: &str, body: &str) -> String {
