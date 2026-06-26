@@ -66,6 +66,16 @@ test('App Access Model resolves startup and workspace visibility', () => {
   })
 
   assert.deepEqual(resolveAppWorkspaceVisibility({
+    accessProvider: 'remote-readonly',
+    activeRemoteWorkspace: null,
+    localRootId: 'local-root',
+  }), {
+    shouldShowRemoteWorkspace: false,
+    shouldShowLocalWorkspace: true,
+    shouldShowStartupScreen: false,
+  })
+
+  assert.deepEqual(resolveAppWorkspaceVisibility({
     accessProvider: 'local-browser',
     activeRemoteWorkspace: null,
     localRootId: null,
