@@ -49,32 +49,49 @@ test('Remote Access Listing is served through Fauplay Runtime', async () => {
         return
       }
 
+      const body = await readRequestBody(req)
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        body,
       })
-      res.statusCode = 200
+      if (req.method === 'POST' && req.url === '/v1/remote/files/list') {
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({
+          ok: true,
+          rootId: 'root-a',
+          path: 'albums',
+          flattenView: true,
+          items: [
+            {
+              name: 'runtime-only.jpg',
+              path: 'albums/runtime-only.jpg',
+              kind: 'file',
+              size: 12,
+              lastModifiedMs: 1767225600000,
+              mimeType: 'image/jpeg',
+              previewKind: 'image',
+              displayPath: 'albums/runtime-only.jpg',
+            },
+            {
+              name: 'nested',
+              path: 'albums/nested',
+              kind: 'directory',
+              isEmpty: false,
+              entryCount: 2,
+              displayPath: 'albums/nested',
+            },
+          ],
+          isTruncated: true,
+          nextOffset: 2,
+        }))
+        return
+      }
+
+      res.statusCode = 404
       res.setHeader('Content-Type', 'application/json')
-      res.end(JSON.stringify({
-        entries: [
-          {
-            name: 'runtime-only.jpg',
-            rootRelativePath: 'albums/runtime-only.jpg',
-            kind: 'file',
-            size: 12,
-            lastModifiedMs: 1767225600000,
-          },
-          {
-            name: 'nested',
-            rootRelativePath: 'albums/nested',
-            kind: 'directory',
-            isEmpty: false,
-            entryCount: 2,
-          },
-        ],
-        isTruncated: true,
-        nextOffset: 2,
-      }))
+      res.end(JSON.stringify({ ok: false, error: 'unexpected Runtime path' }))
     })
     await listen(runtimeServer, 0)
     const runtimeAddress = serverAddress(runtimeServer)
@@ -135,12 +152,14 @@ test('Remote Access Listing is served through Fauplay Runtime', async () => {
       nextOffset: 2,
     })
     assert.equal(runtimeRequests.length, 1)
-    assert.equal(runtimeRequests[0].method, 'GET')
+    assert.equal(runtimeRequests[0].method, 'POST')
     const runtimeRequestUrl = new URL(runtimeRequests[0].url, runtimeAddress)
-    assert.equal(runtimeRequestUrl.pathname, '/v1/local-directory')
-    assert.equal(runtimeRequestUrl.searchParams.get('rootPath'), remoteRoot)
-    assert.equal(runtimeRequestUrl.searchParams.get('rootRelativePath'), 'albums')
-    assert.equal(runtimeRequestUrl.searchParams.get('flattened'), 'true')
+    assert.equal(runtimeRequestUrl.pathname, '/v1/remote/files/list')
+    assert.deepEqual(JSON.parse(runtimeRequests[0].body), {
+      rootId: 'root-a',
+      path: 'albums',
+      flattenView: true,
+    })
   } finally {
     if (gatewayServer) await closeServer(gatewayServer)
     if (runtimeServer) await closeServer(runtimeServer)
@@ -191,6 +210,14 @@ async function reservePort() {
 async function listen(server, port) {
   server.listen(port, '127.0.0.1')
   await once(server, 'listening')
+}
+
+async function readRequestBody(req) {
+  let body = ''
+  for await (const chunk of req) {
+    body += chunk
+  }
+  return body
 }
 
 function serverAddress(server) {

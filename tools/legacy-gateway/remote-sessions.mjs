@@ -2,6 +2,8 @@ import {
   authorizeRuntimeRemoteAccessSession,
   loginRuntimeRemoteAccessSession,
   logoutRuntimeRemoteAccessSession,
+  readRuntimeRemoteFileList,
+  readRuntimeRemoteRoots,
 } from './remote-file-access.mjs'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 
@@ -44,6 +46,24 @@ export async function forwardRemoteReadonlySessionLogout(req, res, runtimeBaseUr
   const result = await logoutRuntimeRemoteAccessSession(runtimeBaseUrl, {
     cookieHeader: readHeader(req, 'cookie'),
     forgetDevice: payload.forgetDevice === true,
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyRoots(req, res, runtimeBaseUrl) {
+  const result = await readRuntimeRemoteRoots(runtimeBaseUrl, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyFileList(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await readRuntimeRemoteFileList(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
   })
   sendRuntimeSessionExchangeResponse(res, result)
 }

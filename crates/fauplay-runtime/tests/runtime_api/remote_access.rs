@@ -1,5 +1,6 @@
 use super::support::*;
 
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -117,6 +118,151 @@ fn runtime_api_remote_session_rotates_remembered_device_cookie() {
     assert!(
         response_cookie(&authorize_response, "__Host-fauplay-remote-session").is_some(),
         "Remembered Device authorization should also issue a fresh session cookie"
+    );
+}
+
+#[test]
+fn runtime_api_remote_roots_are_session_protected_and_hide_host_paths() {
+    let fixture =
+        Fixture::new("runtime_api_remote_roots_are_session_protected_and_hide_host_paths");
+    fixture.create_dir("Shared Root");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let unauthorized_response = send_remote_roots_request(&address, None);
+    server.join().expect("server thread should finish");
+    assert!(
+        unauthorized_response.starts_with("HTTP/1.1 401 Unauthorized\r\n"),
+        "Remote Roots should require a Remote Access session: {unauthorized_response}"
+    );
+
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_remote_roots_request(&address, Some(&session_cookie_pair));
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Roots should be served by the Runtime: {response}"
+    );
+    let payload = response_json(&response);
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["items"][0]["id"], "shared-root");
+    assert_eq!(payload["items"][0]["label"], "Shared Root");
+    assert!(
+        payload["items"][0].get("path").is_none() && payload["items"][0].get("realPath").is_none(),
+        "Remote Roots response must not expose host paths: {payload}"
+    );
+}
+
+#[test]
+fn runtime_api_remote_file_list_resolves_remote_roots_and_projects_listing_items() {
+    let fixture = Fixture::new(
+        "runtime_api_remote_file_list_resolves_remote_roots_and_projects_listing_items",
+    );
+    fixture.create_dir("Shared Root/albums/nested");
+    fixture.write_file("Shared Root/albums/runtime-only.jpg", "runtime image");
+    fixture.write_file("Shared Root/albums/nested/clip.mp4", "runtime video");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let response = send_remote_file_list_request(
+        &address,
+        Some(&session_cookie_pair),
+        r#"{"rootId":"shared-root","path":"albums","flattenView":false}"#,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Listing should be served by the Runtime: {response}"
+    );
+    let payload = response_json(&response);
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["rootId"], "shared-root");
+    assert_eq!(payload["path"], "albums");
+    assert_eq!(payload["flattenView"], false);
+    assert_eq!(payload["items"][0]["name"], "nested");
+    assert_eq!(payload["items"][0]["path"], "albums/nested");
+    assert_eq!(payload["items"][0]["kind"], "directory");
+    assert_eq!(payload["items"][0]["displayPath"], "albums/nested");
+    assert_eq!(payload["items"][0]["isEmpty"], false);
+    assert_eq!(payload["items"][0]["entryCount"], 1);
+    assert_eq!(payload["items"][1]["name"], "runtime-only.jpg");
+    assert_eq!(payload["items"][1]["path"], "albums/runtime-only.jpg");
+    assert_eq!(payload["items"][1]["kind"], "file");
+    assert_eq!(payload["items"][1]["mimeType"], "image/jpeg");
+    assert_eq!(payload["items"][1]["previewKind"], "image");
+    assert_eq!(
+        payload["items"][1]["displayPath"],
+        "albums/runtime-only.jpg"
+    );
+    assert_eq!(payload["isTruncated"], false);
+    assert!(payload["nextOffset"].is_null());
+    assert!(
+        !response.contains(&shared_root_json),
+        "Remote Listing response must not expose Remote Root host paths: {response}"
+    );
+
+    let (address, server) = serve_runtime_once(runtime);
+    let escape_response = send_remote_file_list_request(
+        &address,
+        Some(&session_cookie_pair),
+        r#"{"rootId":"shared-root","path":"../outside","flattenView":false}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        escape_response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+        "Remote Listing should reject unsafe Root-relative Paths: {escape_response}"
     );
 }
 
@@ -293,4 +439,27 @@ fn cookie_pair(set_cookie: &str) -> String {
         .next()
         .expect("Set-Cookie should contain a cookie pair")
         .to_owned()
+}
+
+fn login_remote_session_cookie_pair(runtime: fauplay_runtime::FauplayRuntime) -> String {
+    let (address, server) = serve_runtime_once(runtime);
+    let login_response = send_remote_session_login_request(
+        &address,
+        "Bearer secret-token",
+        None,
+        Some("FauplayTest Chrome/126 Linux"),
+        "{}",
+    );
+    server.join().expect("server thread should finish");
+    let session_cookie = response_cookie(&login_response, "__Host-fauplay-remote-session")
+        .expect("login response should include a Remote Access session cookie");
+    cookie_pair(&session_cookie)
+}
+
+fn response_json(response: &str) -> Value {
+    let body = response
+        .split("\r\n\r\n")
+        .nth(1)
+        .expect("HTTP response should contain a body");
+    serde_json::from_str(body).expect("HTTP response body should be JSON")
 }

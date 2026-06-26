@@ -187,7 +187,7 @@ pub(crate) fn read_text_preview_at_path(
     })
 }
 
-fn infer_content_type(path: &Path) -> &'static str {
+pub(crate) fn infer_content_type(path: &Path) -> &'static str {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())

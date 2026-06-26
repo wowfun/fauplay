@@ -131,6 +131,43 @@ async function getRuntimeJson(runtimeBaseUrl, pathname, options = {}) {
   }
 }
 
+async function getRuntimeJsonExchange(runtimeBaseUrl, pathname, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const headers = {
+    ...(typeof options.cookieHeader === 'string' && options.cookieHeader.trim()
+      ? { Cookie: options.cookieHeader.trim() }
+      : {}),
+    ...(typeof options.userAgent === 'string' && options.userAgent.trim()
+      ? { 'User-Agent': options.userAgent.trim() }
+      : {}),
+    ...(typeof options.forwardedFor === 'string' && options.forwardedFor.trim()
+      ? { 'X-Forwarded-For': options.forwardedFor.trim() }
+      : {}),
+  }
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    })
+    return {
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'application/json',
+      setCookies: responseSetCookies(response),
+      body: await response.text(),
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, pathname)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 async function postRuntimeJsonExchange(runtimeBaseUrl, pathname, payload, options = {}) {
   const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
   const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
@@ -364,51 +401,6 @@ export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
   }
 }
 
-export async function readRuntimeDirectoryListing(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  const endpoint = new URL('/v1/local-directory', `${normalizedBaseUrl}/`)
-  endpoint.searchParams.set('rootPath', rootPath)
-  endpoint.searchParams.set(
-    'rootRelativePath',
-    typeof options.rootRelativePath === 'string' ? options.rootRelativePath.trim() : '',
-  )
-  if (options.flattened === true) {
-    endpoint.searchParams.set('flattened', 'true')
-  }
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'GET',
-      signal: controller.signal,
-    })
-    const body = await response.text()
-    if (!response.ok) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime directory listing request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    try {
-      return body ? JSON.parse(body) : {}
-    } catch (error) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime directory listing response was not valid JSON: ${error.message}`,
-        502,
-      )
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, 'directory listing')
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
 export async function readRuntimeTagOptions(runtimeBaseUrl, options = {}) {
   const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
   return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/options', { rootPath }, options)
@@ -466,6 +458,14 @@ export async function readRuntimeRemoteSharedFavorites(runtimeBaseUrl, options =
 
 export async function readRuntimeRemoteAccessConfig(runtimeBaseUrl, options = {}) {
   return getRuntimeJson(runtimeBaseUrl, '/v1/remote/access/config', options)
+}
+
+export async function readRuntimeRemoteRoots(runtimeBaseUrl, options = {}) {
+  return getRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/roots', options)
+}
+
+export async function readRuntimeRemoteFileList(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/files/list', payload, options)
 }
 
 export async function loginRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {

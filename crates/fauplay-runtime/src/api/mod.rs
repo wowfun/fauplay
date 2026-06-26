@@ -7,6 +7,7 @@ mod file_index;
 mod global_trash;
 mod listing;
 mod paths;
+mod remote_access;
 mod root_operations;
 mod runtime_home;
 
@@ -60,6 +61,10 @@ pub use listing::{
     ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
 };
 pub use paths::RootRelativePath;
+pub use remote_access::{
+    RemoteFileListRequest, RemoteFileListResponse, RemoteListingEntry, RemoteRootEntry,
+    RemoteRootsResponse,
+};
 pub use root_operations::{
     RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,
     RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode,

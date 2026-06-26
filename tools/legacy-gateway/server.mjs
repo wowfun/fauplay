@@ -13,6 +13,8 @@ import {
   appendRemoteRuntimeSetCookies,
   createRemoteBudgetExceededError,
   ensureRemoteReadonlySessionAuthorized,
+  forwardRemoteReadonlyFileList,
+  forwardRemoteReadonlyRoots,
   forwardRemoteReadonlySessionLogin,
   forwardRemoteReadonlySessionLogout,
 } from './remote-sessions.mjs'
@@ -21,10 +23,8 @@ import {
   getRemoteReadonlyCapabilities,
   getRemoteReadonlyFileTags,
   listRemoteReadonlyFavorites,
-  listRemoteReadonlyFiles,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
-  listRemoteReadonlyRoots,
   listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
   queryRemoteReadonlyFilesByTags,
@@ -213,17 +213,7 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'GET' && pathname === '/v1/remote/roots') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
-        sendJson(res, 200, {
-          ok: true,
-          items: listRemoteReadonlyRoots(currentRemoteReadonlyConfig),
-        })
+        await forwardRemoteReadonlyRoots(req, res, runtimeBaseUrl)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -392,18 +382,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/files/list') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyFiles(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyFileList(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }

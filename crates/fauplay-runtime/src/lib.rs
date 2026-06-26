@@ -44,8 +44,9 @@ pub use api::{
     RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
     RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
     RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
-    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
+    RemoteFileListRequest, RemoteFileListResponse, RemoteListingEntry, RemotePublishedRoot,
+    RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
+    RemotePublishedRootsResponse, RemoteRootEntry, RemoteRootsResponse, RemoteSharedFavorite,
     RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
@@ -484,6 +485,74 @@ impl FauplayRuntime {
         store::remove_remote_shared_favorite(&self.runtime_home_path, request)
     }
 
+    pub fn list_remote_roots(&self) -> Result<RemoteRootsResponse, RuntimeError> {
+        let config = self.load_remote_access_config()?;
+        Ok(RemoteRootsResponse {
+            items: config
+                .roots
+                .into_iter()
+                .map(|root| RemoteRootEntry {
+                    id: root.id,
+                    label: root.label,
+                })
+                .collect(),
+        })
+    }
+
+    pub fn list_remote_files(
+        &self,
+        request: RemoteFileListRequest,
+    ) -> Result<RemoteFileListResponse, RuntimeError> {
+        let config = self.load_remote_access_config()?;
+        let root_id = request.root_id.trim().to_owned();
+        if root_id.is_empty() {
+            return Err(RuntimeError::runtime_capability("rootId is required"));
+        }
+        let Some(root) = config.roots.into_iter().find(|root| root.id == root_id) else {
+            return Err(RuntimeError::runtime_capability("Unknown Remote Root"));
+        };
+
+        let listing = self.list_local_directory(ListDirectoryRequest {
+            root_path: root.path,
+            root_relative_path: request.path.clone(),
+            flattened: request.flatten_view,
+            entry_limit: request.entry_limit,
+            entry_offset: request.entry_offset,
+            query: request.query,
+        })?;
+
+        Ok(RemoteFileListResponse {
+            root_id,
+            path: request.path,
+            flatten_view: request.flatten_view,
+            items: listing
+                .entries
+                .into_iter()
+                .map(|entry| {
+                    let is_file = entry.kind == DirectoryEntryKind::File;
+                    let mime_type = is_file.then(|| {
+                        media::infer_content_type(std::path::Path::new(&entry.name)).to_owned()
+                    });
+                    let preview_kind =
+                        is_file.then(|| preview_kind_for_name(&entry.name).to_owned());
+                    RemoteListingEntry {
+                        name: entry.name,
+                        path: entry.root_relative_path,
+                        kind: entry.kind,
+                        is_empty: entry.is_empty,
+                        entry_count: entry.entry_count,
+                        size: entry.size,
+                        last_modified_ms: entry.last_modified_ms,
+                        mime_type,
+                        preview_kind,
+                    }
+                })
+                .collect(),
+            is_truncated: listing.is_truncated,
+            next_offset: listing.next_offset,
+        })
+    }
+
     pub fn list_global_trash(
         &self,
         request: GlobalTrashListRequest,
@@ -761,4 +830,21 @@ fn face_scan_media_type(root_relative_path: &RootRelativePath) -> Option<FaceMed
     }
 
     None
+}
+
+fn preview_kind_for_name(name: &str) -> &'static str {
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    match extension.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "ico" | "avif" => "image",
+        "mp4" | "webm" | "mov" | "avi" | "mkv" | "ogg" => "video",
+        "txt" | "md" | "markdown" | "json" | "yaml" | "yml" | "xml" | "csv" | "log" | "js"
+        | "jsx" | "ts" | "tsx" | "css" | "scss" | "less" | "html" | "htm" | "py" | "sh"
+        | "bash" | "zsh" | "ini" | "conf" | "toml" | "sql" | "c" | "cc" | "cpp" | "h" | "hpp"
+        | "java" | "go" | "rs" | "vue" | "svelte" => "text",
+        _ => "unsupported",
+    }
 }

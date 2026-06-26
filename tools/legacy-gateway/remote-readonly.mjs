@@ -6,7 +6,6 @@ import {
   listRuntimePeople,
   queryRuntimeFileAnnotations,
   readRuntimeRemoteAccessConfig,
-  readRuntimeDirectoryListing,
   readRuntimeFileAnnotation,
   readRuntimeRemoteSharedFavorites,
   readRuntimeTagOptions,
@@ -22,98 +21,6 @@ const REMOTE_READONLY_HOST_PATH_FIELDS = new Set([
   'rootAbsolutePath',
   'sourceAbsolutePath',
 ])
-
-const PREVIEW_KIND_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'])
-const PREVIEW_KIND_VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'])
-const PREVIEW_KIND_TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'markdown',
-  'json',
-  'yaml',
-  'yml',
-  'xml',
-  'csv',
-  'log',
-  'js',
-  'jsx',
-  'ts',
-  'tsx',
-  'css',
-  'scss',
-  'less',
-  'html',
-  'htm',
-  'py',
-  'sh',
-  'bash',
-  'zsh',
-  'ini',
-  'conf',
-  'toml',
-  'sql',
-  'c',
-  'cc',
-  'cpp',
-  'h',
-  'hpp',
-  'java',
-  'go',
-  'rs',
-  'vue',
-  'svelte',
-])
-const MIME_BY_EXTENSION = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  ico: 'image/x-icon',
-  avif: 'image/avif',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mov: 'video/quicktime',
-  avi: 'video/x-msvideo',
-  mkv: 'video/x-matroska',
-  ogg: 'video/ogg',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  yaml: 'application/yaml',
-  yml: 'application/yaml',
-  xml: 'application/xml',
-  csv: 'text/csv',
-  log: 'text/plain',
-  js: 'text/javascript',
-  jsx: 'text/javascript',
-  ts: 'text/typescript',
-  tsx: 'text/typescript',
-  css: 'text/css',
-  scss: 'text/x-scss',
-  less: 'text/x-less',
-  html: 'text/html',
-  htm: 'text/html',
-  py: 'text/x-python',
-  sh: 'text/x-shellscript',
-  bash: 'text/x-shellscript',
-  zsh: 'text/x-shellscript',
-  ini: 'text/plain',
-  conf: 'text/plain',
-  toml: 'application/toml',
-  sql: 'application/sql',
-  c: 'text/x-c',
-  cc: 'text/x-c++',
-  cpp: 'text/x-c++',
-  h: 'text/x-c',
-  hpp: 'text/x-c++',
-  java: 'text/x-java-source',
-  go: 'text/x-go',
-  rs: 'text/x-rust',
-}
 
 function createRemoteError(code, message, statusCode) {
   const error = new Error(message)
@@ -205,22 +112,6 @@ function pathMatchesRoot(rootPath, absolutePath) {
 
 function statPath(targetPath, options) {
   return statWithDrvfsRetry(targetPath, options)
-}
-
-function getFileExtension(name) {
-  return String(name || '').split('.').pop()?.toLowerCase() || ''
-}
-
-function getPreviewKind(name) {
-  const ext = getFileExtension(name)
-  if (PREVIEW_KIND_IMAGE_EXTS.has(ext)) return 'image'
-  if (PREVIEW_KIND_VIDEO_EXTS.has(ext)) return 'video'
-  if (PREVIEW_KIND_TEXT_EXTS.has(ext)) return 'text'
-  return 'unsupported'
-}
-
-function getMimeType(name) {
-  return MIME_BY_EXTENSION[getFileExtension(name)] || 'application/octet-stream'
 }
 
 function normalizeOptionalRemotePath(value, fieldName = 'relativePath') {
@@ -356,17 +247,9 @@ export async function resolveRemoteReadonlyFileResource(remoteConfig, query = {}
 
   return {
     ...target,
-    contentType: getMimeType(path.basename(target.absolutePath)),
     sizeBytes: Number(statResult.size) || 0,
     lastModifiedMs: Number.isFinite(Number(statResult.mtimeMs)) ? Math.trunc(Number(statResult.mtimeMs)) : 0,
   }
-}
-
-export function listRemoteReadonlyRoots(remoteConfig) {
-  return remoteConfig.roots.map((item) => ({
-    id: item.id,
-    label: item.label,
-  }))
 }
 
 function toRemoteReadonlyFavorite(item, allowedRootIds) {
@@ -432,68 +315,6 @@ export async function removeRemoteReadonlyFavorite(remoteConfig, payload = {}, r
 function toFiniteNumber(value) {
   const next = Number(value)
   return Number.isFinite(next) ? next : undefined
-}
-
-function toRemoteReadonlyListingItems(runtimeListing) {
-  const entries = Array.isArray(runtimeListing?.entries) ? runtimeListing.entries : []
-  return entries.flatMap((entry) => {
-    if (!isObjectRecord(entry)) return []
-    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
-    const rootRelativePath = typeof entry.rootRelativePath === 'string'
-      ? normalizeOptionalRemotePath(entry.rootRelativePath, 'rootRelativePath')
-      : ''
-    const kind = entry.kind === 'directory' ? 'directory' : entry.kind === 'file' ? 'file' : null
-    if (!name || !rootRelativePath || !kind) return []
-
-    const item = {
-      name,
-      path: rootRelativePath,
-      kind,
-      displayPath: rootRelativePath,
-    }
-    if (kind === 'directory') {
-      if (typeof entry.isEmpty === 'boolean') {
-        item.isEmpty = entry.isEmpty
-      }
-      const entryCount = toFiniteNumber(entry.entryCount)
-      if (typeof entryCount === 'number') {
-        item.entryCount = entryCount
-      }
-      return [item]
-    }
-
-    const size = toFiniteNumber(entry.size)
-    if (typeof size === 'number') {
-      item.size = size
-    }
-    const lastModifiedMs = toFiniteNumber(entry.lastModifiedMs)
-    if (typeof lastModifiedMs === 'number') {
-      item.lastModifiedMs = lastModifiedMs
-    }
-    item.mimeType = getMimeType(name)
-    item.previewKind = getPreviewKind(name)
-    return [item]
-  })
-}
-
-export async function listRemoteReadonlyFiles(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const targetPath = normalizeOptionalRemotePath(payload.path, 'path')
-  const flattenView = payload.flattenView === true
-  const runtimeListing = await readRuntimeDirectoryListing(runtimeBaseUrl, {
-    rootPath: root.path,
-    rootRelativePath: targetPath,
-    flattened: flattenView,
-  })
-  return {
-    ok: true,
-    rootId: root.id,
-    path: targetPath,
-    flattenView,
-    items: toRemoteReadonlyListingItems(runtimeListing),
-    isTruncated: runtimeListing?.isTruncated === true,
-    nextOffset: toFiniteNumber(runtimeListing?.nextOffset) ?? null,
-  }
 }
 
 export async function resolveRemoteReadonlyThumbnailResource(remoteConfig, query = {}) {

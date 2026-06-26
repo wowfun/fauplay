@@ -113,6 +113,35 @@ export async function handleRuntimeRemoteAccessHostRequest(req, res, {
     return true
   }
 
+  if (req.method === 'GET' && req.url === '/v1/remote/roots') {
+    const cookieHeader = req.headers.cookie ?? ''
+    const responseBody = {
+      ok: true,
+      items: config.roots.map((root) => ({
+        id: root.id,
+        label: root.label,
+      })),
+    }
+    if (cookieHeader.includes(sessionState.sessionCookie)) {
+      sendJson(res, 200, responseBody)
+      return true
+    }
+    if (cookieHeader.includes(sessionState.rememberCookie)) {
+      sendJsonWithCookies(res, 200, responseBody, [
+        sessionCookie(sessionState.rotatedRememberCookie),
+        sessionCookie(sessionState.sessionCookie),
+      ])
+      return true
+    }
+
+    sendJsonWithCookies(res, 401, {
+      ok: false,
+      error: 'Unauthorized',
+      code: 'REMOTE_UNAUTHORIZED',
+    }, [expiredSessionCookie(), expiredRememberCookie()])
+    return true
+  }
+
   if (req.method === 'POST' && req.url === '/v1/remote/session/logout') {
     const body = await readRequestBody(req)
     let payload = {}
