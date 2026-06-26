@@ -132,6 +132,23 @@ test('Legacy Gateway no longer owns Remote Access shared state storage', async (
   assert.equal(serverSource.includes('remote-shared-state.mjs'), false)
 })
 
+test('Legacy Gateway no longer owns Remembered Device storage', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/remembered-devices.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
+  const serverSource = await readFile(new URL('../../tools/legacy-gateway/server.mjs', import.meta.url), 'utf8')
+  const remoteSessionsSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-sessions.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(serverSource.includes('createRemoteRememberedDeviceStore'), false)
+  assert.equal(serverSource.includes('remembered-devices.mjs'), false)
+  assert.equal(remoteSessionsSource.includes('remembered-devices.mjs'), false)
+  assert.equal(remoteSessionsSource.includes('DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS'), false)
+})
+
 test('Legacy Gateway no longer owns local text preview file reads', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),

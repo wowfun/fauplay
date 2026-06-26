@@ -7,11 +7,15 @@ import {
 } from './runtime-mcp-bridge.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
+  createRuntimeRememberedDevice,
   parseRemoteByteRangeHeader,
   readRuntimeFaceCrop,
   readRuntimeFileContent,
   readRuntimeFileThumbnail,
   readRuntimeTextPreview,
+  revokeAllRuntimeRememberedDevices,
+  revokeRuntimeRememberedDevice,
+  rotateRuntimeRememberedDevice,
   sendRemoteRangeNotSatisfiable,
   sendRuntimeFileContentResponse,
 } from './remote-file-access.mjs'
@@ -31,7 +35,6 @@ import {
   normalizeRememberedDeviceLabel,
   readRemoteReadonlyClientId,
   registerRemoteReadonlyLoginFailure,
-  REMOTE_REMEMBER_DEVICE_TTL_MS,
 } from './remote-sessions.mjs'
 import {
   ensureRemoteReadonlyAuthorized,
@@ -53,9 +56,6 @@ import {
   resolveRemoteReadonlyThumbnailResource,
   upsertRemoteReadonlyFavorite,
 } from './remote-readonly.mjs'
-import {
-  createRemoteRememberedDeviceStore,
-} from './remembered-devices.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
@@ -163,6 +163,71 @@ function toHttpErrorBody(error) {
   }
 }
 
+function toRuntimeRememberedDeviceCredential(value) {
+  if (!isObjectRecord(value)) return null
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  const cookieValue = typeof value.cookieValue === 'string' ? value.cookieValue.trim() : ''
+  const expiresAtMs = Number(value.expiresAtMs)
+  if (!id || !cookieValue || !Number.isFinite(expiresAtMs)) return null
+  return {
+    id,
+    cookieValue,
+    label: typeof value.label === 'string' ? value.label : '',
+    autoLabel: typeof value.autoLabel === 'string' ? value.autoLabel : '',
+    userAgentSummary: typeof value.userAgentSummary === 'string' ? value.userAgentSummary : '',
+    expiresAtMs,
+  }
+}
+
+function toRuntimeRememberedDeviceIds(value) {
+  return Array.isArray(value)
+    ? value
+      .filter((item) => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    : []
+}
+
+function createRuntimeRememberedDeviceAdapter(runtimeBaseUrl) {
+  return {
+    async create(nowMs = Date.now(), options = {}) {
+      void nowMs
+      const result = await createRuntimeRememberedDevice(runtimeBaseUrl, {
+        label: typeof options.label === 'string' ? options.label : '',
+        userAgent: typeof options.userAgent === 'string' ? options.userAgent : '',
+      })
+      const device = toRuntimeRememberedDeviceCredential(result?.device)
+      if (!device) {
+        throw createMcpRuntimeError(
+          'REMOTE_RUNTIME_RESPONSE_ERROR',
+          'Runtime returned an invalid Remembered Device',
+          502,
+        )
+      }
+      return device
+    },
+    async rotate(cookieValue) {
+      try {
+        const result = await rotateRuntimeRememberedDevice(runtimeBaseUrl, { cookieValue })
+        return toRuntimeRememberedDeviceCredential(result?.device)
+      } catch (error) {
+        if (resolveErrorStatusCode(error) === 404) {
+          return null
+        }
+        throw error
+      }
+    },
+    async revoke(cookieValue) {
+      const result = await revokeRuntimeRememberedDevice(runtimeBaseUrl, { cookieValue })
+      return toRuntimeRememberedDeviceIds(result?.revokedDeviceIds)
+    },
+    async clearAll() {
+      await revokeAllRuntimeRememberedDevices(runtimeBaseUrl)
+      return []
+    },
+  }
+}
+
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
@@ -187,9 +252,7 @@ export async function startGatewayServer(options = {}) {
 
   const remoteReadonlySessions = new Map()
   const remoteReadonlyLoginAttempts = new Map()
-  const remoteRememberedDevices = createRemoteRememberedDeviceStore({
-    ttlMs: REMOTE_REMEMBER_DEVICE_TTL_MS,
-  })
+  const remoteRememberedDevices = createRuntimeRememberedDeviceAdapter(runtimeBaseUrl)
 
   const refreshRemoteReadonlyConfigIfNeeded = async () => {
     const nextFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)

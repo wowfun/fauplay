@@ -39,9 +39,11 @@ pub use api::{
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
     MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
     PersonSuggestion, PersonSuggestionFace, PersonSummary, RememberedDeviceAdminEntry,
-    RememberedDevicesAdminResponse, RemotePublishedRoot, RemotePublishedRootSyncEntry,
-    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
-    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RememberedDeviceCreateRequest, RememberedDeviceCredential, RememberedDeviceRevokeRequest,
+    RememberedDeviceRevokeResponse, RememberedDeviceRotateRequest, RememberedDevicesAdminResponse,
+    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
+    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
     RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
@@ -370,6 +372,27 @@ impl FauplayRuntime {
 
     pub fn list_remembered_devices(&self) -> Result<RememberedDevicesAdminResponse, RuntimeError> {
         store::list_remembered_devices(&self.runtime_home_path)
+    }
+
+    pub fn create_remembered_device(
+        &self,
+        request: RememberedDeviceCreateRequest,
+    ) -> Result<RememberedDeviceCredential, RuntimeError> {
+        store::create_remembered_device(&self.runtime_home_path, request)
+    }
+
+    pub fn rotate_remembered_device(
+        &self,
+        request: RememberedDeviceRotateRequest,
+    ) -> Result<Option<RememberedDeviceCredential>, RuntimeError> {
+        store::rotate_remembered_device(&self.runtime_home_path, request)
+    }
+
+    pub fn revoke_remembered_device_credential(
+        &self,
+        request: RememberedDeviceRevokeRequest,
+    ) -> Result<RememberedDeviceRevokeResponse, RuntimeError> {
+        store::revoke_remembered_device_credential(&self.runtime_home_path, request)
     }
 
     pub fn rename_remembered_device(

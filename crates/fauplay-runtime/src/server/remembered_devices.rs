@@ -1,12 +1,103 @@
-use crate::{FauplayRuntime, RememberedDevicesAdminResponse};
+use crate::{
+    FauplayRuntime, RememberedDeviceCreateRequest, RememberedDeviceCredential,
+    RememberedDeviceRevokeRequest, RememberedDeviceRevokeResponse, RememberedDeviceRotateRequest,
+    RememberedDevicesAdminResponse,
+};
 
 use super::{
-    HttpResponse, error_json, escape_json_string, http_response, parse_json_body, percent_decode,
+    HttpResponse, error_json, escape_json_string, http_response, json_string_or_default,
+    parse_json_body, percent_decode,
 };
 
 pub(in crate::server) fn handle_list_remembered_devices(runtime: &FauplayRuntime) -> HttpResponse {
     match runtime.list_remembered_devices() {
         Ok(response) => http_response(200, "OK", &remembered_devices_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+pub(in crate::server) fn handle_create_remembered_device(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    match runtime.create_remembered_device(RememberedDeviceCreateRequest {
+        label: json_string_or_default(&payload, "label", ""),
+        user_agent: json_string_or_default(&payload, "userAgent", ""),
+    }) {
+        Ok(device) => http_response(
+            200,
+            "OK",
+            &format!(
+                "{{\"ok\":true,\"device\":{}}}",
+                remembered_device_credential_json(device),
+            ),
+        ),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+pub(in crate::server) fn handle_rotate_remembered_device(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    match runtime.rotate_remembered_device(RememberedDeviceRotateRequest {
+        cookie_value: json_string_or_default(&payload, "cookieValue", ""),
+    }) {
+        Ok(Some(device)) => http_response(
+            200,
+            "OK",
+            &format!(
+                "{{\"ok\":true,\"device\":{}}}",
+                remembered_device_credential_json(device),
+            ),
+        ),
+        Ok(None) => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+pub(in crate::server) fn handle_revoke_remembered_device_credential(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+
+    match runtime.revoke_remembered_device_credential(RememberedDeviceRevokeRequest {
+        cookie_value: json_string_or_default(&payload, "cookieValue", ""),
+    }) {
+        Ok(response) => http_response(
+            200,
+            "OK",
+            &format!(
+                "{{\"ok\":true,\"revokedDeviceIds\":{}}}",
+                remembered_device_ids_json(response),
+            ),
+        ),
         Err(error) => http_response(
             500,
             "Internal Server Error",
@@ -111,4 +202,26 @@ fn remembered_devices_response_json(response: RememberedDevicesAdminResponse) ->
         .join(",");
 
     format!("{{\"items\":[{items}]}}")
+}
+
+fn remembered_device_credential_json(device: RememberedDeviceCredential) -> String {
+    format!(
+        "{{\"id\":\"{}\",\"cookieValue\":\"{}\",\"label\":\"{}\",\"autoLabel\":\"{}\",\"userAgentSummary\":\"{}\",\"expiresAtMs\":{}}}",
+        escape_json_string(&device.id),
+        escape_json_string(&device.cookie_value),
+        escape_json_string(&device.label),
+        escape_json_string(&device.auto_label),
+        escape_json_string(&device.user_agent_summary),
+        device.expires_at_ms,
+    )
+}
+
+fn remembered_device_ids_json(response: RememberedDeviceRevokeResponse) -> String {
+    let ids = response
+        .revoked_device_ids
+        .into_iter()
+        .map(|id| format!("\"{}\"", escape_json_string(&id)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{ids}]")
 }

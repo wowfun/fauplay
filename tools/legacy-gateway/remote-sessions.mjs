@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
-import { DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS } from './remembered-devices.mjs'
 
 const REMOTE_SESSION_COOKIE_NAME = '__Host-fauplay-remote-session'
 const REMOTE_REMEMBER_DEVICE_COOKIE_NAME = '__Host-fauplay-remote-remember-device'
 const REMOTE_SESSION_ABSOLUTE_TTL_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_SESSION_ABSOLUTE_TTL_MS', 12 * 60 * 60 * 1000)
 const REMOTE_SESSION_IDLE_TTL_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_SESSION_IDLE_TTL_MS', 30 * 60 * 1000)
-export const REMOTE_REMEMBER_DEVICE_TTL_MS = DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS
+export const REMOTE_REMEMBER_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const REMOTE_LOGIN_FAILURE_WINDOW_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_FAILURE_WINDOW_MS', 10 * 60 * 1000)
 const REMOTE_LOGIN_MAX_FAILURES = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_MAX_FAILURES', 8)
 const REMOTE_LOGIN_BLOCK_DURATION_MS = readPositiveIntegerEnv('FAUPLAY_REMOTE_LOGIN_BLOCK_DURATION_MS', 10 * 60 * 1000)

@@ -418,6 +418,31 @@ export async function readRuntimeRemotePublishedRoots(runtimeBaseUrl, options = 
   return getRuntimeJson(runtimeBaseUrl, '/v1/admin/remote-published-roots/resolved', options)
 }
 
+export async function createRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/create', {
+    label: typeof options.label === 'string' ? options.label : '',
+    userAgent: typeof options.userAgent === 'string' ? options.userAgent : '',
+  }, options)
+}
+
+export async function rotateRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
+  const cookieValue = normalizeRequiredStringInput(options.cookieValue, 'cookieValue')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/rotate', {
+    cookieValue,
+  }, options)
+}
+
+export async function revokeRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {
+  const cookieValue = typeof options.cookieValue === 'string' ? options.cookieValue : ''
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/remembered-devices/revoke', {
+    cookieValue,
+  }, options)
+}
+
+export async function revokeAllRuntimeRememberedDevices(runtimeBaseUrl, options = {}) {
+  return postRuntimeJson(runtimeBaseUrl, '/v1/admin/remembered-devices/revoke-all', {}, options)
+}
+
 export async function upsertRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {
   const rootId = normalizeRequiredStringInput(options.rootId, 'rootId')
   const path = typeof options.path === 'string' ? options.path : ''

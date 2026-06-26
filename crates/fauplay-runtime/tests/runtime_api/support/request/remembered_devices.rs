@@ -18,6 +18,36 @@ pub(crate) fn send_remembered_devices_request(address: &str) -> String {
     response
 }
 
+pub(crate) fn send_create_remembered_device_request(address: &str, body: &str) -> String {
+    send_json_request(
+        address,
+        "POST",
+        "/v1/remote/remembered-devices/create",
+        body,
+    )
+}
+
+pub(crate) fn send_rotate_remembered_device_request(address: &str, body: &str) -> String {
+    send_json_request(
+        address,
+        "POST",
+        "/v1/remote/remembered-devices/rotate",
+        body,
+    )
+}
+
+pub(crate) fn send_revoke_remembered_device_credential_request(
+    address: &str,
+    body: &str,
+) -> String {
+    send_json_request(
+        address,
+        "POST",
+        "/v1/remote/remembered-devices/revoke",
+        body,
+    )
+}
+
 pub(crate) fn send_rename_remembered_device_request(
     address: &str,
     device_id: &str,

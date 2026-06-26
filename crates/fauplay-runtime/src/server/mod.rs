@@ -44,6 +44,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("GET", "/v1/admin/remembered-devices")) => {
             remembered_devices::handle_list_remembered_devices(runtime)
         }
+        Some(("POST", "/v1/remote/remembered-devices/create")) => {
+            remembered_devices::handle_create_remembered_device(runtime, request)
+        }
+        Some(("POST", "/v1/remote/remembered-devices/rotate")) => {
+            remembered_devices::handle_rotate_remembered_device(runtime, request)
+        }
+        Some(("POST", "/v1/remote/remembered-devices/revoke")) => {
+            remembered_devices::handle_revoke_remembered_device_credential(runtime, request)
+        }
         Some(("POST", "/v1/admin/remembered-devices/revoke-all")) => {
             remembered_devices::handle_revoke_all_remembered_devices(runtime)
         }
@@ -369,6 +378,9 @@ fn is_preflight_target(target: &str) -> bool {
         "/v1/local-directory"
             | "/v1/config/shortcuts"
             | "/v1/admin/remembered-devices"
+            | "/v1/remote/remembered-devices/create"
+            | "/v1/remote/remembered-devices/rotate"
+            | "/v1/remote/remembered-devices/revoke"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
             | "/v1/admin/remote-published-roots/resolved"
             | "/v1/remote/shared-favorites"

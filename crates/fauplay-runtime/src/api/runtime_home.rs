@@ -41,6 +41,37 @@ pub struct RememberedDevicesAdminResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedDeviceCredential {
+    pub id: String,
+    pub cookie_value: String,
+    pub label: String,
+    pub auto_label: String,
+    pub user_agent_summary: String,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedDeviceCreateRequest {
+    pub label: String,
+    pub user_agent: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedDeviceRotateRequest {
+    pub cookie_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedDeviceRevokeRequest {
+    pub cookie_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedDeviceRevokeResponse {
+    pub revoked_device_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePublishedRootSyncEntry {
     pub label: String,
     pub absolute_path: PathBuf,

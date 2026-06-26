@@ -32,8 +32,9 @@ pub(crate) use global_trash::{
 };
 pub(crate) use local_root_bindings::{list_local_root_bindings, upsert_local_root_binding};
 pub(crate) use remembered_devices::{
-    list_remembered_devices, rename_remembered_device, revoke_all_remembered_devices,
-    revoke_remembered_device,
+    create_remembered_device, list_remembered_devices, rename_remembered_device,
+    revoke_all_remembered_devices, revoke_remembered_device, revoke_remembered_device_credential,
+    rotate_remembered_device,
 };
 pub(crate) use remote_published_roots::{
     list_remote_shared_favorites, list_resolved_remote_published_roots,
