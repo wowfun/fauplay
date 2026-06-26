@@ -39,15 +39,15 @@ pub use api::{
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
     MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
     PersonSuggestion, PersonSuggestionFace, PersonSummary, RememberedDeviceAdminEntry,
-    RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
-    RemotePublishedRootSyncResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
-    RemoteSharedFavoriteRemoveResponse, RemoteSharedFavoriteUpsertRequest,
-    RemoteSharedFavoritesResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
-    RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
-    RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashEntry,
-    RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem,
-    RootTrashMutationResponse, RootTrashRequest, RuntimeError, TextPreviewRequest,
-    TextPreviewResponse, TextPreviewStatus,
+    RememberedDevicesAdminResponse, RemotePublishedRoot, RemotePublishedRootSyncEntry,
+    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
+    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
+    RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
+    RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
+    RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
+    RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest, RuntimeError,
+    TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::collections::HashSet;
@@ -393,6 +393,12 @@ impl FauplayRuntime {
         request: RemotePublishedRootSyncRequest,
     ) -> Result<RemotePublishedRootSyncResponse, RuntimeError> {
         store::sync_remote_published_roots(&self.runtime_home_path, request)
+    }
+
+    pub fn list_resolved_remote_published_roots(
+        &self,
+    ) -> Result<RemotePublishedRootsResponse, RuntimeError> {
+        store::list_resolved_remote_published_roots(&self.runtime_home_path)
     }
 
     pub fn list_remote_shared_favorites(

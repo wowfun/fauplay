@@ -8,6 +8,7 @@ import {
   queryRuntimeFileAnnotations,
   readRuntimeDirectoryListing,
   readRuntimeFileAnnotation,
+  readRuntimeRemotePublishedRoots,
   readRuntimeRemoteSharedFavorites,
   readRuntimeTagOptions,
   removeRuntimeRemoteSharedFavorite,
@@ -303,6 +304,33 @@ export function listRemoteReadonlyRoots(remoteConfig) {
     id: item.id,
     label: item.label,
   }))
+}
+
+function toRemoteReadonlyPublishedRoot(item) {
+  if (!isObjectRecord(item)) return null
+  const id = typeof item.id === 'string' ? item.id.trim() : ''
+  const label = typeof item.label === 'string' ? item.label.trim() : ''
+  const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
+  const realPath = typeof item.realPath === 'string' ? item.realPath.trim() : ''
+  if (!id || !label || !absolutePath || !realPath) return null
+
+  try {
+    return {
+      id,
+      label,
+      path: resolveRootPath(absolutePath),
+      realPath: resolveRootPath(realPath),
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function listRemoteReadonlyPublishedRoots(runtimeBaseUrl) {
+  const result = await readRuntimeRemotePublishedRoots(runtimeBaseUrl)
+  return Array.isArray(result?.items)
+    ? result.items.map(toRemoteReadonlyPublishedRoot).filter(Boolean)
+    : []
 }
 
 function toRemoteReadonlyFavorite(item, allowedRootIds) {

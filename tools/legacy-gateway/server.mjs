@@ -42,6 +42,7 @@ import {
   listRemoteReadonlyFiles,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
+  listRemoteReadonlyPublishedRoots,
   listRemoteReadonlyRoots,
   listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
@@ -55,9 +56,6 @@ import {
 import {
   createRemoteRememberedDeviceStore,
 } from './remembered-devices.mjs'
-import {
-  createRemotePublishedRootsStore,
-} from './remote-shared-state.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
@@ -168,13 +166,6 @@ function toHttpErrorBody(error) {
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
-  const remotePublishedRoots = createRemotePublishedRootsStore()
-  let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
-  if (remoteReadonlyConfig.rootSource === 'local-browser-sync') {
-    remoteReadonlyConfig.roots = await remotePublishedRoots.listResolvedRoots()
-  }
-  let remoteReadonlyConfigFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
-
   const runtimeBaseUrl = typeof options.runtimeBaseUrl === 'string' && options.runtimeBaseUrl.trim()
     ? options.runtimeBaseUrl.trim()
     : resolveRuntimeMcpBaseUrl()
@@ -184,18 +175,21 @@ export async function startGatewayServer(options = {}) {
     initTimeoutMs: Number(process.env.FAUPLAY_RUNTIME_MCP_INIT_TIMEOUT_MS || process.env.FAUPLAY_MCP_INIT_TIMEOUT_MS || 5000),
   })
 
+  let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
+  const hydrateRemoteReadonlyRoots = async (config) => {
+    if (config.rootSource === 'local-browser-sync') {
+      config.roots = await listRemoteReadonlyPublishedRoots(runtimeBaseUrl)
+    }
+    return config
+  }
+  await hydrateRemoteReadonlyRoots(remoteReadonlyConfig)
+  let remoteReadonlyConfigFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
+
   const remoteReadonlySessions = new Map()
   const remoteReadonlyLoginAttempts = new Map()
   const remoteRememberedDevices = createRemoteRememberedDeviceStore({
     ttlMs: REMOTE_REMEMBER_DEVICE_TTL_MS,
   })
-
-  const hydrateRemoteReadonlyRoots = async (config) => {
-    if (config.rootSource === 'local-browser-sync') {
-      config.roots = await remotePublishedRoots.listResolvedRoots()
-    }
-    return config
-  }
 
   const refreshRemoteReadonlyConfigIfNeeded = async () => {
     const nextFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)

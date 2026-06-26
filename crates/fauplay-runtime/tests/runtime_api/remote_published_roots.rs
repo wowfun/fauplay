@@ -5,6 +5,91 @@ use sha2::{Digest, Sha256};
 use super::support::*;
 
 #[test]
+fn runtime_api_lists_resolved_remote_published_roots_from_runtime_home() {
+    let fixture =
+        Fixture::new("runtime_api_lists_resolved_remote_published_roots_from_runtime_home");
+    fixture.create_dir("Published Root");
+    fixture.write_file("not-a-directory.txt", "not a directory");
+
+    let published_root_path = fixture.root.join("Published Root");
+    let missing_root_path = fixture.root.join("Missing Root");
+    let file_root_path = fixture.root.join("not-a-directory.txt");
+    let published_root_json = json_path(&published_root_path);
+    let missing_root_json = json_path(&missing_root_path);
+    let file_root_json = json_path(&file_root_path);
+    let published_root_id = remote_root_id_for_path(&published_root_json);
+    let runtime_home_path = fixture.root.join(".runtime-home");
+
+    fixture.write_file(
+        ".runtime-home/global/remote-published-roots.v1.json",
+        &format!(
+            r#"{{
+  "version": 1,
+  "items": [
+    {{
+      "id": "{published_root_id}",
+      "label": "Runtime Published Root",
+      "absolutePath": "{published_root_json}",
+      "createdAtMs": 10,
+      "lastSyncedAtMs": 20
+    }},
+    {{
+      "id": "ignored-missing",
+      "label": "Missing Root",
+      "absolutePath": "{missing_root_json}",
+      "createdAtMs": 30,
+      "lastSyncedAtMs": 40
+    }},
+    {{
+      "id": "ignored-file",
+      "label": "File Root",
+      "absolutePath": "{file_root_json}",
+      "createdAtMs": 50,
+      "lastSyncedAtMs": 60
+    }},
+    {{
+      "id": "ignored-relative",
+      "label": "Relative Root",
+      "absolutePath": "relative/path",
+      "createdAtMs": 70,
+      "lastSyncedAtMs": 80
+    }}
+  ]
+}}"#,
+        ),
+    );
+
+    let response = send_runtime_home_request_once(&runtime_home_path, |address| {
+        send_remote_published_roots_resolved_request(address)
+    });
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "resolved roots response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":true"),
+        "resolved roots response should report success: {response}"
+    );
+    assert!(
+        response.contains(&format!("\"id\":\"{published_root_id}\"")),
+        "resolved roots response should include the valid Remote Root: {response}"
+    );
+    assert!(
+        response.contains("\"label\":\"Runtime Published Root\"")
+            && response.contains(&format!("\"absolutePath\":\"{published_root_json}\""))
+            && response.contains("\"realPath\":"),
+        "resolved roots response should include host paths for gateway hydration: {response}"
+    );
+    assert!(
+        !response.contains("Missing Root")
+            && !response.contains("File Root")
+            && !response.contains("Relative Root"),
+        "resolved roots response should skip stale or invalid Remote Roots: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_lists_remote_shared_favorites_from_runtime_home() {
     let fixture = Fixture::new("runtime_api_lists_remote_shared_favorites_from_runtime_home");
     fixture.write_file(

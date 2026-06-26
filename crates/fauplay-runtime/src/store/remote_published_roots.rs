@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
-    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
+    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RuntimeError,
 };
 
@@ -77,6 +78,17 @@ pub(crate) fn sync_remote_published_roots(
     Ok(RemotePublishedRootSyncResponse {
         published_root_count: next_roots.len(),
     })
+}
+
+pub(crate) fn list_resolved_remote_published_roots(
+    runtime_home_path: &Path,
+) -> Result<RemotePublishedRootsResponse, RuntimeError> {
+    let published_roots_path = remote_published_roots_path(runtime_home_path);
+    let items = read_published_root_records(&published_roots_path)?
+        .into_iter()
+        .filter_map(resolve_published_root_record)
+        .collect();
+    Ok(RemotePublishedRootsResponse { items })
 }
 
 pub(crate) fn list_remote_shared_favorites(
@@ -266,6 +278,24 @@ fn derive_published_root_id(absolute_path: &str) -> String {
         let _ = write!(&mut hex, "{byte:02x}");
     }
     format!("remote-root-{hex}")
+}
+
+fn resolve_published_root_record(record: PublishedRootRecord) -> Option<RemotePublishedRoot> {
+    let absolute_path_string = normalize_absolute_path(Path::new(&record.absolute_path))?;
+    let absolute_path = PathBuf::from(&absolute_path_string);
+    let metadata = fs::metadata(&absolute_path).ok()?;
+    if !metadata.is_dir() {
+        return None;
+    }
+    fs::read_dir(&absolute_path).ok()?;
+    let real_path = fs::canonicalize(&absolute_path).ok()?;
+
+    Some(RemotePublishedRoot {
+        id: record.id,
+        label: record.label,
+        absolute_path,
+        real_path,
+    })
 }
 
 fn read_published_root_records(path: &Path) -> Result<Vec<PublishedRootRecord>, RuntimeError> {

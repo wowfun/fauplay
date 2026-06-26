@@ -58,6 +58,19 @@ pub struct RemotePublishedRootSyncResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePublishedRoot {
+    pub id: String,
+    pub label: String,
+    pub absolute_path: PathBuf,
+    pub real_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePublishedRootsResponse {
+    pub items: Vec<RemotePublishedRoot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteSharedFavorite {
     pub root_id: String,
     pub path: String,

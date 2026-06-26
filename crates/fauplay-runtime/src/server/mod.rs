@@ -50,6 +50,9 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/admin/remote-published-roots/sync-from-local-browser")) => {
             remote_published_roots::handle_sync_from_local_browser(runtime, request)
         }
+        Some(("GET", "/v1/admin/remote-published-roots/resolved")) => {
+            remote_published_roots::handle_list_resolved_published_roots(runtime)
+        }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
         }
@@ -367,6 +370,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/config/shortcuts"
             | "/v1/admin/remembered-devices"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
+            | "/v1/admin/remote-published-roots/resolved"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

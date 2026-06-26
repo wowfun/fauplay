@@ -36,8 +36,8 @@ pub(crate) use remembered_devices::{
     revoke_remembered_device,
 };
 pub(crate) use remote_published_roots::{
-    list_remote_shared_favorites, remove_remote_shared_favorite, sync_remote_published_roots,
-    upsert_remote_shared_favorite,
+    list_remote_shared_favorites, list_resolved_remote_published_roots,
+    remove_remote_shared_favorite, sync_remote_published_roots, upsert_remote_shared_favorite,
 };
 
 const GLOBAL_CONFIG_FOLDER_NAME: &str = "global";

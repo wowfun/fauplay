@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::{
     FauplayRuntime, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
-    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteUpsertRequest,
-    RemoteSharedFavoritesResponse,
+    RemotePublishedRootsResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse,
 };
 
 use super::{
@@ -13,6 +13,19 @@ use super::{
 pub(in crate::server) fn handle_list_shared_favorites(runtime: &FauplayRuntime) -> HttpResponse {
     match runtime.list_remote_shared_favorites() {
         Ok(response) => http_response(200, "OK", &remote_shared_favorites_response_json(response)),
+        Err(error) => http_response(
+            500,
+            "Internal Server Error",
+            &error_json(&error.to_string()),
+        ),
+    }
+}
+
+pub(in crate::server) fn handle_list_resolved_published_roots(
+    runtime: &FauplayRuntime,
+) -> HttpResponse {
+    match runtime.list_resolved_remote_published_roots() {
+        Ok(response) => http_response(200, "OK", &remote_published_roots_response_json(response)),
         Err(error) => http_response(
             500,
             "Internal Server Error",
@@ -155,6 +168,25 @@ fn remote_shared_favorites_response_json(response: RemoteSharedFavoritesResponse
         .items
         .into_iter()
         .map(remote_shared_favorite_json)
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!("{{\"ok\":true,\"items\":[{items}]}}")
+}
+
+fn remote_published_roots_response_json(response: RemotePublishedRootsResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(|item| {
+            format!(
+                "{{\"id\":\"{}\",\"label\":\"{}\",\"absolutePath\":\"{}\",\"realPath\":\"{}\"}}",
+                escape_json_string(&item.id),
+                escape_json_string(&item.label),
+                escape_json_string(&item.absolute_path.display().to_string()),
+                escape_json_string(&item.real_path.display().to_string()),
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
 

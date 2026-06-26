@@ -69,7 +69,8 @@ pub use root_operations::{
 pub use runtime_home::{
     GlobalShortcutConfigResponse, LocalRootBinding, LocalRootBindingUpsertRequest,
     LocalRootBindingsResponse, RememberedDeviceAdminEntry, RememberedDevicesAdminResponse,
-    RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
-    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
+    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse,
 };
