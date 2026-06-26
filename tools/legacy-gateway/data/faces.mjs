@@ -1,8 +1,4 @@
-import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import path from 'node:path'
-import { promisify } from 'node:util'
 import {
   nowTs,
   resolveRootPath,
@@ -32,22 +28,6 @@ import {
   markAssetFaceDetection,
 } from './faces-scan.mjs'
 
-const execFileAsync = promisify(execFile)
-const FACE_CROP_SCRIPT_PATH = path.resolve(process.cwd(), 'tools', 'legacy-gateway', 'face_crop.py')
-const FACE_CROP_SIZE_DEFAULT = 160
-const FACE_CROP_SIZE_MIN = 48
-const FACE_CROP_SIZE_MAX = 512
-const FACE_CROP_PADDING_DEFAULT = 0.35
-const FACE_CROP_PADDING_MIN = 0
-const FACE_CROP_PADDING_MAX = 2
-const FACE_CROP_MAX_BUFFER = 8 * 1024 * 1024
-const FACE_ERROR_STATUS_CODES = {
-  FACE_NOT_FOUND: 404,
-  PERSON_NOT_FOUND: 404,
-  FACE_ALREADY_ASSIGNED_TO_TARGET: 409,
-  FACE_ALREADY_IGNORED: 409,
-  FACE_STATE_CONFLICT: 409,
-}
 function parsePeopleScope(params) {
   const rawScope = typeof params?.scope === 'string' ? params.scope.trim() : 'global'
   if (rawScope !== 'global' && rawScope !== 'root') {
@@ -64,13 +44,6 @@ function parsePeopleScope(params) {
     displayRootPath,
     scopedRootPath,
   }
-}
-
-function createFaceError(code, message) {
-  const error = new Error(message)
-  error.code = code
-  error.statusCode = FACE_ERROR_STATUS_CODES[code] ?? 500
-  return error
 }
 
 function buildAssetScopeExistsClause(assetIdColumn, rootPath) {
@@ -186,14 +159,6 @@ function pickCandidateAbsolutePath(row) {
     return row.absolutePath
   }
   return null
-}
-
-function resolveCropPythonBinary() {
-  const venvPython = path.resolve(process.cwd(), '.venv', 'bin', 'python')
-  if (existsSync(venvPython)) {
-    return venvPython
-  }
-  return 'python3'
 }
 
 export async function saveDetectedFaces(params) {
@@ -632,82 +597,6 @@ export async function listAssetFaces(params) {
       scope: 'root',
       total: rows.length,
       items: rows.map((row) => toFaceDto(row, displayRootPath, relativePath)),
-    }
-  })
-}
-
-export async function getFaceCrop(params) {
-  const faceId = typeof params.faceId === 'string' ? params.faceId.trim() : ''
-  if (!faceId) {
-    throw new Error('faceId is required')
-  }
-  const rootPath = resolveOptionalRootPath(params.rootPath)
-
-  const size = Math.min(
-    FACE_CROP_SIZE_MAX,
-    Math.max(FACE_CROP_SIZE_MIN, parseInteger(params.size, FACE_CROP_SIZE_DEFAULT))
-  )
-  const padding = Math.min(
-    FACE_CROP_PADDING_MAX,
-    Math.max(FACE_CROP_PADDING_MIN, parseFiniteNumber(params.padding, FACE_CROP_PADDING_DEFAULT))
-  )
-
-  return withDb(async (db) => {
-    const scopeClause = buildAssetScopeExistsClause('face.assetId', rootPath)
-    const scopedPathExpr = buildRepresentativeFilePathExpression('face.assetId', rootPath)
-    const row = db.prepare(`
-      SELECT
-        face.id AS faceId,
-        face.mediaType AS mediaType,
-        face.frameTsMs AS frameTsMs,
-        face.x1 AS x1,
-        face.y1 AS y1,
-        face.x2 AS x2,
-        face.y2 AS y2,
-        ${scopedPathExpr.sql} AS absolutePath
-      FROM face
-      INNER JOIN asset ON asset.id = face.assetId
-      WHERE face.id = ?
-        AND asset.deletedAt IS NULL
-        AND ${scopeClause.sql}
-    `).get(...scopedPathExpr.params, faceId, ...scopeClause.params)
-
-    if (!row || typeof row.absolutePath !== 'string' || !row.absolutePath) {
-      throw createFaceError('FACE_NOT_FOUND', `face not found: ${faceId}`)
-    }
-
-    const pythonBinary = resolveCropPythonBinary()
-    const args = [
-      FACE_CROP_SCRIPT_PATH,
-      '--input',
-      row.absolutePath,
-      '--media-type',
-      normalizeFaceMediaType(row.mediaType),
-      '--x1',
-      String(Number(row.x1)),
-      '--y1',
-      String(Number(row.y1)),
-      '--x2',
-      String(Number(row.x2)),
-      '--y2',
-      String(Number(row.y2)),
-      '--size',
-      String(size),
-      '--padding',
-      String(padding),
-    ]
-    if (normalizeFaceMediaType(row.mediaType) === 'video') {
-      args.push('--frame-ts-ms', String(Math.max(0, parseInteger(row.frameTsMs, 0))))
-    }
-
-    const { stdout } = await execFileAsync(pythonBinary, args, {
-      encoding: 'buffer',
-      maxBuffer: FACE_CROP_MAX_BUFFER,
-    })
-
-    return {
-      contentType: 'image/jpeg',
-      body: Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout),
     }
   })
 }

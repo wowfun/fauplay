@@ -39,6 +39,11 @@ test('Legacy Gateway no longer exposes the Runtime MCP endpoint', async () => {
 })
 
 test('Legacy Gateway no longer exposes local Face Crop directly', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/face_crop.py', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
   const serverSource = await readFile(
     new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
     'utf8',
@@ -46,6 +51,7 @@ test('Legacy Gateway no longer exposes local Face Crop directly', async () => {
   assert.equal(serverSource.includes("pathname.startsWith('/v1/faces/crops/')"), false)
   assert.equal(serverSource.includes("pathname.slice('/v1/faces/crops/'.length)"), false)
   assert.equal(serverSource.includes('getFaceCrop'), false)
+  assert.equal(serverSource.includes('readRemoteReadonlyFaceCrop'), false)
 })
 
 test('Legacy Gateway no longer owns MCP config or stdio hosting', async () => {

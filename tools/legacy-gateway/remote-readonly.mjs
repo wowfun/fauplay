@@ -3,7 +3,6 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  getFaceCrop,
   getFileTags,
   listAssetFaces,
   listPeople,
@@ -527,7 +526,7 @@ export function ensureRemoteReadonlyAuthorized(remoteConfig, headers) {
   }
 }
 
-function resolveRemoteRoot(remoteConfig, rootId) {
+export function resolveRemoteRoot(remoteConfig, rootId) {
   const normalizedRootId = typeof rootId === 'string' ? rootId.trim() : ''
   if (!normalizedRootId) {
     throw createRemoteError('REMOTE_INVALID_PARAMS', 'rootId is required', 400)
@@ -663,15 +662,5 @@ export async function listRemoteReadonlyPersonFaces(remoteConfig, payload = {}) 
     rootPath: root.path,
     scope: 'root',
     personId,
-  })
-}
-
-export async function readRemoteReadonlyFaceCrop(remoteConfig, faceId, query = {}) {
-  const root = resolveRemoteRoot(remoteConfig, query.rootId)
-  return getFaceCrop({
-    faceId,
-    rootPath: root.path,
-    ...(typeof query.size !== 'undefined' ? { size: query.size } : {}),
-    ...(typeof query.padding !== 'undefined' ? { padding: query.padding } : {}),
   })
 }

@@ -30,6 +30,14 @@ function normalizeAbsolutePathInput(absolutePath) {
   return normalizedAbsolutePath
 }
 
+function normalizeRequiredStringInput(value, fieldName) {
+  const normalizedValue = typeof value === 'string' ? value.trim() : ''
+  if (!normalizedValue) {
+    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', `${fieldName} is required`, 400)
+  }
+  return normalizedValue
+}
+
 function resolveRuntimeTimeout(options = {}) {
   return typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
@@ -181,6 +189,50 @@ export async function readRuntimeFileThumbnail(runtimeBaseUrl, options = {}) {
     }
   } catch (error) {
     rethrowRuntimeTimeout(error, timeoutMs, 'thumbnail')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const faceId = normalizeRequiredStringInput(options.faceId, 'faceId')
+  const endpoint = new URL(`/v1/faces/crops/${encodeURIComponent(faceId)}`, `${normalizedBaseUrl}/`)
+  if (typeof options.rootPath === 'string' && options.rootPath.trim()) {
+    endpoint.searchParams.set('rootPath', options.rootPath.trim())
+  }
+  if (typeof options.size === 'string' && options.size.trim()) {
+    endpoint.searchParams.set('size', options.size.trim())
+  }
+  if (typeof options.padding === 'string' && options.padding.trim()) {
+    endpoint.searchParams.set('padding', options.padding.trim())
+  }
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    const body = Buffer.from(await response.arrayBuffer())
+    if (!response.ok) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime face crop request failed: ${response.status}`,
+        response.status,
+      )
+    }
+    return {
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      acceptRanges: response.headers.get('accept-ranges') || 'bytes',
+      contentRange: response.headers.get('content-range'),
+      body,
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, 'face crop')
   } finally {
     clearTimeout(timeoutId)
   }

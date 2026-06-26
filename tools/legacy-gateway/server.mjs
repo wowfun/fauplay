@@ -8,6 +8,7 @@ import {
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
   parseRemoteByteRangeHeader,
+  readRuntimeFaceCrop,
   readRuntimeFileContent,
   readRuntimeFileThumbnail,
   readRuntimeTextPreview,
@@ -44,7 +45,7 @@ import {
   listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
   queryRemoteReadonlyFilesByTags,
-  readRemoteReadonlyFaceCrop,
+  resolveRemoteRoot,
   resolveRemoteReadonlyFileResource,
   resolveRemoteReadonlyThumbnailResource,
 } from './remote-readonly.mjs'
@@ -99,21 +100,6 @@ function sendJson(res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(body))
-}
-
-function sendBinary(res, statusCode, body, contentType, options = {}) {
-  res.statusCode = statusCode
-  res.setHeader('Content-Type', contentType)
-  res.setHeader('Content-Length', String(body.length))
-  res.setHeader('Cache-Control', options.cacheControl || 'no-store')
-  if (options.headers && typeof options.headers === 'object') {
-    for (const [key, value] of Object.entries(options.headers)) {
-      if (typeof value === 'string' && value) {
-        res.setHeader(key, value)
-      }
-    }
-  }
-  res.end(body)
 }
 
 async function readJsonBody(req) {
@@ -456,12 +442,14 @@ export async function startGatewayServer(options = {}) {
         const rootId = requestUrl.searchParams.get('rootId')
         const size = requestUrl.searchParams.get('size')
         const padding = requestUrl.searchParams.get('padding')
-        const result = await readRemoteReadonlyFaceCrop(currentRemoteReadonlyConfig, faceId, {
-          ...(rootId !== null ? { rootId } : {}),
+        const root = resolveRemoteRoot(currentRemoteReadonlyConfig, rootId)
+        const result = await readRuntimeFaceCrop(runtimeBaseUrl, {
+          faceId,
+          rootPath: root.path,
           ...(size !== null ? { size } : {}),
           ...(padding !== null ? { padding } : {}),
         })
-        sendBinary(res, 200, result.body, result.contentType, {
+        sendRuntimeFileContentResponse(res, result, {
           cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
         })
       } catch (error) {

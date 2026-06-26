@@ -14,6 +14,5 @@ export {
   clusterPendingFaces,
   listPeople,
   listAssetFaces,
-  getFaceCrop,
   callVisionInference,
 } from './faces.mjs'
