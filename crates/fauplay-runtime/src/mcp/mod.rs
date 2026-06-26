@@ -1,14 +1,56 @@
 //! Plugin and MCP coordination inside the Fauplay Runtime.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
+mod config;
+mod host;
+mod stdio;
+
 const MCP_PROTOCOL_VERSION: &str = "2025-11-05";
 
+pub(crate) use config::resolve_default_mcp_config_path;
+use host::McpHost;
+
+#[derive(Clone)]
+pub(crate) struct McpRuntime {
+    sessions: McpSessions,
+    host: McpHost,
+}
+
+impl std::fmt::Debug for McpRuntime {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpRuntime")
+            .field("config_path", &self.host.config_path)
+            .field("runtime_home_path", &self.host.runtime_home_path)
+            .finish()
+    }
+}
+
+impl McpRuntime {
+    pub(crate) fn new(runtime_home_path: PathBuf, config_path: PathBuf) -> Self {
+        Self {
+            sessions: McpSessions::default(),
+            host: McpHost::new(runtime_home_path, config_path),
+        }
+    }
+
+    pub(crate) fn handle_request(
+        &self,
+        session_id: Option<&str>,
+        payload: Value,
+    ) -> McpHttpResponse {
+        self.sessions
+            .handle_request(&self.host, session_id, payload)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
-pub(crate) struct McpSessions {
+struct McpSessions {
     inner: Arc<Mutex<McpSessionStore>>,
 }
 
@@ -50,11 +92,17 @@ enum McpRuntimeErrorCode {
     MethodNotFound,
     InvalidParams,
     ToolNotFound,
+    ToolCallFailed,
+    ServerTimeout,
+    ServerCrashed,
+    ConfigError,
+    RuntimeError,
 }
 
 impl McpSessions {
-    pub(crate) fn handle_request(
+    fn handle_request(
         &self,
+        host: &McpHost,
         session_id: Option<&str>,
         payload: Value,
     ) -> McpHttpResponse {
@@ -63,7 +111,7 @@ impl McpSessions {
             Err(error) => return json_rpc_error_response(None, false, error),
         };
 
-        match self.handle_json_rpc_request(session_id, &request) {
+        match self.handle_json_rpc_request(host, session_id, &request) {
             Ok(response) => response,
             Err(error) => {
                 json_rpc_error_response(request.id.clone(), request.is_notification, error)
@@ -73,6 +121,7 @@ impl McpSessions {
 
     fn handle_json_rpc_request(
         &self,
+        host: &McpHost,
         session_id: Option<&str>,
         request: &McpRequest,
     ) -> Result<McpHttpResponse, McpRuntimeError> {
@@ -88,10 +137,11 @@ impl McpSessions {
             }
             "tools/list" => {
                 let session_id = self.require_client_ready_session(session_id)?;
+                let tools = host.list_tools()?;
                 Ok(json_rpc_result_response(
                     request,
                     Some(session_id),
-                    json!({ "tools": [] }),
+                    json!({ "tools": tools }),
                 ))
             }
             "tools/call" => {
@@ -117,10 +167,9 @@ impl McpSessions {
                     ));
                 }
 
-                Err(McpRuntimeError::new(
-                    McpRuntimeErrorCode::ToolNotFound,
-                    format!("Unknown tool: {tool_name}"),
-                ))
+                let result =
+                    host.call_tool(tool_name, tool_args.cloned().unwrap_or_else(|| json!({})))?;
+                Ok(json_rpc_result_response(request, None, result))
             }
             _ => Err(McpRuntimeError::new(
                 McpRuntimeErrorCode::MethodNotFound,
@@ -308,7 +357,12 @@ impl McpRuntimeErrorCode {
             Self::InvalidRequest => -32600,
             Self::MethodNotFound => -32601,
             Self::InvalidParams => -32602,
-            Self::ToolNotFound => -32000,
+            Self::ToolNotFound
+            | Self::ToolCallFailed
+            | Self::ServerTimeout
+            | Self::ServerCrashed
+            | Self::ConfigError
+            | Self::RuntimeError => -32000,
         }
     }
 
@@ -318,6 +372,11 @@ impl McpRuntimeErrorCode {
             Self::MethodNotFound => "MCP_METHOD_NOT_FOUND",
             Self::InvalidParams => "MCP_INVALID_PARAMS",
             Self::ToolNotFound => "MCP_TOOL_NOT_FOUND",
+            Self::ToolCallFailed => "MCP_TOOL_CALL_FAILED",
+            Self::ServerTimeout => "MCP_SERVER_TIMEOUT",
+            Self::ServerCrashed => "MCP_SERVER_CRASHED",
+            Self::ConfigError => "MCP_CONFIG_ERROR",
+            Self::RuntimeError => "MCP_RUNTIME_ERROR",
         }
     }
 }

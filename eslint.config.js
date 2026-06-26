@@ -38,6 +38,6 @@ export default [
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', '.venv*/', '**/.venv*/', '.references/', '**/.references/**'],
+    ignores: ['dist/', 'node_modules/', 'target/', '**/target/**', '.venv*/', '**/.venv*/', '.references/', '**/.references/**'],
   },
 ]

@@ -1,5 +1,4 @@
 import http from 'node:http'
-import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
@@ -33,7 +32,6 @@ import {
 } from './remote-sessions.mjs'
 import {
   getFaceCrop,
-  ingestClassificationResult,
 } from './data/core.mjs'
 import {
   ensureRemoteReadonlyAuthorized,
@@ -63,8 +61,6 @@ import {
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
 const GATEWAY_VERSION = '0.2.0'
-const MCP_PROTOCOL_VERSION = '2025-11-05'
-const MCP_SESSION_HEADER = 'mcp-session-id'
 const REMOTE_CONTENT_CACHE_CONTROL = 'private, no-store'
 const REMOTE_DERIVATIVE_CACHE_CONTROL = 'private, max-age=300'
 const REMOTE_MAX_RANGE_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_MAX_RANGE_BYTES', 16 * 1024 * 1024)
@@ -98,8 +94,7 @@ async function createRemoteReadonlyRuntimeFingerprint(configSources) {
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${MCP_SESSION_HEADER}`)
-  res.setHeader('Access-Control-Expose-Headers', MCP_SESSION_HEADER)
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 }
 
 function sendJson(res, statusCode, body) {
@@ -162,33 +157,6 @@ function normalizeRemoteFavoritePath(value) {
   return segments.join('/')
 }
 
-function parseJsonRpcRequest(payload) {
-  if (!payload || typeof payload !== 'object') {
-    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Invalid JSON-RPC request payload', 400)
-  }
-
-  if (payload.jsonrpc !== '2.0') {
-    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'jsonrpc must be "2.0"', 400)
-  }
-
-  const method = payload.method
-  if (typeof method !== 'string' || !method) {
-    throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'method is required', 400)
-  }
-
-  return {
-    id: payload.id,
-    method,
-    params: isObjectRecord(payload.params) ? payload.params : {},
-  }
-}
-
-function readSessionId(req) {
-  const raw = req.headers[MCP_SESSION_HEADER]
-  if (Array.isArray(raw)) return raw[0] || null
-  return typeof raw === 'string' && raw ? raw : null
-}
-
 async function sendRemoteReadonlyError(res, remoteSessions, remoteRememberedDevices, req, error) {
   const statusCode = resolveErrorStatusCode(error)
   if (statusCode === 401) {
@@ -196,48 +164,6 @@ async function sendRemoteReadonlyError(res, remoteSessions, remoteRememberedDevi
     await clearRemoteRememberedDevice(res, remoteSessions, remoteRememberedDevices, req)
   }
   sendJson(res, statusCode, toHttpErrorBody(error))
-}
-
-function toJsonRpcError(error) {
-  if (error?.code === 'MCP_PARSE_ERROR') {
-    return {
-      code: -32700,
-      message: error.message || 'Parse error',
-      data: { code: 'MCP_PARSE_ERROR' },
-    }
-  }
-
-  if (error?.code === 'MCP_INVALID_REQUEST') {
-    return {
-      code: -32600,
-      message: error.message || 'Invalid Request',
-      data: { code: 'MCP_INVALID_REQUEST' },
-    }
-  }
-
-  if (error?.code === 'MCP_METHOD_NOT_FOUND') {
-    return {
-      code: -32601,
-      message: error.message || 'Method not found',
-      data: { code: 'MCP_METHOD_NOT_FOUND' },
-    }
-  }
-
-  if (error?.code === 'MCP_INVALID_PARAMS') {
-    return {
-      code: -32602,
-      message: error.message || 'Invalid params',
-      data: { code: 'MCP_INVALID_PARAMS' },
-    }
-  }
-
-  return {
-    code: -32000,
-    message: error instanceof Error ? error.message : 'Server error',
-    data: {
-      code: error?.code || 'MCP_RUNTIME_ERROR',
-    },
-  }
 }
 
 function resolveErrorStatusCode(error) {
@@ -268,95 +194,6 @@ function toHttpErrorBody(error) {
   }
 }
 
-function buildInitializeResult() {
-  return {
-    protocolVersion: MCP_PROTOCOL_VERSION,
-    capabilities: {
-      tools: {},
-    },
-    serverInfo: {
-      name: 'fauplay-local-gateway',
-      version: GATEWAY_VERSION,
-    },
-  }
-}
-
-async function postProcessClassificationToolCall(toolName, toolArgs, result) {
-  if ((toolName !== 'ml.classifyImage' && toolName !== 'ml.classifyBatch') || !isObjectRecord(toolArgs)) {
-    return
-  }
-
-  const rootPath = typeof toolArgs.rootPath === 'string' ? toolArgs.rootPath : ''
-  if (!rootPath) return
-
-  await ingestClassificationResult({
-    rootPath,
-    toolName,
-    toolArgs,
-    toolResult: result,
-  })
-}
-
-async function postProcessToolCallResult(toolName, toolArgs, result) {
-  await postProcessClassificationToolCall(toolName, toolArgs, result)
-}
-
-async function handleMcpRequest(runtime, request, sessions, sessionId) {
-  if (request.method === 'initialize') {
-    const nextSessionId = randomUUID()
-    sessions.set(nextSessionId, {
-      initialized: true,
-      clientReady: false,
-    })
-
-    return {
-      sessionId: nextSessionId,
-      result: buildInitializeResult(),
-    }
-  }
-
-  const state = sessionId ? sessions.get(sessionId) : null
-  if (!state) {
-    throw createMcpRuntimeError('MCP_INVALID_REQUEST', `Missing or invalid ${MCP_SESSION_HEADER} header`, 400)
-  }
-
-  if (request.method === 'tools/list') {
-    if (!state.initialized || !state.clientReady) {
-      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Client must complete initialize lifecycle', 400)
-    }
-    return { sessionId, result: { tools: runtime.listTools() } }
-  }
-
-  if (request.method === 'tools/call') {
-    if (!state.initialized || !state.clientReady) {
-      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'Client must complete initialize lifecycle', 400)
-    }
-
-    const toolName = request.params?.name
-    const toolArgs = request.params?.arguments
-
-    if (typeof toolName !== 'string' || !toolName) {
-      throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'params.name is required for tools/call', 400)
-    }
-    if (!isObjectRecord(toolArgs)) {
-      throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'params.arguments must be an object', 400)
-    }
-
-    const result = await runtime.callTool(toolName, toolArgs)
-    return { sessionId, result: result ?? {} }
-  }
-
-  if (request.method === 'notifications/initialized') {
-    if (!state.initialized) {
-      throw createMcpRuntimeError('MCP_INVALID_REQUEST', 'initialize is required before initialized notification', 400)
-    }
-    state.clientReady = true
-    return { sessionId, result: null }
-  }
-
-  throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Unsupported MCP method: ${request.method}`, 404)
-}
-
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
@@ -383,7 +220,6 @@ export async function startGatewayServer(options = {}) {
   })
 
   await runtime.initialize()
-  const clientSessions = new Map()
   const remoteReadonlySessions = new Map()
   const remoteReadonlyLoginAttempts = new Map()
   const remoteRememberedDevices = createRemoteRememberedDeviceStore({
@@ -718,57 +554,6 @@ export async function startGatewayServer(options = {}) {
         sendBinary(res, 200, result.body, result.contentType)
       } catch (error) {
         sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
-      return
-    }
-
-    if (method === 'POST' && pathname === '/v1/mcp') {
-      let request = null
-      let requestIsNotification = false
-      let responseSessionId = null
-      try {
-        const payload = await readJsonBody(req)
-        request = parseJsonRpcRequest(payload)
-        requestIsNotification = request.id === undefined
-
-        const requestSessionId = request.method === 'initialize' ? null : readSessionId(req)
-        const { sessionId, result } = await handleMcpRequest(runtime, request, clientSessions, requestSessionId)
-        if (request.method === 'tools/call') {
-          await postProcessToolCallResult(request.params?.name, request.params?.arguments, result)
-        }
-        responseSessionId = sessionId
-
-        if (responseSessionId) {
-          res.setHeader(MCP_SESSION_HEADER, responseSessionId)
-        }
-
-        if (requestIsNotification) {
-          res.statusCode = 204
-          res.end()
-          return
-        }
-
-        sendJson(res, 200, {
-          jsonrpc: '2.0',
-          id: request.id ?? null,
-          result: result ?? {},
-        })
-      } catch (error) {
-        if (responseSessionId) {
-          res.setHeader(MCP_SESSION_HEADER, responseSessionId)
-        }
-
-        if (requestIsNotification) {
-          res.statusCode = 204
-          res.end()
-          return
-        }
-
-        sendJson(res, 200, {
-          jsonrpc: '2.0',
-          id: request?.id ?? null,
-          error: toJsonRpcError(error),
-        })
       }
       return
     }

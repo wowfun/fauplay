@@ -42,7 +42,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct FauplayRuntime {
     runtime_home_path: PathBuf,
-    mcp_sessions: mcp::McpSessions,
+    mcp_runtime: mcp::McpRuntime,
 }
 
 impl FauplayRuntime {
@@ -51,9 +51,21 @@ impl FauplayRuntime {
     }
 
     pub fn with_runtime_home_path(runtime_home_path: impl Into<PathBuf>) -> Self {
+        let runtime_home_path = runtime_home_path.into();
+        Self::with_runtime_home_path_and_mcp_config_path(
+            runtime_home_path,
+            mcp::resolve_default_mcp_config_path(),
+        )
+    }
+
+    pub fn with_runtime_home_path_and_mcp_config_path(
+        runtime_home_path: impl Into<PathBuf>,
+        mcp_config_path: impl Into<PathBuf>,
+    ) -> Self {
+        let runtime_home_path = runtime_home_path.into();
         Self {
-            runtime_home_path: runtime_home_path.into(),
-            mcp_sessions: mcp::McpSessions::default(),
+            mcp_runtime: mcp::McpRuntime::new(runtime_home_path.clone(), mcp_config_path.into()),
+            runtime_home_path,
         }
     }
 
@@ -66,7 +78,7 @@ impl FauplayRuntime {
         session_id: Option<&str>,
         payload: serde_json::Value,
     ) -> mcp::McpHttpResponse {
-        self.mcp_sessions.handle_request(session_id, payload)
+        self.mcp_runtime.handle_request(session_id, payload)
     }
 
     pub fn load_global_shortcut_config(

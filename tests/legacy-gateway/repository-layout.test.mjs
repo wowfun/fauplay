@@ -26,3 +26,14 @@ test('Legacy Gateway no longer exposes local Remote Root publishing sync', async
     false,
   )
 })
+
+test('Legacy Gateway no longer exposes the Runtime MCP endpoint', async () => {
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(serverSource.includes("pathname === '/v1/mcp'"), false)
+  assert.equal(serverSource.includes('MCP_SESSION_HEADER'), false)
+  assert.equal(serverSource.includes('parseJsonRpcRequest'), false)
+  assert.equal(serverSource.includes('handleMcpRequest'), false)
+})
