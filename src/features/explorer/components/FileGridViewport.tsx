@@ -6,7 +6,6 @@ import {
   useCallback,
   forwardRef,
   useImperativeHandle,
-  type MouseEvent as ReactMouseEvent,
 } from 'react'
 import { FixedSizeGrid as Grid } from 'react-window'
 import type { FixedSizeGrid as FixedSizeGridType } from 'react-window'
@@ -25,6 +24,7 @@ import {
   shouldLoadNextFileGridPage,
 } from '@/features/explorer/lib/fileGridViewportModel'
 import { useFileGridKeyboardNavigation } from '@/features/explorer/hooks/useFileGridKeyboardNavigation'
+import { useFileGridItemInteractionHandlers } from '@/features/explorer/hooks/useFileGridItemInteractionHandlers'
 import { useGridSelection } from '@/hooks/useGridSelection'
 
 interface FileGridViewportProps {
@@ -356,6 +356,23 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
     onFileDoubleClick,
   })
 
+  const {
+    handleItemToggleChecked,
+    handleItemClick,
+    handleItemDoubleClick,
+  } = useFileGridItemInteractionHandlers({
+    markSelectedElement,
+    applyRangeSelection,
+    selectionAnchorPathRef,
+    pendingPreviewPathDuringRangeRef,
+    setAnchorId,
+    toggleSelection,
+    shouldSuppressClick,
+    onDirectoryClick,
+    onFileClick,
+    onFileDoubleClick,
+  })
+
   if (files.length === 0) {
     return (
       <div className="h-full w-full flex items-center justify-center text-muted-foreground">
@@ -416,56 +433,14 @@ export const FileGridViewport = forwardRef<FileGridViewportHandle, FileGridViewp
                 thumbnailPriority={thumbnailPriority}
                 isSelected={file.path === selectedPathRef.current}
                 isChecked={selectedPathSet.has(file.path)}
-                onToggleChecked={(event: ReactMouseEvent<HTMLInputElement>) => {
-                  event.stopPropagation()
-                  markSelectedElement(index, file.path)
-
-                  if (event.shiftKey) {
-                    applyRangeSelection(index)
-                    return
-                  }
-
-                  selectionAnchorPathRef.current = file.path
-                  setAnchorId(file.path)
-                  pendingPreviewPathDuringRangeRef.current = null
-                  toggleSelection(file.path)
+                onToggleChecked={(event) => {
+                  handleItemToggleChecked(file, index, event)
                 }}
-                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
-                  if (shouldSuppressClick()) {
-                    return
-                  }
-
-                  markSelectedElement(index, file.path)
-
-                  if (event.shiftKey) {
-                    applyRangeSelection(index)
-                    return
-                  }
-
-                  if (event.ctrlKey || event.metaKey) {
-                    selectionAnchorPathRef.current = file.path
-                    setAnchorId(file.path)
-                    pendingPreviewPathDuringRangeRef.current = null
-                    toggleSelection(file.path)
-                    return
-                  }
-
-                  selectionAnchorPathRef.current = file.path
-                  setAnchorId(file.path)
-                  pendingPreviewPathDuringRangeRef.current = null
-                  if (file.kind === 'directory') {
-                    onDirectoryClick(file.name)
-                  } else {
-                    onFileClick(file)
-                  }
+                onClick={(event) => {
+                  handleItemClick(file, index, event)
                 }}
                 onDoubleClick={() => {
-                  if (shouldSuppressClick()) {
-                    return
-                  }
-                  if (file.kind === 'file' && onFileDoubleClick) {
-                    onFileDoubleClick(file)
-                  }
+                  handleItemDoubleClick(file)
                 }}
               />
             </div>
