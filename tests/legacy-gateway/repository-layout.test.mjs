@@ -120,6 +120,18 @@ test('Legacy Gateway no longer owns Remote Access face people data reads', async
   assert.equal(remoteReadonlySource.includes('listAssetFaces({'), false)
 })
 
+test('Legacy Gateway no longer owns Remote Access Favorite Folder storage', async () => {
+  const serverSource = await readFile(new URL('../../tools/legacy-gateway/server.mjs', import.meta.url), 'utf8')
+  const sharedStateSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-shared-state.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(serverSource.includes('createRemoteSharedFavoritesStore'), false)
+  assert.equal(sharedStateSource.includes('DEFAULT_REMOTE_SHARED_FAVORITES_PATH'), false)
+  assert.equal(sharedStateSource.includes('createRemoteSharedFavoritesStore'), false)
+  assert.equal(sharedStateSource.includes('remote-shared-favorites.v1.json'), false)
+})
+
 test('Legacy Gateway no longer owns local text preview file reads', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),

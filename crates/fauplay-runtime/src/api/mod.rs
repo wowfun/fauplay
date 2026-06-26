@@ -70,4 +70,6 @@ pub use runtime_home::{
     GlobalShortcutConfigResponse, LocalRootBinding, LocalRootBindingUpsertRequest,
     LocalRootBindingsResponse, RememberedDeviceAdminEntry, RememberedDevicesAdminResponse,
     RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
+    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse,
 };

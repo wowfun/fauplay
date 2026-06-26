@@ -8,7 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
-    RuntimeError,
+    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RuntimeError,
 };
 
 use super::{GLOBAL_CONFIG_FOLDER_NAME, now_ms, number_value, string_value};
@@ -76,6 +77,82 @@ pub(crate) fn sync_remote_published_roots(
     Ok(RemotePublishedRootSyncResponse {
         published_root_count: next_roots.len(),
     })
+}
+
+pub(crate) fn list_remote_shared_favorites(
+    runtime_home_path: &Path,
+) -> Result<RemoteSharedFavoritesResponse, RuntimeError> {
+    let shared_favorites_path = remote_shared_favorites_path(runtime_home_path);
+    Ok(RemoteSharedFavoritesResponse {
+        items: read_favorite_records(&shared_favorites_path)?
+            .into_iter()
+            .map(|record| RemoteSharedFavorite {
+                root_id: record.root_id,
+                path: record.path,
+                favorited_at_ms: record.favorited_at_ms,
+            })
+            .collect(),
+    })
+}
+
+pub(crate) fn upsert_remote_shared_favorite(
+    runtime_home_path: &Path,
+    request: RemoteSharedFavoriteUpsertRequest,
+) -> Result<RemoteSharedFavorite, RuntimeError> {
+    let root_id = normalize_favorite_root_id(&request.root_id)?;
+    let Some(path) = normalize_favorite_path(&request.path) else {
+        return Err(RuntimeError::runtime_capability(
+            "invalid Favorite Folder path",
+        ));
+    };
+    let shared_favorites_path = remote_shared_favorites_path(runtime_home_path);
+    let favorited_at_ms = request.favorited_at_ms.unwrap_or_else(now_ms);
+    let key = favorite_key(&root_id, &path);
+    let mut records = read_favorite_records(&shared_favorites_path)?;
+    upsert_favorite_records(
+        &mut records,
+        vec![FavoriteRecord {
+            root_id,
+            path,
+            favorited_at_ms,
+        }],
+    );
+    write_favorite_records(&shared_favorites_path, &records)?;
+    let Some(record) = records
+        .into_iter()
+        .find(|record| favorite_key(&record.root_id, &record.path) == key)
+    else {
+        return Err(RuntimeError::runtime_capability(
+            "failed to upsert Favorite Folder",
+        ));
+    };
+    Ok(RemoteSharedFavorite {
+        root_id: record.root_id,
+        path: record.path,
+        favorited_at_ms: record.favorited_at_ms,
+    })
+}
+
+pub(crate) fn remove_remote_shared_favorite(
+    runtime_home_path: &Path,
+    request: RemoteSharedFavoriteRemoveRequest,
+) -> Result<RemoteSharedFavoriteRemoveResponse, RuntimeError> {
+    let root_id = normalize_favorite_root_id(&request.root_id)?;
+    let Some(path) = normalize_favorite_path(&request.path) else {
+        return Err(RuntimeError::runtime_capability(
+            "invalid Favorite Folder path",
+        ));
+    };
+    let shared_favorites_path = remote_shared_favorites_path(runtime_home_path);
+    let key = favorite_key(&root_id, &path);
+    let mut records = read_favorite_records(&shared_favorites_path)?;
+    let previous_len = records.len();
+    records.retain(|record| favorite_key(&record.root_id, &record.path) != key);
+    let removed = records.len() != previous_len;
+    if removed {
+        write_favorite_records(&shared_favorites_path, &records)?;
+    }
+    Ok(RemoteSharedFavoriteRemoveResponse { removed })
 }
 
 #[derive(Debug, Clone)]
@@ -377,6 +454,16 @@ fn normalize_favorite_path(value: &str) -> Option<String> {
         segments.push(segment);
     }
     (!segments.is_empty()).then(|| segments.join("/"))
+}
+
+fn normalize_favorite_root_id(value: &str) -> Result<String, RuntimeError> {
+    let root_id = value.trim();
+    if root_id.is_empty() {
+        return Err(RuntimeError::runtime_capability(
+            "Favorite Folder rootId is required",
+        ));
+    }
+    Ok(root_id.to_owned())
 }
 
 fn favorite_key(root_id: &str, path: &str) -> String {

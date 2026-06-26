@@ -50,6 +50,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/admin/remote-published-roots/sync-from-local-browser")) => {
             remote_published_roots::handle_sync_from_local_browser(runtime, request)
         }
+        Some(("GET", "/v1/remote/shared-favorites")) => {
+            remote_published_roots::handle_list_shared_favorites(runtime)
+        }
+        Some(("POST", "/v1/remote/shared-favorites/upsert")) => {
+            remote_published_roots::handle_upsert_shared_favorite(runtime, request)
+        }
+        Some(("POST", "/v1/remote/shared-favorites/remove")) => {
+            remote_published_roots::handle_remove_shared_favorite(runtime, request)
+        }
         Some(("POST", "/v1/mcp")) => mcp::handle_mcp_json_rpc(runtime, request),
         Some(("POST", "/v1/faces/detect-asset")) => {
             faces::handle_detect_asset_faces_json(runtime, request)
@@ -358,6 +367,9 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/config/shortcuts"
             | "/v1/admin/remembered-devices"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
+            | "/v1/remote/shared-favorites"
+            | "/v1/remote/shared-favorites/upsert"
+            | "/v1/remote/shared-favorites/remove"
             | "/v1/mcp"
             | "/v1/faces/detect-asset"
             | "/v1/faces/detect-assets"

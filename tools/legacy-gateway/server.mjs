@@ -38,6 +38,7 @@ import {
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
   getRemoteReadonlyFileTags,
+  listRemoteReadonlyFavorites,
   listRemoteReadonlyFiles,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
@@ -45,16 +46,17 @@ import {
   listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
   queryRemoteReadonlyFilesByTags,
+  removeRemoteReadonlyFavorite,
   resolveRemoteRoot,
   resolveRemoteReadonlyFileResource,
   resolveRemoteReadonlyThumbnailResource,
+  upsertRemoteReadonlyFavorite,
 } from './remote-readonly.mjs'
 import {
   createRemoteRememberedDeviceStore,
 } from './remembered-devices.mjs'
 import {
   createRemotePublishedRootsStore,
-  createRemoteSharedFavoritesStore,
 } from './remote-shared-state.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
@@ -126,21 +128,6 @@ function normalizeBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
 }
 
-function normalizeRemoteFavoritePath(value) {
-  if (typeof value !== 'string') {
-    throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'path must be a string', 400)
-  }
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  const segments = trimmed.replace(/\\/g, '/').split('/').filter(Boolean)
-  for (const segment of segments) {
-    if (segment === '.' || segment === '..' || segment.includes('\0')) {
-      throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'path contains invalid value', 400)
-    }
-  }
-  return segments.join('/')
-}
-
 async function sendRemoteReadonlyError(res, remoteSessions, remoteRememberedDevices, req, error) {
   const statusCode = resolveErrorStatusCode(error)
   if (statusCode === 401) {
@@ -182,7 +169,6 @@ export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
   const remotePublishedRoots = createRemotePublishedRootsStore()
-  const remoteSharedFavorites = createRemoteSharedFavoritesStore()
   let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
   if (remoteReadonlyConfig.rootSource === 'local-browser-sync') {
     remoteReadonlyConfig.roots = await remotePublishedRoots.listResolvedRoots()
@@ -352,9 +338,7 @@ export async function startGatewayServer(options = {}) {
           remoteReadonlySessions,
           remoteRememberedDevices,
         )
-        const items = await remoteSharedFavorites.list({
-          allowedRootIds: currentRemoteReadonlyConfig.roots.map((item) => item.id),
-        })
+        const items = await listRemoteReadonlyFavorites(currentRemoteReadonlyConfig, runtimeBaseUrl)
         sendJson(res, 200, { ok: true, items })
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
@@ -376,18 +360,7 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        const rootId = typeof payload.rootId === 'string' ? payload.rootId.trim() : ''
-        if (!rootId) {
-          throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'rootId is required', 400)
-        }
-        if (!currentRemoteReadonlyConfig.roots.some((item) => item.id === rootId)) {
-          const error = new Error('Unknown remote root')
-          error.code = 'REMOTE_ROOT_NOT_FOUND'
-          error.statusCode = 404
-          throw error
-        }
-        const normalizedPath = normalizeRemoteFavoritePath(payload.path)
-        const item = await remoteSharedFavorites.upsert(rootId, normalizedPath, Date.now())
+        const item = await upsertRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
         sendJson(res, 200, { ok: true, item })
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
@@ -409,18 +382,7 @@ export async function startGatewayServer(options = {}) {
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        const rootId = typeof payload.rootId === 'string' ? payload.rootId.trim() : ''
-        if (!rootId) {
-          throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'rootId is required', 400)
-        }
-        if (!currentRemoteReadonlyConfig.roots.some((item) => item.id === rootId)) {
-          const error = new Error('Unknown remote root')
-          error.code = 'REMOTE_ROOT_NOT_FOUND'
-          error.statusCode = 404
-          throw error
-        }
-        const normalizedPath = normalizeRemoteFavoritePath(payload.path)
-        await remoteSharedFavorites.remove(rootId, normalizedPath)
+        await removeRemoteReadonlyFavorite(currentRemoteReadonlyConfig, payload, runtimeBaseUrl)
         sendJson(res, 200, { ok: true })
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)

@@ -8,7 +8,10 @@ import {
   queryRuntimeFileAnnotations,
   readRuntimeDirectoryListing,
   readRuntimeFileAnnotation,
+  readRuntimeRemoteSharedFavorites,
   readRuntimeTagOptions,
+  removeRuntimeRemoteSharedFavorite,
+  upsertRuntimeRemoteSharedFavorite,
 } from './remote-file-access.mjs'
 import {
   normalizeAbsolutePath,
@@ -96,6 +99,13 @@ function normalizeOptionalRemotePath(value, fieldName = 'relativePath') {
     return ''
   }
   return normalizeRelativePath(trimmed, fieldName)
+}
+
+function normalizeRemoteFavoritePath(value) {
+  if (typeof value !== 'string') {
+    throw createRemoteError('REMOTE_INVALID_PARAMS', 'path must be a string', 400)
+  }
+  return normalizeOptionalRemotePath(value, 'path')
 }
 
 async function fileExists(targetPath) {
@@ -293,6 +303,66 @@ export function listRemoteReadonlyRoots(remoteConfig) {
     id: item.id,
     label: item.label,
   }))
+}
+
+function toRemoteReadonlyFavorite(item, allowedRootIds) {
+  if (!isObjectRecord(item)) return null
+  const rootId = typeof item.rootId === 'string' ? item.rootId.trim() : ''
+  if (!rootId || !allowedRootIds.has(rootId)) return null
+  const pathSource = typeof item.path === 'string' ? item.path : ''
+  let normalizedPath = ''
+  try {
+    normalizedPath = normalizeOptionalRemotePath(pathSource, 'path')
+  } catch {
+    return null
+  }
+  const favoritedAtMs = toFiniteNumber(item.favoritedAtMs)
+  if (typeof favoritedAtMs !== 'number') return null
+  return {
+    rootId,
+    path: normalizedPath,
+    favoritedAtMs,
+  }
+}
+
+function remoteReadonlyRootIdSet(remoteConfig) {
+  return new Set(
+    remoteConfig.roots
+      .map((item) => (typeof item.id === 'string' ? item.id.trim() : ''))
+      .filter(Boolean),
+  )
+}
+
+export async function listRemoteReadonlyFavorites(remoteConfig, runtimeBaseUrl) {
+  const allowedRootIds = remoteReadonlyRootIdSet(remoteConfig)
+  const result = await readRuntimeRemoteSharedFavorites(runtimeBaseUrl)
+  return Array.isArray(result?.items)
+    ? result.items.map((item) => toRemoteReadonlyFavorite(item, allowedRootIds)).filter(Boolean)
+    : []
+}
+
+export async function upsertRemoteReadonlyFavorite(remoteConfig, payload = {}, runtimeBaseUrl) {
+  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
+  const normalizedPath = normalizeRemoteFavoritePath(payload.path)
+  const result = await upsertRuntimeRemoteSharedFavorite(runtimeBaseUrl, {
+    rootId: root.id,
+    path: normalizedPath,
+    favoritedAtMs: Date.now(),
+  })
+  const item = toRemoteReadonlyFavorite(result?.item, new Set([root.id]))
+  if (!item) {
+    throw createRemoteError('REMOTE_RUNTIME_RESPONSE_ERROR', 'Runtime returned an invalid Favorite Folder', 502)
+  }
+  return item
+}
+
+export async function removeRemoteReadonlyFavorite(remoteConfig, payload = {}, runtimeBaseUrl) {
+  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
+  const normalizedPath = normalizeRemoteFavoritePath(payload.path)
+  await removeRuntimeRemoteSharedFavorite(runtimeBaseUrl, {
+    rootId: root.id,
+    path: normalizedPath,
+  })
 }
 
 function toFiniteNumber(value) {

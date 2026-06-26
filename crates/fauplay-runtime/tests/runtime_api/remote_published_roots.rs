@@ -5,6 +5,106 @@ use sha2::{Digest, Sha256};
 use super::support::*;
 
 #[test]
+fn runtime_api_lists_remote_shared_favorites_from_runtime_home() {
+    let fixture = Fixture::new("runtime_api_lists_remote_shared_favorites_from_runtime_home");
+    fixture.write_file(
+        "global/remote-shared-favorites.v1.json",
+        r#"{
+  "version": 1,
+  "items": [
+    {"rootId":"root-a","path":"albums/2026","favoritedAtMs":20},
+    {"rootId":"root-b","path":"","favoritedAtMs":10},
+    {"rootId":"","path":"ignored","favoritedAtMs":30},
+    {"rootId":"root-a","path":"../unsafe","favoritedAtMs":40}
+  ]
+}"#,
+    );
+
+    let response = send_runtime_home_request_once(&fixture.root, |address| {
+        send_remote_shared_favorites_list_request(address)
+    });
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "list response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":true"),
+        "list response should report success: {response}"
+    );
+    assert!(
+        response.contains("\"rootId\":\"root-a\""),
+        "list response should include valid favorites: {response}"
+    );
+    assert!(
+        response.contains("\"path\":\"albums/2026\""),
+        "list response should include valid favorite paths: {response}"
+    );
+    assert!(
+        response.contains("\"path\":\"\""),
+        "list response should include the Local Root favorite: {response}"
+    );
+    assert!(
+        !response.contains("ignored") && !response.contains("unsafe"),
+        "list response should skip invalid favorites: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_upserts_and_removes_remote_shared_favorites() {
+    let fixture = Fixture::new("runtime_api_upserts_and_removes_remote_shared_favorites");
+    fixture.write_file(
+        "global/remote-shared-favorites.v1.json",
+        r#"{
+  "version": 1,
+  "items": [
+    {"rootId":"root-a","path":"albums/old","favoritedAtMs":10}
+  ]
+}"#,
+    );
+
+    let upsert_body = r#"{"rootId":" root-a ","path":"albums\\new","favoritedAtMs":50}"#;
+    let response = send_runtime_home_request_once(&fixture.root, |address| {
+        send_remote_shared_favorite_upsert_request(address, upsert_body)
+    });
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "upsert response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"rootId\":\"root-a\"")
+            && response.contains("\"path\":\"albums/new\"")
+            && response.contains("\"favoritedAtMs\":50"),
+        "upsert response should include the normalized favorite: {response}"
+    );
+
+    let remove_body = r#"{"rootId":"root-a","path":"albums/old"}"#;
+    let response = send_runtime_home_request_once(&fixture.root, |address| {
+        send_remote_shared_favorite_remove_request(address, remove_body)
+    });
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "remove response should be OK: {response}"
+    );
+    assert!(
+        response.contains("\"ok\":true"),
+        "remove response should report success: {response}"
+    );
+
+    let response = send_runtime_home_request_once(&fixture.root, |address| {
+        send_remote_shared_favorites_list_request(address)
+    });
+    assert!(
+        response.contains("\"path\":\"albums/new\""),
+        "list response should keep the upserted favorite: {response}"
+    );
+    assert!(
+        !response.contains("albums/old"),
+        "list response should remove the deleted favorite: {response}"
+    );
+}
+
+#[test]
 fn runtime_api_syncs_remote_published_roots_from_local_browser() {
     let fixture = Fixture::new("runtime_api_syncs_remote_published_roots_from_local_browser");
     fixture.create_dir("Library Root");

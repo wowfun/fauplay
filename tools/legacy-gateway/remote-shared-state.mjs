@@ -6,7 +6,6 @@ import {
   isSkippableFsError,
   isObjectRecord,
   normalizeAbsolutePath,
-  normalizeRelativePath,
   resolveRootPath,
   statPath,
 } from './data/common.mjs'
@@ -18,15 +17,7 @@ export const DEFAULT_REMOTE_PUBLISHED_ROOTS_PATH = path.join(
   'remote-published-roots.v1.json',
 )
 
-export const DEFAULT_REMOTE_SHARED_FAVORITES_PATH = path.join(
-  os.homedir(),
-  '.fauplay',
-  'global',
-  'remote-shared-favorites.v1.json',
-)
-
 const PUBLISHED_ROOTS_STORE_VERSION = 1
-const SHARED_FAVORITES_STORE_VERSION = 1
 
 function normalizeDisplayText(value, maxLength = 120) {
   if (typeof value !== 'string') return ''
@@ -37,10 +28,6 @@ function normalizeDisplayText(value, maxLength = 120) {
 
 function derivePublishedRootId(absolutePath) {
   return `remote-root-${createHash('sha256').update(absolutePath, 'utf-8').digest('hex').slice(0, 24)}`
-}
-
-function createFavoriteKey(rootId, pathValue) {
-  return `${rootId}:${pathValue}`
 }
 
 function normalizePublishedRootSnapshotEntry(value) {
@@ -97,45 +84,6 @@ function buildPublishedRootsPayload(recordsById) {
         absolutePath: record.absolutePath,
         createdAtMs: record.createdAtMs,
         lastSyncedAtMs: record.lastSyncedAtMs,
-      })),
-  }
-}
-
-function normalizeFavoritePath(value) {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  try {
-    return normalizeRelativePath(trimmed, 'path')
-  } catch {
-    return null
-  }
-}
-
-function normalizeSharedFavoriteRecord(value) {
-  if (!isObjectRecord(value)) return null
-  const rootId = typeof value.rootId === 'string' ? value.rootId.trim() : ''
-  const normalizedPath = normalizeFavoritePath(value.path)
-  const favoritedAtMs = Number(value.favoritedAtMs)
-  if (!rootId || normalizedPath === null || !Number.isFinite(favoritedAtMs)) {
-    return null
-  }
-  return {
-    rootId,
-    path: normalizedPath,
-    favoritedAtMs,
-  }
-}
-
-function buildSharedFavoritesPayload(recordsByKey) {
-  return {
-    version: SHARED_FAVORITES_STORE_VERSION,
-    items: [...recordsByKey.values()]
-      .sort((left, right) => right.favoritedAtMs - left.favoritedAtMs)
-      .map((record) => ({
-        rootId: record.rootId,
-        path: record.path,
-        favoritedAtMs: record.favoritedAtMs,
       })),
   }
 }
@@ -240,133 +188,6 @@ export function createRemotePublishedRootsStore({
         }
       }
       return resolvedRoots
-    },
-  }
-}
-
-export function createRemoteSharedFavoritesStore({
-  storagePath = DEFAULT_REMOTE_SHARED_FAVORITES_PATH,
-} = {}) {
-  let loaded = false
-  let loadPromise = null
-  const recordsByKey = new Map()
-
-  async function ensureLoaded() {
-    if (loaded) return
-    if (loadPromise) {
-      await loadPromise
-      return
-    }
-
-    loadPromise = (async () => {
-      let raw = ''
-      try {
-        raw = await fs.readFile(storagePath, 'utf-8')
-      } catch (error) {
-        if (error && typeof error === 'object' && error.code === 'ENOENT') {
-          loaded = true
-          return
-        }
-        throw error
-      }
-
-      try {
-        const parsed = JSON.parse(raw)
-        const items = Array.isArray(parsed?.items) ? parsed.items : []
-        recordsByKey.clear()
-        for (const item of items) {
-          const record = normalizeSharedFavoriteRecord(item)
-          if (!record) continue
-          recordsByKey.set(createFavoriteKey(record.rootId, record.path), record)
-        }
-      } catch (error) {
-        console.warn(`[gateway] invalid remote shared favorites store, resetting: ${storagePath}`)
-        console.warn(error)
-        recordsByKey.clear()
-        await writeStoreFile(storagePath, buildSharedFavoritesPayload(recordsByKey))
-      }
-
-      loaded = true
-    })()
-
-    try {
-      await loadPromise
-    } finally {
-      loadPromise = null
-    }
-  }
-
-  async function persist() {
-    await writeStoreFile(storagePath, buildSharedFavoritesPayload(recordsByKey))
-  }
-
-  function listRecords() {
-    return [...recordsByKey.values()].sort((left, right) => right.favoritedAtMs - left.favoritedAtMs)
-  }
-
-  async function pruneByAllowedRootIds(allowedRootIds) {
-    if (!Array.isArray(allowedRootIds)) return false
-    const allowed = new Set(
-      allowedRootIds
-        .filter((item) => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean),
-    )
-    let changed = false
-    for (const [key, record] of recordsByKey.entries()) {
-      if (!allowed.has(record.rootId)) {
-        recordsByKey.delete(key)
-        changed = true
-      }
-    }
-    if (changed) {
-      await persist()
-    }
-    return changed
-  }
-
-  return {
-    storagePath,
-    async list(options = {}) {
-      await ensureLoaded()
-      await pruneByAllowedRootIds(options.allowedRootIds)
-      return listRecords()
-    },
-    async upsert(rootId, pathValue, favoritedAtMs = Date.now()) {
-      await ensureLoaded()
-      const normalizedRootId = typeof rootId === 'string' ? rootId.trim() : ''
-      const normalizedPath = normalizeFavoritePath(pathValue)
-      if (!normalizedRootId) {
-        throw new Error('rootId is required')
-      }
-      if (normalizedPath === null) {
-        throw new Error('path contains invalid value')
-      }
-      const key = createFavoriteKey(normalizedRootId, normalizedPath)
-      recordsByKey.set(key, {
-        rootId: normalizedRootId,
-        path: normalizedPath,
-        favoritedAtMs: Number.isFinite(Number(favoritedAtMs)) ? Number(favoritedAtMs) : Date.now(),
-      })
-      await persist()
-      return recordsByKey.get(key) ?? null
-    },
-    async remove(rootId, pathValue) {
-      await ensureLoaded()
-      const normalizedRootId = typeof rootId === 'string' ? rootId.trim() : ''
-      const normalizedPath = normalizeFavoritePath(pathValue)
-      if (!normalizedRootId) {
-        throw new Error('rootId is required')
-      }
-      if (normalizedPath === null) {
-        throw new Error('path contains invalid value')
-      }
-      const key = createFavoriteKey(normalizedRootId, normalizedPath)
-      const deleted = recordsByKey.delete(key)
-      if (deleted) {
-        await persist()
-      }
-      return deleted
     },
   }
 }

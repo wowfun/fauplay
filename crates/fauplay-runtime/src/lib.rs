@@ -40,7 +40,9 @@ pub use api::{
     MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
     PersonSuggestion, PersonSuggestionFace, PersonSummary, RememberedDeviceAdminEntry,
     RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
-    RemotePublishedRootSyncResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
+    RemotePublishedRootSyncResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
+    RemoteSharedFavoriteRemoveResponse, RemoteSharedFavoriteUpsertRequest,
+    RemoteSharedFavoritesResponse, RootMoveBatchFailureReason, RootMoveBatchItem,
     RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest,
     RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath, RootTrashEntry,
     RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem,
@@ -391,6 +393,26 @@ impl FauplayRuntime {
         request: RemotePublishedRootSyncRequest,
     ) -> Result<RemotePublishedRootSyncResponse, RuntimeError> {
         store::sync_remote_published_roots(&self.runtime_home_path, request)
+    }
+
+    pub fn list_remote_shared_favorites(
+        &self,
+    ) -> Result<RemoteSharedFavoritesResponse, RuntimeError> {
+        store::list_remote_shared_favorites(&self.runtime_home_path)
+    }
+
+    pub fn upsert_remote_shared_favorite(
+        &self,
+        request: RemoteSharedFavoriteUpsertRequest,
+    ) -> Result<RemoteSharedFavorite, RuntimeError> {
+        store::upsert_remote_shared_favorite(&self.runtime_home_path, request)
+    }
+
+    pub fn remove_remote_shared_favorite(
+        &self,
+        request: RemoteSharedFavoriteRemoveRequest,
+    ) -> Result<RemoteSharedFavoriteRemoveResponse, RuntimeError> {
+        store::remove_remote_shared_favorite(&self.runtime_home_path, request)
     }
 
     pub fn list_global_trash(

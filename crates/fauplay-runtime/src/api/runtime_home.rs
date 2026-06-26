@@ -56,3 +56,33 @@ pub struct RemotePublishedRootSyncRequest {
 pub struct RemotePublishedRootSyncResponse {
     pub published_root_count: usize,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSharedFavorite {
+    pub root_id: String,
+    pub path: String,
+    pub favorited_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSharedFavoritesResponse {
+    pub items: Vec<RemoteSharedFavorite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSharedFavoriteUpsertRequest {
+    pub root_id: String,
+    pub path: String,
+    pub favorited_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSharedFavoriteRemoveRequest {
+    pub root_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSharedFavoriteRemoveResponse {
+    pub removed: bool,
+}

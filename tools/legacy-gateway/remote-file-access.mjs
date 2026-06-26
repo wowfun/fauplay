@@ -95,6 +95,42 @@ async function postRuntimeJson(runtimeBaseUrl, pathname, payload, options = {}) 
   }
 }
 
+async function getRuntimeJson(runtimeBaseUrl, pathname, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    const body = await response.text()
+    if (!response.ok) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime ${pathname} request failed: ${response.status}`,
+        response.status,
+      )
+    }
+    try {
+      return body ? JSON.parse(body) : {}
+    } catch (error) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime ${pathname} response was not valid JSON: ${error.message}`,
+        502,
+      )
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, pathname)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export function parseRemoteByteRangeHeader(rangeHeader, totalSizeBytes) {
   if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
     return null
@@ -371,6 +407,31 @@ export async function listRuntimeAssetFaces(runtimeBaseUrl, options = {}) {
     rootPath,
     ...(personId ? { personId } : {}),
     ...(relativePath ? { relativePath } : {}),
+  }, options)
+}
+
+export async function readRuntimeRemoteSharedFavorites(runtimeBaseUrl, options = {}) {
+  return getRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites', options)
+}
+
+export async function upsertRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {
+  const rootId = normalizeRequiredStringInput(options.rootId, 'rootId')
+  const path = typeof options.path === 'string' ? options.path : ''
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites/upsert', {
+    rootId,
+    path,
+    ...(typeof options.favoritedAtMs === 'number' && Number.isFinite(options.favoritedAtMs)
+      ? { favoritedAtMs: options.favoritedAtMs }
+      : {}),
+  }, options)
+}
+
+export async function removeRuntimeRemoteSharedFavorite(runtimeBaseUrl, options = {}) {
+  const rootId = normalizeRequiredStringInput(options.rootId, 'rootId')
+  const path = typeof options.path === 'string' ? options.path : ''
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites/remove', {
+    rootId,
+    path,
   }, options)
 }
 
