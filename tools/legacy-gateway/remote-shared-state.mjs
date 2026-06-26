@@ -200,10 +200,6 @@ export function createRemotePublishedRootsStore({
     }
   }
 
-  async function persist() {
-    await writeStoreFile(storagePath, buildPublishedRootsPayload(recordsById))
-  }
-
   function listRecords() {
     return [...recordsById.values()].sort((left, right) => left.createdAtMs - right.createdAtMs)
   }
@@ -213,43 +209,6 @@ export function createRemotePublishedRootsStore({
     async list() {
       await ensureLoaded()
       return listRecords()
-    },
-    async replaceAll(snapshotItems, nowMs = Date.now()) {
-      await ensureLoaded()
-      const previousRecords = listRecords()
-      const previousRecordById = new Map(previousRecords.map((record) => [record.id, record]))
-      const nextRecordsById = new Map()
-
-      for (const item of Array.isArray(snapshotItems) ? snapshotItems : []) {
-        const normalized = normalizePublishedRootSnapshotEntry(item)
-        if (!normalized) continue
-        const existing = previousRecordById.get(normalized.id)
-        nextRecordsById.set(normalized.id, {
-          id: normalized.id,
-          label: normalized.label,
-          absolutePath: normalized.absolutePath,
-          createdAtMs: existing?.createdAtMs ?? nowMs,
-          lastSyncedAtMs: nowMs,
-        })
-      }
-
-      const removedRootIds = previousRecords
-        .map((record) => record.id)
-        .filter((id) => !nextRecordsById.has(id))
-
-      recordsById.clear()
-      for (const [id, record] of nextRecordsById.entries()) {
-        recordsById.set(id, record)
-      }
-      await persist()
-
-      return {
-        items: listRecords(),
-        itemsByAbsolutePath: new Map(
-          listRecords().map((record) => [record.absolutePath, record]),
-        ),
-        removedRootIds,
-      }
     },
     async listResolvedRoots() {
       await ensureLoaded()
@@ -392,38 +351,6 @@ export function createRemoteSharedFavoritesStore({
       await persist()
       return recordsByKey.get(key) ?? null
     },
-    async upsertBatch(items = [], nowMs = Date.now()) {
-      await ensureLoaded()
-      let changed = false
-      for (const item of Array.isArray(items) ? items : []) {
-        if (!isObjectRecord(item)) continue
-        const normalizedRootId = typeof item.rootId === 'string' ? item.rootId.trim() : ''
-        const normalizedPath = normalizeFavoritePath(item.path)
-        if (!normalizedRootId || normalizedPath === null) continue
-        const key = createFavoriteKey(normalizedRootId, normalizedPath)
-        const favoritedAtMs = Number.isFinite(Number(item.favoritedAtMs))
-          ? Number(item.favoritedAtMs)
-          : nowMs
-        const existing = recordsByKey.get(key)
-        if (
-          existing?.favoritedAtMs === favoritedAtMs
-          && existing.rootId === normalizedRootId
-          && existing.path === normalizedPath
-        ) {
-          continue
-        }
-        recordsByKey.set(key, {
-          rootId: normalizedRootId,
-          path: normalizedPath,
-          favoritedAtMs,
-        })
-        changed = true
-      }
-      if (changed) {
-        await persist()
-      }
-      return listRecords()
-    },
     async remove(rootId, pathValue) {
       await ensureLoaded()
       const normalizedRootId = typeof rootId === 'string' ? rootId.trim() : ''
@@ -440,29 +367,6 @@ export function createRemoteSharedFavoritesStore({
         await persist()
       }
       return deleted
-    },
-    async removeByRootIds(rootIds) {
-      await ensureLoaded()
-      const targetRootIds = new Set(
-        (Array.isArray(rootIds) ? rootIds : [])
-          .filter((item) => typeof item === 'string')
-          .map((item) => item.trim())
-          .filter(Boolean),
-      )
-      if (targetRootIds.size === 0) {
-        return []
-      }
-      let changed = false
-      for (const [key, record] of recordsByKey.entries()) {
-        if (targetRootIds.has(record.rootId)) {
-          recordsByKey.delete(key)
-          changed = true
-        }
-      }
-      if (changed) {
-        await persist()
-      }
-      return [...targetRootIds]
     },
   }
 }

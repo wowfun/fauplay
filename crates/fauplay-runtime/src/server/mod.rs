@@ -10,6 +10,7 @@ mod local_files;
 mod local_root_bindings;
 mod missing_files;
 mod remembered_devices;
+mod remote_published_roots;
 mod request;
 mod root_operations;
 mod runtime_config;
@@ -42,6 +43,9 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         }
         Some(("POST", "/v1/admin/remembered-devices/revoke-all")) => {
             remembered_devices::handle_revoke_all_remembered_devices(runtime)
+        }
+        Some(("POST", "/v1/admin/remote-published-roots/sync-from-local-browser")) => {
+            remote_published_roots::handle_sync_from_local_browser(runtime, request)
         }
         Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
             remembered_devices::handle_rename_remembered_device(runtime, target, request)
@@ -214,6 +218,7 @@ fn is_preflight_target(target: &str) -> bool {
         "/v1/local-directory"
             | "/v1/config/shortcuts"
             | "/v1/admin/remembered-devices"
+            | "/v1/admin/remote-published-roots/sync-from-local-browser"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"

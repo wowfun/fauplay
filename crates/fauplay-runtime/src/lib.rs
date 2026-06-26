@@ -28,7 +28,8 @@ pub use api::{
     ListDirectoryResponse, ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection,
     ListingSortKey, LocalRootBinding, LocalRootBindingUpsertRequest, LocalRootBindingsResponse,
     MissingFileCleanupImpact, MissingFileCleanupRequest, MissingFileCleanupResponse,
-    RememberedDeviceAdminEntry, RememberedDevicesAdminResponse, RootMoveBatchFailureReason,
+    RememberedDeviceAdminEntry, RememberedDevicesAdminResponse, RemotePublishedRootSyncEntry,
+    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
     RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
     RootTrashEntry, RootTrashFailureReason, RootTrashListRequest, RootTrashListResponse,
@@ -93,6 +94,13 @@ impl FauplayRuntime {
 
     pub fn revoke_all_remembered_devices(&self) -> Result<(), RuntimeError> {
         store::revoke_all_remembered_devices(&self.runtime_home_path)
+    }
+
+    pub fn sync_remote_published_roots(
+        &self,
+        request: RemotePublishedRootSyncRequest,
+    ) -> Result<RemotePublishedRootSyncResponse, RuntimeError> {
+        store::sync_remote_published_roots(&self.runtime_home_path, request)
     }
 
     pub fn list_global_trash(

@@ -15,3 +15,14 @@ test('Legacy Gateway no longer keeps local annotation rebind storage code', asyn
   )
   assert.equal(serverSource.includes('batchRebindPaths'), false)
 })
+
+test('Legacy Gateway no longer exposes local Remote Root publishing sync', async () => {
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(
+    serverSource.includes('/v1/admin/remote-published-roots/sync-from-local-browser'),
+    false,
+  )
+})

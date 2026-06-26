@@ -39,3 +39,20 @@ pub struct RememberedDeviceAdminEntry {
 pub struct RememberedDevicesAdminResponse {
     pub items: Vec<RememberedDeviceAdminEntry>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePublishedRootSyncEntry {
+    pub label: String,
+    pub absolute_path: PathBuf,
+    pub favorite_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePublishedRootSyncRequest {
+    pub items: Vec<RemotePublishedRootSyncEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePublishedRootSyncResponse {
+    pub published_root_count: usize,
+}

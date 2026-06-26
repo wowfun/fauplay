@@ -13,6 +13,7 @@ mod global_trash;
 mod global_trash_records;
 mod local_root_bindings;
 mod remembered_devices;
+mod remote_published_roots;
 
 pub(crate) use file_annotations::{
     bind_file_annotation_tag, cleanup_missing_files, list_annotation_tag_options,
@@ -28,6 +29,7 @@ pub(crate) use remembered_devices::{
     list_remembered_devices, rename_remembered_device, revoke_all_remembered_devices,
     revoke_remembered_device,
 };
+pub(crate) use remote_published_roots::sync_remote_published_roots;
 
 const GLOBAL_CONFIG_FOLDER_NAME: &str = "global";
 const SHORTCUTS_CONFIG_FILENAME: &str = "shortcuts.json";

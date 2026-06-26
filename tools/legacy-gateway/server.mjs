@@ -22,7 +22,6 @@ import {
   clearRemoteReadonlySession,
   clearRemoteRememberedDevice,
   createRemoteBudgetExceededError,
-  ensureLoopbackAdminRequest,
   ensureRemoteReadonlyLoginAllowed,
   ensureRemoteReadonlySessionAuthorized,
   issueRemoteReadonlySession,
@@ -36,7 +35,6 @@ import {
   getFaceCrop,
   ingestClassificationResult,
 } from './data/core.mjs'
-import { resolveRootPath } from './data/common.mjs'
 import {
   ensureRemoteReadonlyAuthorized,
   formatRemoteAccessConfigSourceLog,
@@ -428,7 +426,6 @@ export async function startGatewayServer(options = {}) {
 
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`)
     const pathname = requestUrl.pathname
-    const requestHostname = requestUrl.hostname
 
     if (method === 'GET' && pathname === '/v1/health') {
       sendJson(res, 200, {
@@ -436,56 +433,6 @@ export async function startGatewayServer(options = {}) {
         version: GATEWAY_VERSION,
         status: 'ok',
       })
-      return
-    }
-
-    if (method === 'POST' && pathname === '/v1/admin/remote-published-roots/sync-from-local-browser') {
-      try {
-        ensureLoopbackAdminRequest(req, requestHostname, pathname)
-        await refreshRemoteReadonlyConfigIfNeeded()
-        const payload = await readJsonBody(req)
-        if (!Array.isArray(payload)) {
-          throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON array', 400)
-        }
-
-        const nowMs = Date.now()
-        const replaceResult = await remotePublishedRoots.replaceAll(payload, nowMs)
-        if (replaceResult.removedRootIds.length > 0) {
-          await remoteSharedFavorites.removeByRootIds(replaceResult.removedRootIds)
-        }
-
-        const favoriteSeeds = []
-        for (const item of payload) {
-          if (!isObjectRecord(item)) continue
-          const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
-          if (!absolutePath) continue
-          let normalizedAbsolutePath = ''
-          try {
-            normalizedAbsolutePath = resolveRootPath(absolutePath)
-          } catch {
-            continue
-          }
-          const publishedRoot = replaceResult.itemsByAbsolutePath.get(normalizedAbsolutePath)
-          if (!publishedRoot) continue
-          const favoritePaths = Array.isArray(item.favoritePaths) ? item.favoritePaths : []
-          for (const favoritePath of favoritePaths) {
-            if (typeof favoritePath !== 'string') continue
-            favoriteSeeds.push({
-              rootId: publishedRoot.id,
-              path: favoritePath,
-              favoritedAtMs: nowMs,
-            })
-          }
-        }
-        await remoteSharedFavorites.upsertBatch(favoriteSeeds, nowMs)
-        await hydrateRemoteReadonlyRoots(remoteReadonlyConfig)
-        sendJson(res, 200, {
-          ok: true,
-          publishedRootCount: replaceResult.items.length,
-        })
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
       return
     }
 

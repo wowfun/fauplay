@@ -112,62 +112,6 @@ function readRequestUserAgent(req) {
   return typeof raw === 'string' ? raw : ''
 }
 
-function isLoopbackAddress(address) {
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
-}
-
-function isLoopbackHostname(hostname) {
-  const normalized = typeof hostname === 'string'
-    ? hostname.trim().replace(/^\[|\]$/g, '').toLowerCase()
-    : ''
-  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1'
-}
-
-function isLoopbackAdminRequest(req, hostname) {
-  if (!isLoopbackHostname(hostname)) {
-    return false
-  }
-  const remoteAddress = typeof req.socket?.remoteAddress === 'string' ? req.socket.remoteAddress.trim() : ''
-  if (!isLoopbackAddress(remoteAddress)) {
-    return false
-  }
-  const forwardedFor = req.headers['x-forwarded-for']
-  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
-  if (typeof forwardedValue === 'string' && forwardedValue.trim()) {
-    const firstHop = forwardedValue.split(',')[0]?.trim() || ''
-    if (!isLoopbackAddress(firstHop)) {
-      return false
-    }
-  }
-  const originHeader = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
-  if (typeof originHeader === 'string' && originHeader.trim()) {
-    try {
-      if (!isLoopbackHostname(new URL(originHeader).hostname)) {
-        return false
-      }
-    } catch {
-      return false
-    }
-  }
-  const refererHeader = Array.isArray(req.headers.referer) ? req.headers.referer[0] : req.headers.referer
-  if (typeof refererHeader === 'string' && refererHeader.trim()) {
-    try {
-      if (!isLoopbackHostname(new URL(refererHeader).hostname)) {
-        return false
-      }
-    } catch {
-      return false
-    }
-  }
-  return true
-}
-
-export function ensureLoopbackAdminRequest(req, hostname, pathname) {
-  if (!isLoopbackAdminRequest(req, hostname)) {
-    throw createMcpRuntimeError('MCP_METHOD_NOT_FOUND', `Not found: ${pathname}`, 404)
-  }
-}
-
 function createRemoteSessionCookie(sessionId) {
   const maxAgeSeconds = Math.max(1, Math.ceil(REMOTE_SESSION_ABSOLUTE_TTL_MS / 1000))
   return [
