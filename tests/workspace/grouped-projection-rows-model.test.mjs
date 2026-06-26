@@ -6,6 +6,8 @@ import {
   resolveGroupedProjectionItemInteraction,
   resolveGroupedProjectionKeyboardIntent,
   resolveGroupedProjectionRangeSelection,
+  resolveGroupedProjectionSelectedPathState,
+  resolveGroupedProjectionVisibleSelectionState,
   resolveGroupedProjectionVerticalNeighborIndex,
 } from '../../src/features/workspace/lib/groupedProjectionRowsModel.ts'
 
@@ -73,6 +75,56 @@ test('Grouped Projection Rows Model selects a contiguous visible range from the 
       'set-b/one.jpg',
       'set-b/two.jpg',
     ],
+  })
+})
+
+test('Grouped Projection Rows Model preserves only visible transient selection state', () => {
+  const files = [
+    file('set-a/one.jpg', 'set-a'),
+    file('set-b/one.jpg', 'set-b'),
+  ]
+
+  assert.deepEqual(resolveGroupedProjectionVisibleSelectionState({
+    files,
+    selectedPaths: [
+      'set-a/one.jpg',
+      'set-a/deleted.jpg',
+      'set-b/one.jpg',
+    ],
+    selectionAnchorPath: 'set-a/deleted.jpg',
+    pendingPreviewPathDuringRange: 'set-b/deleted.jpg',
+  }), {
+    selectedPaths: [
+      'set-a/one.jpg',
+      'set-b/one.jpg',
+    ],
+    selectionAnchorPath: null,
+    pendingPreviewPathDuringRange: null,
+  })
+})
+
+test('Grouped Projection Rows Model repairs selected path focus after visible files change', () => {
+  const files = [
+    file('set-a/one.jpg', 'set-a'),
+    file('set-b/one.jpg', 'set-b'),
+  ]
+
+  assert.deepEqual(resolveGroupedProjectionSelectedPathState({
+    files,
+    selectedIndex: 4,
+    selectedPath: 'set-z/deleted.jpg',
+  }), {
+    selectedIndex: 1,
+    selectedPath: 'set-b/one.jpg',
+  })
+
+  assert.deepEqual(resolveGroupedProjectionSelectedPathState({
+    files: [],
+    selectedIndex: 1,
+    selectedPath: 'set-b/one.jpg',
+  }), {
+    selectedIndex: 0,
+    selectedPath: null,
   })
 })
 

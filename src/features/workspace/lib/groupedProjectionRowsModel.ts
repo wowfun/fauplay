@@ -23,6 +23,30 @@ export interface ResolveGroupedProjectionRangeSelectionParams {
   fallbackPath: string | null | undefined
 }
 
+export interface ResolveGroupedProjectionVisibleSelectionStateParams {
+  files: FileItem[]
+  selectedPaths: string[]
+  selectionAnchorPath: string | null
+  pendingPreviewPathDuringRange: string | null
+}
+
+export interface GroupedProjectionVisibleSelectionState {
+  selectedPaths: string[]
+  selectionAnchorPath: string | null
+  pendingPreviewPathDuringRange: string | null
+}
+
+export interface ResolveGroupedProjectionSelectedPathStateParams {
+  files: FileItem[]
+  selectedIndex: number
+  selectedPath: string | null
+}
+
+export interface GroupedProjectionSelectedPathState {
+  selectedIndex: number
+  selectedPath: string | null
+}
+
 export interface GroupedProjectionRangeSelection {
   clampedIndex: number
   targetPath: string
@@ -155,6 +179,59 @@ export function resolveGroupedProjectionRangeSelection({
     clampedIndex,
     targetPath: targetFile.path,
     selectedPaths: files.slice(rangeStart, rangeEnd + 1).map((file) => file.path),
+  }
+}
+
+export function resolveGroupedProjectionVisibleSelectionState({
+  files,
+  selectedPaths,
+  selectionAnchorPath,
+  pendingPreviewPathDuringRange,
+}: ResolveGroupedProjectionVisibleSelectionStateParams): GroupedProjectionVisibleSelectionState {
+  const visiblePathSet = new Set(files.map((file) => file.path))
+
+  return {
+    selectedPaths: selectedPaths.filter((path) => visiblePathSet.has(path)),
+    selectionAnchorPath: (
+      selectionAnchorPath && visiblePathSet.has(selectionAnchorPath)
+        ? selectionAnchorPath
+        : null
+    ),
+    pendingPreviewPathDuringRange: (
+      pendingPreviewPathDuringRange && visiblePathSet.has(pendingPreviewPathDuringRange)
+        ? pendingPreviewPathDuringRange
+        : null
+    ),
+  }
+}
+
+export function resolveGroupedProjectionSelectedPathState({
+  files,
+  selectedIndex,
+  selectedPath,
+}: ResolveGroupedProjectionSelectedPathStateParams): GroupedProjectionSelectedPathState {
+  if (files.length === 0) {
+    return {
+      selectedIndex: 0,
+      selectedPath: null,
+    }
+  }
+
+  if (selectedPath) {
+    const selectedIndexByPath = files.findIndex((file) => file.path === selectedPath)
+    if (selectedIndexByPath >= 0) {
+      return {
+        selectedIndex: selectedIndexByPath,
+        selectedPath,
+      }
+    }
+  }
+
+  const nextSelectedIndex = clampGroupedProjectionIndex(selectedIndex, files.length)
+
+  return {
+    selectedIndex: nextSelectedIndex,
+    selectedPath: files[nextSelectedIndex]?.path ?? null,
   }
 }
 

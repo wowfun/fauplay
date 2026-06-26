@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { FileItem, ResultProjection } from '@/types'
 import type { DispatchSystemToolResult } from '@/lib/actionDispatcher'
-import { callRuntimeHttp, type RuntimeToolActionAnnotation, type RuntimeToolDescriptor } from '@/lib/runtimeApi'
+import type { RuntimeToolActionAnnotation, RuntimeToolDescriptor } from '@/lib/runtimeApi'
 import { withToolScopedProjection } from '@/lib/projection'
-import { ensureRootPath } from '@/lib/reveal'
 import { PluginActionRail } from '@/features/plugin-runtime/components/PluginActionRail'
 import { PluginToolResultPanel } from '@/features/plugin-runtime/components/PluginToolResultPanel'
 import { PluginToolWorkbench } from '@/features/plugin-runtime/components/PluginToolWorkbench'
+import { useWorkspaceFaceScanJobController } from '@/features/explorer/hooks/useWorkspaceFaceScanJobController'
 import type { WorkspaceMutationCommitParams } from '@/features/workspace/types/mutation'
 import {
   resolveWorkspaceContextualTools,
@@ -19,34 +19,13 @@ import {
   type WorkspaceToolRunPlan,
 } from '@/features/explorer/lib/workspacePluginHostModel'
 import {
-  FACE_SCAN_JOB_CANCEL_TIMEOUT_MS,
-  FACE_SCAN_JOB_POLL_INTERVAL_MS,
-  FACE_SCAN_JOB_POLL_TIMEOUT_MS,
-  FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS,
-  type FaceScanJobSnapshot,
   WORKSPACE_FACE_SCAN_ACTION,
-  isWorkspaceFaceScanJobTerminal,
-  readWorkspaceFaceScanProvidedRootPath,
-  resolveWorkspaceFaceScanJobCancelPlan,
-  resolveWorkspaceFaceScanJobErrorPlan,
-  resolveWorkspaceFaceScanJobFinishPlan,
-  resolveWorkspaceFaceScanJobPollPath,
-  resolveWorkspaceFaceScanJobStartPlan,
-  shouldRefreshAfterWorkspaceFaceScanJob,
-  toWorkspaceFaceScanJobErrorMessage,
-  toWorkspaceFaceScanJobProgress,
 } from '@/features/explorer/lib/workspaceFaceScanJobModel'
 import {
   hasWorkbenchMetadata,
   usePluginRuntime,
 } from '@/features/plugin-runtime/hooks/usePluginRuntime'
-import type { PluginResultProgress, PluginResultQueueItem, PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
-import {
-  createQueueItemId,
-  enqueueLoadingResult,
-  finalizeQueueItem,
-  updateQueueItemProgress,
-} from '@/features/plugin-runtime/utils/resultQueueState'
+import type { PluginResultQueueState, PluginWorkbenchState } from '@/features/plugin-runtime/types'
 
 interface WorkspacePluginHostProps {
   tools: RuntimeToolDescriptor[]
@@ -67,12 +46,6 @@ interface WorkspacePluginHostProps {
   onToggleToolPanelCollapsed: () => void
   toolPanelWidthPx: number
   onToolPanelWidthChange: (nextWidthPx: number) => void
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
 }
 
 export function WorkspacePluginHost({
@@ -96,7 +69,6 @@ export function WorkspacePluginHost({
   onToolPanelWidthChange,
 }: WorkspacePluginHostProps) {
   const handledDuplicateProjectionDismissResultIdRef = useRef<string | null>(null)
-  const faceScanJobIdByQueueItemIdRef = useRef(new Map<string, string>())
   const contextualTools = useMemo(() => resolveWorkspaceContextualTools({
     currentPath,
     tools,
@@ -169,113 +141,17 @@ export function WorkspacePluginHost({
     }, [hasSelectedEntries, hasTargets, relativeTargetArgs]),
     onMutationCommitted: onMutationCommitted ? handleRuntimeMutationCommitted : undefined,
   })
-
-  const updateFaceScanQueueProgress = useCallback((queueItemId: string, progress: PluginResultProgress) => {
-    setResultQueueState((prev) => updateQueueItemProgress(prev, {
-      contextKey,
-      queueItemId,
-      progress,
-    }))
-  }, [contextKey, setResultQueueState])
-
-  const runWorkspaceFaceScanJob = useCallback(async (tool: RuntimeToolDescriptor, additionalArgs: Record<string, unknown>) => {
-    if (!rootHandle || !rootId) return
-
-    const providedRootPath = readWorkspaceFaceScanProvidedRootPath(additionalArgs)
-    const resolvedRootPath = providedRootPath || ensureRootPath({
-      rootLabel: rootHandle.name || 'current-folder',
-      rootId,
-      promptIfMissing: true,
-    })
-    const queueItemId = createQueueItemId(tool.name)
-    const startedAt = Date.now()
-    const startPlan = resolveWorkspaceFaceScanJobStartPlan({
-      toolName: tool.name,
-      toolTitle: tool.title,
-      actionLabel: WORKSPACE_FACE_SCAN_ACTION.label,
-      additionalArgs,
-      resolvedRootPath: resolvedRootPath ?? '',
-      queueItemId,
-      startedAt,
-      requestSignature: null,
-    })
-    const requestSignature = runtime.getRequestSignature(tool, {
-      actionKey: WORKSPACE_FACE_SCAN_ACTION.key,
-      additionalArgs: startPlan.requestArgs,
-    }) ?? startPlan.requestSignature
-
-    setResultQueueState((prev) => enqueueLoadingResult(prev, {
-      queueItemId: startPlan.queueItemId,
-      contextKey,
-      toolName: tool.name,
-      title: startPlan.title,
-      trigger: 'manual',
-      actionKey: WORKSPACE_FACE_SCAN_ACTION.key,
-      requestSignature,
-      startedAt: startPlan.startedAt,
-      progress: startPlan.initialProgress,
-    }))
-
-    let latestSnapshot: FaceScanJobSnapshot | null = null
-    try {
-      if (startPlan.missingRootPathError) {
-        throw new Error(startPlan.missingRootPathError)
-      }
-      latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
-        '/v1/faces/detect-assets/jobs',
-        startPlan.requestArgs,
-        FACE_SCAN_JOB_SUBMIT_TIMEOUT_MS
-      )
-      if (!latestSnapshot.jobId) {
-        throw new Error('Runtime 未返回人脸扫描任务 ID')
-      }
-      const jobId = latestSnapshot.jobId
-      faceScanJobIdByQueueItemIdRef.current.set(queueItemId, jobId)
-      updateFaceScanQueueProgress(queueItemId, toWorkspaceFaceScanJobProgress(latestSnapshot))
-
-      while (!isWorkspaceFaceScanJobTerminal(latestSnapshot.status)) {
-        await delay(FACE_SCAN_JOB_POLL_INTERVAL_MS)
-        latestSnapshot = await callRuntimeHttp<FaceScanJobSnapshot>(
-          resolveWorkspaceFaceScanJobPollPath(jobId),
-          {},
-          FACE_SCAN_JOB_POLL_TIMEOUT_MS,
-          'GET'
-        )
-        updateFaceScanQueueProgress(queueItemId, toWorkspaceFaceScanJobProgress(latestSnapshot))
-      }
-
-      const finishedAt = Date.now()
-      const snapshot = latestSnapshot
-      setResultQueueState((prev) => finalizeQueueItem(prev, resolveWorkspaceFaceScanJobFinishPlan({
-        contextKey,
-        queueItemId,
-        snapshot,
-        finishedAt,
-      })))
-
-      if (onMutationCommitted && shouldRefreshAfterWorkspaceFaceScanJob(snapshot)) {
-        await onMutationCommitted({ mutationToolName: tool.name })
-      }
-    } catch (error) {
-      const finishedAt = Date.now()
-      setResultQueueState((prev) => finalizeQueueItem(prev, resolveWorkspaceFaceScanJobErrorPlan({
-        contextKey,
-        queueItemId,
-        error,
-        finishedAt,
-      })))
-    } finally {
-      faceScanJobIdByQueueItemIdRef.current.delete(queueItemId)
-    }
-  }, [
-    contextKey,
-    onMutationCommitted,
+  const {
+    runWorkspaceFaceScanJob,
+    handleCancelResultItem,
+  } = useWorkspaceFaceScanJobController({
     rootHandle,
     rootId,
-    runtime,
+    contextKey,
     setResultQueueState,
-    updateFaceScanQueueProgress,
-  ])
+    getRequestSignature: runtime.getRequestSignature,
+    onMutationCommitted,
+  })
 
   const runWorkspaceToolPlan = useCallback((tool: RuntimeToolDescriptor, plan: WorkspaceToolRunPlan) => {
     if (plan.kind === 'none') return
@@ -291,33 +167,6 @@ export function WorkspacePluginHost({
       additionalArgs: plan.additionalArgs,
     })
   }, [runWorkspaceFaceScanJob, runtime])
-
-  const handleCancelResultItem = useCallback(({ item }: { item: PluginResultQueueItem }) => {
-    const cancelPlan = resolveWorkspaceFaceScanJobCancelPlan({
-      item,
-      trackedJobId: faceScanJobIdByQueueItemIdRef.current.get(item.id),
-    })
-    if (!cancelPlan) return
-    updateFaceScanQueueProgress(item.id, cancelPlan.cancelProgress)
-    void callRuntimeHttp<FaceScanJobSnapshot>(
-      cancelPlan.endpointPath,
-      {},
-      FACE_SCAN_JOB_CANCEL_TIMEOUT_MS
-    )
-      .then((snapshot) => {
-        updateFaceScanQueueProgress(item.id, toWorkspaceFaceScanJobProgress(snapshot, {
-          cancelRequested: snapshot.status === 'canceling',
-        }))
-      })
-      .catch((error) => {
-        updateFaceScanQueueProgress(item.id, {
-          jobId: cancelPlan.jobId,
-          cancelRequested: false,
-          cancelable: true,
-          message: `取消失败：${toWorkspaceFaceScanJobErrorMessage(error)}`,
-        })
-      })
-  }, [updateFaceScanQueueProgress])
 
   const toolByName = useMemo(() => {
     const map = new Map<string, RuntimeToolDescriptor>()
