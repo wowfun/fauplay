@@ -8,6 +8,8 @@ mod global_trash;
 mod local_directory;
 #[path = "request/local_root_bindings.rs"]
 mod local_root_bindings;
+#[path = "request/mcp.rs"]
+mod mcp;
 #[path = "request/remembered_devices.rs"]
 mod remembered_devices;
 #[path = "request/remote_published_roots.rs"]
@@ -22,6 +24,7 @@ pub(crate) use file_access::*;
 pub(crate) use global_trash::*;
 pub(crate) use local_directory::*;
 pub(crate) use local_root_bindings::*;
+pub(crate) use mcp::*;
 pub(crate) use remembered_devices::*;
 pub(crate) use remote_published_roots::*;
 pub(crate) use root_operations::*;

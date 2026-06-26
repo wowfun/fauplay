@@ -10,6 +10,8 @@ mod health;
 mod local_directory;
 #[path = "runtime_api/local_root_bindings.rs"]
 mod local_root_bindings;
+#[path = "runtime_api/mcp.rs"]
+mod mcp;
 #[path = "runtime_api/process.rs"]
 mod process;
 #[path = "runtime_api/remembered_devices.rs"]

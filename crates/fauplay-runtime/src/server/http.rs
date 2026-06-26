@@ -164,7 +164,7 @@ pub(super) struct HttpResponse {
 impl HttpResponse {
     fn into_bytes(self) -> Vec<u8> {
         let mut response = format!(
-            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Range\r\n",
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Range, mcp-session-id\r\n",
             self.status_code,
             self.reason,
             self.content_type
@@ -191,6 +191,21 @@ pub(super) fn http_response(status_code: u16, reason: &'static str, body: &str) 
         reason,
         "application/json",
         body.as_bytes().to_vec(),
+    )
+}
+
+pub(super) fn http_response_with_headers(
+    status_code: u16,
+    reason: &'static str,
+    body: &str,
+    extra_headers: Vec<(String, String)>,
+) -> HttpResponse {
+    binary_response_with_headers(
+        status_code,
+        reason,
+        "application/json",
+        body.as_bytes().to_vec(),
+        extra_headers,
     )
 }
 

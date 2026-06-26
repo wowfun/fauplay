@@ -8,6 +8,7 @@ mod global_trash;
 mod http;
 mod local_files;
 mod local_root_bindings;
+mod mcp;
 mod missing_files;
 mod remembered_devices;
 mod remote_published_roots;
@@ -18,8 +19,8 @@ mod runtime_config;
 pub use http::{serve_http, serve_one_http_request};
 
 use http::{
-    HttpResponse, file_content_response, http_response, parse_file_content_range,
-    parse_header_value, parse_http_request_line,
+    HttpResponse, file_content_response, http_response, http_response_with_headers,
+    parse_file_content_range, parse_header_value, parse_http_request_line,
 };
 use request::{
     first_query_value, http_request_body, json_bool_field, json_i64_or_default,
@@ -47,6 +48,7 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/admin/remote-published-roots/sync-from-local-browser")) => {
             remote_published_roots::handle_sync_from_local_browser(runtime, request)
         }
+        Some(("POST", "/v1/mcp")) => mcp::handle_mcp_json_rpc(runtime, request),
         Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
             remembered_devices::handle_rename_remembered_device(runtime, target, request)
         }
@@ -219,6 +221,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/config/shortcuts"
             | "/v1/admin/remembered-devices"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
+            | "/v1/mcp"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"
