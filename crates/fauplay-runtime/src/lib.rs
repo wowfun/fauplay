@@ -44,7 +44,8 @@ pub use api::{
     RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
     RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
     RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemoteAnnotationTagOptionsRequest, RemoteFileAnnotationQueryRequest,
+    RemoteAnnotationTagOptionsRequest, RemoteFaceCropRequest, RemoteFaceListPeopleRequest,
+    RemoteFaceListPersonFacesRequest, RemoteFileAnnotationQueryRequest,
     RemoteFileAnnotationReadRequest, RemoteFileContentRequest, RemoteFileContentResponse,
     RemoteFileListRequest, RemoteFileListResponse, RemoteFileThumbnailRequest,
     RemoteFileThumbnailResponse, RemoteListingEntry, RemotePublishedRoot,
@@ -646,6 +647,45 @@ impl FauplayRuntime {
         let _size_preset = request.size_preset;
         let content = media::read_file_content_at_path(resource.absolute_path, None)?;
         Ok(RemoteFileThumbnailResponse { content })
+    }
+
+    pub fn read_remote_face_crop(
+        &self,
+        request: RemoteFaceCropRequest,
+    ) -> Result<FaceCropResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.read_face_crop(FaceCropRequest {
+            face_id: request.face_id,
+            root_path: Some(root_path),
+            size: request.size,
+            padding: request.padding,
+        })
+    }
+
+    pub fn list_remote_people(
+        &self,
+        request: RemoteFaceListPeopleRequest,
+    ) -> Result<FaceListPeopleResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.list_people(FaceListPeopleRequest {
+            root_path,
+            scope: FaceScope::Root,
+            query: request.query,
+            page: request.page,
+            size: request.size,
+        })
+    }
+
+    pub fn list_remote_person_faces(
+        &self,
+        request: RemoteFaceListPersonFacesRequest,
+    ) -> Result<FaceListAssetFacesResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.list_asset_faces(FaceListAssetFacesRequest {
+            root_path,
+            root_relative_path: None,
+            person_id: Some(request.person_id),
+        })
     }
 
     pub fn list_remote_annotation_tag_options(

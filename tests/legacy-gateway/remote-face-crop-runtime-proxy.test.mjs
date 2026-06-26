@@ -52,9 +52,12 @@ test('Remote Access face crop is served through Fauplay Runtime', async () => {
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie || '',
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'image/jpeg')
+      res.setHeader('Cache-Control', 'private, max-age=300')
+      res.setHeader('Accept-Ranges', 'bytes')
       res.setHeader('Content-Length', String(Buffer.byteLength('runtime-face-crop')))
       res.end('runtime-face-crop')
     })
@@ -86,9 +89,11 @@ test('Remote Access face crop is served through Fauplay Runtime', async () => {
     assert.equal(await response.text(), 'runtime-face-crop')
     assert.equal(runtimeRequests.length, 1)
     assert.equal(runtimeRequests[0].method, 'GET')
+    assert.equal(runtimeRequests[0].cookie, sessionCookie)
     const runtimeRequestUrl = new URL(runtimeRequests[0].url, runtimeAddress)
-    assert.equal(runtimeRequestUrl.pathname, '/v1/faces/crops/face-1')
-    assert.equal(runtimeRequestUrl.searchParams.get('rootPath'), remoteRoot)
+    assert.equal(runtimeRequestUrl.pathname, '/v1/remote/faces/crops/face-1')
+    assert.equal(runtimeRequestUrl.searchParams.get('rootId'), 'root-a')
+    assert.equal(runtimeRequestUrl.searchParams.has('rootPath'), false)
     assert.equal(runtimeRequestUrl.searchParams.get('size'), '96')
     assert.equal(runtimeRequestUrl.searchParams.get('padding'), '0.2')
   } finally {

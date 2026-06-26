@@ -128,6 +128,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/remote/favorites/remove")) => {
             remote_access::handle_remote_favorite_remove(runtime, request)
         }
+        Some(("GET", target)) if target.starts_with("/v1/remote/faces/crops/") => {
+            handle_remote_face_crop_get(runtime, request, target)
+        }
+        Some(("POST", "/v1/remote/faces/list-people")) => {
+            remote_access::handle_remote_face_people(runtime, request)
+        }
+        Some(("POST", "/v1/remote/faces/list-person-faces")) => {
+            remote_access::handle_remote_face_person_faces(runtime, request)
+        }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
         }
@@ -415,8 +424,33 @@ fn handle_face_crop_get(runtime: &FauplayRuntime, target: &str) -> HttpResponse 
     faces::handle_face_crop(runtime, face_id, &query)
 }
 
+fn handle_remote_face_crop_get(
+    runtime: &FauplayRuntime,
+    request: &str,
+    target: &str,
+) -> HttpResponse {
+    let Some((face_id, query)) = parse_remote_face_crop_target(target) else {
+        return http_response(404, "Not Found", "{\"error\":\"not found\"}");
+    };
+    let query = query.map(parse_query_string).unwrap_or_default();
+    remote_access::handle_remote_face_crop(runtime, request, face_id, &query)
+}
+
 fn parse_face_crop_target(target: &str) -> Option<(String, Option<&str>)> {
     let rest = target.strip_prefix("/v1/faces/crops/")?;
+    let (face_id, query) = rest
+        .split_once('?')
+        .map(|(face_id, query)| (face_id, Some(query)))
+        .unwrap_or((rest, None));
+    let face_id = percent_decode(face_id);
+    if face_id.trim().is_empty() {
+        return None;
+    }
+    Some((face_id, query))
+}
+
+fn parse_remote_face_crop_target(target: &str) -> Option<(String, Option<&str>)> {
+    let rest = target.strip_prefix("/v1/remote/faces/crops/")?;
     let (face_id, query) = rest
         .split_once('?')
         .map(|(face_id, query)| (face_id, Some(query)))
@@ -436,6 +470,9 @@ fn is_preflight_target(target: &str) -> bool {
         return true;
     }
     if target.starts_with("/v1/faces/crops/") {
+        return true;
+    }
+    if target.starts_with("/v1/remote/faces/crops/") {
         return true;
     }
 
@@ -465,6 +502,8 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/remote/favorites"
             | "/v1/remote/favorites/upsert"
             | "/v1/remote/favorites/remove"
+            | "/v1/remote/faces/list-people"
+            | "/v1/remote/faces/list-person-faces"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

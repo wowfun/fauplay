@@ -555,7 +555,9 @@ fn face_detect_assets_job_items_response_json(
     )
 }
 
-fn face_list_asset_faces_response_json(response: FaceListAssetFacesResponse) -> String {
+pub(in crate::server) fn face_list_asset_faces_response_json(
+    response: FaceListAssetFacesResponse,
+) -> String {
     format!(
         "{{\"ok\":true,\"scope\":\"{}\",\"total\":{},\"items\":[{}]}}",
         face_scope_json(response.scope),
@@ -576,7 +578,9 @@ fn face_list_review_faces_response_json(response: FaceListReviewFacesResponse) -
     )
 }
 
-fn face_list_people_response_json(response: FaceListPeopleResponse) -> String {
+pub(in crate::server) fn face_list_people_response_json(
+    response: FaceListPeopleResponse,
+) -> String {
     format!(
         "{{\"ok\":true,\"scope\":\"{}\",\"page\":{},\"size\":{},\"total\":{},\"items\":[{}]}}",
         face_scope_json(response.scope),

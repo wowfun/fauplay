@@ -2,20 +2,23 @@ use std::collections::HashMap;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::{
-    AnnotationTagOptionsResponse, DirectoryEntryKind, FauplayRuntime, FileAnnotationFile,
-    FileAnnotationMatchMode, FileAnnotationQueryResponse, FileAnnotationReadResponse,
-    ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
-    RemoteAccessConfigResponse, RemoteAccessSessionAuthorizeRequest,
-    RemoteAccessSessionLoginRequest, RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse,
-    RemoteAccessTokenVerifyRequest, RemoteAnnotationTagOptionsRequest,
-    RemoteFileAnnotationQueryRequest, RemoteFileAnnotationReadRequest, RemoteFileContentRequest,
-    RemoteFileContentResponse, RemoteFileListRequest, RemoteFileListResponse,
-    RemoteFileThumbnailRequest, RemoteFileThumbnailResponse, RemoteListingEntry,
-    RemoteRootsResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
-    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RemoteTextPreviewRequest,
-    RemoteTextPreviewResponse, RootRelativePath,
+    AnnotationTagOptionsResponse, DirectoryEntryKind, FaceCropResponse, FauplayRuntime,
+    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationQueryResponse,
+    FileAnnotationReadResponse, ListingEntryFilter, ListingOrder, ListingQuery,
+    ListingSortDirection, ListingSortKey, RemoteAccessConfigResponse,
+    RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
+    RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
+    RemoteAnnotationTagOptionsRequest, RemoteFaceCropRequest, RemoteFaceListPeopleRequest,
+    RemoteFaceListPersonFacesRequest, RemoteFileAnnotationQueryRequest,
+    RemoteFileAnnotationReadRequest, RemoteFileContentRequest, RemoteFileContentResponse,
+    RemoteFileListRequest, RemoteFileListResponse, RemoteFileThumbnailRequest,
+    RemoteFileThumbnailResponse, RemoteListingEntry, RemoteRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteUpsertRequest,
+    RemoteSharedFavoritesResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse,
+    RootRelativePath,
 };
 
+use super::faces::{face_list_asset_faces_response_json, face_list_people_response_json};
 use super::{
     HttpResponse, binary_response_with_headers, error_json, escape_json_string, http_response,
     http_response_with_headers, json_bool_field, json_string_array_field, json_string_field,
@@ -27,6 +30,12 @@ const REMOTE_SESSION_COOKIE_NAME: &str = "__Host-fauplay-remote-session";
 const REMOTE_REMEMBER_DEVICE_COOKIE_NAME: &str = "__Host-fauplay-remote-remember-device";
 const REMOTE_CONTENT_CACHE_CONTROL: &str = "private, no-store";
 const REMOTE_DERIVATIVE_CACHE_CONTROL: &str = "private, max-age=300";
+const FACE_CROP_SIZE_DEFAULT: u32 = 160;
+const FACE_CROP_SIZE_MIN: u32 = 48;
+const FACE_CROP_SIZE_MAX: u32 = 512;
+const FACE_CROP_PADDING_DEFAULT: f64 = 0.35;
+const FACE_CROP_PADDING_MIN: f64 = 0.0;
+const FACE_CROP_PADDING_MAX: f64 = 2.0;
 
 pub(in crate::server) fn handle_remote_access_config(runtime: &FauplayRuntime) -> HttpResponse {
     match runtime.load_remote_access_config() {
@@ -499,6 +508,108 @@ pub(in crate::server) fn handle_remote_favorite_remove(
     }
 }
 
+pub(in crate::server) fn handle_remote_face_crop(
+    runtime: &FauplayRuntime,
+    request: &str,
+    face_id: String,
+    query: &HashMap<String, String>,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    if face_id.trim().is_empty() {
+        return http_response(400, "Bad Request", "{\"error\":\"faceId is required\"}");
+    }
+    let Some(root_id) = query
+        .get("rootId")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+
+    match runtime.read_remote_face_crop(RemoteFaceCropRequest {
+        root_id: root_id.to_owned(),
+        face_id,
+        size: face_crop_size(query),
+        padding: face_crop_padding(query),
+    }) {
+        Ok(response) => remote_face_crop_http_response(response, headers),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_face_people(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+
+    match runtime.list_remote_people(RemoteFaceListPeopleRequest {
+        root_id: root_id.to_owned(),
+        query: json_string_field(&payload, "query").map(ToOwned::to_owned),
+        page: json_usize_or_default(&payload, "page", 1)
+            .unwrap_or(1)
+            .max(1),
+        size: json_usize_or_default(&payload, "size", 100)
+            .unwrap_or(100)
+            .clamp(1, 500),
+    }) {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &face_list_people_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_face_person_faces(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let Some(person_id) = json_string_field(&payload, "personId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"personId is required\"}");
+    };
+
+    match runtime.list_remote_person_faces(RemoteFaceListPersonFacesRequest {
+        root_id: root_id.to_owned(),
+        person_id: person_id.to_owned(),
+    }) {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &face_list_asset_faces_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
 fn remote_access_config_json(response: RemoteAccessConfigResponse) -> String {
     let roots = response
         .roots
@@ -689,6 +800,19 @@ fn remote_thumbnail_http_response(
     )
 }
 
+fn remote_face_crop_http_response(
+    response: FaceCropResponse,
+    headers: Vec<(String, String)>,
+) -> HttpResponse {
+    let mut headers = headers;
+    headers.push((
+        "Cache-Control".to_owned(),
+        REMOTE_DERIVATIVE_CACHE_CONTROL.to_owned(),
+    ));
+    headers.push(("Accept-Ranges".to_owned(), "bytes".to_owned()));
+    binary_response_with_headers(200, "OK", &response.content_type, response.bytes, headers)
+}
+
 fn remote_text_preview_http_response(
     response: RemoteTextPreviewResponse,
     headers: Vec<(String, String)>,
@@ -803,6 +927,23 @@ fn remote_file_content_headers(
         ));
     }
     headers
+}
+
+fn face_crop_size(query: &HashMap<String, String>) -> u32 {
+    query
+        .get("size")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(FACE_CROP_SIZE_DEFAULT)
+        .clamp(FACE_CROP_SIZE_MIN, FACE_CROP_SIZE_MAX)
+}
+
+fn face_crop_padding(query: &HashMap<String, String>) -> f64 {
+    query
+        .get("padding")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+        .unwrap_or(FACE_CROP_PADDING_DEFAULT)
+        .clamp(FACE_CROP_PADDING_MIN, FACE_CROP_PADDING_MAX)
 }
 
 fn remote_roots_json(response: RemoteRootsResponse) -> String {

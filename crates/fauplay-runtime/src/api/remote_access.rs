@@ -90,6 +90,28 @@ pub struct RemoteFileThumbnailResponse {
     pub content: FileContentResponse,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteFaceCropRequest {
+    pub root_id: String,
+    pub face_id: String,
+    pub size: u32,
+    pub padding: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFaceListPeopleRequest {
+    pub root_id: String,
+    pub query: Option<String>,
+    pub page: usize,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFaceListPersonFacesRequest {
+    pub root_id: String,
+    pub person_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteAnnotationTagOptionsRequest {
     pub root_id: String,

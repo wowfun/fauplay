@@ -1,17 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import {
-  listRuntimeAssetFaces,
-  listRuntimePeople,
-  readRuntimeRemoteAccessConfig,
-} from './remote-file-access.mjs'
-
-const REMOTE_READONLY_HOST_PATH_FIELDS = new Set([
-  'absolutePath',
-  'rootPath',
-  'rootAbsolutePath',
-  'sourceAbsolutePath',
-])
+import { readRuntimeRemoteAccessConfig } from './remote-file-access.mjs'
 
 function createRemoteError(code, message, statusCode) {
   const error = new Error(message)
@@ -121,60 +110,4 @@ export function getRemoteReadonlyCapabilities(remoteConfig) {
     loginMode: 'bearer-token-exchange',
     readOnly: true,
   }
-}
-
-export function resolveRemoteRoot(remoteConfig, rootId) {
-  const normalizedRootId = typeof rootId === 'string' ? rootId.trim() : ''
-  if (!normalizedRootId) {
-    throw createRemoteError('REMOTE_INVALID_PARAMS', 'rootId is required', 400)
-  }
-  const match = remoteConfig.roots.find((item) => item.id === normalizedRootId) ?? null
-  if (!match) {
-    throw createRemoteError('REMOTE_ROOT_NOT_FOUND', 'Unknown remote root', 404)
-  }
-  return match
-}
-
-function omitRemoteReadonlyHostPathFields(value) {
-  if (!isObjectRecord(value)) return value
-  return Object.fromEntries(
-    Object.entries(value).filter(([key]) => !REMOTE_READONLY_HOST_PATH_FIELDS.has(key)),
-  )
-}
-
-function toRemoteReadonlyRuntimeItemsResult(result) {
-  const safeResult = isObjectRecord(result) ? omitRemoteReadonlyHostPathFields(result) : {}
-  const items = Array.isArray(result?.items)
-    ? result.items
-      .filter(isObjectRecord)
-      .map(omitRemoteReadonlyHostPathFields)
-    : []
-  return {
-    ...safeResult,
-    items,
-  }
-}
-
-export async function listRemoteReadonlyPeople(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const result = await listRuntimePeople(runtimeBaseUrl, {
-    rootPath: root.path,
-    query: payload.query,
-    page: payload.page,
-    size: payload.size,
-  })
-  return toRemoteReadonlyRuntimeItemsResult(result)
-}
-
-export async function listRemoteReadonlyPersonFaces(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const personId = typeof payload.personId === 'string' ? payload.personId.trim() : ''
-  if (!personId) {
-    throw createRemoteError('REMOTE_INVALID_PARAMS', 'personId is required', 400)
-  }
-  const result = await listRuntimeAssetFaces(runtimeBaseUrl, {
-    rootPath: root.path,
-    personId,
-  })
-  return toRemoteReadonlyRuntimeItemsResult(result)
 }

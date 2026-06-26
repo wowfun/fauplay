@@ -1,18 +1,16 @@
 import http from 'node:http'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
 import {
-  readRuntimeFaceCrop,
-  sendRuntimeFileContentResponse,
-} from './remote-file-access.mjs'
-import {
   appendRemoteRuntimeSetCookies,
-  ensureRemoteReadonlySessionAuthorized,
   forwardRemoteReadonlyFavoriteRemove,
   forwardRemoteReadonlyFavorites,
   forwardRemoteReadonlyFavoriteUpsert,
+  forwardRemoteReadonlyFaceCrop,
+  forwardRemoteReadonlyFacePeople,
   forwardRemoteReadonlyFileContent,
   forwardRemoteReadonlyFileList,
   forwardRemoteReadonlyFileThumbnail,
+  forwardRemoteReadonlyPersonFaces,
   forwardRemoteReadonlyRoots,
   forwardRemoteReadonlySessionLogin,
   forwardRemoteReadonlySessionLogout,
@@ -24,17 +22,13 @@ import {
 import {
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
-  listRemoteReadonlyPeople,
-  listRemoteReadonlyPersonFaces,
   loadRemoteReadonlyConfig,
-  resolveRemoteRoot,
 } from './remote-readonly.mjs'
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_RUNTIME_BASE_URL = 'http://127.0.0.1:3211'
 const GATEWAY_VERSION = '0.2.0'
-const REMOTE_DERIVATIVE_CACHE_CONTROL = 'private, max-age=300'
 
 function resolveRuntimeBaseUrl(env = process.env) {
   const raw = (
@@ -245,26 +239,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'GET' && pathname.startsWith('/v1/remote/faces/crops/')) {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const faceId = decodeURIComponent(pathname.slice('/v1/remote/faces/crops/'.length))
-        const rootId = requestUrl.searchParams.get('rootId')
-        const size = requestUrl.searchParams.get('size')
-        const padding = requestUrl.searchParams.get('padding')
-        const root = resolveRemoteRoot(currentRemoteReadonlyConfig, rootId)
-        const result = await readRuntimeFaceCrop(runtimeBaseUrl, {
-          faceId,
-          rootPath: root.path,
-          ...(size !== null ? { size } : {}),
-          ...(padding !== null ? { padding } : {}),
-        })
-        sendRuntimeFileContentResponse(res, result, {
-          cacheControl: REMOTE_DERIVATIVE_CACHE_CONTROL,
+        await forwardRemoteReadonlyFaceCrop(req, res, runtimeBaseUrl, faceId, {
+          rootId: requestUrl.searchParams.get('rootId'),
+          size: requestUrl.searchParams.get('size'),
+          padding: requestUrl.searchParams.get('padding'),
         })
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
@@ -364,18 +343,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/faces/list-people') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyPeople(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyFacePeople(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -384,18 +356,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/faces/list-person-faces') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyPersonFaces(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyPersonFaces(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }

@@ -22,14 +22,6 @@ function normalizeRuntimeBaseUrl(runtimeBaseUrl) {
   return normalizedBaseUrl
 }
 
-function normalizeRequiredStringInput(value, fieldName) {
-  const normalizedValue = typeof value === 'string' ? value.trim() : ''
-  if (!normalizedValue) {
-    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', `${fieldName} is required`, 400)
-  }
-  return normalizedValue
-}
-
 function resolveRuntimeTimeout(options = {}) {
   return typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
@@ -45,46 +37,6 @@ function rethrowRuntimeTimeout(error, timeoutMs, operation) {
     )
   }
   throw error
-}
-
-async function postRuntimeJson(runtimeBaseUrl, pathname, payload, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-    const body = await response.text()
-    if (!response.ok) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime ${pathname} request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    try {
-      return body ? JSON.parse(body) : {}
-    } catch (error) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime ${pathname} response was not valid JSON: ${error.message}`,
-        502,
-      )
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, pathname)
-  } finally {
-    clearTimeout(timeoutId)
-  }
 }
 
 async function getRuntimeJson(runtimeBaseUrl, pathname, options = {}) {
@@ -270,75 +222,6 @@ function responseSetCookies(response) {
   return raw.split(/,\s*(?=__Host-fauplay-remote-)/).filter(Boolean)
 }
 
-export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
-  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
-  const faceId = normalizeRequiredStringInput(options.faceId, 'faceId')
-  const endpoint = new URL(`/v1/faces/crops/${encodeURIComponent(faceId)}`, `${normalizedBaseUrl}/`)
-  if (typeof options.rootPath === 'string' && options.rootPath.trim()) {
-    endpoint.searchParams.set('rootPath', options.rootPath.trim())
-  }
-  if (typeof options.size === 'string' && options.size.trim()) {
-    endpoint.searchParams.set('size', options.size.trim())
-  }
-  if (typeof options.padding === 'string' && options.padding.trim()) {
-    endpoint.searchParams.set('padding', options.padding.trim())
-  }
-  const controller = new AbortController()
-  const timeoutMs = resolveRuntimeTimeout(options)
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await (options.fetch ?? fetch)(endpoint, {
-      method: 'GET',
-      signal: controller.signal,
-    })
-    const body = Buffer.from(await response.arrayBuffer())
-    if (!response.ok) {
-      throw createMcpRuntimeError(
-        'RUNTIME_HTTP_ERROR',
-        `Fauplay Runtime face crop request failed: ${response.status}`,
-        response.status,
-      )
-    }
-    return {
-      statusCode: response.status,
-      contentType: response.headers.get('content-type') || 'application/octet-stream',
-      acceptRanges: response.headers.get('accept-ranges') || 'bytes',
-      contentRange: response.headers.get('content-range'),
-      body,
-    }
-  } catch (error) {
-    rethrowRuntimeTimeout(error, timeoutMs, 'face crop')
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-export async function listRuntimePeople(runtimeBaseUrl, options = {}) {
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/faces/list-people', {
-    rootPath,
-    scope: 'root',
-    ...(typeof options.query === 'string' ? { query: options.query } : {}),
-    ...(typeof options.page !== 'undefined' ? { page: options.page } : {}),
-    ...(typeof options.size !== 'undefined' ? { size: options.size } : {}),
-  }, options)
-}
-
-export async function listRuntimeAssetFaces(runtimeBaseUrl, options = {}) {
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  const personId = typeof options.personId === 'string' ? options.personId.trim() : ''
-  const relativePath = typeof options.relativePath === 'string' ? options.relativePath.trim() : ''
-  if (!personId && !relativePath) {
-    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'personId or relativePath is required', 400)
-  }
-  return postRuntimeJson(runtimeBaseUrl, '/v1/faces/list-asset-faces', {
-    rootPath,
-    ...(personId ? { personId } : {}),
-    ...(relativePath ? { relativePath } : {}),
-  }, options)
-}
-
 export async function readRuntimeRemoteTagOptions(runtimeBaseUrl, payload, options = {}) {
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/options', payload, options)
 }
@@ -349,6 +232,33 @@ export async function queryRuntimeRemoteFileAnnotations(runtimeBaseUrl, payload,
 
 export async function readRuntimeRemoteFileAnnotation(runtimeBaseUrl, payload, options = {}) {
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/file', payload, options)
+}
+
+export async function readRuntimeRemoteFaceCrop(runtimeBaseUrl, options = {}) {
+  const faceId = typeof options.faceId === 'string' ? options.faceId.trim() : ''
+  if (!faceId) {
+    throw createMcpRuntimeError('RUNTIME_HTTP_ERROR', 'faceId is required', 400)
+  }
+  return getRuntimeBinaryExchange(
+    runtimeBaseUrl,
+    `/v1/remote/faces/crops/${encodeURIComponent(faceId)}`,
+    {
+      ...options,
+      query: {
+        rootId: options.rootId,
+        size: options.size,
+        padding: options.padding,
+      },
+    },
+  )
+}
+
+export async function listRuntimeRemotePeople(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/faces/list-people', payload, options)
+}
+
+export async function listRuntimeRemotePersonFaces(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/faces/list-person-faces', payload, options)
 }
 
 export async function readRuntimeRemoteFavorites(runtimeBaseUrl, options = {}) {
@@ -401,10 +311,6 @@ export async function loginRuntimeRemoteAccessSession(runtimeBaseUrl, options = 
   }, options)
 }
 
-export async function authorizeRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
-  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/authorize', {}, options)
-}
-
 export async function logoutRuntimeRemoteAccessSession(runtimeBaseUrl, options = {}) {
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/session/logout', {
     forgetDevice: options.forgetDevice === true,
@@ -417,22 +323,4 @@ export async function upsertRuntimeRemoteFavorite(runtimeBaseUrl, payload, optio
 
 export async function removeRuntimeRemoteFavorite(runtimeBaseUrl, payload, options = {}) {
   return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/favorites/remove', payload, options)
-}
-
-export function sendRuntimeFileContentResponse(res, runtimeResponse, options = {}) {
-  const body = Buffer.isBuffer(runtimeResponse.body)
-    ? runtimeResponse.body
-    : Buffer.from(runtimeResponse.body ?? [])
-  res.statusCode = runtimeResponse.statusCode === 206 ? 206 : 200
-  res.setHeader('Content-Type', runtimeResponse.contentType || 'application/octet-stream')
-  res.setHeader('Accept-Ranges', runtimeResponse.acceptRanges || 'bytes')
-  res.setHeader('Content-Length', String(body.length))
-  res.setHeader('Cache-Control', options.cacheControl || 'no-store')
-  if (runtimeResponse.contentRange) {
-    res.setHeader('Content-Range', runtimeResponse.contentRange)
-  }
-  if (typeof options.lastModifiedMs === 'number' && options.lastModifiedMs > 0) {
-    res.setHeader('Last-Modified', new Date(options.lastModifiedMs).toUTCString())
-  }
-  res.end(body)
 }

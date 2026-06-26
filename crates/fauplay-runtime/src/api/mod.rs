@@ -62,7 +62,8 @@ pub use listing::{
 };
 pub use paths::RootRelativePath;
 pub use remote_access::{
-    RemoteAnnotationTagOptionsRequest, RemoteFileAnnotationQueryRequest,
+    RemoteAnnotationTagOptionsRequest, RemoteFaceCropRequest, RemoteFaceListPeopleRequest,
+    RemoteFaceListPersonFacesRequest, RemoteFileAnnotationQueryRequest,
     RemoteFileAnnotationReadRequest, RemoteFileContentRequest, RemoteFileContentResponse,
     RemoteFileListRequest, RemoteFileListResponse, RemoteFileThumbnailRequest,
     RemoteFileThumbnailResponse, RemoteListingEntry, RemoteRootEntry, RemoteRootsResponse,

@@ -168,13 +168,33 @@ test('Legacy Gateway no longer owns Remote Access Favorite Folder data reads', a
 })
 
 test('Legacy Gateway no longer owns Remote Access face people data reads', async () => {
+  const remoteFileAccessSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-file-access.mjs', import.meta.url),
+    'utf8',
+  )
   const remoteReadonlySource = await readFile(
     new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
     'utf8',
   )
   assert.equal(remoteReadonlySource.includes("from './data/core.mjs'"), false)
   assert.equal(remoteReadonlySource.includes('listPeople({'), false)
   assert.equal(remoteReadonlySource.includes('listAssetFaces({'), false)
+  assert.equal(remoteReadonlySource.includes('listRemoteReadonlyPeople'), false)
+  assert.equal(remoteReadonlySource.includes('listRemoteReadonlyPersonFaces'), false)
+  assert.equal(remoteReadonlySource.includes('resolveRemoteRoot'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/faces/list-people'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/faces/list-asset-faces'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/faces/crops/'), false)
+  assert.equal(serverSource.includes('listRemoteReadonlyPeople'), false)
+  assert.equal(serverSource.includes('listRemoteReadonlyPersonFaces'), false)
+  assert.equal(serverSource.includes('readRuntimeFaceCrop'), false)
+  assert.equal(serverSource.includes('sendRuntimeFileContentResponse'), false)
+  assert.equal(serverSource.includes('resolveRemoteRoot'), false)
+  assert.equal(serverSource.includes('ensureRemoteReadonlySessionAuthorized'), false)
 })
 
 test('Legacy Gateway no longer owns Remote Access shared state storage', async () => {

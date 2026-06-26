@@ -4,6 +4,14 @@ use fauplay_runtime::{FileAnnotationTagBindingRequest, RootRelativePath};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+const FACE_CROP_SOURCE_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 4, 0, 0, 0, 4, 8, 2, 0,
+    0, 0, 38, 147, 9, 41, 0, 0, 0, 40, 73, 68, 65, 84, 120, 156, 77, 201, 65, 17, 0, 48, 16, 131,
+    64, 164, 157, 180, 72, 139, 51, 154, 103, 127, 204, 130, 224, 97, 176, 44, 57, 137, 116, 252,
+    13, 81, 219, 38, 25, 63, 73, 43, 23, 50, 166, 241, 103, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174,
+    66, 96, 130,
+];
+
 #[test]
 fn runtime_api_remote_session_login_authorize_and_logout_use_runtime_cookies() {
     let fixture =
@@ -746,6 +754,209 @@ fn runtime_api_remote_favorites_are_session_protected_and_resolve_remote_roots()
 }
 
 #[test]
+fn runtime_api_remote_faces_resolve_remote_roots_without_host_paths() {
+    let fixture = Fixture::new("runtime_api_remote_faces_resolve_remote_roots_without_host_paths");
+    fixture.create_dir("Shared Root/photos");
+    fixture.create_dir("Other Root/photos");
+    fixture.write_bytes("Shared Root/photos/ada.png", FACE_CROP_SOURCE_PNG);
+    fixture.write_file("Shared Root/photos/ada-2.jpg", "second face source");
+    fixture.write_file("Other Root/photos/outside.jpg", "outside face source");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let other_root_path = fixture.root.join("Other Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+    fixture.write_file(
+        ".runtime-home/global/faces.v1.json",
+        &serde_json::json!({
+            "version": 1,
+            "faces": [
+                {
+                    "rootPath": shared_root_path.display().to_string(),
+                    "rootRelativePath": "photos/ada.png",
+                    "assetId": "asset-a-1",
+                    "faceId": "face-a-1",
+                    "boundingBox": { "x1": 1.0, "y1": 1.0, "x2": 3.0, "y2": 3.0 },
+                    "score": 0.91,
+                    "status": "assigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": "person-a",
+                    "personName": "Ada",
+                    "assignedBy": "manual",
+                    "updatedAt": 10,
+                    "embedding": [0.1, 0.2]
+                },
+                {
+                    "rootPath": shared_root_path.display().to_string(),
+                    "rootRelativePath": "photos/ada-2.jpg",
+                    "assetId": "asset-a-2",
+                    "faceId": "face-a-2",
+                    "boundingBox": { "x1": 0.2, "y1": 0.1, "x2": 0.4, "y2": 0.5 },
+                    "score": 0.94,
+                    "status": "assigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": "person-a",
+                    "personName": "Ada",
+                    "assignedBy": "manual",
+                    "updatedAt": 30,
+                    "embedding": [0.2, 0.3]
+                },
+                {
+                    "rootPath": other_root_path.display().to_string(),
+                    "rootRelativePath": "photos/outside.jpg",
+                    "assetId": "asset-outside",
+                    "faceId": "face-a-outside",
+                    "boundingBox": { "x1": 0.1, "y1": 0.1, "x2": 0.3, "y2": 0.5 },
+                    "score": 0.89,
+                    "status": "assigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "personId": "person-a",
+                    "personName": "Ada",
+                    "assignedBy": "manual",
+                    "updatedAt": 50,
+                    "embedding": [0.8, 0.9]
+                }
+            ]
+        })
+        .to_string(),
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let unauthorized_response = send_remote_faces_request(
+        &address,
+        None,
+        "/v1/remote/faces/list-people",
+        r#"{"rootId":"shared-root"}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        unauthorized_response.starts_with("HTTP/1.1 401 Unauthorized\r\n"),
+        "Remote People should require a Remote Access session: {unauthorized_response}"
+    );
+
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let people_response = send_remote_faces_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/faces/list-people",
+        r#"{"rootId":"shared-root","query":"Ada","page":1,"size":10}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        people_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote People should be served by the Runtime: {people_response}"
+    );
+    let people_payload = response_json(&people_response);
+    assert_eq!(people_payload["ok"], true);
+    assert_eq!(people_payload["scope"], "root");
+    assert_eq!(people_payload["total"], 1);
+    assert_eq!(people_payload["items"][0]["personId"], "person-a");
+    assert_eq!(people_payload["items"][0]["name"], "Ada");
+    assert_eq!(people_payload["items"][0]["faceCount"], 2);
+    assert_eq!(people_payload["items"][0]["globalFaceCount"], 3);
+    assert_eq!(people_payload["items"][0]["featureFaceId"], "face-a-2");
+    assert_eq!(
+        people_payload["items"][0]["featureAssetPath"],
+        "photos/ada-2.jpg"
+    );
+    assert!(people_payload["items"][0].get("absolutePath").is_none());
+
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let person_faces_response = send_remote_faces_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/faces/list-person-faces",
+        r#"{"rootId":"shared-root","personId":"person-a"}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        person_faces_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Person Faces should be served by the Runtime: {person_faces_response}"
+    );
+    let person_faces_payload = response_json(&person_faces_response);
+    assert_eq!(person_faces_payload["ok"], true);
+    assert_eq!(person_faces_payload["scope"], "root");
+    assert_eq!(person_faces_payload["total"], 2);
+    let person_face_ids = person_faces_payload["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["faceId"].as_str())
+        .collect::<Vec<_>>();
+    assert!(person_face_ids.contains(&"face-a-1"));
+    assert!(person_face_ids.contains(&"face-a-2"));
+    assert!(
+        person_faces_payload["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["assetPath"] == "photos/ada.png")
+    );
+    assert!(
+        person_faces_payload["items"][0]
+            .get("absolutePath")
+            .is_none()
+    );
+
+    let (address, server) = serve_runtime_once(runtime);
+    let crop_response = send_remote_face_crop_request(
+        &address,
+        Some(&session_cookie_pair),
+        "face-a-1",
+        "rootId=shared-root&size=96&padding=0.25",
+    );
+    server.join().expect("server thread should finish");
+    let (crop_headers, crop_body) = split_binary_http_response(&crop_response);
+    assert!(
+        crop_headers.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Face Crop should be served by the Runtime: {crop_headers}"
+    );
+    assert!(
+        crop_headers.contains("Content-Type: image/jpeg"),
+        "Remote Face Crop should be a JPEG response: {crop_headers}"
+    );
+    assert!(
+        crop_headers.contains("Cache-Control: private, max-age=300"),
+        "Remote Face Crop should use derivative cache policy: {crop_headers}"
+    );
+    assert!(
+        crop_body.starts_with(&[0xFF, 0xD8]) && crop_body.ends_with(&[0xFF, 0xD9]),
+        "Remote Face Crop body should be JPEG bytes"
+    );
+    assert!(
+        !people_response.contains(&shared_root_json)
+            && !person_faces_response.contains(&shared_root_json)
+            && !String::from_utf8_lossy(&crop_response).contains(&shared_root_json),
+        "Remote face responses must not expose Remote Root host paths"
+    );
+}
+
+#[test]
 fn runtime_api_returns_remote_access_config_without_exposing_token() {
     let fixture = Fixture::new("runtime_api_returns_remote_access_config_without_exposing_token");
     fixture.create_dir("Shared Root");
@@ -956,4 +1167,15 @@ fn response_header(response: &str, header_name: &str) -> Option<String> {
         name.eq_ignore_ascii_case(header_name)
             .then(|| value.trim().to_owned())
     })
+}
+
+fn split_binary_http_response(response: &[u8]) -> (String, &[u8]) {
+    let marker = b"\r\n\r\n";
+    let split_at = response
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .expect("HTTP response should include a header/body separator");
+    let headers = String::from_utf8_lossy(&response[..split_at + marker.len()]).to_string();
+    let body = &response[split_at + marker.len()..];
+    (headers, body)
 }

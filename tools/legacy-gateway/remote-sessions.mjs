@@ -1,11 +1,13 @@
 import {
-  authorizeRuntimeRemoteAccessSession,
   loginRuntimeRemoteAccessSession,
   logoutRuntimeRemoteAccessSession,
   readRuntimeRemoteFileContent,
   readRuntimeRemoteFileList,
   readRuntimeRemoteFileThumbnail,
   readRuntimeRemoteFavorites,
+  readRuntimeRemoteFaceCrop,
+  listRuntimeRemotePeople,
+  listRuntimeRemotePersonFaces,
   queryRuntimeRemoteFileAnnotations,
   removeRuntimeRemoteFavorite,
   readRuntimeRemoteFileAnnotation,
@@ -14,15 +16,6 @@ import {
   readRuntimeRemoteTextPreview,
   upsertRuntimeRemoteFavorite,
 } from './remote-file-access.mjs'
-import { createMcpRuntimeError } from './runtime-errors.mjs'
-
-function createRemoteUnauthorizedError(setCookies = []) {
-  const error = new Error('Unauthorized')
-  error.code = 'REMOTE_UNAUTHORIZED'
-  error.statusCode = 401
-  error.setCookies = setCookies
-  return error
-}
 
 export function appendRemoteRuntimeSetCookies(res, setCookies = []) {
   for (const cookie of setCookies) {
@@ -157,32 +150,35 @@ export async function forwardRemoteReadonlyFavoriteRemove(req, res, runtimeBaseU
   sendRuntimeSessionExchangeResponse(res, result)
 }
 
-export async function ensureRemoteReadonlySessionAuthorized(
-  remoteConfig,
-  req,
-  res,
-  runtimeBaseUrl,
-) {
-  if (remoteConfig.enabled !== true || remoteConfig.authConfigured !== true) {
-    throw createRemoteUnauthorizedError()
-  }
-
-  const result = await authorizeRuntimeRemoteAccessSession(runtimeBaseUrl, {
+export async function forwardRemoteReadonlyFaceCrop(req, res, runtimeBaseUrl, faceId, query = {}) {
+  const result = await readRuntimeRemoteFaceCrop(runtimeBaseUrl, {
     cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+    faceId,
+    rootId: query.rootId,
+    size: query.size,
+    padding: query.padding,
   })
-  appendRemoteRuntimeSetCookies(res, result.setCookies)
+  sendRuntimeBinaryExchangeResponse(res, result)
+}
 
-  if (result.statusCode === 204) {
-    return
-  }
-  if (result.statusCode === 401) {
-    throw createRemoteUnauthorizedError(result.setCookies)
-  }
-  throw createMcpRuntimeError(
-    'RUNTIME_HTTP_ERROR',
-    `Fauplay Runtime Remote Access session authorize request failed: ${result.statusCode}`,
-    result.statusCode,
-  )
+export async function forwardRemoteReadonlyFacePeople(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await listRuntimeRemotePeople(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyPersonFaces(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await listRuntimeRemotePersonFaces(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
 }
 
 function sendRuntimeSessionExchangeResponse(res, result) {

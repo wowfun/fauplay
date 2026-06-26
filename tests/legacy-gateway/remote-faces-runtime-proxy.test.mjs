@@ -53,12 +53,13 @@ test('Remote Access People and Person Faces are served through Fauplay Runtime',
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie || '',
         body,
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
 
-      if (req.url === '/v1/faces/list-people') {
+      if (req.url === '/v1/remote/faces/list-people') {
         res.end(JSON.stringify({
           ok: true,
           scope: 'root',
@@ -72,14 +73,13 @@ test('Remote Access People and Person Faces are served through Fauplay Runtime',
             globalFaceCount: 5,
             featureFaceId: 'face-1',
             featureAssetPath: 'portraits/ada.jpg',
-            absolutePath: path.join(remoteRoot, 'portraits/ada.jpg'),
             updatedAt: 30,
           }],
         }))
         return
       }
 
-      if (req.url === '/v1/faces/list-asset-faces') {
+      if (req.url === '/v1/remote/faces/list-person-faces') {
         res.end(JSON.stringify({
           ok: true,
           scope: 'root',
@@ -88,7 +88,6 @@ test('Remote Access People and Person Faces are served through Fauplay Runtime',
             faceId: 'face-1',
             assetId: 'asset-1',
             assetPath: 'portraits/ada.jpg',
-            absolutePath: path.join(remoteRoot, 'portraits/ada.jpg'),
             boundingBox: {
               x1: 0.1,
               y1: 0.2,
@@ -188,14 +187,15 @@ test('Remote Access People and Person Faces are served through Fauplay Runtime',
     assert.deepEqual(runtimeRequests.map((request) => ({
       method: request.method,
       url: request.url,
+      cookie: request.cookie,
       body: JSON.parse(request.body),
     })), [
       {
         method: 'POST',
-        url: '/v1/faces/list-people',
+        url: '/v1/remote/faces/list-people',
+        cookie: sessionCookie,
         body: {
-          rootPath: remoteRoot,
-          scope: 'root',
+          rootId: 'root-a',
           query: 'Ada',
           page: 2,
           size: 10,
@@ -203,9 +203,10 @@ test('Remote Access People and Person Faces are served through Fauplay Runtime',
       },
       {
         method: 'POST',
-        url: '/v1/faces/list-asset-faces',
+        url: '/v1/remote/faces/list-person-faces',
+        cookie: sessionCookie,
         body: {
-          rootPath: remoteRoot,
+          rootId: 'root-a',
           personId: 'person-1',
         },
       },
