@@ -2,14 +2,16 @@ import { timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { readRuntimeDirectoryListing } from './remote-file-access.mjs'
 import {
-  getFileTags,
   listAssetFaces,
   listPeople,
-  listTagOptions,
-  queryFilesByTags,
 } from './data/core.mjs'
+import {
+  queryRuntimeFileAnnotations,
+  readRuntimeDirectoryListing,
+  readRuntimeFileAnnotation,
+  readRuntimeTagOptions,
+} from './remote-file-access.mjs'
 import {
   normalizeAbsolutePath,
   normalizeRelativePath,
@@ -179,19 +181,6 @@ function isTokenMatch(expected, received) {
     return false
   }
   return timingSafeEqual(expectedBuffer, receivedBuffer)
-}
-
-function stripAbsolutePathFromTagQueryResult(result) {
-  const items = Array.isArray(result?.items) ? result.items : []
-  return {
-    ...result,
-    items: items.map((item) => ({
-      assetId: item.assetId,
-      relativePath: item.relativePath,
-      tags: Array.isArray(item.tags) ? item.tags : [],
-      updatedAt: item.updatedAt,
-    })),
-  }
 }
 
 export async function loadRemoteReadonlyConfig() {
@@ -381,16 +370,90 @@ export async function resolveRemoteReadonlyThumbnailResource(remoteConfig, query
   return target
 }
 
-export async function listRemoteReadonlyTagOptions(remoteConfig, payload = {}) {
+function toRemoteReadonlyTagRecord(tag) {
+  if (!isObjectRecord(tag)) return null
+  const result = {}
+  if (typeof tag.id === 'string' || typeof tag.id === 'number') {
+    result.id = tag.id
+  }
+  if (typeof tag.key === 'string') {
+    result.key = tag.key
+  }
+  if (typeof tag.value === 'string') {
+    result.value = tag.value
+  }
+  if (typeof tag.source === 'string') {
+    result.source = tag.source
+  }
+  const appliedAt = toFiniteNumber(tag.appliedAt)
+  if (typeof appliedAt === 'number') {
+    result.appliedAt = appliedAt
+  }
+  const updatedAt = toFiniteNumber(tag.updatedAt)
+  if (typeof updatedAt === 'number') {
+    result.updatedAt = updatedAt
+  }
+  if (tag.score === null) {
+    result.score = null
+  } else {
+    const score = toFiniteNumber(tag.score)
+    if (typeof score === 'number') {
+      result.score = score
+    }
+  }
+  return result
+}
+
+function toRemoteReadonlyFileTagView(file) {
+  if (!isObjectRecord(file)) return null
+  const relativePathSource = typeof file.relativePath === 'string' && file.relativePath.trim()
+    ? file.relativePath
+    : (typeof file.rootRelativePath === 'string' ? file.rootRelativePath : '')
+  const relativePath = normalizeOptionalRemotePath(relativePathSource, 'relativePath')
+  const result = {
+    relativePath,
+    tags: Array.isArray(file.tags)
+      ? file.tags.map(toRemoteReadonlyTagRecord).filter(Boolean)
+      : [],
+  }
+  if (typeof file.assetId === 'string' && file.assetId.trim()) {
+    result.assetId = file.assetId.trim()
+  }
+  const updatedAt = toFiniteNumber(file.updatedAt)
+  if (typeof updatedAt === 'number') {
+    result.updatedAt = updatedAt
+  }
+  return result
+}
+
+function toRemoteReadonlyTagQueryResult(result) {
+  const items = Array.isArray(result?.items)
+    ? result.items.map(toRemoteReadonlyFileTagView).filter(Boolean)
+    : []
+  return {
+    ...result,
+    items,
+  }
+}
+
+function toRemoteReadonlyFileTagResult(result) {
+  const file = toRemoteReadonlyFileTagView(result?.file)
+  return {
+    ...result,
+    file,
+  }
+}
+
+export async function listRemoteReadonlyTagOptions(remoteConfig, payload = {}, runtimeBaseUrl) {
   const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  return listTagOptions({
+  return readRuntimeTagOptions(runtimeBaseUrl, {
     rootPath: root.path,
   })
 }
 
-export async function queryRemoteReadonlyFilesByTags(remoteConfig, payload = {}) {
+export async function queryRemoteReadonlyFilesByTags(remoteConfig, payload = {}, runtimeBaseUrl) {
   const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const result = await queryFilesByTags({
+  const result = await queryRuntimeFileAnnotations(runtimeBaseUrl, {
     rootPath: root.path,
     includeTagKeys: payload.includeTagKeys,
     excludeTagKeys: payload.excludeTagKeys,
@@ -398,27 +461,17 @@ export async function queryRemoteReadonlyFilesByTags(remoteConfig, payload = {})
     page: payload.page,
     size: payload.size,
   })
-  return stripAbsolutePathFromTagQueryResult(result)
+  return toRemoteReadonlyTagQueryResult(result)
 }
 
-export async function getRemoteReadonlyFileTags(remoteConfig, payload = {}) {
+export async function getRemoteReadonlyFileTags(remoteConfig, payload = {}, runtimeBaseUrl) {
   const root = resolveRemoteRoot(remoteConfig, payload.rootId)
   const normalizedRelativePath = normalizeRelativePath(payload.relativePath, 'relativePath')
-  const result = await getFileTags({
+  const result = await readRuntimeFileAnnotation(runtimeBaseUrl, {
     rootPath: root.path,
     relativePath: normalizedRelativePath,
   })
-  if (!result?.file) {
-    return result
-  }
-  return {
-    ...result,
-    file: {
-      assetId: result.file.assetId,
-      relativePath: result.file.relativePath,
-      tags: Array.isArray(result.file.tags) ? result.file.tags : [],
-    },
-  }
+  return toRemoteReadonlyFileTagResult(result)
 }
 
 export async function listRemoteReadonlyPeople(remoteConfig, payload = {}) {

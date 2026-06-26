@@ -55,6 +55,46 @@ function rethrowRuntimeTimeout(error, timeoutMs, operation) {
   throw error
 }
 
+async function postRuntimeJson(runtimeBaseUrl, pathname, payload, options = {}) {
+  const normalizedBaseUrl = normalizeRuntimeBaseUrl(runtimeBaseUrl)
+  const endpoint = new URL(pathname, `${normalizedBaseUrl}/`)
+  const controller = new AbortController()
+  const timeoutMs = resolveRuntimeTimeout(options)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await (options.fetch ?? fetch)(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    const body = await response.text()
+    if (!response.ok) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime ${pathname} request failed: ${response.status}`,
+        response.status,
+      )
+    }
+    try {
+      return body ? JSON.parse(body) : {}
+    } catch (error) {
+      throw createMcpRuntimeError(
+        'RUNTIME_HTTP_ERROR',
+        `Fauplay Runtime ${pathname} response was not valid JSON: ${error.message}`,
+        502,
+      )
+    }
+  } catch (error) {
+    rethrowRuntimeTimeout(error, timeoutMs, pathname)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export function parseRemoteByteRangeHeader(rangeHeader, totalSizeBytes) {
   if (typeof rangeHeader !== 'string' || !rangeHeader.trim()) {
     return null
@@ -281,6 +321,32 @@ export async function readRuntimeDirectoryListing(runtimeBaseUrl, options = {}) 
   } finally {
     clearTimeout(timeoutId)
   }
+}
+
+export async function readRuntimeTagOptions(runtimeBaseUrl, options = {}) {
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/options', { rootPath }, options)
+}
+
+export async function queryRuntimeFileAnnotations(runtimeBaseUrl, options = {}) {
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/query', {
+    rootPath,
+    ...(Array.isArray(options.includeTagKeys) ? { includeTagKeys: options.includeTagKeys } : {}),
+    ...(Array.isArray(options.excludeTagKeys) ? { excludeTagKeys: options.excludeTagKeys } : {}),
+    ...(typeof options.includeMatchMode === 'string' ? { includeMatchMode: options.includeMatchMode } : {}),
+    ...(typeof options.page !== 'undefined' ? { page: options.page } : {}),
+    ...(typeof options.size !== 'undefined' ? { size: options.size } : {}),
+  }, options)
+}
+
+export async function readRuntimeFileAnnotation(runtimeBaseUrl, options = {}) {
+  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
+  const relativePath = normalizeRequiredStringInput(options.relativePath, 'relativePath')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/file', {
+    rootPath,
+    relativePath,
+  }, options)
 }
 
 export async function readRuntimeTextPreview(runtimeBaseUrl, options = {}) {
