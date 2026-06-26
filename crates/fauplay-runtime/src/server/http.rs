@@ -209,7 +209,7 @@ pub(super) fn http_response_with_headers(
     )
 }
 
-fn binary_response(
+pub(super) fn binary_response(
     status_code: u16,
     reason: &'static str,
     content_type: &str,

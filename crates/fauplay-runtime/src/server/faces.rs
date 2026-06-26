@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
+    FaceClusterPendingRequest, FaceClusterPendingResponse, FaceCropRequest, FaceDetectAssetRequest,
     FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
     FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse, FaceDetectAssetsJobSnapshot,
     FaceDetectAssetsJobStatus, FaceDetectAssetsRequest, FaceDetectAssetsResponse,
@@ -15,9 +15,16 @@ use crate::{
 };
 
 use super::{
-    HttpResponse, error_json, escape_json_string, http_response, json_string_array_field,
-    json_string_field, parse_json_body,
+    HttpResponse, binary_response, error_json, escape_json_string, http_response,
+    json_string_array_field, json_string_field, parse_json_body,
 };
+
+const FACE_CROP_SIZE_DEFAULT: u32 = 160;
+const FACE_CROP_SIZE_MIN: u32 = 48;
+const FACE_CROP_SIZE_MAX: u32 = 512;
+const FACE_CROP_PADDING_DEFAULT: f64 = 0.35;
+const FACE_CROP_PADDING_MIN: f64 = 0.0;
+const FACE_CROP_PADDING_MAX: f64 = 2.0;
 
 pub(in crate::server) fn handle_detect_asset_faces_json(
     runtime: &FauplayRuntime,
@@ -166,6 +173,47 @@ pub(in crate::server) fn handle_list_detect_assets_job_items(
             &face_detect_assets_job_items_response_json(response),
         ),
         Err(error) => http_response(404, "Not Found", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_face_crop(
+    runtime: &FauplayRuntime,
+    face_id: String,
+    query: &std::collections::HashMap<String, String>,
+) -> HttpResponse {
+    if face_id.trim().is_empty() {
+        return http_response(400, "Bad Request", "{\"error\":\"faceId is required\"}");
+    }
+
+    let size = query
+        .get("size")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(FACE_CROP_SIZE_DEFAULT)
+        .clamp(FACE_CROP_SIZE_MIN, FACE_CROP_SIZE_MAX);
+    let padding = query
+        .get("padding")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+        .unwrap_or(FACE_CROP_PADDING_DEFAULT)
+        .clamp(FACE_CROP_PADDING_MIN, FACE_CROP_PADDING_MAX);
+    let root_path = query
+        .get("rootPath")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    match runtime.read_face_crop(FaceCropRequest {
+        face_id,
+        root_path,
+        size,
+        padding,
+    }) {
+        Ok(response) => binary_response(200, "OK", &response.content_type, response.bytes),
+        Err(error) if error.to_string().starts_with("face not found:") => {
+            http_response(404, "Not Found", &error_json(&error.to_string()))
+        }
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
     }
 }
 

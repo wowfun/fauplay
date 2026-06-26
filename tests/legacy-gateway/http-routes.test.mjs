@@ -24,6 +24,7 @@ const runtimeOwnedLocalRoutes = [
   ['GET', '/v1/faces/detect-assets/jobs/job-1'],
   ['GET', '/v1/faces/detect-assets/jobs/job-1/items'],
   ['POST', '/v1/faces/detect-assets/jobs/job-1/cancel'],
+  ['GET', '/v1/faces/crops/face-1'],
   ['POST', '/v1/faces/list-asset-faces'],
   ['POST', '/v1/faces/list-review-faces'],
   ['POST', '/v1/faces/list-people'],

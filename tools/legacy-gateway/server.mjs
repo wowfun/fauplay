@@ -29,9 +29,6 @@ import {
   REMOTE_REMEMBER_DEVICE_TTL_MS,
 } from './remote-sessions.mjs'
 import {
-  getFaceCrop,
-} from './data/core.mjs'
-import {
   ensureRemoteReadonlyAuthorized,
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
@@ -529,23 +526,6 @@ export async function startGatewayServer(options = {}) {
         })
       } catch (error) {
         await sendRemoteReadonlyError(res, remoteReadonlySessions, remoteRememberedDevices, req, error)
-      }
-      return
-    }
-
-    if (method === 'GET' && pathname.startsWith('/v1/faces/crops/')) {
-      try {
-        const faceId = decodeURIComponent(pathname.slice('/v1/faces/crops/'.length))
-        const size = requestUrl.searchParams.get('size')
-        const padding = requestUrl.searchParams.get('padding')
-        const result = await getFaceCrop({
-          faceId,
-          ...(size !== null ? { size } : {}),
-          ...(padding !== null ? { padding } : {}),
-        })
-        sendBinary(res, 200, result.body, result.contentType)
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
       }
       return
     }

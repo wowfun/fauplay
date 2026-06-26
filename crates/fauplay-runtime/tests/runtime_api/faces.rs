@@ -9,6 +9,14 @@ use fauplay_runtime::FauplayRuntime;
 
 use super::support::*;
 
+const FACE_CROP_SOURCE_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 4, 0, 0, 0, 4, 8, 2, 0,
+    0, 0, 38, 147, 9, 41, 0, 0, 0, 40, 73, 68, 65, 84, 120, 156, 77, 201, 65, 17, 0, 48, 16, 131,
+    64, 164, 157, 180, 72, 139, 51, 154, 103, 127, 204, 130, 224, 97, 176, 44, 57, 137, 116, 252,
+    13, 81, 219, 38, 25, 63, 73, 43, 23, 50, 166, 241, 103, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174,
+    66, 96, 130,
+];
+
 #[test]
 fn runtime_api_faces_detects_and_lists_file_faces_through_runtime_mcp() {
     let fixture =
@@ -450,6 +458,36 @@ rl.on('line', (line) => {
     assert_eq!(second_json["items"][0]["reasonCode"], "ALREADY_DETECTED");
     assert_eq!(second_json["items"][0]["mediaType"], "image");
     assert_eq!(second_json["items"][0]["faceCount"], 0);
+}
+
+#[test]
+fn runtime_api_faces_returns_face_crop_from_runtime_home() {
+    let fixture = Fixture::new("runtime_api_faces_returns_face_crop_from_runtime_home");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    let root_path = fixture.root.join("local-root");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fixture.write_bytes("local-root/photos/ada.png", FACE_CROP_SOURCE_PNG);
+    write_face_crop_store(&runtime_home_path, &root_path);
+
+    let runtime = FauplayRuntime::with_runtime_home_path(runtime_home_path);
+    let (address, server) = serve_runtime_once(runtime);
+    let response = send_face_crop_request(&address, "face-crop-target", 96, 0.25);
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "Face Crop should be served by the Rust Runtime: {}",
+        String::from_utf8_lossy(&response)
+    );
+    let (headers, body) = split_http_response(&response);
+    assert!(
+        headers.contains("Content-Type: image/jpeg"),
+        "Face Crop should be a JPEG response: {headers}"
+    );
+    assert!(
+        body.starts_with(&[0xFF, 0xD8]) && body.ends_with(&[0xFF, 0xD9]),
+        "Face Crop body should be JPEG bytes"
+    );
 }
 
 #[test]
@@ -1311,6 +1349,35 @@ fn write_cluster_face_store(runtime_home_path: &Path, root_path: &Path) {
     .expect("face store should be written");
 }
 
+fn write_face_crop_store(runtime_home_path: &Path, root_path: &Path) {
+    let store_path = runtime_home_path.join("global").join("faces.v1.json");
+    fs::create_dir_all(store_path.parent().expect("store should have parent"))
+        .expect("face store parent should be created");
+    fs::write(
+        store_path,
+        serde_json::json!({
+            "faces": [
+                {
+                    "rootPath": root_path.display().to_string(),
+                    "rootRelativePath": "photos/ada.png",
+                    "assetId": "asset-crop",
+                    "faceId": "face-crop-target",
+                    "boundingBox": { "x1": 1.0, "y1": 1.0, "x2": 3.0, "y2": 3.0 },
+                    "score": 0.99,
+                    "status": "unassigned",
+                    "mediaType": "image",
+                    "frameTsMs": null,
+                    "updatedAtMs": 1700000000000_u64,
+                    "embedding": [0.1, 0.2, 0.3]
+                }
+            ],
+            "assetDetections": []
+        })
+        .to_string(),
+    )
+    .expect("face store should be written");
+}
+
 fn send_json_request(address: &str, method: &str, path: &str, body: &str) -> String {
     let mut stream = TcpStream::connect(address).expect("client should connect");
     write!(
@@ -1365,6 +1432,30 @@ fn get_runtime_json(runtime: FauplayRuntime, path: &str) -> serde_json::Value {
         "{path} should be handled by the Rust Runtime: {response}"
     );
     response_json(&response)
+}
+
+fn send_face_crop_request(address: &str, face_id: &str, size: usize, padding: f64) -> Vec<u8> {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET /v1/faces/crops/{face_id}?size={size}&padding={padding} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request should be written");
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .expect("response should be readable");
+    response
+}
+
+fn split_http_response(response: &[u8]) -> (String, &[u8]) {
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("response should include a header terminator");
+    let headers = String::from_utf8_lossy(&response[..header_end]).into_owned();
+    (headers, &response[header_end + 4..])
 }
 
 fn poll_runtime_job_until_terminal(runtime: FauplayRuntime, job_id: &str) -> serde_json::Value {

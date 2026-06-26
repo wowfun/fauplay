@@ -28,17 +28,17 @@ pub use duplicates::{
 };
 pub use errors::RuntimeError;
 pub use faces::{
-    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
-    FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
-    FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse, FaceDetectAssetsJobSnapshot,
-    FaceDetectAssetsJobStatus, FaceDetectAssetsRequest, FaceDetectAssetsResponse,
-    FaceListAssetFacesRequest, FaceListAssetFacesResponse, FaceListPeopleRequest,
-    FaceListPeopleResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType,
-    FaceMergePeopleRequest, FaceMergePeopleResponse, FaceMutateFacesRequest,
-    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
-    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
-    FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, PersonSuggestion, PersonSuggestionFace,
-    PersonSummary,
+    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceCropRequest,
+    FaceCropResponse, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceDetectAssetsItem,
+    FaceDetectAssetsItemStatus, FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse,
+    FaceDetectAssetsJobSnapshot, FaceDetectAssetsJobStatus, FaceDetectAssetsRequest,
+    FaceDetectAssetsResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
+    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
+    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
+    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
+    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
+    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, PersonSuggestion,
+    PersonSuggestionFace, PersonSummary,
 };
 pub use file_content::{
     FileContentRange, FileContentRangeRequest, FileContentRequest, FileContentResponse,

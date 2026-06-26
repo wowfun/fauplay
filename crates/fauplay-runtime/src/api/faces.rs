@@ -29,6 +29,20 @@ pub struct FaceDetectAssetsRequest {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceCropRequest {
+    pub face_id: String,
+    pub root_path: Option<PathBuf>,
+    pub size: u32,
+    pub padding: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaceCropResponse {
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceDetectAssetsResponse {
     pub total: usize,
     pub unique: usize,

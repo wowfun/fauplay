@@ -20,8 +20,9 @@ mod runtime_config;
 pub use http::{serve_http, serve_one_http_request};
 
 use http::{
-    HttpResponse, file_content_response, http_response, http_response_with_headers,
-    parse_file_content_range, parse_header_value, parse_http_request_line,
+    HttpResponse, binary_response, file_content_response, http_response,
+    http_response_with_headers, parse_file_content_range, parse_header_value,
+    parse_http_request_line,
 };
 use request::{
     first_query_value, http_request_body, json_bool_field, json_i64_or_default,
@@ -64,6 +65,9 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         }
         Some(("POST", target)) if target.starts_with("/v1/faces/detect-assets/jobs/") => {
             handle_detect_assets_job_post(runtime, target)
+        }
+        Some(("GET", target)) if target.starts_with("/v1/faces/crops/") => {
+            handle_face_crop_get(runtime, target)
         }
         Some(("POST", "/v1/faces/list-asset-faces")) => {
             faces::handle_list_asset_faces_json(runtime, request)
@@ -316,11 +320,35 @@ fn parse_detect_assets_job_target(target: &str) -> Option<(String, Option<&str>,
     Some((job_id, action, query))
 }
 
+fn handle_face_crop_get(runtime: &FauplayRuntime, target: &str) -> HttpResponse {
+    let Some((face_id, query)) = parse_face_crop_target(target) else {
+        return http_response(404, "Not Found", "{\"error\":\"not found\"}");
+    };
+    let query = query.map(parse_query_string).unwrap_or_default();
+    faces::handle_face_crop(runtime, face_id, &query)
+}
+
+fn parse_face_crop_target(target: &str) -> Option<(String, Option<&str>)> {
+    let rest = target.strip_prefix("/v1/faces/crops/")?;
+    let (face_id, query) = rest
+        .split_once('?')
+        .map(|(face_id, query)| (face_id, Some(query)))
+        .unwrap_or((rest, None));
+    let face_id = percent_decode(face_id);
+    if face_id.trim().is_empty() {
+        return None;
+    }
+    Some((face_id, query))
+}
+
 fn is_preflight_target(target: &str) -> bool {
     if target.starts_with("/v1/admin/remembered-devices/") {
         return true;
     }
     if target.starts_with("/v1/faces/detect-assets/jobs/") {
+        return true;
+    }
+    if target.starts_with("/v1/faces/crops/") {
         return true;
     }
 

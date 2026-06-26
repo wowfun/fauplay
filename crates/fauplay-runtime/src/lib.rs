@@ -10,16 +10,16 @@ pub use api::{
     AnnotationTag, AnnotationTagOption, AnnotationTagOptionsRequest, AnnotationTagOptionsResponse,
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
-    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
-    FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
-    FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse, FaceDetectAssetsJobSnapshot,
-    FaceDetectAssetsJobStatus, FaceDetectAssetsRequest, FaceDetectAssetsResponse,
-    FaceListAssetFacesRequest, FaceListAssetFacesResponse, FaceListPeopleRequest,
-    FaceListPeopleResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType,
-    FaceMergePeopleRequest, FaceMergePeopleResponse, FaceMutateFacesRequest,
-    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
-    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
-    FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FileAnnotationActionSource,
+    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceCropRequest,
+    FaceCropResponse, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceDetectAssetsItem,
+    FaceDetectAssetsItemStatus, FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse,
+    FaceDetectAssetsJobSnapshot, FaceDetectAssetsJobStatus, FaceDetectAssetsRequest,
+    FaceDetectAssetsResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
+    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
+    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
+    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
+    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
+    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FileAnnotationActionSource,
     FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
     FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
     FileAnnotationMutationResponse, FileAnnotationPathMapping,
@@ -258,6 +258,14 @@ impl FauplayRuntime {
     ) -> Result<FaceDetectAssetsJobSnapshot, RuntimeError> {
         self.face_scan_jobs
             .start_detect_assets_job(self.clone(), request)
+    }
+
+    pub fn read_face_crop(
+        &self,
+        request: FaceCropRequest,
+    ) -> Result<FaceCropResponse, RuntimeError> {
+        let source = store::resolve_face_crop_source(&self.runtime_home_path, &request)?;
+        media::read_face_crop(source, request.size, request.padding)
     }
 
     pub fn get_detect_assets_job(

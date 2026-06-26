@@ -8,14 +8,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
-    FaceDetectAssetResponse, FaceListAssetFacesRequest, FaceListAssetFacesResponse,
-    FaceListPeopleRequest, FaceListPeopleResponse, FaceListReviewFacesRequest,
-    FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest, FaceMergePeopleResponse,
-    FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem,
-    FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope,
-    FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, PersonSuggestion,
-    PersonSuggestionFace, PersonSummary, RootRelativePath, RuntimeError,
+    FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceCropRequest,
+    FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
+    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
+    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
+    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
+    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
+    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
+    PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath, RuntimeError,
 };
 
 use super::{
@@ -54,6 +54,14 @@ pub(crate) struct FaceAssetDetection {
     pub asset_id: String,
     pub media_type: FaceMediaType,
     pub face_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FaceCropSource {
+    pub absolute_path: PathBuf,
+    pub bounding_box: FaceBoundingBox,
+    pub media_type: FaceMediaType,
+    pub frame_ts_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +219,47 @@ pub(crate) fn get_asset_face_detection(
         media_type: first_face.media_type,
         face_count,
     }))
+}
+
+pub(crate) fn resolve_face_crop_source(
+    runtime_home_path: &Path,
+    request: &FaceCropRequest,
+) -> Result<FaceCropSource, RuntimeError> {
+    let face_id = request.face_id.trim();
+    if face_id.is_empty() {
+        return Err(RuntimeError::invalid_detected_face("faceId is required"));
+    }
+
+    let scoped_root_path = request.root_path.as_deref().map(root_path_key);
+    let store_path = faces_path(runtime_home_path);
+    let record = read_face_records(&store_path)?
+        .into_iter()
+        .find(|record| {
+            record.face_id == face_id
+                && scoped_root_path
+                    .as_ref()
+                    .is_none_or(|root_path| record.root_path == *root_path)
+        })
+        .ok_or_else(|| RuntimeError::runtime_capability(format!("face not found: {face_id}")))?;
+    let root_relative_path = RootRelativePath::try_from(record.root_relative_path.as_str())?;
+    let absolute_path =
+        file_annotation_absolute_path(Path::new(&record.root_path), &root_relative_path)?;
+
+    let metadata = fs::symlink_metadata(&absolute_path)
+        .map_err(|source| RuntimeError::read_file(&absolute_path, source))?;
+    if !metadata.is_file() {
+        return Err(RuntimeError::runtime_capability(format!(
+            "Face Crop source is not a file: {}",
+            absolute_path.display()
+        )));
+    }
+
+    Ok(FaceCropSource {
+        absolute_path,
+        bounding_box: record.bounding_box,
+        media_type: record.media_type,
+        frame_ts_ms: record.frame_ts_ms,
+    })
 }
 
 pub(crate) fn list_asset_faces(
