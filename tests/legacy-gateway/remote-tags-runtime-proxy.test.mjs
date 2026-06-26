@@ -60,12 +60,13 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
       runtimeRequests.push({
         method: req.method,
         url: req.url,
+        cookie: req.headers.cookie,
         body,
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
 
-      if (req.url === '/v1/data/tags/options') {
+      if (req.url === '/v1/remote/tags/options') {
         res.end(JSON.stringify({
           ok: true,
           items: [{
@@ -79,15 +80,13 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
         return
       }
 
-      if (req.url === '/v1/data/tags/query') {
+      if (req.url === '/v1/remote/tags/query') {
         res.end(JSON.stringify({
           ok: true,
           page: 1,
           size: 1000,
           total: 1,
           items: [{
-            assetId: 'asset-1',
-            absolutePath: path.join(remoteRoot, 'albums/photo.jpg'),
             relativePath: 'albums/photo.jpg',
             rootRelativePath: 'albums/photo.jpg',
             tags: [tagRecord],
@@ -97,12 +96,10 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
         return
       }
 
-      if (req.url === '/v1/data/tags/file') {
+      if (req.url === '/v1/remote/tags/file') {
         res.end(JSON.stringify({
           ok: true,
           file: {
-            assetId: 'asset-1',
-            absolutePath: path.join(remoteRoot, 'albums/photo.jpg'),
             relativePath: 'albums/photo.jpg',
             rootRelativePath: 'albums/photo.jpg',
             tags: [tagRecord],
@@ -157,8 +154,8 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
       size: 1000,
       total: 1,
       items: [{
-        assetId: 'asset-1',
         relativePath: 'albums/photo.jpg',
+        rootRelativePath: 'albums/photo.jpg',
         tags: [tagRecord],
         updatedAt: 20,
       }],
@@ -171,8 +168,8 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
     assert.deepEqual(fileResponse, {
       ok: true,
       file: {
-        assetId: 'asset-1',
         relativePath: 'albums/photo.jpg',
+        rootRelativePath: 'albums/photo.jpg',
         tags: [tagRecord],
       },
     })
@@ -182,18 +179,21 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
     assert.deepEqual(runtimeRequests.map((request) => ({
       method: request.method,
       url: request.url,
+      cookie: request.cookie,
       body: JSON.parse(request.body),
     })), [
       {
         method: 'POST',
-        url: '/v1/data/tags/options',
-        body: { rootPath: remoteRoot },
+        url: '/v1/remote/tags/options',
+        cookie: sessionCookie,
+        body: { rootId: 'root-a' },
       },
       {
         method: 'POST',
-        url: '/v1/data/tags/query',
+        url: '/v1/remote/tags/query',
+        cookie: sessionCookie,
         body: {
-          rootPath: remoteRoot,
+          rootId: 'root-a',
           includeTagKeys: ['rating=5'],
           includeMatchMode: 'and',
           page: 1,
@@ -202,9 +202,10 @@ test('Remote Access Annotation Tags are served through Fauplay Runtime', async (
       },
       {
         method: 'POST',
-        url: '/v1/data/tags/file',
+        url: '/v1/remote/tags/file',
+        cookie: sessionCookie,
         body: {
-          rootPath: remoteRoot,
+          rootId: 'root-a',
           relativePath: 'albums/photo.jpg',
         },
       },

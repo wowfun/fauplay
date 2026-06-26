@@ -314,32 +314,6 @@ export async function readRuntimeFaceCrop(runtimeBaseUrl, options = {}) {
   }
 }
 
-export async function readRuntimeTagOptions(runtimeBaseUrl, options = {}) {
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/options', { rootPath }, options)
-}
-
-export async function queryRuntimeFileAnnotations(runtimeBaseUrl, options = {}) {
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/query', {
-    rootPath,
-    ...(Array.isArray(options.includeTagKeys) ? { includeTagKeys: options.includeTagKeys } : {}),
-    ...(Array.isArray(options.excludeTagKeys) ? { excludeTagKeys: options.excludeTagKeys } : {}),
-    ...(typeof options.includeMatchMode === 'string' ? { includeMatchMode: options.includeMatchMode } : {}),
-    ...(typeof options.page !== 'undefined' ? { page: options.page } : {}),
-    ...(typeof options.size !== 'undefined' ? { size: options.size } : {}),
-  }, options)
-}
-
-export async function readRuntimeFileAnnotation(runtimeBaseUrl, options = {}) {
-  const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
-  const relativePath = normalizeRequiredStringInput(options.relativePath, 'relativePath')
-  return postRuntimeJson(runtimeBaseUrl, '/v1/data/tags/file', {
-    rootPath,
-    relativePath,
-  }, options)
-}
-
 export async function listRuntimePeople(runtimeBaseUrl, options = {}) {
   const rootPath = normalizeRequiredStringInput(options.rootPath, 'rootPath')
   return postRuntimeJson(runtimeBaseUrl, '/v1/faces/list-people', {
@@ -363,6 +337,18 @@ export async function listRuntimeAssetFaces(runtimeBaseUrl, options = {}) {
     ...(personId ? { personId } : {}),
     ...(relativePath ? { relativePath } : {}),
   }, options)
+}
+
+export async function readRuntimeRemoteTagOptions(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/options', payload, options)
+}
+
+export async function queryRuntimeRemoteFileAnnotations(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/query', payload, options)
+}
+
+export async function readRuntimeRemoteFileAnnotation(runtimeBaseUrl, payload, options = {}) {
+  return postRuntimeJsonExchange(runtimeBaseUrl, '/v1/remote/tags/file', payload, options)
 }
 
 export async function readRuntimeRemoteSharedFavorites(runtimeBaseUrl, options = {}) {

@@ -13,18 +13,18 @@ import {
   forwardRemoteReadonlyRoots,
   forwardRemoteReadonlySessionLogin,
   forwardRemoteReadonlySessionLogout,
+  forwardRemoteReadonlyTagFile,
+  forwardRemoteReadonlyTagOptions,
+  forwardRemoteReadonlyTagQuery,
   forwardRemoteReadonlyTextPreview,
 } from './remote-sessions.mjs'
 import {
   formatRemoteAccessConfigSourceLog,
   getRemoteReadonlyCapabilities,
-  getRemoteReadonlyFileTags,
   listRemoteReadonlyFavorites,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
-  listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
-  queryRemoteReadonlyFilesByTags,
   removeRemoteReadonlyFavorite,
   resolveRemoteRoot,
   upsertRemoteReadonlyFavorite,
@@ -349,18 +349,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/tags/options') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await listRemoteReadonlyTagOptions(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyTagOptions(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -369,18 +362,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/tags/query') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await queryRemoteReadonlyFilesByTags(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyTagQuery(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }
@@ -389,18 +375,11 @@ export async function startGatewayServer(options = {}) {
 
     if (method === 'POST' && pathname === '/v1/remote/tags/file') {
       try {
-        const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
-        await ensureRemoteReadonlySessionAuthorized(
-          currentRemoteReadonlyConfig,
-          req,
-          res,
-          runtimeBaseUrl,
-        )
         const payload = await readJsonBody(req)
         if (!isObjectRecord(payload)) {
           throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
         }
-        sendJson(res, 200, await getRemoteReadonlyFileTags(currentRemoteReadonlyConfig, payload, runtimeBaseUrl))
+        await forwardRemoteReadonlyTagFile(req, res, runtimeBaseUrl, payload)
       } catch (error) {
         await sendRemoteReadonlyError(res, error)
       }

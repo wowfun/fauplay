@@ -62,10 +62,11 @@ pub use listing::{
 };
 pub use paths::RootRelativePath;
 pub use remote_access::{
-    RemoteFileContentRequest, RemoteFileContentResponse, RemoteFileListRequest,
-    RemoteFileListResponse, RemoteFileThumbnailRequest, RemoteFileThumbnailResponse,
-    RemoteListingEntry, RemoteRootEntry, RemoteRootsResponse, RemoteTextPreviewRequest,
-    RemoteTextPreviewResponse,
+    RemoteAnnotationTagOptionsRequest, RemoteFileAnnotationQueryRequest,
+    RemoteFileAnnotationReadRequest, RemoteFileContentRequest, RemoteFileContentResponse,
+    RemoteFileListRequest, RemoteFileListResponse, RemoteFileThumbnailRequest,
+    RemoteFileThumbnailResponse, RemoteListingEntry, RemoteRootEntry, RemoteRootsResponse,
+    RemoteTextPreviewRequest, RemoteTextPreviewResponse,
 };
 pub use root_operations::{
     RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,

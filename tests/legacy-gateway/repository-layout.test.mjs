@@ -114,14 +114,31 @@ test('Legacy Gateway no longer owns Remote Access directory traversal', async ()
 })
 
 test('Legacy Gateway no longer owns Remote Access tag data reads', async () => {
+  const remoteFileAccessSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-file-access.mjs', import.meta.url),
+    'utf8',
+  )
   const remoteReadonlySource = await readFile(
     new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
     'utf8',
   )
   assert.equal(remoteReadonlySource.includes('getFileTags'), false)
   assert.equal(remoteReadonlySource.includes('listTagOptions'), false)
   assert.equal(remoteReadonlySource.includes('queryFilesByTags'), false)
   assert.equal(remoteReadonlySource.includes('stripAbsolutePathFromTagQueryResult'), false)
+  assert.equal(remoteReadonlySource.includes('listRemoteReadonlyTagOptions'), false)
+  assert.equal(remoteReadonlySource.includes('queryRemoteReadonlyFilesByTags'), false)
+  assert.equal(remoteReadonlySource.includes('getRemoteReadonlyFileTags'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/data/tags/options'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/data/tags/query'), false)
+  assert.equal(remoteFileAccessSource.includes('/v1/data/tags/file'), false)
+  assert.equal(serverSource.includes('listRemoteReadonlyTagOptions'), false)
+  assert.equal(serverSource.includes('queryRemoteReadonlyFilesByTags'), false)
+  assert.equal(serverSource.includes('getRemoteReadonlyFileTags'), false)
 })
 
 test('Legacy Gateway no longer owns Remote Access face people data reads', async () => {

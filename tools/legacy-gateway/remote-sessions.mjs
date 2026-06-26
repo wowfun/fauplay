@@ -5,7 +5,10 @@ import {
   readRuntimeRemoteFileContent,
   readRuntimeRemoteFileList,
   readRuntimeRemoteFileThumbnail,
+  queryRuntimeRemoteFileAnnotations,
+  readRuntimeRemoteFileAnnotation,
   readRuntimeRemoteRoots,
+  readRuntimeRemoteTagOptions,
   readRuntimeRemoteTextPreview,
 } from './remote-file-access.mjs'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
@@ -90,6 +93,33 @@ export async function forwardRemoteReadonlyFileThumbnail(req, res, runtimeBaseUr
 
 export async function forwardRemoteReadonlyTextPreview(req, res, runtimeBaseUrl, payload = {}) {
   const result = await readRuntimeRemoteTextPreview(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyTagOptions(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await readRuntimeRemoteTagOptions(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyTagQuery(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await queryRuntimeRemoteFileAnnotations(runtimeBaseUrl, payload, {
+    cookieHeader: readHeader(req, 'cookie'),
+    userAgent: readHeader(req, 'user-agent'),
+    forwardedFor: readRemoteReadonlyClientId(req),
+  })
+  sendRuntimeSessionExchangeResponse(res, result)
+}
+
+export async function forwardRemoteReadonlyTagFile(req, res, runtimeBaseUrl, payload = {}) {
+  const result = await readRuntimeRemoteFileAnnotation(runtimeBaseUrl, payload, {
     cookieHeader: readHeader(req, 'cookie'),
     userAgent: readHeader(req, 'user-agent'),
     forwardedFor: readRemoteReadonlyClientId(req),

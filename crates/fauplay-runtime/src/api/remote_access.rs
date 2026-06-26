@@ -1,5 +1,6 @@
 use super::{
-    DirectoryEntryKind, FileContentResponse, ListingQuery, RootRelativePath, TextPreviewResponse,
+    DirectoryEntryKind, FileAnnotationMatchMode, FileContentResponse, ListingQuery,
+    RootRelativePath, TextPreviewResponse,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,4 +88,25 @@ pub struct RemoteFileThumbnailRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteFileThumbnailResponse {
     pub content: FileContentResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAnnotationTagOptionsRequest {
+    pub root_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFileAnnotationQueryRequest {
+    pub root_id: String,
+    pub include_tag_keys: Vec<String>,
+    pub exclude_tag_keys: Vec<String>,
+    pub include_match_mode: FileAnnotationMatchMode,
+    pub page: usize,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFileAnnotationReadRequest {
+    pub root_id: String,
+    pub path: RootRelativePath,
 }

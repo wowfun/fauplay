@@ -44,18 +44,19 @@ pub use api::{
     RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
     RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
     RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemoteFileContentRequest, RemoteFileContentResponse, RemoteFileListRequest,
-    RemoteFileListResponse, RemoteFileThumbnailRequest, RemoteFileThumbnailResponse,
-    RemoteListingEntry, RemotePublishedRoot, RemotePublishedRootSyncEntry,
-    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
-    RemoteRootEntry, RemoteRootsResponse, RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest,
-    RemoteSharedFavoriteRemoveResponse, RemoteSharedFavoriteUpsertRequest,
-    RemoteSharedFavoritesResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse,
-    RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse,
-    RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode,
-    RootRelativePath, RootTrashEntry, RootTrashFailureReason, RootTrashListRequest,
-    RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse, RootTrashRequest,
-    RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
+    RemoteAnnotationTagOptionsRequest, RemoteFileAnnotationQueryRequest,
+    RemoteFileAnnotationReadRequest, RemoteFileContentRequest, RemoteFileContentResponse,
+    RemoteFileListRequest, RemoteFileListResponse, RemoteFileThumbnailRequest,
+    RemoteFileThumbnailResponse, RemoteListingEntry, RemotePublishedRoot,
+    RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse,
+    RemotePublishedRootsResponse, RemoteRootEntry, RemoteRootsResponse, RemoteSharedFavorite,
+    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RemoteTextPreviewRequest,
+    RemoteTextPreviewResponse, RootMoveBatchFailureReason, RootMoveBatchItem, RootMoveBatchRequest,
+    RootMoveBatchResponse, RootMoveFailureReason, RootMoveRequest, RootMoveResponse, RootMoveRule,
+    RootMoveSearchMode, RootRelativePath, RootTrashEntry, RootTrashFailureReason,
+    RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
+    RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
 pub use server::{serve_http, serve_one_http_request};
 use std::collections::HashSet;
@@ -505,17 +506,11 @@ impl FauplayRuntime {
         &self,
         request: RemoteFileListRequest,
     ) -> Result<RemoteFileListResponse, RuntimeError> {
-        let config = self.load_remote_access_config()?;
         let root_id = request.root_id.trim().to_owned();
-        if root_id.is_empty() {
-            return Err(RuntimeError::runtime_capability("rootId is required"));
-        }
-        let Some(root) = config.roots.into_iter().find(|root| root.id == root_id) else {
-            return Err(RuntimeError::runtime_capability("Unknown Remote Root"));
-        };
+        let root_path = self.resolve_remote_root_path(&root_id)?;
 
         let listing = self.list_local_directory(ListDirectoryRequest {
-            root_path: root.path,
+            root_path,
             root_relative_path: request.path.clone(),
             flattened: request.flatten_view,
             entry_limit: request.entry_limit,
@@ -609,6 +604,54 @@ impl FauplayRuntime {
         let _size_preset = request.size_preset;
         let content = media::read_file_content_at_path(resource.absolute_path, None)?;
         Ok(RemoteFileThumbnailResponse { content })
+    }
+
+    pub fn list_remote_annotation_tag_options(
+        &self,
+        request: RemoteAnnotationTagOptionsRequest,
+    ) -> Result<AnnotationTagOptionsResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.list_annotation_tag_options(AnnotationTagOptionsRequest {
+            root_path: Some(root_path),
+        })
+    }
+
+    pub fn query_remote_file_annotations(
+        &self,
+        request: RemoteFileAnnotationQueryRequest,
+    ) -> Result<FileAnnotationQueryResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.query_file_annotations(FileAnnotationQueryRequest {
+            root_path: Some(root_path),
+            include_tag_keys: request.include_tag_keys,
+            exclude_tag_keys: request.exclude_tag_keys,
+            include_match_mode: request.include_match_mode,
+            page: request.page,
+            size: request.size,
+        })
+    }
+
+    pub fn read_remote_file_annotation(
+        &self,
+        request: RemoteFileAnnotationReadRequest,
+    ) -> Result<FileAnnotationReadResponse, RuntimeError> {
+        let root_path = self.resolve_remote_root_path(&request.root_id)?;
+        self.read_file_annotation(FileAnnotationReadRequest {
+            root_path,
+            root_relative_path: request.path,
+        })
+    }
+
+    fn resolve_remote_root_path(&self, root_id: &str) -> Result<PathBuf, RuntimeError> {
+        let config = self.load_remote_access_config()?;
+        let root_id = root_id.trim();
+        if root_id.is_empty() {
+            return Err(RuntimeError::runtime_capability("rootId is required"));
+        }
+        let Some(root) = config.roots.into_iter().find(|root| root.id == root_id) else {
+            return Err(RuntimeError::runtime_capability("Unknown Remote Root"));
+        };
+        Ok(root.path)
     }
 
     fn resolve_remote_file_resource(

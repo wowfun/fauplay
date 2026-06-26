@@ -217,3 +217,28 @@ pub(crate) fn send_remote_text_preview_request(
         .expect("response should be readable");
     response
 }
+
+pub(crate) fn send_remote_tags_request(
+    address: &str,
+    cookie: Option<&str>,
+    endpoint_path: &str,
+    body: &str,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    let cookie_header = cookie
+        .map(|value| format!("Cookie: {value}\r\n"))
+        .unwrap_or_default();
+    write!(
+        stream,
+        "POST {endpoint_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n{cookie_header}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    response
+}

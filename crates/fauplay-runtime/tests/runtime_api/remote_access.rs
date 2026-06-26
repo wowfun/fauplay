@@ -1,5 +1,6 @@
 use super::support::*;
 
+use fauplay_runtime::{FileAnnotationTagBindingRequest, RootRelativePath};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -511,6 +512,111 @@ fn runtime_api_remote_file_content_rejects_symlink_escape() {
     assert!(
         response.starts_with("HTTP/1.1 403 Forbidden\r\n"),
         "Remote File Content should reject symlink escapes from a Remote Root: {response}"
+    );
+}
+
+#[test]
+fn runtime_api_remote_annotation_tags_resolve_remote_roots_without_host_paths() {
+    let fixture =
+        Fixture::new("runtime_api_remote_annotation_tags_resolve_remote_roots_without_host_paths");
+    fixture.create_dir("Shared Root/albums");
+    fixture.write_file("Shared Root/albums/photo.jpg", "image");
+    let shared_root_path = fixture.root.join("Shared Root");
+    let runtime_home_path = fixture.root.join(".runtime-home");
+    let shared_root_json = json_path(&shared_root_path);
+
+    fixture.write_file(
+        ".runtime-home/global/remote-access.json",
+        &format!(
+            r#"{{
+  "enabled": true,
+  "rootSource": "manual",
+  "roots": [
+    {{
+      "id": "shared-root",
+      "label": "Shared Root",
+      "path": "{shared_root_json}"
+    }}
+  ]
+}}"#,
+        ),
+    );
+    fixture.write_file(
+        ".runtime-home/global/.env",
+        "FAUPLAY_REMOTE_ACCESS_TOKEN=secret-token\n",
+    );
+
+    let runtime = fauplay_runtime::FauplayRuntime::with_runtime_home_path(&runtime_home_path);
+    runtime
+        .bind_file_annotation_tag(FileAnnotationTagBindingRequest {
+            root_path: shared_root_path.clone(),
+            root_relative_path: RootRelativePath::try_from("albums/photo.jpg")
+                .expect("fixture path should be Root-relative"),
+            key: "rating".to_owned(),
+            value: "5".to_owned(),
+        })
+        .expect("fixture Annotation Tag should be bound");
+
+    let session_cookie_pair = login_remote_session_cookie_pair(runtime.clone());
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let options_response = send_remote_tags_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/tags/options",
+        r#"{"rootId":"shared-root"}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        options_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote Annotation Tag options should be served by the Runtime: {options_response}"
+    );
+    let options_payload = response_json(&options_response);
+    assert_eq!(options_payload["ok"], true);
+    assert_eq!(options_payload["items"][0]["tagKey"], "rating=5");
+    assert_eq!(options_payload["items"][0]["fileCount"], 1);
+
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let query_response = send_remote_tags_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/tags/query",
+        r#"{"rootId":"shared-root","includeTagKeys":["rating=5"],"includeMatchMode":"and","page":1,"size":10}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        query_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote File Annotation query should be served by the Runtime: {query_response}"
+    );
+    let query_payload = response_json(&query_response);
+    assert_eq!(query_payload["ok"], true);
+    assert_eq!(query_payload["total"], 1);
+    assert_eq!(
+        query_payload["items"][0]["relativePath"],
+        "albums/photo.jpg"
+    );
+    assert!(query_payload["items"][0].get("absolutePath").is_none());
+
+    let (address, server) = serve_runtime_once(runtime);
+    let file_response = send_remote_tags_request(
+        &address,
+        Some(&session_cookie_pair),
+        "/v1/remote/tags/file",
+        r#"{"rootId":"shared-root","relativePath":"albums/photo.jpg"}"#,
+    );
+    server.join().expect("server thread should finish");
+    assert!(
+        file_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "Remote File Annotation read should be served by the Runtime: {file_response}"
+    );
+    let file_payload = response_json(&file_response);
+    assert_eq!(file_payload["ok"], true);
+    assert_eq!(file_payload["file"]["relativePath"], "albums/photo.jpg");
+    assert_eq!(file_payload["file"]["tags"][0]["key"], "rating");
+    assert_eq!(file_payload["file"]["tags"][0]["value"], "5");
+    assert!(file_payload["file"].get("absolutePath").is_none());
+    assert!(
+        !query_response.contains(&shared_root_json) && !file_response.contains(&shared_root_json),
+        "Remote Annotation Tag responses must not expose Remote Root host paths"
     );
 }
 

@@ -2,20 +2,23 @@ use std::collections::HashMap;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::{
-    DirectoryEntryKind, FauplayRuntime, ListingEntryFilter, ListingOrder, ListingQuery,
-    ListingSortDirection, ListingSortKey, RemoteAccessConfigResponse,
-    RemoteAccessSessionAuthorizeRequest, RemoteAccessSessionLoginRequest,
-    RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse, RemoteAccessTokenVerifyRequest,
-    RemoteFileContentRequest, RemoteFileContentResponse, RemoteFileListRequest,
-    RemoteFileListResponse, RemoteFileThumbnailRequest, RemoteFileThumbnailResponse,
-    RemoteListingEntry, RemoteRootsResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse,
-    RootRelativePath,
+    AnnotationTagOptionsResponse, DirectoryEntryKind, FauplayRuntime, FileAnnotationFile,
+    FileAnnotationMatchMode, FileAnnotationQueryResponse, FileAnnotationReadResponse,
+    ListingEntryFilter, ListingOrder, ListingQuery, ListingSortDirection, ListingSortKey,
+    RemoteAccessConfigResponse, RemoteAccessSessionAuthorizeRequest,
+    RemoteAccessSessionLoginRequest, RemoteAccessSessionLogoutRequest, RemoteAccessSessionResponse,
+    RemoteAccessTokenVerifyRequest, RemoteAnnotationTagOptionsRequest,
+    RemoteFileAnnotationQueryRequest, RemoteFileAnnotationReadRequest, RemoteFileContentRequest,
+    RemoteFileContentResponse, RemoteFileListRequest, RemoteFileListResponse,
+    RemoteFileThumbnailRequest, RemoteFileThumbnailResponse, RemoteListingEntry,
+    RemoteRootsResponse, RemoteTextPreviewRequest, RemoteTextPreviewResponse, RootRelativePath,
 };
 
 use super::{
     HttpResponse, binary_response_with_headers, error_json, escape_json_string, http_response,
-    http_response_with_headers, json_bool_field, json_string_field, json_string_or_default,
-    optional_usize_json, parse_header_value, parse_json_body, text_preview_response_json,
+    http_response_with_headers, json_bool_field, json_string_array_field, json_string_field,
+    json_string_or_default, json_usize_or_default, optional_usize_json, parse_header_value,
+    parse_json_body, text_preview_response_json,
 };
 
 const REMOTE_SESSION_COOKIE_NAME: &str = "__Host-fauplay-remote-session";
@@ -301,6 +304,121 @@ pub(in crate::server) fn handle_remote_text_preview(
     }
 }
 
+pub(in crate::server) fn handle_remote_tag_options(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+
+    match runtime.list_remote_annotation_tag_options(RemoteAnnotationTagOptionsRequest {
+        root_id: root_id.to_owned(),
+    }) {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &remote_annotation_tag_options_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_tag_query(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let page = json_usize_or_default(&payload, "page", 1)
+        .unwrap_or(1)
+        .max(1);
+    let size = json_usize_or_default(&payload, "size", 500)
+        .unwrap_or(500)
+        .clamp(1, 5000);
+    let include_match_mode =
+        match json_string_or_default(&payload, "includeMatchMode", "or").as_str() {
+            "and" => FileAnnotationMatchMode::And,
+            _ => FileAnnotationMatchMode::Or,
+        };
+
+    match runtime.query_remote_file_annotations(RemoteFileAnnotationQueryRequest {
+        root_id: root_id.to_owned(),
+        include_tag_keys: json_string_array_field(&payload, "includeTagKeys"),
+        exclude_tag_keys: json_string_array_field(&payload, "excludeTagKeys"),
+        include_match_mode,
+        page,
+        size,
+    }) {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &remote_file_annotation_query_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
+pub(in crate::server) fn handle_remote_tag_file(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let headers = match authorize_remote_session_headers(runtime, request) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_id) = json_string_field(&payload, "rootId") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootId is required\"}");
+    };
+    let Some(relative_path) = json_string_field(&payload, "relativePath") else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"relativePath is required\"}",
+        );
+    };
+    let path = match RootRelativePath::try_from(relative_path) {
+        Ok(path) => path,
+        Err(error) => return http_response(400, "Bad Request", &error_json(&error.to_string())),
+    };
+
+    match runtime.read_remote_file_annotation(RemoteFileAnnotationReadRequest {
+        root_id: root_id.to_owned(),
+        path,
+    }) {
+        Ok(response) => http_response_with_headers(
+            200,
+            "OK",
+            &remote_file_annotation_read_response_json(response),
+            headers,
+        ),
+        Err(error) => remote_error_response(error, headers),
+    }
+}
+
 fn remote_access_config_json(response: RemoteAccessConfigResponse) -> String {
     let roots = response
         .roots
@@ -497,6 +615,74 @@ fn remote_text_preview_http_response(
         "OK",
         &text_preview_response_json(response.preview),
         headers,
+    )
+}
+
+fn remote_annotation_tag_options_response_json(response: AnnotationTagOptionsResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(|item| {
+            format!(
+                "{{\"tagKey\":\"{}\",\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\",\"fileCount\":{}}}",
+                escape_json_string(&item.tag_key),
+                escape_json_string(&item.key),
+                escape_json_string(&item.value),
+                escape_json_string(&item.source),
+                item.file_count,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!("{{\"ok\":true,\"items\":[{items}]}}")
+}
+
+fn remote_file_annotation_query_response_json(response: FileAnnotationQueryResponse) -> String {
+    let items = response
+        .items
+        .into_iter()
+        .map(remote_file_annotation_file_json)
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{{\"ok\":true,\"page\":{},\"size\":{},\"total\":{},\"items\":[{items}]}}",
+        response.page, response.size, response.total,
+    )
+}
+
+fn remote_file_annotation_read_response_json(response: FileAnnotationReadResponse) -> String {
+    match response.file {
+        Some(file) => format!(
+            "{{\"ok\":true,\"file\":{}}}",
+            remote_file_annotation_file_json(file)
+        ),
+        None => "{\"ok\":true,\"file\":null}".to_owned(),
+    }
+}
+
+fn remote_file_annotation_file_json(file: FileAnnotationFile) -> String {
+    let root_relative_path = file.root_relative_path.to_string();
+    let tags = file
+        .tags
+        .into_iter()
+        .map(|tag| {
+            format!(
+                "{{\"key\":\"{}\",\"value\":\"{}\",\"source\":\"{}\",\"appliedAt\":{},\"updatedAt\":{}}}",
+                escape_json_string(&tag.key),
+                escape_json_string(&tag.value),
+                escape_json_string(&tag.source),
+                tag.applied_at_ms,
+                tag.applied_at_ms,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"relativePath\":\"{}\",\"rootRelativePath\":\"{}\",\"tags\":[{tags}]}}",
+        escape_json_string(&root_relative_path),
+        escape_json_string(&root_relative_path),
     )
 }
 

@@ -3,11 +3,8 @@ import path from 'node:path'
 import {
   listRuntimeAssetFaces,
   listRuntimePeople,
-  queryRuntimeFileAnnotations,
   readRuntimeRemoteAccessConfig,
-  readRuntimeFileAnnotation,
   readRuntimeRemoteSharedFavorites,
-  readRuntimeTagOptions,
   removeRuntimeRemoteSharedFavorite,
   upsertRuntimeRemoteSharedFavorite,
 } from './remote-file-access.mjs'
@@ -246,80 +243,6 @@ function toFiniteNumber(value) {
   return Number.isFinite(next) ? next : undefined
 }
 
-function toRemoteReadonlyTagRecord(tag) {
-  if (!isObjectRecord(tag)) return null
-  const result = {}
-  if (typeof tag.id === 'string' || typeof tag.id === 'number') {
-    result.id = tag.id
-  }
-  if (typeof tag.key === 'string') {
-    result.key = tag.key
-  }
-  if (typeof tag.value === 'string') {
-    result.value = tag.value
-  }
-  if (typeof tag.source === 'string') {
-    result.source = tag.source
-  }
-  const appliedAt = toFiniteNumber(tag.appliedAt)
-  if (typeof appliedAt === 'number') {
-    result.appliedAt = appliedAt
-  }
-  const updatedAt = toFiniteNumber(tag.updatedAt)
-  if (typeof updatedAt === 'number') {
-    result.updatedAt = updatedAt
-  }
-  if (tag.score === null) {
-    result.score = null
-  } else {
-    const score = toFiniteNumber(tag.score)
-    if (typeof score === 'number') {
-      result.score = score
-    }
-  }
-  return result
-}
-
-function toRemoteReadonlyFileTagView(file) {
-  if (!isObjectRecord(file)) return null
-  const relativePathSource = typeof file.relativePath === 'string' && file.relativePath.trim()
-    ? file.relativePath
-    : (typeof file.rootRelativePath === 'string' ? file.rootRelativePath : '')
-  const relativePath = normalizeOptionalRemotePath(relativePathSource, 'relativePath')
-  const result = {
-    relativePath,
-    tags: Array.isArray(file.tags)
-      ? file.tags.map(toRemoteReadonlyTagRecord).filter(Boolean)
-      : [],
-  }
-  if (typeof file.assetId === 'string' && file.assetId.trim()) {
-    result.assetId = file.assetId.trim()
-  }
-  const updatedAt = toFiniteNumber(file.updatedAt)
-  if (typeof updatedAt === 'number') {
-    result.updatedAt = updatedAt
-  }
-  return result
-}
-
-function toRemoteReadonlyTagQueryResult(result) {
-  const items = Array.isArray(result?.items)
-    ? result.items.map(toRemoteReadonlyFileTagView).filter(Boolean)
-    : []
-  return {
-    ...result,
-    items,
-  }
-}
-
-function toRemoteReadonlyFileTagResult(result) {
-  const file = toRemoteReadonlyFileTagView(result?.file)
-  return {
-    ...result,
-    file,
-  }
-}
-
 function omitRemoteReadonlyHostPathFields(value) {
   if (!isObjectRecord(value)) return value
   return Object.fromEntries(
@@ -338,36 +261,6 @@ function toRemoteReadonlyRuntimeItemsResult(result) {
     ...safeResult,
     items,
   }
-}
-
-export async function listRemoteReadonlyTagOptions(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  return readRuntimeTagOptions(runtimeBaseUrl, {
-    rootPath: root.path,
-  })
-}
-
-export async function queryRemoteReadonlyFilesByTags(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const result = await queryRuntimeFileAnnotations(runtimeBaseUrl, {
-    rootPath: root.path,
-    includeTagKeys: payload.includeTagKeys,
-    excludeTagKeys: payload.excludeTagKeys,
-    includeMatchMode: payload.includeMatchMode,
-    page: payload.page,
-    size: payload.size,
-  })
-  return toRemoteReadonlyTagQueryResult(result)
-}
-
-export async function getRemoteReadonlyFileTags(remoteConfig, payload = {}, runtimeBaseUrl) {
-  const root = resolveRemoteRoot(remoteConfig, payload.rootId)
-  const normalizedRelativePath = normalizeRelativePath(payload.relativePath, 'relativePath')
-  const result = await readRuntimeFileAnnotation(runtimeBaseUrl, {
-    rootPath: root.path,
-    relativePath: normalizedRelativePath,
-  })
-  return toRemoteReadonlyFileTagResult(result)
 }
 
 export async function listRemoteReadonlyPeople(remoteConfig, payload = {}, runtimeBaseUrl) {
