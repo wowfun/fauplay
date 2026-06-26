@@ -172,3 +172,23 @@ test('Legacy Gateway no longer keeps the old local data layer', async () => {
   )
   assert.equal(remoteReadonlySource.includes("from './data/"), false)
 })
+
+test('Legacy Gateway no longer keeps the old Runtime MCP route bridge', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/http-routes.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/runtime-mcp-bridge.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(serverSource.includes('createRuntimeMcpBridge'), false)
+  assert.equal(serverSource.includes('findHttpGatewayRoute'), false)
+  assert.equal(serverSource.includes('handleHttpGatewayRoute'), false)
+  assert.equal(serverSource.includes('Runtime MCP bridge'), false)
+})

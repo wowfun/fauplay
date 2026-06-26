@@ -1,10 +1,6 @@
 import http from 'node:http'
 import { stat } from 'node:fs/promises'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
-import {
-  createRuntimeMcpBridge,
-  resolveRuntimeMcpBaseUrl,
-} from './runtime-mcp-bridge.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
   createRuntimeRememberedDevice,
@@ -19,10 +15,6 @@ import {
   sendRemoteRangeNotSatisfiable,
   sendRuntimeFileContentResponse,
 } from './remote-file-access.mjs'
-import {
-  findHttpGatewayRoute,
-  handleHttpGatewayRoute,
-} from './http-routes.mjs'
 import {
   clearRemoteReadonlyLoginFailures,
   clearRemoteReadonlySession,
@@ -59,6 +51,7 @@ import {
 
 const DEFAULT_PORT = Number(process.env.FAUPLAY_GATEWAY_PORT || 3210)
 const DEFAULT_HOST = '127.0.0.1'
+const DEFAULT_RUNTIME_BASE_URL = 'http://127.0.0.1:3211'
 const GATEWAY_VERSION = '0.2.0'
 const REMOTE_CONTENT_CACHE_CONTROL = 'private, no-store'
 const REMOTE_DERIVATIVE_CACHE_CONTROL = 'private, max-age=300'
@@ -67,6 +60,16 @@ const REMOTE_MAX_RANGE_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_MAX_RANGE_
 function readPositiveIntegerEnv(name, fallback) {
   const raw = Number.parseInt(process.env[name] || '', 10)
   return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+function resolveRuntimeBaseUrl(env = process.env) {
+  const raw = (
+    env.FAUPLAY_RUNTIME_BASE_URL
+    || env.VITE_FAUPLAY_RUNTIME_BASE_URL
+    || ''
+  )
+  const normalized = typeof raw === 'string' ? raw.trim() : ''
+  return (normalized || DEFAULT_RUNTIME_BASE_URL).replace(/\/+$/, '')
 }
 
 async function readOptionalFileFingerprint(filePath) {
@@ -233,12 +236,7 @@ export async function startGatewayServer(options = {}) {
   const port = Number(options.port || DEFAULT_PORT)
   const runtimeBaseUrl = typeof options.runtimeBaseUrl === 'string' && options.runtimeBaseUrl.trim()
     ? options.runtimeBaseUrl.trim()
-    : resolveRuntimeMcpBaseUrl()
-  const runtime = createRuntimeMcpBridge({
-    baseUrl: runtimeBaseUrl,
-    callTimeoutMs: Number(process.env.FAUPLAY_RUNTIME_MCP_CALL_TIMEOUT_MS || process.env.FAUPLAY_MCP_CALL_TIMEOUT_MS || 120000),
-    initTimeoutMs: Number(process.env.FAUPLAY_RUNTIME_MCP_INIT_TIMEOUT_MS || process.env.FAUPLAY_MCP_INIT_TIMEOUT_MS || 5000),
-  })
+    : resolveRuntimeBaseUrl()
 
   let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
   const hydrateRemoteReadonlyRoots = async (config) => {
@@ -551,21 +549,6 @@ export async function startGatewayServer(options = {}) {
       return
     }
 
-    if (findHttpGatewayRoute(method, pathname)) {
-      try {
-        const payload = await readJsonBody(req)
-        if (!isObjectRecord(payload)) {
-          throw createMcpRuntimeError('MCP_INVALID_PARAMS', 'Request body must be a JSON object', 400)
-        }
-
-        const result = await handleHttpGatewayRoute(runtime, method, pathname, payload, requestUrl)
-        sendJson(res, 200, result ?? { ok: true })
-      } catch (error) {
-        sendJson(res, resolveErrorStatusCode(error), toHttpErrorBody(error))
-      }
-      return
-    }
-
     if (method === 'POST' && pathname === '/v1/remote/files/list') {
       try {
         const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
@@ -729,7 +712,7 @@ export async function startGatewayServer(options = {}) {
 
   server.listen(port, host, () => {
     console.log(`Fauplay gateway listening on http://${host}:${port}`)
-    console.log(`[gateway] Runtime MCP bridge: ${runtimeBaseUrl.replace(/\/+$/, '')}/v1/mcp`)
+    console.log(`[gateway] Fauplay Runtime API: ${runtimeBaseUrl}`)
     console.log('[gateway] Remote access config files:')
     for (const source of remoteReadonlyConfig.configSources) {
       console.log(formatRemoteAccessConfigSourceLog(source))
@@ -738,7 +721,6 @@ export async function startGatewayServer(options = {}) {
 
   const shutdown = async () => {
     server.close()
-    await runtime.shutdown()
   }
 
   process.once('SIGINT', () => {
