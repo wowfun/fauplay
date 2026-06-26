@@ -56,6 +56,15 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         Some(("POST", "/v1/faces/detect-assets")) => {
             faces::handle_detect_assets_faces_json(runtime, request)
         }
+        Some(("POST", "/v1/faces/detect-assets/jobs")) => {
+            faces::handle_start_detect_assets_job_json(runtime, request)
+        }
+        Some(("GET", target)) if target.starts_with("/v1/faces/detect-assets/jobs/") => {
+            handle_detect_assets_job_get(runtime, target)
+        }
+        Some(("POST", target)) if target.starts_with("/v1/faces/detect-assets/jobs/") => {
+            handle_detect_assets_job_post(runtime, target)
+        }
         Some(("POST", "/v1/faces/list-asset-faces")) => {
             faces::handle_list_asset_faces_json(runtime, request)
         }
@@ -258,8 +267,60 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
     }
 }
 
+fn handle_detect_assets_job_get(runtime: &FauplayRuntime, target: &str) -> HttpResponse {
+    let Some((job_id, action, query)) = parse_detect_assets_job_target(target) else {
+        return http_response(404, "Not Found", "{\"error\":\"not found\"}");
+    };
+    match action {
+        Some("items") => {
+            let query = query.map(parse_query_string).unwrap_or_default();
+            let offset = query
+                .get("offset")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0);
+            let limit = query
+                .get("limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(100);
+            faces::handle_list_detect_assets_job_items(runtime, &job_id, offset, limit)
+        }
+        None => faces::handle_get_detect_assets_job(runtime, &job_id),
+        _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
+    }
+}
+
+fn handle_detect_assets_job_post(runtime: &FauplayRuntime, target: &str) -> HttpResponse {
+    let Some((job_id, action, _query)) = parse_detect_assets_job_target(target) else {
+        return http_response(404, "Not Found", "{\"error\":\"not found\"}");
+    };
+    match action {
+        Some("cancel") => faces::handle_cancel_detect_assets_job(runtime, &job_id),
+        _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
+    }
+}
+
+fn parse_detect_assets_job_target(target: &str) -> Option<(String, Option<&str>, Option<&str>)> {
+    let rest = target.strip_prefix("/v1/faces/detect-assets/jobs/")?;
+    let (path, query) = rest
+        .split_once('?')
+        .map(|(path, query)| (path, Some(query)))
+        .unwrap_or((rest, None));
+    let (job_id, action) = path
+        .split_once('/')
+        .map(|(job_id, action)| (job_id, Some(action)))
+        .unwrap_or((path, None));
+    let job_id = percent_decode(job_id);
+    if job_id.trim().is_empty() {
+        return None;
+    }
+    Some((job_id, action, query))
+}
+
 fn is_preflight_target(target: &str) -> bool {
     if target.starts_with("/v1/admin/remembered-devices/") {
+        return true;
+    }
+    if target.starts_with("/v1/faces/detect-assets/jobs/") {
         return true;
     }
 
@@ -272,6 +333,7 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/mcp"
             | "/v1/faces/detect-asset"
             | "/v1/faces/detect-assets"
+            | "/v1/faces/detect-assets/jobs"
             | "/v1/faces/list-asset-faces"
             | "/v1/faces/list-review-faces"
             | "/v1/faces/list-people"

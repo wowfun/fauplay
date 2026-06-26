@@ -63,6 +63,59 @@ pub enum FaceDetectAssetsItemStatus {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsJobSnapshot {
+    pub ok: bool,
+    pub job_id: String,
+    pub status: FaceDetectAssetsJobStatus,
+    pub total: usize,
+    pub unique: usize,
+    pub processed: usize,
+    pub scanned: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub detected_faces: usize,
+    pub current_path: Option<RootRelativePath>,
+    pub batch_index: usize,
+    pub batch_count: usize,
+    pub pre_cluster: Option<FaceClusterPendingResponse>,
+    pub post_cluster: Option<FaceClusterPendingResponse>,
+    pub error: Option<String>,
+    pub created_at_ms: u64,
+    pub started_at_ms: Option<u64>,
+    pub updated_at_ms: u64,
+    pub finished_at_ms: Option<u64>,
+    pub recent_items: Vec<FaceDetectAssetsItem>,
+    pub failure_summary: Vec<FaceDetectAssetsJobFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsJobItemsResponse {
+    pub job_id: String,
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
+    pub items: Vec<FaceDetectAssetsItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetectAssetsJobFailure {
+    pub root_relative_path: RootRelativePath,
+    pub media_type: Option<FaceMediaType>,
+    pub reason_code: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceDetectAssetsJobStatus {
+    Queued,
+    Running,
+    Canceling,
+    Canceled,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FaceListAssetFacesRequest {
     pub root_path: PathBuf,
     pub root_relative_path: Option<RootRelativePath>,

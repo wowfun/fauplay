@@ -20,6 +20,10 @@ const runtimeOwnedLocalRoutes = [
   ['POST', '/v1/recycle/items/restore'],
   ['POST', '/v1/faces/detect-asset'],
   ['POST', '/v1/faces/detect-assets'],
+  ['POST', '/v1/faces/detect-assets/jobs'],
+  ['GET', '/v1/faces/detect-assets/jobs/job-1'],
+  ['GET', '/v1/faces/detect-assets/jobs/job-1/items'],
+  ['POST', '/v1/faces/detect-assets/jobs/job-1/cancel'],
   ['POST', '/v1/faces/list-asset-faces'],
   ['POST', '/v1/faces/list-review-faces'],
   ['POST', '/v1/faces/list-people'],
@@ -43,9 +47,4 @@ test('Legacy Gateway HTTP route registry does not expose Runtime-owned local cap
       `${method} ${pathname} should be owned by Fauplay Runtime`,
     )
   }
-})
-
-test('Legacy Gateway HTTP route registry keeps face migration routes online', () => {
-  assert.notEqual(findHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs'), null)
-  assert.notEqual(findHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/job-1'), null)
 })

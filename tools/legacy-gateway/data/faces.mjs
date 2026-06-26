@@ -28,7 +28,6 @@ import {
   syncVisionFaceTags,
 } from './storage.mjs'
 import {
-  createFaceScanRuntime,
   getFaceScanMediaType,
   markAssetFaceDetection,
 } from './faces-scan.mjs'
@@ -49,16 +48,6 @@ const FACE_ERROR_STATUS_CODES = {
   FACE_ALREADY_IGNORED: 409,
   FACE_STATE_CONFLICT: 409,
 }
-const faceScanRuntime = createFaceScanRuntime({
-  callVisionInference,
-  clusterPendingFaces,
-  saveDetectedFaces,
-})
-export const createDetectAssetsJob = faceScanRuntime.createDetectAssetsJob
-export const getDetectAssetsJob = faceScanRuntime.getDetectAssetsJob
-export const cancelDetectAssetsJob = faceScanRuntime.cancelDetectAssetsJob
-export const listDetectAssetsJobItems = faceScanRuntime.listDetectAssetsJobItems
-
 function parsePeopleScope(params) {
   const rawScope = typeof params?.scope === 'string' ? params.scope.trim() : 'global'
   if (rawScope !== 'global' && rawScope !== 'root') {

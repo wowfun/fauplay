@@ -2,6 +2,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
+use std::thread;
+use std::time::Duration;
 
 use fauplay_runtime::FauplayRuntime;
 
@@ -448,6 +450,157 @@ rl.on('line', (line) => {
     assert_eq!(second_json["items"][0]["reasonCode"], "ALREADY_DETECTED");
     assert_eq!(second_json["items"][0]["mediaType"], "image");
     assert_eq!(second_json["items"][0]["faceCount"], 0);
+}
+
+#[test]
+fn runtime_api_faces_runs_detect_assets_job_through_runtime() {
+    let fixture = Fixture::new("runtime_api_faces_runs_detect_assets_job_through_runtime");
+    let runtime_home_path = fixture.root.join("runtime-home");
+    fs::create_dir_all(&runtime_home_path).expect("runtime home should be created");
+    fixture.write_file("local-root/photos/ada.jpg", "fake image bytes");
+    fixture.write_file("local-root/docs/readme.txt", "not media");
+    fixture.write_file(
+        "mock-vision-face-server.mjs",
+        r#"
+import readline from 'node:readline'
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+
+rl.on('line', (line) => {
+  const request = JSON.parse(line)
+  if (request.method === 'tools/list') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        tools: [{
+          name: 'vision.face',
+          description: 'Detect faces',
+          inputSchema: { type: 'object' }
+        }]
+      }
+    }) + '\n')
+    return
+  }
+
+  if (request.method === 'tools/call' && request.params?.name === 'vision.face') {
+    const args = request.params.arguments ?? {}
+    if (args.operation !== 'detectAsset' || args.relativePath !== 'photos/ada.jpg') {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32602,
+          message: 'unexpected vision.face arguments',
+          data: { code: 'MCP_INVALID_PARAMS' }
+        }
+      }) + '\n')
+      return
+    }
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        faces: [{
+          boundingBox: { x1: 0.2, y1: 0.2, x2: 0.5, y2: 0.8 },
+          score: 0.98,
+          mediaType: 'image',
+          embedding: [0.4, 0.5, 0.6]
+        }]
+      }
+    }) + '\n')
+    return
+  }
+
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0',
+    id: request.id,
+    error: {
+      code: -32000,
+      message: 'unknown tool',
+      data: { code: 'MCP_TOOL_NOT_FOUND' }
+    }
+  }) + '\n')
+})
+"#,
+    );
+    let mock_server_path = fixture.root.join("mock-vision-face-server.mjs");
+    let config_path = fixture.root.join("mcp.json");
+    fs::write(
+        &config_path,
+        serde_json::json!({
+            "servers": {
+                "vision": {
+                    "type": "stdio",
+                    "command": "node",
+                    "args": [mock_server_path.display().to_string()],
+                    "callTimeoutMs": 2000,
+                    "initTimeoutMs": 2000
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("MCP config should be written");
+
+    let runtime =
+        FauplayRuntime::with_runtime_home_path_and_mcp_config_path(runtime_home_path, config_path);
+    let root_path = fixture.root.join("local-root");
+    let started_json = post_runtime_json(
+        runtime.clone(),
+        "/v1/faces/detect-assets/jobs",
+        serde_json::json!({
+            "rootPath": root_path.display().to_string(),
+            "relativePaths": [
+                "photos/ada.jpg",
+                "photos/ada.jpg",
+                "docs/readme.txt"
+            ],
+            "runCluster": false
+        }),
+    );
+
+    let job_id = started_json["jobId"]
+        .as_str()
+        .expect("start response should include jobId")
+        .to_owned();
+    assert_eq!(started_json["ok"], true);
+    assert_eq!(started_json["total"], 3);
+    assert_eq!(started_json["unique"], 2);
+    assert_eq!(started_json["processed"], 0);
+    assert_eq!(started_json["recentItems"], serde_json::json!([]));
+
+    let finished_json = poll_runtime_job_until_terminal(runtime.clone(), &job_id);
+    assert_eq!(finished_json["ok"], true);
+    assert_eq!(finished_json["jobId"], job_id);
+    assert_eq!(finished_json["status"], "succeeded");
+    assert_eq!(finished_json["total"], 3);
+    assert_eq!(finished_json["unique"], 2);
+    assert_eq!(finished_json["processed"], 3);
+    assert_eq!(finished_json["scanned"], 1);
+    assert_eq!(finished_json["skipped"], 2);
+    assert_eq!(finished_json["failed"], 0);
+    assert_eq!(finished_json["detectedFaces"], 1);
+    assert_eq!(finished_json["postCluster"], serde_json::Value::Null);
+    assert_eq!(finished_json["failureSummary"], serde_json::json!([]));
+
+    let items_json = get_runtime_json(
+        runtime,
+        &format!(
+            "/v1/faces/detect-assets/jobs/{}/items?offset=0&limit=10",
+            job_id
+        ),
+    );
+    assert_eq!(items_json["ok"], true);
+    assert_eq!(items_json["jobId"], job_id);
+    assert_eq!(items_json["total"], 3);
+    assert_eq!(items_json["items"][0]["status"], "detected");
+    assert_eq!(items_json["items"][0]["relativePath"], "photos/ada.jpg");
+    assert_eq!(items_json["items"][0]["detected"], 1);
+    assert_eq!(items_json["items"][1]["status"], "skipped");
+    assert_eq!(items_json["items"][1]["reasonCode"], "DUPLICATE_PATH");
+    assert_eq!(items_json["items"][2]["status"], "skipped");
+    assert_eq!(items_json["items"][2]["reasonCode"], "UNSUPPORTED_MEDIA");
 }
 
 #[test]
@@ -1190,6 +1343,45 @@ fn post_runtime_json(
         "{path} should be handled by the Rust Runtime: {response}"
     );
     response_json(&response)
+}
+
+fn get_runtime_json(runtime: FauplayRuntime, path: &str) -> serde_json::Value {
+    let (address, server) = serve_runtime_once(runtime);
+    let mut stream = TcpStream::connect(address).expect("client should connect");
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    )
+    .expect("request should be written");
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("response should be readable");
+    server.join().expect("server thread should finish");
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "{path} should be handled by the Rust Runtime: {response}"
+    );
+    response_json(&response)
+}
+
+fn poll_runtime_job_until_terminal(runtime: FauplayRuntime, job_id: &str) -> serde_json::Value {
+    let path = format!("/v1/faces/detect-assets/jobs/{job_id}");
+    let mut last_json = serde_json::Value::Null;
+    for _ in 0..20 {
+        let snapshot = get_runtime_json(runtime.clone(), &path);
+        if matches!(
+            snapshot["status"].as_str(),
+            Some("succeeded" | "failed" | "canceled")
+        ) {
+            return snapshot;
+        }
+        last_json = snapshot;
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("face scan job did not finish: {last_json}");
 }
 
 fn response_json(response: &str) -> serde_json::Value {

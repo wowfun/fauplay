@@ -12,16 +12,18 @@ pub use api::{
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
     FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
-    FaceDetectAssetsRequest, FaceDetectAssetsResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
-    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
-    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
-    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
-    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
-    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
-    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
-    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse, FaceDetectAssetsJobSnapshot,
+    FaceDetectAssetsJobStatus, FaceDetectAssetsRequest, FaceDetectAssetsResponse,
+    FaceListAssetFacesRequest, FaceListAssetFacesResponse, FaceListPeopleRequest,
+    FaceListPeopleResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType,
+    FaceMergePeopleRequest, FaceMergePeopleResponse, FaceMutateFacesRequest,
+    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
+    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FileAnnotationActionSource,
+    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
+    FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
+    FileAnnotationMutationResponse, FileAnnotationPathMapping,
+    FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
@@ -53,6 +55,7 @@ use std::path::PathBuf;
 pub struct FauplayRuntime {
     runtime_home_path: PathBuf,
     mcp_runtime: mcp::McpRuntime,
+    face_scan_jobs: tasks::FaceScanJobs,
 }
 
 impl FauplayRuntime {
@@ -75,6 +78,7 @@ impl FauplayRuntime {
         let runtime_home_path = runtime_home_path.into();
         Self {
             mcp_runtime: mcp::McpRuntime::new(runtime_home_path.clone(), mcp_config_path.into()),
+            face_scan_jobs: tasks::FaceScanJobs::default(),
             runtime_home_path,
         }
     }
@@ -246,6 +250,39 @@ impl FauplayRuntime {
             post_cluster,
             items,
         })
+    }
+
+    pub fn start_detect_assets_job(
+        &self,
+        request: FaceDetectAssetsRequest,
+    ) -> Result<FaceDetectAssetsJobSnapshot, RuntimeError> {
+        self.face_scan_jobs
+            .start_detect_assets_job(self.clone(), request)
+    }
+
+    pub fn get_detect_assets_job(
+        &self,
+        job_id: &str,
+    ) -> Result<FaceDetectAssetsJobSnapshot, RuntimeError> {
+        self.face_scan_jobs.get_detect_assets_job(job_id)
+    }
+
+    pub fn cancel_detect_assets_job(
+        &self,
+        job_id: &str,
+    ) -> Result<FaceDetectAssetsJobSnapshot, RuntimeError> {
+        self.face_scan_jobs
+            .cancel_detect_assets_job(self.clone(), job_id)
+    }
+
+    pub fn list_detect_assets_job_items(
+        &self,
+        job_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<FaceDetectAssetsJobItemsResponse, RuntimeError> {
+        self.face_scan_jobs
+            .list_detect_assets_job_items(job_id, offset, limit)
     }
 
     pub fn list_asset_faces(

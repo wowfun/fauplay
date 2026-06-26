@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use crate::{
     FaceClusterPendingRequest, FaceClusterPendingResponse, FaceDetectAssetRequest,
     FaceDetectAssetResponse, FaceDetectAssetsItem, FaceDetectAssetsItemStatus,
-    FaceDetectAssetsRequest, FaceDetectAssetsResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceListPeopleRequest, FaceListPeopleResponse,
-    FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType, FaceMergePeopleRequest,
-    FaceMergePeopleResponse, FaceMutateFacesRequest, FaceMutateFacesResponse, FaceMutationAction,
-    FaceMutationItem, FaceRecord, FaceRenamePersonRequest, FaceRenamePersonResponse,
-    FaceReviewBucket, FaceScope, FaceStatus, FaceSuggestPeopleRequest, FaceSuggestPeopleResponse,
-    FauplayRuntime, PersonSuggestion, PersonSuggestionFace, PersonSummary, RootRelativePath,
+    FaceDetectAssetsJobFailure, FaceDetectAssetsJobItemsResponse, FaceDetectAssetsJobSnapshot,
+    FaceDetectAssetsJobStatus, FaceDetectAssetsRequest, FaceDetectAssetsResponse,
+    FaceListAssetFacesRequest, FaceListAssetFacesResponse, FaceListPeopleRequest,
+    FaceListPeopleResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse, FaceMediaType,
+    FaceMergePeopleRequest, FaceMergePeopleResponse, FaceMutateFacesRequest,
+    FaceMutateFacesResponse, FaceMutationAction, FaceMutationItem, FaceRecord,
+    FaceRenamePersonRequest, FaceRenamePersonResponse, FaceReviewBucket, FaceScope, FaceStatus,
+    FaceSuggestPeopleRequest, FaceSuggestPeopleResponse, FauplayRuntime, PersonSuggestion,
+    PersonSuggestionFace, PersonSummary, RootRelativePath,
 };
 
 use super::{
@@ -87,6 +89,83 @@ pub(in crate::server) fn handle_detect_assets_faces_json(
     }) {
         Ok(response) => http_response(200, "OK", &face_detect_assets_response_json(response)),
         Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_start_detect_assets_job_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+
+    let mut root_relative_paths = Vec::new();
+    for value in json_string_array_field(&payload, "relativePaths") {
+        match RootRelativePath::try_from(value.as_str()) {
+            Ok(path) => root_relative_paths.push(path),
+            Err(error) => {
+                return http_response(400, "Bad Request", &error_json(&error.to_string()));
+            }
+        }
+    }
+    if root_relative_paths.is_empty() {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"relativePaths must contain at least one path\"}",
+        );
+    }
+
+    match runtime.start_detect_assets_job(FaceDetectAssetsRequest {
+        root_path: PathBuf::from(root_path),
+        root_relative_paths,
+        only_undetected: json_bool_field_default_true(&payload, "onlyUndetected"),
+        run_cluster: json_bool_field_default_true(&payload, "runCluster"),
+        pre_cluster: json_bool_field_default_true(&payload, "preCluster"),
+    }) {
+        Ok(response) => http_response(200, "OK", &face_detect_assets_job_snapshot_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_get_detect_assets_job(
+    runtime: &FauplayRuntime,
+    job_id: &str,
+) -> HttpResponse {
+    match runtime.get_detect_assets_job(job_id) {
+        Ok(response) => http_response(200, "OK", &face_detect_assets_job_snapshot_json(response)),
+        Err(error) => http_response(404, "Not Found", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_cancel_detect_assets_job(
+    runtime: &FauplayRuntime,
+    job_id: &str,
+) -> HttpResponse {
+    match runtime.cancel_detect_assets_job(job_id) {
+        Ok(response) => http_response(200, "OK", &face_detect_assets_job_snapshot_json(response)),
+        Err(error) => http_response(404, "Not Found", &error_json(&error.to_string())),
+    }
+}
+
+pub(in crate::server) fn handle_list_detect_assets_job_items(
+    runtime: &FauplayRuntime,
+    job_id: &str,
+    offset: usize,
+    limit: usize,
+) -> HttpResponse {
+    match runtime.list_detect_assets_job_items(job_id, offset, limit) {
+        Ok(response) => http_response(
+            200,
+            "OK",
+            &face_detect_assets_job_items_response_json(response),
+        ),
+        Err(error) => http_response(404, "Not Found", &error_json(&error.to_string())),
     }
 }
 
@@ -387,6 +466,47 @@ fn face_detect_assets_response_json(response: FaceDetectAssetsResponse) -> Strin
     )
 }
 
+fn face_detect_assets_job_snapshot_json(response: FaceDetectAssetsJobSnapshot) -> String {
+    format!(
+        "{{\"ok\":{},\"jobId\":\"{}\",\"status\":\"{}\",\"total\":{},\"unique\":{},\"processed\":{},\"scanned\":{},\"skipped\":{},\"failed\":{},\"detectedFaces\":{},\"currentPath\":{},\"batchIndex\":{},\"batchCount\":{},\"preCluster\":{},\"postCluster\":{},\"error\":{},\"createdAt\":{},\"startedAt\":{},\"updatedAt\":{},\"finishedAt\":{},\"recentItems\":[{}],\"failureSummary\":[{}]}}",
+        if response.ok { "true" } else { "false" },
+        escape_json_string(&response.job_id),
+        face_detect_assets_job_status_json(response.status),
+        response.total,
+        response.unique,
+        response.processed,
+        response.scanned,
+        response.skipped,
+        response.failed,
+        response.detected_faces,
+        optional_root_relative_path_json(response.current_path),
+        response.batch_index,
+        response.batch_count,
+        optional_face_cluster_pending_response_json(response.pre_cluster),
+        optional_face_cluster_pending_response_json(response.post_cluster),
+        optional_string_json(response.error.as_deref()),
+        response.created_at_ms,
+        optional_u64_json(response.started_at_ms),
+        response.updated_at_ms,
+        optional_u64_json(response.finished_at_ms),
+        face_detect_assets_items_json(response.recent_items),
+        face_detect_assets_job_failures_json(response.failure_summary),
+    )
+}
+
+fn face_detect_assets_job_items_response_json(
+    response: FaceDetectAssetsJobItemsResponse,
+) -> String {
+    format!(
+        "{{\"ok\":true,\"jobId\":\"{}\",\"total\":{},\"offset\":{},\"limit\":{},\"items\":[{}]}}",
+        escape_json_string(&response.job_id),
+        response.total,
+        response.offset,
+        response.limit,
+        face_detect_assets_items_json(response.items),
+    )
+}
+
 fn face_list_asset_faces_response_json(response: FaceListAssetFacesResponse) -> String {
     format!(
         "{{\"ok\":true,\"scope\":\"{}\",\"total\":{},\"items\":[{}]}}",
@@ -505,6 +625,24 @@ fn face_detect_assets_item_json(item: FaceDetectAssetsItem) -> String {
         optional_usize_json(item.face_count),
         optional_usize_json(item.detected),
         optional_usize_json(item.inference_detected),
+        optional_string_json(item.error.as_deref()),
+    )
+}
+
+fn face_detect_assets_job_failures_json(items: Vec<FaceDetectAssetsJobFailure>) -> String {
+    items
+        .into_iter()
+        .map(face_detect_assets_job_failure_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn face_detect_assets_job_failure_json(item: FaceDetectAssetsJobFailure) -> String {
+    format!(
+        "{{\"relativePath\":\"{}\",\"mediaType\":{},\"reasonCode\":\"{}\",\"error\":{}}}",
+        escape_json_string(&item.root_relative_path.to_string()),
+        optional_face_media_type_json(item.media_type),
+        escape_json_string(&item.reason_code),
         optional_string_json(item.error.as_deref()),
     )
 }
@@ -707,6 +845,17 @@ fn face_detect_assets_item_status_json(value: FaceDetectAssetsItemStatus) -> &'s
         FaceDetectAssetsItemStatus::Detected => "detected",
         FaceDetectAssetsItemStatus::Skipped => "skipped",
         FaceDetectAssetsItemStatus::Failed => "failed",
+    }
+}
+
+fn face_detect_assets_job_status_json(value: FaceDetectAssetsJobStatus) -> &'static str {
+    match value {
+        FaceDetectAssetsJobStatus::Queued => "queued",
+        FaceDetectAssetsJobStatus::Running => "running",
+        FaceDetectAssetsJobStatus::Canceling => "canceling",
+        FaceDetectAssetsJobStatus::Canceled => "canceled",
+        FaceDetectAssetsJobStatus::Succeeded => "succeeded",
+        FaceDetectAssetsJobStatus::Failed => "failed",
     }
 }
 
