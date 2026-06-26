@@ -9,7 +9,6 @@ import {
   listPeople,
   listTagOptions,
   queryFilesByTags,
-  readFileContentByAbsolutePath,
   readFileTextPreview,
 } from './data/core.mjs'
 import {
@@ -613,13 +612,6 @@ export async function readRemoteReadonlyTextPreview(remoteConfig, payload = {}) 
   return readFileTextPreview({
     absolutePath: target.absolutePath,
     ...(typeof payload.sizeLimitBytes !== 'undefined' ? { sizeLimitBytes: payload.sizeLimitBytes } : {}),
-  })
-}
-
-export async function readRemoteReadonlyFileContent(remoteConfig, query = {}) {
-  const target = await resolveRemoteReadonlyFileResource(remoteConfig, query)
-  return readFileContentByAbsolutePath({
-    absolutePath: target.absolutePath,
   })
 }
 

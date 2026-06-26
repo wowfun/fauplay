@@ -18,6 +18,5 @@ export {
   callVisionInference,
 } from './faces.mjs'
 export {
-  readFileContentByAbsolutePath,
   readFileTextPreview,
 } from './files.mjs'

@@ -70,3 +70,14 @@ test('Legacy Gateway no longer owns MCP config or stdio hosting', async () => {
   assert.equal(serverSource.includes('createMcpServerRegistry'), false)
   assert.equal(serverSource.includes('DEFAULT_MCP_CONFIG_PATH'), false)
 })
+
+test('Legacy Gateway no longer owns Remote Access file streaming', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/file-stream-response.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
+  const serverSource = await readFile(new URL('../../tools/legacy-gateway/server.mjs', import.meta.url), 'utf8')
+  assert.equal(serverSource.includes('sendFileStreamResponse'), false)
+  assert.equal(serverSource.includes('parseByteRangeHeader'), false)
+})

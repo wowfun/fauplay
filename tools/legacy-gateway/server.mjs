@@ -7,9 +7,11 @@ import {
 } from './runtime-mcp-bridge.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
-  parseByteRangeHeader,
-  sendFileStreamResponse,
-} from './file-stream-response.mjs'
+  parseRemoteByteRangeHeader,
+  readRuntimeFileContent,
+  sendRemoteRangeNotSatisfiable,
+  sendRuntimeFileContentResponse,
+} from './remote-file-content.mjs'
 import {
   findHttpGatewayRoute,
   handleHttpGatewayRoute,
@@ -481,20 +483,27 @@ export async function startGatewayServer(options = {}) {
           rootId: requestUrl.searchParams.get('rootId'),
           relativePath: requestUrl.searchParams.get('relativePath'),
         })
-        const requestedRange = parseByteRangeHeader(req.headers.range, resource.sizeBytes)
+        const requestedRange = parseRemoteByteRangeHeader(req.headers.range, resource.sizeBytes)
+        if (requestedRange && requestedRange.invalid === true) {
+          sendRemoteRangeNotSatisfiable(res, resource.sizeBytes, {
+            cacheControl: REMOTE_CONTENT_CACHE_CONTROL,
+            lastModifiedMs: resource.lastModifiedMs,
+          })
+          return
+        }
         if (
           requestedRange
-          && requestedRange.invalid !== true
           && requestedRange.end - requestedRange.start + 1 > REMOTE_MAX_RANGE_BYTES
         ) {
           throw createRemoteBudgetExceededError('Requested media range exceeds remote budget')
         }
-        await sendFileStreamResponse(
-          req,
+        const result = await readRuntimeFileContent(runtimeBaseUrl, {
+          absolutePath: resource.absolutePath,
+          rangeHeader: req.headers.range,
+        })
+        sendRuntimeFileContentResponse(
           res,
-          resource.absolutePath,
-          resource.contentType,
-          resource.sizeBytes,
+          result,
           {
             cacheControl: REMOTE_CONTENT_CACHE_CONTROL,
             lastModifiedMs: resource.lastModifiedMs,

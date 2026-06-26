@@ -1,12 +1,8 @@
 import fs from 'node:fs/promises'
-import path from 'node:path'
 import {
   resolveRootPath,
   statPath,
 } from './common.mjs'
-import {
-  getMimeType,
-} from './file-preview-kind.mjs'
 
 const TEXT_PREVIEW_DEFAULT_SIZE_LIMIT_BYTES = 1024 * 1024
 
@@ -24,15 +20,6 @@ function resolveAbsolutePathInput(input, fieldName = 'absolutePath') {
     throw new Error(`${fieldName} is required`)
   }
   return resolveRootPath(input)
-}
-
-export async function readFileContentByAbsolutePath(payload = {}) {
-  const absolutePath = resolveAbsolutePathInput(payload.absolutePath)
-  const body = await fs.readFile(absolutePath)
-  return {
-    body,
-    contentType: getMimeType(path.basename(absolutePath)),
-  }
 }
 
 export async function readFileTextPreview(payload = {}) {
