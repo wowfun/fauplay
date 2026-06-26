@@ -160,6 +160,14 @@ _Avoid_: gateway thumbnail, preview blob
 A browser-renderable cropped view around a detected face, addressed by face identity and display options.
 _Avoid_: gateway face image, crop URL
 
+**Detected Face**:
+A face observed in File Content, identified independently from the file path that revealed it. A Detected Face carries its location in the source media, review status, and optional Person assignment.
+_Avoid_: face row, face result
+
+**Person**:
+A user-maintained identity that groups Detected Faces which should be treated as the same person.
+_Avoid_: face group, cluster
+
 **Plugin Capability**:
 An optional or replaceable capability provided through plugin/MCP integration. Plugin Capabilities may use Runtime Capabilities but do not define the runtime boundary.
 _Avoid_: extension feature, external tool

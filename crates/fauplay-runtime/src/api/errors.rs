@@ -62,6 +62,18 @@ impl RuntimeError {
         }
     }
 
+    pub(crate) fn invalid_detected_face(message: &str) -> Self {
+        Self {
+            message: format!("invalid Detected Face: {message}"),
+        }
+    }
+
+    pub(crate) fn runtime_capability(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
     pub(crate) fn invalid_local_root_binding(message: &str) -> Self {
         Self {
             message: format!("invalid Local Root Binding: {message}"),

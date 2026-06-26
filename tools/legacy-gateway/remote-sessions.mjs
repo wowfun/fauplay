@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createMcpRuntimeError } from './mcp/runtime.mjs'
+import { createMcpRuntimeError } from './runtime-errors.mjs'
 import { DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS } from './remembered-devices.mjs'
 
 const REMOTE_SESSION_COOKIE_NAME = '__Host-fauplay-remote-session'

@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
+use crate::RuntimeError;
+
 mod config;
 mod host;
 mod stdio;
@@ -46,6 +48,19 @@ impl McpRuntime {
     ) -> McpHttpResponse {
         self.sessions
             .handle_request(&self.host, session_id, payload)
+    }
+
+    pub(crate) fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<Value, RuntimeError> {
+        self.host.call_tool(tool_name, arguments).map_err(|error| {
+            RuntimeError::runtime_capability(format!(
+                "MCP tool {tool_name} failed: {}",
+                error.message
+            ))
+        })
     }
 }
 

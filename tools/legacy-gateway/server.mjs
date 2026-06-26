@@ -1,6 +1,10 @@
 import http from 'node:http'
 import { stat } from 'node:fs/promises'
-import { McpHostRuntime, createMcpRuntimeError } from './mcp/runtime.mjs'
+import { createMcpRuntimeError } from './runtime-errors.mjs'
+import {
+  createRuntimeMcpBridge,
+  resolveRuntimeMcpBaseUrl,
+} from './runtime-mcp-bridge.mjs'
 import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
   parseByteRangeHeader,
@@ -10,12 +14,6 @@ import {
   findHttpGatewayRoute,
   handleHttpGatewayRoute,
 } from './http-routes.mjs'
-import {
-  createMcpServerRegistry,
-  DEFAULT_MCP_CONFIG_PATH,
-  formatMcpConfigSourceLog,
-  resolveConfigPath,
-} from './mcp-config.mjs'
 import {
   clearRemoteReadonlyLoginFailures,
   clearRemoteReadonlySession,
@@ -197,11 +195,6 @@ function toHttpErrorBody(error) {
 export async function startGatewayServer(options = {}) {
   const host = options.host || DEFAULT_HOST
   const port = Number(options.port || DEFAULT_PORT)
-  const hasCustomMcpConfig = typeof options.mcpConfigPath === 'string' && options.mcpConfigPath
-  const configPath = hasCustomMcpConfig ? resolveConfigPath(options.mcpConfigPath) : DEFAULT_MCP_CONFIG_PATH
-  const { serverRegistry, configSources } = await createMcpServerRegistry(configPath, {
-    useGlobalConfig: !hasCustomMcpConfig,
-  })
   const remotePublishedRoots = createRemotePublishedRootsStore()
   const remoteSharedFavorites = createRemoteSharedFavoritesStore()
   let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
@@ -210,16 +203,15 @@ export async function startGatewayServer(options = {}) {
   }
   let remoteReadonlyConfigFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
 
-  const runtime = new McpHostRuntime({
-    serverRegistry,
-    callTimeoutMs: Number(process.env.FAUPLAY_MCP_CALL_TIMEOUT_MS || 5000),
-    initTimeoutMs: Number(process.env.FAUPLAY_MCP_INIT_TIMEOUT_MS || 2000),
-    restartWindowMs: Number(process.env.FAUPLAY_MCP_RESTART_WINDOW_MS || 10000),
-    maxCrashesInWindow: Number(process.env.FAUPLAY_MCP_MAX_CRASHES || 3),
-    restartCooldownMs: Number(process.env.FAUPLAY_MCP_RESTART_COOLDOWN_MS || 15000),
+  const runtimeBaseUrl = typeof options.runtimeBaseUrl === 'string' && options.runtimeBaseUrl.trim()
+    ? options.runtimeBaseUrl.trim()
+    : resolveRuntimeMcpBaseUrl()
+  const runtime = createRuntimeMcpBridge({
+    baseUrl: runtimeBaseUrl,
+    callTimeoutMs: Number(process.env.FAUPLAY_RUNTIME_MCP_CALL_TIMEOUT_MS || process.env.FAUPLAY_MCP_CALL_TIMEOUT_MS || 120000),
+    initTimeoutMs: Number(process.env.FAUPLAY_RUNTIME_MCP_INIT_TIMEOUT_MS || process.env.FAUPLAY_MCP_INIT_TIMEOUT_MS || 5000),
   })
 
-  await runtime.initialize()
   const remoteReadonlySessions = new Map()
   const remoteReadonlyLoginAttempts = new Map()
   const remoteRememberedDevices = createRemoteRememberedDeviceStore({
@@ -729,15 +721,11 @@ export async function startGatewayServer(options = {}) {
 
   server.listen(port, host, () => {
     console.log(`Fauplay gateway listening on http://${host}:${port}`)
-    console.log('[gateway] MCP config files:')
-    for (const source of configSources) {
-      console.log(formatMcpConfigSourceLog(source))
-    }
+    console.log(`[gateway] Runtime MCP bridge: ${runtimeBaseUrl.replace(/\/+$/, '')}/v1/mcp`)
     console.log('[gateway] Remote access config files:')
     for (const source of remoteReadonlyConfig.configSources) {
       console.log(formatRemoteAccessConfigSourceLog(source))
     }
-    console.log(`[gateway] MCP servers loaded: ${serverRegistry.length}`)
   })
 
   const shutdown = async () => {

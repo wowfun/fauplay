@@ -1,5 +1,7 @@
 #[path = "runtime_api/duplicate_files.rs"]
 mod duplicate_files;
+#[path = "runtime_api/faces.rs"]
+mod faces;
 #[path = "runtime_api/file_access.rs"]
 mod file_access;
 #[path = "runtime_api/global_trash.rs"]

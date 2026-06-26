@@ -37,3 +37,26 @@ test('Legacy Gateway no longer exposes the Runtime MCP endpoint', async () => {
   assert.equal(serverSource.includes('parseJsonRpcRequest'), false)
   assert.equal(serverSource.includes('handleMcpRequest'), false)
 })
+
+test('Legacy Gateway no longer owns MCP config or stdio hosting', async () => {
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/mcp-config.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/mcp/runtime.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+  await assert.rejects(
+    () => access(new URL('../../tools/legacy-gateway/mcp/stdio-runner.mjs', import.meta.url), constants.F_OK),
+    { code: 'ENOENT' },
+  )
+
+  const serverSource = await readFile(
+    new URL('../../tools/legacy-gateway/server.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.equal(serverSource.includes('McpHostRuntime'), false)
+  assert.equal(serverSource.includes('createMcpServerRegistry'), false)
+  assert.equal(serverSource.includes('DEFAULT_MCP_CONFIG_PATH'), false)
+})

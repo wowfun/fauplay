@@ -10,6 +10,8 @@ pub use api::{
     AnnotationTag, AnnotationTagOption, AnnotationTagOptionsRequest, AnnotationTagOptionsResponse,
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
+    FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
+    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus,
     FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
     FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
     FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
@@ -79,6 +81,30 @@ impl FauplayRuntime {
         payload: serde_json::Value,
     ) -> mcp::McpHttpResponse {
         self.mcp_runtime.handle_request(session_id, payload)
+    }
+
+    pub fn detect_asset_faces(
+        &self,
+        request: FaceDetectAssetRequest,
+    ) -> Result<FaceDetectAssetResponse, RuntimeError> {
+        let root_path = request.root_path.clone();
+        let root_relative_path = request.root_relative_path.clone();
+        let inference = self.mcp_runtime.call_tool(
+            "vision.face",
+            serde_json::json!({
+                "rootPath": root_path.display().to_string(),
+                "operation": "detectAsset",
+                "relativePath": root_relative_path.to_string(),
+            }),
+        )?;
+        store::save_detected_faces(&self.runtime_home_path, request, inference)
+    }
+
+    pub fn list_asset_faces(
+        &self,
+        request: FaceListAssetFacesRequest,
+    ) -> Result<FaceListAssetFacesResponse, RuntimeError> {
+        store::list_asset_faces(&self.runtime_home_path, request)
     }
 
     pub fn load_global_shortcut_config(

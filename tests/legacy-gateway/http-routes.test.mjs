@@ -18,6 +18,8 @@ const runtimeOwnedLocalRoutes = [
   ['POST', '/v1/recycle/items/move'],
   ['POST', '/v1/recycle/items/list'],
   ['POST', '/v1/recycle/items/restore'],
+  ['POST', '/v1/faces/detect-asset'],
+  ['POST', '/v1/faces/list-asset-faces'],
 ]
 
 test('Legacy Gateway HTTP route registry does not expose Runtime-owned local capabilities', () => {
@@ -31,7 +33,6 @@ test('Legacy Gateway HTTP route registry does not expose Runtime-owned local cap
 })
 
 test('Legacy Gateway HTTP route registry keeps face migration routes online', () => {
-  assert.notEqual(findHttpGatewayRoute('POST', '/v1/faces/detect-asset'), null)
   assert.notEqual(findHttpGatewayRoute('POST', '/v1/faces/detect-assets'), null)
   assert.notEqual(findHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/job-1'), null)
 })

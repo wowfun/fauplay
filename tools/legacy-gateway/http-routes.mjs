@@ -1,4 +1,4 @@
-import { createMcpRuntimeError } from './mcp/runtime.mjs'
+import { createMcpRuntimeError } from './runtime-errors.mjs'
 import {
   detectAssets,
   createDetectAssetsJob,
@@ -6,18 +6,15 @@ import {
   cancelDetectAssetsJob,
   listDetectAssetsJobItems,
   assignFaces,
-  callVisionInference,
   clusterPendingFaces,
   createPersonFromFaces,
   ignoreFaces,
-  listAssetFaces,
   listPeople,
   listReviewFaces,
   mergePeople,
   requeueFaces,
   renamePerson,
   restoreIgnoredFaces,
-  saveDetectedFaces,
   suggestPeople,
   unassignFaces,
 } from './data/core.mjs'
@@ -67,28 +64,6 @@ function parseFaceScanJobPath(pathname) {
 }
 
 const httpGatewayRoutes = [
-  createExactHttpGatewayRoute('POST', '/v1/faces/detect-asset', async ({ runtime, payload }) => {
-    const inferred = await callVisionInference(runtime, payload)
-    const persisted = await saveDetectedFaces({
-      rootPath: inferred.rootPath,
-      relativePath: inferred.relativePath,
-      facePayloads: inferred.faces,
-    })
-    const runCluster = payload?.runCluster === true
-    const hasVideoFaces = persisted.faces.some((face) => face?.mediaType === 'video')
-    const cluster = runCluster && persisted.created > 0
-      ? await clusterPendingFaces({
-        limit: persisted.created,
-        assetId: persisted.assetId,
-        minFaces: hasVideoFaces ? 3 : 1,
-      })
-      : null
-    return {
-      ...persisted,
-      inferenceDetected: inferred.detected,
-      ...(cluster ? { cluster } : {}),
-    }
-  }),
   createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets', ({ runtime, payload }) => detectAssets(runtime, payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/detect-assets/jobs', ({ runtime, payload }) => createDetectAssetsJob(runtime, payload)),
   createPrefixHttpGatewayRoute('GET', '/v1/faces/detect-assets/jobs/', ({ pathname, requestUrl }) => {
@@ -115,7 +90,6 @@ const httpGatewayRoutes = [
   createExactHttpGatewayRoute('POST', '/v1/faces/list-people', ({ payload }) => listPeople(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/rename-person', ({ payload }) => renamePerson(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/merge-people', ({ payload }) => mergePeople(payload)),
-  createExactHttpGatewayRoute('POST', '/v1/faces/list-asset-faces', ({ payload }) => listAssetFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/list-review-faces', ({ payload }) => listReviewFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/suggest-people', ({ payload }) => suggestPeople(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/assign-faces', ({ payload }) => assignFaces(payload)),
@@ -124,9 +98,6 @@ const httpGatewayRoutes = [
   createExactHttpGatewayRoute('POST', '/v1/faces/ignore-faces', ({ payload }) => ignoreFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/restore-ignored-faces', ({ payload }) => restoreIgnoredFaces(payload)),
   createExactHttpGatewayRoute('POST', '/v1/faces/requeue-faces', ({ payload }) => requeueFaces(payload)),
-  createPrefixHttpGatewayRoute('POST', '/v1/faces/', ({ pathname }) => {
-    throwHttpGatewayRouteNotFound(pathname)
-  }),
 ]
 
 export function findHttpGatewayRoute(method, pathname) {

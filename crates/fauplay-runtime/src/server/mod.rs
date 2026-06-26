@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::{FauplayRuntime, TextPreviewStatus};
 
+mod faces;
 mod file_annotations;
 mod file_index;
 mod global_trash;
@@ -49,6 +50,12 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
             remote_published_roots::handle_sync_from_local_browser(runtime, request)
         }
         Some(("POST", "/v1/mcp")) => mcp::handle_mcp_json_rpc(runtime, request),
+        Some(("POST", "/v1/faces/detect-asset")) => {
+            faces::handle_detect_asset_faces_json(runtime, request)
+        }
+        Some(("POST", "/v1/faces/list-asset-faces")) => {
+            faces::handle_list_asset_faces_json(runtime, request)
+        }
         Some(("PATCH", target)) if target.starts_with("/v1/admin/remembered-devices/") => {
             remembered_devices::handle_rename_remembered_device(runtime, target, request)
         }
@@ -222,6 +229,8 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/admin/remembered-devices"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
             | "/v1/mcp"
+            | "/v1/faces/detect-asset"
+            | "/v1/faces/list-asset-faces"
             | "/v1/local-root-bindings"
             | "/v1/global-trash"
             | "/v1/global-trash/file-content"

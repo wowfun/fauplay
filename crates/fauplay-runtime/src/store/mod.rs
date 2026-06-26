@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{GlobalShortcutConfigResponse, RootRelativePath, RuntimeError};
 
+mod faces;
 mod file_annotation_records;
 mod file_annotations;
 mod file_index;
@@ -15,6 +16,7 @@ mod local_root_bindings;
 mod remembered_devices;
 mod remote_published_roots;
 
+pub(crate) use faces::{list_asset_faces, save_detected_faces};
 pub(crate) use file_annotations::{
     bind_file_annotation_tag, cleanup_missing_files, list_annotation_tag_options,
     query_file_annotations, read_file_annotation, rebind_file_annotation_paths,

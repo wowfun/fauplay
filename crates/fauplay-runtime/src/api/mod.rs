@@ -1,6 +1,7 @@
 mod annotations;
 mod duplicates;
 mod errors;
+mod faces;
 mod file_content;
 mod file_index;
 mod global_trash;
@@ -26,6 +27,10 @@ pub use duplicates::{
     DuplicateSeedSkipReason, DuplicateSet,
 };
 pub use errors::RuntimeError;
+pub use faces::{
+    FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
+    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus,
+};
 pub use file_content::{
     FileContentRange, FileContentRangeRequest, FileContentRequest, FileContentResponse,
     FileMetadataRequest, FileMetadataResponse, TextPreviewRequest, TextPreviewResponse,
