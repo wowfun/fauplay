@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -14,15 +15,7 @@ import {
   removeRuntimeRemoteSharedFavorite,
   upsertRuntimeRemoteSharedFavorite,
 } from './remote-file-access.mjs'
-import {
-  normalizeAbsolutePath,
-  normalizeRelativePath,
-  pathMatchesRoot,
-  resolvePathWithinRoot,
-  resolveRootPath,
-  statPath,
-} from './data/common.mjs'
-import { getMimeType, getPreviewKind } from './data/file-preview-kind.mjs'
+import { statWithDrvfsRetry } from './drvfs.mjs'
 
 const PROJECT_ROOT = process.cwd()
 const DEFAULT_REMOTE_ACCESS_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'remote-access.json')
@@ -34,6 +27,99 @@ const REMOTE_READONLY_HOST_PATH_FIELDS = new Set([
   'rootAbsolutePath',
   'sourceAbsolutePath',
 ])
+
+const PREVIEW_KIND_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'])
+const PREVIEW_KIND_VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'])
+const PREVIEW_KIND_TEXT_EXTS = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'json',
+  'yaml',
+  'yml',
+  'xml',
+  'csv',
+  'log',
+  'js',
+  'jsx',
+  'ts',
+  'tsx',
+  'css',
+  'scss',
+  'less',
+  'html',
+  'htm',
+  'py',
+  'sh',
+  'bash',
+  'zsh',
+  'ini',
+  'conf',
+  'toml',
+  'sql',
+  'c',
+  'cc',
+  'cpp',
+  'h',
+  'hpp',
+  'java',
+  'go',
+  'rs',
+  'vue',
+  'svelte',
+])
+const MIME_BY_EXTENSION = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  avif: 'image/avif',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  ogg: 'video/ogg',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  json: 'application/json',
+  yaml: 'application/yaml',
+  yml: 'application/yaml',
+  xml: 'application/xml',
+  csv: 'text/csv',
+  log: 'text/plain',
+  js: 'text/javascript',
+  jsx: 'text/javascript',
+  ts: 'text/typescript',
+  tsx: 'text/typescript',
+  css: 'text/css',
+  scss: 'text/x-scss',
+  less: 'text/x-less',
+  html: 'text/html',
+  htm: 'text/html',
+  py: 'text/x-python',
+  sh: 'text/x-shellscript',
+  bash: 'text/x-shellscript',
+  zsh: 'text/x-shellscript',
+  ini: 'text/plain',
+  conf: 'text/plain',
+  toml: 'application/toml',
+  sql: 'application/sql',
+  c: 'text/x-c',
+  cc: 'text/x-c++',
+  cpp: 'text/x-c++',
+  h: 'text/x-c',
+  hpp: 'text/x-c++',
+  java: 'text/x-java-source',
+  go: 'text/x-go',
+  rs: 'text/x-rust',
+}
+
 function createRemoteError(code, message, statusCode) {
   const error = new Error(message)
   error.code = code
@@ -48,6 +134,98 @@ function readPositiveIntegerEnv(name, fallback) {
 
 function isObjectRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isWindowsPath(input) {
+  return typeof input === 'string' && /^[a-zA-Z]:[\\/]/.test(input)
+}
+
+function normalizeAbsolutePath(input) {
+  return path.resolve(input).replace(/\\/g, '/')
+}
+
+function resolveRootPath(input) {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw createRemoteError('REMOTE_INVALID_PARAMS', 'rootPath is required', 400)
+  }
+
+  const raw = input.trim()
+  if (isWindowsPath(raw) && process.platform !== 'win32') {
+    try {
+      const converted = execFileSync('wslpath', ['-u', raw], { encoding: 'utf8' }).trim()
+      if (converted) {
+        return normalizeAbsolutePath(converted)
+      }
+    } catch {
+      throw createRemoteError(
+        'REMOTE_INVALID_PARAMS',
+        'rootPath windows path cannot be resolved in current runtime',
+        400,
+      )
+    }
+  }
+
+  if (!path.isAbsolute(raw)) {
+    throw createRemoteError('REMOTE_INVALID_PARAMS', 'rootPath must be an absolute path', 400)
+  }
+
+  return normalizeAbsolutePath(raw)
+}
+
+function normalizeRelativePath(input, fieldName = 'relativePath') {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw createRemoteError('REMOTE_INVALID_PARAMS', `${fieldName} contains invalid value`, 400)
+  }
+
+  const normalized = input.replace(/\\/g, '/').split('/').filter(Boolean)
+  if (normalized.length === 0) {
+    throw createRemoteError('REMOTE_INVALID_PARAMS', `${fieldName} contains empty path`, 400)
+  }
+
+  for (const segment of normalized) {
+    if (segment === '.' || segment === '..') {
+      throw createRemoteError('REMOTE_INVALID_PARAMS', `${fieldName} contains unsafe segments`, 400)
+    }
+    if (segment.includes('\0')) {
+      throw createRemoteError('REMOTE_INVALID_PARAMS', `${fieldName} contains invalid characters`, 400)
+    }
+  }
+
+  return normalized.join('/')
+}
+
+function resolvePathWithinRoot(rootPath, relativePath) {
+  const target = normalizeAbsolutePath(path.resolve(rootPath, ...relativePath.split('/')))
+  const relative = path.relative(rootPath, target)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw createRemoteError('REMOTE_PATH_OUT_OF_ROOT', 'relativePath escapes rootPath', 403)
+  }
+  return target
+}
+
+function pathMatchesRoot(rootPath, absolutePath) {
+  if (!rootPath) return true
+  return absolutePath === rootPath || absolutePath.startsWith(`${rootPath}/`)
+}
+
+function statPath(targetPath, options) {
+  return statWithDrvfsRetry(targetPath, options)
+}
+
+function getFileExtension(name) {
+  return String(name || '').split('.').pop()?.toLowerCase() || ''
+}
+
+function getPreviewKind(name) {
+  const ext = getFileExtension(name)
+  if (PREVIEW_KIND_IMAGE_EXTS.has(ext)) return 'image'
+  if (PREVIEW_KIND_VIDEO_EXTS.has(ext)) return 'video'
+  if (PREVIEW_KIND_TEXT_EXTS.has(ext)) return 'text'
+  return 'unsupported'
+}
+
+function getMimeType(name) {
+  return MIME_BY_EXTENSION[getFileExtension(name)] || 'application/octet-stream'
 }
 
 async function readRemoteAccessConfigFile(configPath, { allowMissing = false } = {}) {
