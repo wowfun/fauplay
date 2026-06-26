@@ -396,3 +396,32 @@ test('Annotation Display Snapshot Model applies rollback-able optimistic File An
   ])
   assert.equal(setValue.byPathUpdatedAt['albums/a.jpg'], 500)
 })
+
+test('Annotation Display Snapshot Model restores an absent path after an optimistic File Annotation rollback', () => {
+  const bound = reduceAnnotationDisplaySnapshot(createAnnotationDisplaySnapshotState(), {
+    type: 'bind-meta-tag',
+    relativePath: 'albums/new.jpg',
+    key: 'rating',
+    value: '5',
+    nowMs: 100,
+  })
+
+  assert.equal(bound.changed, true)
+  assert.deepEqual(bound.snapshot.rawTagsByPath['albums/new.jpg'], [
+    tag('rating', '5', metaSource, 100),
+  ])
+  assert.equal(bound.rollback?.relativePath, 'albums/new.jpg')
+  assert.equal(bound.rollback?.rawTags, null)
+
+  const restored = reduceAnnotationDisplaySnapshot(bound.snapshot, {
+    type: 'restore-path',
+    rollback: bound.rollback,
+    nowMs: 200,
+  }).snapshot
+
+  assert.deepEqual(restored.rawTagsByPath, {})
+  assert.deepEqual(restored.byPathUpdatedAt, {})
+  assert.deepEqual(restored.tagKeysByPath, {})
+  assert.deepEqual(restored.tagOptions, [])
+  assert.equal(restored.hasAnyFilterableAnnotation, false)
+})
