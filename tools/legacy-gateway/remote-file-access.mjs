@@ -414,8 +414,13 @@ export async function readRuntimeRemoteSharedFavorites(runtimeBaseUrl, options =
   return getRuntimeJson(runtimeBaseUrl, '/v1/remote/shared-favorites', options)
 }
 
-export async function readRuntimeRemotePublishedRoots(runtimeBaseUrl, options = {}) {
-  return getRuntimeJson(runtimeBaseUrl, '/v1/admin/remote-published-roots/resolved', options)
+export async function readRuntimeRemoteAccessConfig(runtimeBaseUrl, options = {}) {
+  return getRuntimeJson(runtimeBaseUrl, '/v1/remote/access/config', options)
+}
+
+export async function verifyRuntimeRemoteAccessToken(runtimeBaseUrl, options = {}) {
+  const bearerToken = normalizeRequiredStringInput(options.bearerToken, 'bearerToken')
+  return postRuntimeJson(runtimeBaseUrl, '/v1/remote/access/authorize', { bearerToken }, options)
 }
 
 export async function createRuntimeRememberedDevice(runtimeBaseUrl, options = {}) {

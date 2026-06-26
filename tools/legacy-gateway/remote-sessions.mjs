@@ -314,7 +314,7 @@ export async function ensureRemoteReadonlySessionAuthorized(
   remoteSessions,
   remoteRememberedDevices,
 ) {
-  if (remoteConfig.enabled !== true || !remoteConfig.token) {
+  if (remoteConfig.enabled !== true || remoteConfig.authConfigured !== true) {
     throw createRemoteUnauthorizedError()
   }
 

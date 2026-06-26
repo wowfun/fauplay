@@ -12,6 +12,7 @@ mod local_root_bindings;
 mod mcp;
 mod missing_files;
 mod remembered_devices;
+mod remote_access;
 mod remote_published_roots;
 mod request;
 mod root_operations;
@@ -61,6 +62,12 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         }
         Some(("GET", "/v1/admin/remote-published-roots/resolved")) => {
             remote_published_roots::handle_list_resolved_published_roots(runtime)
+        }
+        Some(("GET", "/v1/remote/access/config")) => {
+            remote_access::handle_remote_access_config(runtime)
+        }
+        Some(("POST", "/v1/remote/access/authorize")) => {
+            remote_access::handle_remote_access_authorize(runtime, request)
         }
         Some(("GET", "/v1/remote/shared-favorites")) => {
             remote_published_roots::handle_list_shared_favorites(runtime)
@@ -383,6 +390,8 @@ fn is_preflight_target(target: &str) -> bool {
             | "/v1/remote/remembered-devices/revoke"
             | "/v1/admin/remote-published-roots/sync-from-local-browser"
             | "/v1/admin/remote-published-roots/resolved"
+            | "/v1/remote/access/config"
+            | "/v1/remote/access/authorize"
             | "/v1/remote/shared-favorites"
             | "/v1/remote/shared-favorites/upsert"
             | "/v1/remote/shared-favorites/remove"

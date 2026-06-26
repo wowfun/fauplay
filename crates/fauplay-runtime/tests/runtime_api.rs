@@ -18,6 +18,8 @@ mod mcp;
 mod process;
 #[path = "runtime_api/remembered_devices.rs"]
 mod remembered_devices;
+#[path = "runtime_api/remote_access.rs"]
+mod remote_access;
 #[path = "runtime_api/remote_published_roots.rs"]
 mod remote_published_roots;
 #[path = "runtime_api/root_operations.rs"]

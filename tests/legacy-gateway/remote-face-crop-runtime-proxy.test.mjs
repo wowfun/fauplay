@@ -5,6 +5,10 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import {
+  createRuntimeRemoteAccessConfig,
+  handleRuntimeRemoteAccessHostRequest,
+} from './remote-runtime-fixture.mjs'
 
 test('Remote Access face crop is served through Fauplay Runtime', async () => {
   const previousHome = process.env.HOME
@@ -38,7 +42,13 @@ test('Remote Access face crop is served through Fauplay Runtime', async () => {
     process.env.HOME = testHome
     process.env.FAUPLAY_REMOTE_ACCESS_TOKEN = 'secret-token'
 
-    runtimeServer = http.createServer((req, res) => {
+    runtimeServer = http.createServer(async (req, res) => {
+      if (await handleRuntimeRemoteAccessHostRequest(req, res, {
+        config: createRuntimeRemoteAccessConfig({ rootPath: remoteRoot }),
+      })) {
+        return
+      }
+
       runtimeRequests.push({
         method: req.method,
         url: req.url,

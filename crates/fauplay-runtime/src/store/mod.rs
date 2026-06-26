@@ -14,6 +14,7 @@ mod global_trash;
 mod global_trash_records;
 mod local_root_bindings;
 mod remembered_devices;
+mod remote_access;
 mod remote_published_roots;
 
 pub(crate) use faces::{
@@ -36,6 +37,7 @@ pub(crate) use remembered_devices::{
     revoke_all_remembered_devices, revoke_remembered_device, revoke_remembered_device_credential,
     rotate_remembered_device,
 };
+pub(crate) use remote_access::{load_remote_access_config, verify_remote_access_token};
 pub(crate) use remote_published_roots::{
     list_remote_shared_favorites, list_resolved_remote_published_roots,
     remove_remote_shared_favorite, sync_remote_published_roots, upsert_remote_shared_favorite,

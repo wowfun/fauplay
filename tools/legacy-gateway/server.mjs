@@ -1,7 +1,5 @@
 import http from 'node:http'
-import { stat } from 'node:fs/promises'
 import { createMcpRuntimeError } from './runtime-errors.mjs'
-import { GLOBAL_ENV_PATH, loadGlobalEnvFile } from './env.mjs'
 import {
   createRuntimeRememberedDevice,
   parseRemoteByteRangeHeader,
@@ -37,7 +35,6 @@ import {
   listRemoteReadonlyFiles,
   listRemoteReadonlyPeople,
   listRemoteReadonlyPersonFaces,
-  listRemoteReadonlyPublishedRoots,
   listRemoteReadonlyRoots,
   listRemoteReadonlyTagOptions,
   loadRemoteReadonlyConfig,
@@ -70,27 +67,6 @@ function resolveRuntimeBaseUrl(env = process.env) {
   )
   const normalized = typeof raw === 'string' ? raw.trim() : ''
   return (normalized || DEFAULT_RUNTIME_BASE_URL).replace(/\/+$/, '')
-}
-
-async function readOptionalFileFingerprint(filePath) {
-  try {
-    const result = await stat(filePath)
-    return `${result.size}:${Math.trunc(result.mtimeMs)}`
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return 'missing'
-    }
-    throw error
-  }
-}
-
-async function createRemoteReadonlyRuntimeFingerprint(configSources) {
-  const parts = []
-  for (const source of configSources) {
-    parts.push(`${source.label}:${await readOptionalFileFingerprint(source.path)}`)
-  }
-  parts.push(`env:${await readOptionalFileFingerprint(GLOBAL_ENV_PATH)}`)
-  return parts.join('|')
 }
 
 function setCorsHeaders(res) {
@@ -238,34 +214,25 @@ export async function startGatewayServer(options = {}) {
     ? options.runtimeBaseUrl.trim()
     : resolveRuntimeBaseUrl()
 
-  let remoteReadonlyConfig = await loadRemoteReadonlyConfig()
-  const hydrateRemoteReadonlyRoots = async (config) => {
-    if (config.rootSource === 'local-browser-sync') {
-      config.roots = await listRemoteReadonlyPublishedRoots(runtimeBaseUrl)
-    }
-    return config
-  }
-  await hydrateRemoteReadonlyRoots(remoteReadonlyConfig)
-  let remoteReadonlyConfigFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
+  let remoteReadonlyConfig = await loadRemoteReadonlyConfig(runtimeBaseUrl)
+  let remoteReadonlyConfigFingerprint = remoteReadonlyConfig.fingerprint
 
   const remoteReadonlySessions = new Map()
   const remoteReadonlyLoginAttempts = new Map()
   const remoteRememberedDevices = createRuntimeRememberedDeviceAdapter(runtimeBaseUrl)
 
   const refreshRemoteReadonlyConfigIfNeeded = async () => {
-    const nextFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
-    if (nextFingerprint === remoteReadonlyConfigFingerprint) {
-      return hydrateRemoteReadonlyRoots(remoteReadonlyConfig)
+    const nextConfig = await loadRemoteReadonlyConfig(runtimeBaseUrl)
+    if (nextConfig.fingerprint === remoteReadonlyConfigFingerprint) {
+      remoteReadonlyConfig = nextConfig
+      return remoteReadonlyConfig
     }
 
     remoteReadonlySessions.clear()
     remoteReadonlyLoginAttempts.clear()
     await remoteRememberedDevices.clearAll()
-    delete process.env.FAUPLAY_REMOTE_ACCESS_TOKEN
-    await loadGlobalEnvFile()
-    remoteReadonlyConfig = await loadRemoteReadonlyConfig()
-    await hydrateRemoteReadonlyRoots(remoteReadonlyConfig)
-    remoteReadonlyConfigFingerprint = await createRemoteReadonlyRuntimeFingerprint(remoteReadonlyConfig.configSources)
+    remoteReadonlyConfig = nextConfig
+    remoteReadonlyConfigFingerprint = nextConfig.fingerprint
     return remoteReadonlyConfig
   }
 
@@ -315,7 +282,7 @@ export async function startGatewayServer(options = {}) {
         const currentRemoteReadonlyConfig = await refreshRemoteReadonlyConfigIfNeeded()
         const nowMs = Date.now()
         ensureRemoteReadonlyLoginAllowed(remoteReadonlyLoginAttempts, remoteClientId)
-        ensureRemoteReadonlyAuthorized(currentRemoteReadonlyConfig, req.headers)
+        await ensureRemoteReadonlyAuthorized(currentRemoteReadonlyConfig, req.headers, runtimeBaseUrl)
         clearRemoteReadonlyLoginFailures(remoteReadonlyLoginAttempts, remoteClientId)
         let rememberedDeviceId = null
         if (rememberDevice) {

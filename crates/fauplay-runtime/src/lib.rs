@@ -41,9 +41,10 @@ pub use api::{
     PersonSuggestion, PersonSuggestionFace, PersonSummary, RememberedDeviceAdminEntry,
     RememberedDeviceCreateRequest, RememberedDeviceCredential, RememberedDeviceRevokeRequest,
     RememberedDeviceRevokeResponse, RememberedDeviceRotateRequest, RememberedDevicesAdminResponse,
-    RemotePublishedRoot, RemotePublishedRootSyncEntry, RemotePublishedRootSyncRequest,
-    RemotePublishedRootSyncResponse, RemotePublishedRootsResponse, RemoteSharedFavorite,
-    RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
+    RemoteAccessConfigResponse, RemoteAccessConfigSource, RemoteAccessRoot,
+    RemoteAccessTokenVerifyRequest, RemotePublishedRoot, RemotePublishedRootSyncEntry,
+    RemotePublishedRootSyncRequest, RemotePublishedRootSyncResponse, RemotePublishedRootsResponse,
+    RemoteSharedFavorite, RemoteSharedFavoriteRemoveRequest, RemoteSharedFavoriteRemoveResponse,
     RemoteSharedFavoriteUpsertRequest, RemoteSharedFavoritesResponse, RootMoveBatchFailureReason,
     RootMoveBatchItem, RootMoveBatchRequest, RootMoveBatchResponse, RootMoveFailureReason,
     RootMoveRequest, RootMoveResponse, RootMoveRule, RootMoveSearchMode, RootRelativePath,
@@ -409,6 +410,17 @@ impl FauplayRuntime {
 
     pub fn revoke_all_remembered_devices(&self) -> Result<(), RuntimeError> {
         store::revoke_all_remembered_devices(&self.runtime_home_path)
+    }
+
+    pub fn load_remote_access_config(&self) -> Result<RemoteAccessConfigResponse, RuntimeError> {
+        store::load_remote_access_config(&self.runtime_home_path)
+    }
+
+    pub fn verify_remote_access_token(
+        &self,
+        request: RemoteAccessTokenVerifyRequest,
+    ) -> Result<bool, RuntimeError> {
+        store::verify_remote_access_token(&self.runtime_home_path, request)
     }
 
     pub fn sync_remote_published_roots(

@@ -149,6 +149,29 @@ test('Legacy Gateway no longer owns Remembered Device storage', async () => {
   assert.equal(remoteSessionsSource.includes('DEFAULT_REMOTE_REMEMBER_DEVICE_TTL_MS'), false)
 })
 
+test('Legacy Gateway no longer owns Remote Access host config or token verification', async () => {
+  const serverSource = await readFile(new URL('../../tools/legacy-gateway/server.mjs', import.meta.url), 'utf8')
+  const remoteReadonlySource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-readonly.mjs', import.meta.url),
+    'utf8',
+  )
+  const remoteSessionsSource = await readFile(
+    new URL('../../tools/legacy-gateway/remote-sessions.mjs', import.meta.url),
+    'utf8',
+  )
+
+  assert.equal(serverSource.includes('loadGlobalEnvFile'), false)
+  assert.equal(serverSource.includes('readOptionalFileFingerprint'), false)
+  assert.equal(remoteReadonlySource.includes('GLOBAL_REMOTE_ACCESS_CONFIG_PATH'), false)
+  assert.equal(remoteReadonlySource.includes('PROJECT_REMOTE_ACCESS_CONFIG_PATH'), false)
+  assert.equal(remoteReadonlySource.includes('mergeRemoteAccessConfig'), false)
+  assert.equal(remoteReadonlySource.includes('timingSafeEqual'), false)
+  assert.equal(remoteReadonlySource.includes('isTokenMatch'), false)
+  assert.equal(remoteSessionsSource.includes('remoteConfig.token'), false)
+  assert.equal(remoteReadonlySource.includes('readRuntimeRemoteAccessConfig'), true)
+  assert.equal(remoteReadonlySource.includes('verifyRuntimeRemoteAccessToken'), true)
+})
+
 test('Legacy Gateway no longer owns local text preview file reads', async () => {
   await assert.rejects(
     () => access(new URL('../../tools/legacy-gateway/data/files.mjs', import.meta.url), constants.F_OK),

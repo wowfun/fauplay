@@ -12,6 +12,8 @@ mod local_root_bindings;
 mod mcp;
 #[path = "request/remembered_devices.rs"]
 mod remembered_devices;
+#[path = "request/remote_access.rs"]
+mod remote_access;
 #[path = "request/remote_published_roots.rs"]
 mod remote_published_roots;
 #[path = "request/root_operations.rs"]
@@ -26,6 +28,7 @@ pub(crate) use local_directory::*;
 pub(crate) use local_root_bindings::*;
 pub(crate) use mcp::*;
 pub(crate) use remembered_devices::*;
+pub(crate) use remote_access::*;
 pub(crate) use remote_published_roots::*;
 pub(crate) use root_operations::*;
 pub(crate) use runtime_config::*;

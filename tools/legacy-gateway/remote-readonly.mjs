@@ -1,25 +1,21 @@
 import { execFileSync } from 'node:child_process'
-import { timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import {
   listRuntimeAssetFaces,
   listRuntimePeople,
   queryRuntimeFileAnnotations,
+  readRuntimeRemoteAccessConfig,
   readRuntimeDirectoryListing,
   readRuntimeFileAnnotation,
-  readRuntimeRemotePublishedRoots,
   readRuntimeRemoteSharedFavorites,
   readRuntimeTagOptions,
   removeRuntimeRemoteSharedFavorite,
   upsertRuntimeRemoteSharedFavorite,
+  verifyRuntimeRemoteAccessToken,
 } from './remote-file-access.mjs'
 import { statWithDrvfsRetry } from './drvfs.mjs'
 
-const PROJECT_ROOT = process.cwd()
-const DEFAULT_REMOTE_ACCESS_CONFIG_PATH = path.resolve(PROJECT_ROOT, 'src', 'config', 'remote-access.json')
-const GLOBAL_REMOTE_ACCESS_CONFIG_PATH = path.join(os.homedir(), '.fauplay', 'global', 'remote-access.json')
 const REMOTE_THUMBNAIL_SOURCE_MAX_BYTES = readPositiveIntegerEnv('FAUPLAY_REMOTE_THUMBNAIL_SOURCE_MAX_BYTES', 32 * 1024 * 1024)
 const REMOTE_READONLY_HOST_PATH_FIELDS = new Set([
   'absolutePath',
@@ -228,47 +224,6 @@ function getMimeType(name) {
   return MIME_BY_EXTENSION[getFileExtension(name)] || 'application/octet-stream'
 }
 
-async function readRemoteAccessConfigFile(configPath, { allowMissing = false } = {}) {
-  let raw = ''
-  try {
-    raw = await fs.readFile(configPath, 'utf-8')
-  } catch (error) {
-    if (allowMissing && error && typeof error === 'object' && error.code === 'ENOENT') {
-      return null
-    }
-    throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `Failed to read remote-access config: ${configPath}`, 500)
-  }
-
-  let parsed = null
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `Invalid JSON in remote-access config: ${configPath}`, 500)
-  }
-
-  if (!isObjectRecord(parsed)) {
-    throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `remote-access config root must be an object: ${configPath}`, 500)
-  }
-
-  return parsed
-}
-
-function mergeRemoteAccessConfig(baseConfig, overrideConfig) {
-  const base = isObjectRecord(baseConfig) ? baseConfig : {}
-  const override = isObjectRecord(overrideConfig) ? overrideConfig : {}
-  return {
-    ...base,
-    ...override,
-    roots: Array.isArray(override.roots)
-      ? override.roots
-      : (Array.isArray(base.roots) ? base.roots : []),
-  }
-}
-
-function normalizeRemoteRootSource(value) {
-  return value === 'local-browser-sync' ? 'local-browser-sync' : 'manual'
-}
-
 function normalizeOptionalRemotePath(value, fieldName = 'relativePath') {
   if (typeof value !== 'string') {
     return ''
@@ -285,15 +240,6 @@ function normalizeRemoteFavoritePath(value) {
     throw createRemoteError('REMOTE_INVALID_PARAMS', 'path must be a string', 400)
   }
   return normalizeOptionalRemotePath(value, 'path')
-}
-
-async function fileExists(targetPath) {
-  try {
-    await fs.access(targetPath)
-    return true
-  } catch {
-    return false
-  }
 }
 
 async function resolveRealPathWithinRoot(root, targetPath) {
@@ -313,50 +259,6 @@ async function resolveRealPathWithinRoot(root, targetPath) {
   return realPath
 }
 
-async function resolveRemoteRootEntries(configRoots) {
-  const items = Array.isArray(configRoots) ? configRoots : []
-  const seenIds = new Set()
-  const roots = []
-
-  for (const item of items) {
-    if (!isObjectRecord(item)) {
-      throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', 'remote-access.roots[] must contain objects', 500)
-    }
-
-    const id = typeof item.id === 'string' ? item.id.trim() : ''
-    const label = typeof item.label === 'string' ? item.label.trim() : ''
-    const rawPath = typeof item.path === 'string' ? item.path.trim() : ''
-    if (!id || !label || !rawPath) {
-      throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', 'remote-access root entries require id, label and path', 500)
-    }
-    if (seenIds.has(id)) {
-      throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `Duplicate remote-access root id: ${id}`, 500)
-    }
-    seenIds.add(id)
-
-    const resolvedPath = resolveRootPath(rawPath)
-    const rootExists = await fileExists(resolvedPath)
-    if (!rootExists) {
-      throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `Remote root path does not exist: ${resolvedPath}`, 500)
-    }
-
-    const statResult = await statPath(resolvedPath)
-    if (!statResult.isDirectory()) {
-      throw createRemoteError('REMOTE_ACCESS_CONFIG_ERROR', `Remote root path must be a directory: ${resolvedPath}`, 500)
-    }
-
-    const realPath = normalizeAbsolutePath(await fs.realpath(resolvedPath))
-    roots.push({
-      id,
-      label,
-      path: resolvedPath,
-      realPath,
-    })
-  }
-
-  return roots
-}
-
 function readBearerToken(headers) {
   const raw = headers?.authorization
   const header = Array.isArray(raw) ? raw[0] : raw
@@ -366,49 +268,53 @@ function readBearerToken(headers) {
   return trimmed.slice('Bearer '.length).trim()
 }
 
-function isTokenMatch(expected, received) {
-  if (!expected || !received) return false
-  const expectedBuffer = Buffer.from(expected)
-  const receivedBuffer = Buffer.from(received)
-  if (expectedBuffer.length !== receivedBuffer.length) {
-    return false
+function toRemoteReadonlyConfigSource(item) {
+  if (!isObjectRecord(item)) return null
+  const label = typeof item.label === 'string' ? item.label.trim() : ''
+  const sourcePath = typeof item.path === 'string' ? item.path.trim() : ''
+  if (!label || !sourcePath) return null
+  return {
+    label,
+    path: sourcePath,
+    loaded: item.loaded === true,
   }
-  return timingSafeEqual(expectedBuffer, receivedBuffer)
 }
 
-export async function loadRemoteReadonlyConfig() {
-  const defaultConfig = await readRemoteAccessConfigFile(DEFAULT_REMOTE_ACCESS_CONFIG_PATH)
-  const globalConfig = await readRemoteAccessConfigFile(GLOBAL_REMOTE_ACCESS_CONFIG_PATH, { allowMissing: true })
-  const configSources = [
-    {
-      label: 'default',
-      path: DEFAULT_REMOTE_ACCESS_CONFIG_PATH,
-      loaded: true,
-    },
-    {
-      label: 'global',
-      path: GLOBAL_REMOTE_ACCESS_CONFIG_PATH,
-      loaded: Boolean(globalConfig),
-    },
-  ]
+function toRemoteReadonlyRoot(item) {
+  if (!isObjectRecord(item)) return null
+  const id = typeof item.id === 'string' ? item.id.trim() : ''
+  const label = typeof item.label === 'string' ? item.label.trim() : ''
+  const rawPath = typeof item.path === 'string' ? item.path.trim() : ''
+  const rawRealPath = typeof item.realPath === 'string' ? item.realPath.trim() : ''
+  if (!id || !label || !rawPath || !rawRealPath) return null
+  return {
+    id,
+    label,
+    path: resolveRootPath(rawPath),
+    realPath: resolveRootPath(rawRealPath),
+  }
+}
 
-  const merged = mergeRemoteAccessConfig(defaultConfig, globalConfig)
-  const rootSource = normalizeRemoteRootSource(merged.rootSource)
-  const token = typeof process.env.FAUPLAY_REMOTE_ACCESS_TOKEN === 'string'
-    ? process.env.FAUPLAY_REMOTE_ACCESS_TOKEN.trim()
-    : ''
-  const roots = rootSource === 'manual'
-    ? await resolveRemoteRootEntries(merged.roots)
+function toRemoteReadonlyConfig(result) {
+  const roots = Array.isArray(result?.roots)
+    ? result.roots.map(toRemoteReadonlyRoot).filter(Boolean)
+    : []
+  const configSources = Array.isArray(result?.configSources)
+    ? result.configSources.map(toRemoteReadonlyConfigSource).filter(Boolean)
     : []
   return {
-    enabled: merged.enabled === true && Boolean(token),
-    configured: merged.enabled === true,
-    authConfigured: Boolean(token),
-    token,
-    rootSource,
+    enabled: result?.enabled === true,
+    configured: result?.configured === true,
+    authConfigured: result?.authConfigured === true,
+    rootSource: result?.rootSource === 'local-browser-sync' ? 'local-browser-sync' : 'manual',
     roots,
     configSources,
+    fingerprint: typeof result?.fingerprint === 'string' ? result.fingerprint : '',
   }
+}
+
+export async function loadRemoteReadonlyConfig(runtimeBaseUrl) {
+  return toRemoteReadonlyConfig(await readRuntimeRemoteAccessConfig(runtimeBaseUrl))
 }
 
 export function formatRemoteAccessConfigSourceLog(source) {
@@ -425,14 +331,23 @@ export function getRemoteReadonlyCapabilities(remoteConfig) {
   }
 }
 
-export function ensureRemoteReadonlyAuthorized(remoteConfig, headers) {
-  if (remoteConfig.enabled !== true || !remoteConfig.token) {
+export async function ensureRemoteReadonlyAuthorized(remoteConfig, headers, runtimeBaseUrl) {
+  if (remoteConfig.enabled !== true || remoteConfig.authConfigured !== true) {
     throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
   }
 
   const receivedToken = readBearerToken(headers)
-  if (!isTokenMatch(remoteConfig.token, receivedToken)) {
+  if (!receivedToken) {
     throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
+  }
+
+  try {
+    await verifyRuntimeRemoteAccessToken(runtimeBaseUrl, { bearerToken: receivedToken })
+  } catch (error) {
+    if (error?.statusCode === 401) {
+      throw createRemoteError('REMOTE_UNAUTHORIZED', 'Unauthorized', 401)
+    }
+    throw error
   }
 }
 
@@ -482,33 +397,6 @@ export function listRemoteReadonlyRoots(remoteConfig) {
     id: item.id,
     label: item.label,
   }))
-}
-
-function toRemoteReadonlyPublishedRoot(item) {
-  if (!isObjectRecord(item)) return null
-  const id = typeof item.id === 'string' ? item.id.trim() : ''
-  const label = typeof item.label === 'string' ? item.label.trim() : ''
-  const absolutePath = typeof item.absolutePath === 'string' ? item.absolutePath.trim() : ''
-  const realPath = typeof item.realPath === 'string' ? item.realPath.trim() : ''
-  if (!id || !label || !absolutePath || !realPath) return null
-
-  try {
-    return {
-      id,
-      label,
-      path: resolveRootPath(absolutePath),
-      realPath: resolveRootPath(realPath),
-    }
-  } catch {
-    return null
-  }
-}
-
-export async function listRemoteReadonlyPublishedRoots(runtimeBaseUrl) {
-  const result = await readRuntimeRemotePublishedRoots(runtimeBaseUrl)
-  return Array.isArray(result?.items)
-    ? result.items.map(toRemoteReadonlyPublishedRoot).filter(Boolean)
-    : []
 }
 
 function toRemoteReadonlyFavorite(item, allowedRootIds) {

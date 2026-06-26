@@ -130,3 +130,34 @@ pub struct RemoteSharedFavoriteRemoveRequest {
 pub struct RemoteSharedFavoriteRemoveResponse {
     pub removed: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessConfigSource {
+    pub label: String,
+    pub path: PathBuf,
+    pub loaded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessRoot {
+    pub id: String,
+    pub label: String,
+    pub path: PathBuf,
+    pub real_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessConfigResponse {
+    pub enabled: bool,
+    pub configured: bool,
+    pub auth_configured: bool,
+    pub root_source: String,
+    pub roots: Vec<RemoteAccessRoot>,
+    pub config_sources: Vec<RemoteAccessConfigSource>,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteAccessTokenVerifyRequest {
+    pub bearer_token: String,
+}

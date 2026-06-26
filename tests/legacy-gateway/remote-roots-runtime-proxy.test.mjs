@@ -5,6 +5,10 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import {
+  createRuntimeRemoteAccessConfig,
+  handleRuntimeRemoteAccessHostRequest,
+} from './remote-runtime-fixture.mjs'
 
 test('Remote Access Remote Roots are served through Fauplay Runtime', async () => {
   const previousHome = process.env.HOME
@@ -33,6 +37,17 @@ test('Remote Access Remote Roots are served through Fauplay Runtime', async () =
     process.env.FAUPLAY_REMOTE_ACCESS_TOKEN = 'secret-token'
 
     runtimeServer = http.createServer(async (req, res) => {
+      if (await handleRuntimeRemoteAccessHostRequest(req, res, {
+        config: createRuntimeRemoteAccessConfig({
+          rootPath: remoteRoot,
+          rootId: 'runtime-root-a',
+          label: 'Runtime Root A',
+          rootSource: 'local-browser-sync',
+        }),
+      })) {
+        return
+      }
+
       const body = await readRequestBody(req)
       runtimeRequests.push({
         method: req.method,
@@ -41,21 +56,6 @@ test('Remote Access Remote Roots are served through Fauplay Runtime', async () =
       })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
-
-      if (req.method === 'GET' && req.url === '/v1/admin/remote-published-roots/resolved') {
-        res.end(JSON.stringify({
-          ok: true,
-          items: [
-            {
-              id: 'runtime-root-a',
-              label: 'Runtime Root A',
-              absolutePath: remoteRoot,
-              realPath: remoteRoot,
-            },
-          ],
-        }))
-        return
-      }
 
       res.statusCode = 404
       res.end(JSON.stringify({ ok: false, error: 'unexpected Runtime path' }))
@@ -85,12 +85,9 @@ test('Remote Access Remote Roots are served through Fauplay Runtime', async () =
       }],
     })
 
-    assert.ok(
-      runtimeRequests.some((request) => (
-        request.method === 'GET'
-        && request.url === '/v1/admin/remote-published-roots/resolved'
-      )),
-      'gateway should hydrate local-browser-sync Remote Roots through Fauplay Runtime',
+    assert.equal(
+      runtimeRequests.some((request) => request.url === '/v1/admin/remote-published-roots/resolved'),
+      false,
     )
   } finally {
     if (gatewayServer) await closeServer(gatewayServer)
