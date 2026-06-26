@@ -291,6 +291,29 @@ fn runtime_api_faces_lists_people_from_runtime_home() {
             .to_string()
     );
 
+    let default_scope_body = serde_json::json!({
+        "rootPath": root_path.display().to_string(),
+        "page": 1,
+        "size": 10
+    })
+    .to_string();
+    let (address, server) = serve_runtime_once(runtime.clone());
+    let default_scope_response = send_json_request(
+        &address,
+        "POST",
+        "/v1/faces/list-people",
+        &default_scope_body,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        default_scope_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "default-scope list-people should be handled by the Rust Runtime: {default_scope_response}"
+    );
+    let default_scope_json = response_json(&default_scope_response);
+    assert_eq!(default_scope_json["scope"], "global");
+    assert_eq!(default_scope_json["items"][0]["faceCount"], 3);
+
     let rename_body = serde_json::json!({
         "rootPath": root_path.display().to_string(),
         "personId": "person-a",

@@ -321,7 +321,7 @@ fn face_scope_json(value: FaceScope) -> &'static str {
 }
 
 fn parse_face_scope(value: Option<&str>) -> Option<FaceScope> {
-    match value.unwrap_or("root") {
+    match value.unwrap_or("global") {
         "root" => Some(FaceScope::Root),
         "global" => Some(FaceScope::Global),
         _ => None,
