@@ -29,7 +29,8 @@ pub use duplicates::{
 pub use errors::RuntimeError;
 pub use faces::{
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus,
+    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
+    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus,
 };
 pub use file_content::{
     FileContentRange, FileContentRangeRequest, FileContentRequest, FileContentResponse,

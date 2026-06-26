@@ -151,7 +151,7 @@ rl.on('line', (line) => {
         "personId": "person-without-faces"
     })
     .to_string();
-    let (address, server) = serve_runtime_once(runtime);
+    let (address, server) = serve_runtime_once(runtime.clone());
     let list_person_response = send_json_request(
         &address,
         "POST",
@@ -168,6 +168,32 @@ rl.on('line', (line) => {
         response_json(&list_person_response)["items"],
         serde_json::json!([])
     );
+
+    let list_review_body = serde_json::json!({
+        "rootPath": root_path.display().to_string(),
+        "bucket": "unassigned"
+    })
+    .to_string();
+    let (address, server) = serve_runtime_once(runtime);
+    let list_review_response = send_json_request(
+        &address,
+        "POST",
+        "/v1/faces/list-review-faces",
+        &list_review_body,
+    );
+    server.join().expect("server thread should finish");
+
+    assert!(
+        list_review_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "list-review-faces should be handled by the Rust Runtime: {list_review_response}"
+    );
+    let list_review_json = response_json(&list_review_response);
+    assert_eq!(list_review_json["ok"], true);
+    assert_eq!(list_review_json["scope"], "root");
+    assert_eq!(list_review_json["bucket"], "unassigned");
+    assert_eq!(list_review_json["total"], 1);
+    assert_eq!(list_review_json["items"][0]["assetPath"], "photos/ada.jpg");
+    assert_eq!(list_review_json["items"][0]["status"], "unassigned");
 }
 
 fn send_json_request(address: &str, method: &str, path: &str, body: &str) -> String {

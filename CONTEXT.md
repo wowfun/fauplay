@@ -164,6 +164,10 @@ _Avoid_: gateway face image, crop URL
 A face observed in File Content, identified independently from the file path that revealed it. A Detected Face carries its location in the source media, review status, and optional Person assignment.
 _Avoid_: face row, face result
 
+**Face Review Bucket**:
+A view of Detected Faces grouped by review status so the user can finish person assignment or cleanup work.
+_Avoid_: review query, face filter
+
 **Person**:
 A user-maintained identity that groups Detected Faces which should be treated as the same person.
 _Avoid_: face group, cluster

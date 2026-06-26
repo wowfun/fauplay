@@ -21,7 +21,6 @@ export {
   renamePerson,
   mergePeople,
   listAssetFaces,
-  listReviewFaces,
   suggestPeople,
   assignFaces,
   createPersonFromFaces,

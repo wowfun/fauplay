@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::{
     FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus, FauplayRuntime,
+    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
+    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, FauplayRuntime,
     RootRelativePath,
 };
 
@@ -81,9 +82,53 @@ pub(in crate::server) fn handle_list_asset_faces_json(
     }
 }
 
+pub(in crate::server) fn handle_list_review_faces_json(
+    runtime: &FauplayRuntime,
+    request: &str,
+) -> HttpResponse {
+    let payload = match parse_json_body(request) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(root_path) = json_string_field(&payload, "rootPath") else {
+        return http_response(400, "Bad Request", "{\"error\":\"rootPath is required\"}");
+    };
+    let Some(bucket) = parse_face_review_bucket(json_string_field(&payload, "bucket")) else {
+        return http_response(
+            400,
+            "Bad Request",
+            "{\"error\":\"bucket must be \\\"unassigned\\\" or \\\"ignored\\\"\"}",
+        );
+    };
+    let page = json_usize_field(&payload, "page").unwrap_or(1).max(1);
+    let size = json_usize_field(&payload, "size")
+        .unwrap_or(100)
+        .clamp(1, 500);
+
+    match runtime.list_review_faces(FaceListReviewFacesRequest {
+        root_path: PathBuf::from(root_path),
+        bucket,
+        page,
+        size,
+    }) {
+        Ok(response) => http_response(200, "OK", &face_list_review_faces_response_json(response)),
+        Err(error) => http_response(400, "Bad Request", &error_json(&error.to_string())),
+    }
+}
+
 fn face_root_relative_path(payload: &serde_json::Value) -> Option<&str> {
     json_string_field(payload, "relativePath")
         .or_else(|| json_string_field(payload, "rootRelativePath"))
+}
+
+fn json_usize_field(payload: &serde_json::Value, key: &str) -> Option<usize> {
+    match payload.get(key) {
+        Some(serde_json::Value::Number(value)) => {
+            value.as_u64().and_then(|value| usize::try_from(value).ok())
+        }
+        Some(serde_json::Value::String(value)) => value.trim().parse::<usize>().ok(),
+        _ => None,
+    }
 }
 
 fn face_detect_asset_response_json(response: FaceDetectAssetResponse) -> String {
@@ -103,6 +148,18 @@ fn face_list_asset_faces_response_json(response: FaceListAssetFacesResponse) -> 
     format!(
         "{{\"ok\":true,\"scope\":\"{}\",\"total\":{},\"items\":[{}]}}",
         face_scope_json(response.scope),
+        response.total,
+        face_records_json(response.items),
+    )
+}
+
+fn face_list_review_faces_response_json(response: FaceListReviewFacesResponse) -> String {
+    format!(
+        "{{\"ok\":true,\"scope\":\"{}\",\"bucket\":\"{}\",\"page\":{},\"size\":{},\"total\":{},\"items\":[{}]}}",
+        face_scope_json(response.scope),
+        face_review_bucket_json(response.bucket),
+        response.page,
+        response.size,
         response.total,
         face_records_json(response.items),
     )
@@ -158,6 +215,21 @@ fn optional_u64_json(value: Option<u64>) -> String {
 fn face_scope_json(value: FaceScope) -> &'static str {
     match value {
         FaceScope::Root => "root",
+    }
+}
+
+fn parse_face_review_bucket(value: Option<&str>) -> Option<FaceReviewBucket> {
+    match value {
+        Some("unassigned") => Some(FaceReviewBucket::Unassigned),
+        Some("ignored") => Some(FaceReviewBucket::Ignored),
+        _ => None,
+    }
+}
+
+fn face_review_bucket_json(value: FaceReviewBucket) -> &'static str {
+    match value {
+        FaceReviewBucket::Unassigned => "unassigned",
+        FaceReviewBucket::Ignored => "ignored",
     }
 }
 

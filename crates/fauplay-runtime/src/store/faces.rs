@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus, RootRelativePath,
+    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
+    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, RootRelativePath,
     RuntimeError,
 };
 
@@ -149,6 +150,42 @@ pub(crate) fn list_asset_faces(
     Ok(FaceListAssetFacesResponse {
         scope: FaceScope::Root,
         total: items.len(),
+        items,
+    })
+}
+
+pub(crate) fn list_review_faces(
+    runtime_home_path: &Path,
+    request: FaceListReviewFacesRequest,
+) -> Result<FaceListReviewFacesResponse, RuntimeError> {
+    let store_path = faces_path(runtime_home_path);
+    let root_path = root_path_key(&request.root_path);
+    let page = request.page.max(1);
+    let size = request.size.clamp(1, 500);
+    let offset = page.saturating_sub(1).saturating_mul(size);
+    let mut matching = read_face_records(&store_path)?
+        .into_iter()
+        .filter(|record| record.root_path == root_path)
+        .filter(|record| face_status_matches_review_bucket(record.status, request.bucket))
+        .filter_map(|record| face_record_from_data(&record))
+        .collect::<Vec<_>>();
+
+    matching.sort_by(|left, right| {
+        face_review_status_order(left.status)
+            .cmp(&face_review_status_order(right.status))
+            .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms))
+            .then_with(|| left.face_id.cmp(&right.face_id))
+    });
+
+    let total = matching.len();
+    let items = matching.into_iter().skip(offset).take(size).collect();
+
+    Ok(FaceListReviewFacesResponse {
+        scope: FaceScope::Root,
+        bucket: request.bucket,
+        page,
+        size,
+        total,
         items,
     })
 }
@@ -371,6 +408,26 @@ fn parse_face_status(value: Option<&str>) -> FaceStatus {
         Some("manual_unassigned") => FaceStatus::ManualUnassigned,
         Some("ignored") => FaceStatus::Ignored,
         _ => FaceStatus::Unassigned,
+    }
+}
+
+fn face_status_matches_review_bucket(status: FaceStatus, bucket: FaceReviewBucket) -> bool {
+    match bucket {
+        FaceReviewBucket::Unassigned => matches!(
+            status,
+            FaceStatus::ManualUnassigned | FaceStatus::Deferred | FaceStatus::Unassigned
+        ),
+        FaceReviewBucket::Ignored => status == FaceStatus::Ignored,
+    }
+}
+
+fn face_review_status_order(status: FaceStatus) -> u8 {
+    match status {
+        FaceStatus::ManualUnassigned => 0,
+        FaceStatus::Deferred => 1,
+        FaceStatus::Unassigned => 2,
+        FaceStatus::Ignored => 3,
+        FaceStatus::Assigned => 4,
     }
 }
 

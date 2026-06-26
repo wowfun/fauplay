@@ -11,11 +11,12 @@ pub use api::{
     DirectoryEntry, DirectoryEntryKind, DuplicateFile, DuplicateFilesRequest,
     DuplicateFilesResponse, DuplicateSeedSkip, DuplicateSeedSkipReason, DuplicateSet,
     FaceBoundingBox, FaceDetectAssetRequest, FaceDetectAssetResponse, FaceListAssetFacesRequest,
-    FaceListAssetFacesResponse, FaceMediaType, FaceRecord, FaceScope, FaceStatus,
-    FileAnnotationActionSource, FileAnnotationFile, FileAnnotationMatchMode,
-    FileAnnotationMissingCleanupImpact, FileAnnotationMissingCleanupRequest,
-    FileAnnotationMissingCleanupResponse, FileAnnotationMutationResponse,
-    FileAnnotationPathMapping, FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
+    FaceListAssetFacesResponse, FaceListReviewFacesRequest, FaceListReviewFacesResponse,
+    FaceMediaType, FaceRecord, FaceReviewBucket, FaceScope, FaceStatus, FileAnnotationActionSource,
+    FileAnnotationFile, FileAnnotationMatchMode, FileAnnotationMissingCleanupImpact,
+    FileAnnotationMissingCleanupRequest, FileAnnotationMissingCleanupResponse,
+    FileAnnotationMutationResponse, FileAnnotationPathMapping,
+    FileAnnotationPathRebindFailureReason, FileAnnotationPathRebindItem,
     FileAnnotationPathRebindRequest, FileAnnotationPathRebindResponse, FileAnnotationQueryRequest,
     FileAnnotationQueryResponse, FileAnnotationReadRequest, FileAnnotationReadResponse,
     FileAnnotationSetValueRequest, FileAnnotationTagBindingRequest,
@@ -105,6 +106,13 @@ impl FauplayRuntime {
         request: FaceListAssetFacesRequest,
     ) -> Result<FaceListAssetFacesResponse, RuntimeError> {
         store::list_asset_faces(&self.runtime_home_path, request)
+    }
+
+    pub fn list_review_faces(
+        &self,
+        request: FaceListReviewFacesRequest,
+    ) -> Result<FaceListReviewFacesResponse, RuntimeError> {
+        store::list_review_faces(&self.runtime_home_path, request)
     }
 
     pub fn load_global_shortcut_config(
