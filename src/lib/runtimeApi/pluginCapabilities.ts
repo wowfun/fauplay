@@ -60,10 +60,6 @@ interface RuntimeClientAdapter {
   clearTimeout: (timerId: ReturnType<typeof setTimeout>) => void
 }
 
-interface ViteRuntimeEnv {
-  VITE_FAUPLAY_RUNTIME_BASE_URL?: string
-}
-
 export function createRuntimePluginCapabilityClient(
   options: RuntimePluginCapabilityClientOptions = {},
 ): RuntimePluginCapabilityClient {
@@ -179,22 +175,15 @@ async function fetchRuntimeJsonWithTimeout<T>(
 
 function buildDefaultRuntimeUrl(endpointPath: string): string {
   const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`
-  const runtimeBaseUrl = resolveLocalRuntimeBaseUrl(getViteRuntimeEnv(), getBrowserOrigin)
+  const runtimeBaseUrl = resolveLocalRuntimeBaseUrl(getBrowserOrigin)
   return new URL(normalizedPath, `${runtimeBaseUrl.replace(/\/+$/, '')}/`).toString()
-}
-
-function getViteRuntimeEnv(): ViteRuntimeEnv {
-  const meta = import.meta as ImportMeta & { env?: ViteRuntimeEnv }
-  return {
-    VITE_FAUPLAY_RUNTIME_BASE_URL: meta.env?.VITE_FAUPLAY_RUNTIME_BASE_URL,
-  }
 }
 
 function getBrowserOrigin(): string {
   if (typeof window !== 'undefined' && typeof window.location?.origin === 'string') {
     return window.location.origin
   }
-  return 'http://127.0.0.1:3211'
+  throw new RuntimeHttpError('Runtime API origin is unavailable outside the browser')
 }
 
 function isAbortError(error: unknown): boolean {

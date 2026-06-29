@@ -1,3 +1,5 @@
+#[path = "runtime_api/app_service.rs"]
+mod app_service;
 #[path = "runtime_api/duplicate_files.rs"]
 mod duplicate_files;
 #[path = "runtime_api/faces.rs"]

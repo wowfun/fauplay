@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fauplay_runtime::{
     DirectoryEntry, DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, ListingEntryFilter,
@@ -31,29 +30,6 @@ fn lists_immediate_entries_in_a_local_root() {
             entry_summary("albums", "albums", DirectoryEntryKind::Directory, None),
             entry_summary("photo.jpg", "photo.jpg", DirectoryEntryKind::File, Some(5)),
         ],
-    );
-}
-
-#[test]
-fn binary_lists_immediate_entries_in_a_local_root() {
-    let fixture = Fixture::new("binary_lists_immediate_entries_in_a_local_root");
-    fixture.write_file("photo.jpg", "image");
-    fixture.create_dir("albums");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_fauplay-runtime"))
-        .arg("list")
-        .arg(&fixture.root)
-        .output()
-        .expect("runtime binary should run");
-
-    assert!(
-        output.status.success(),
-        "runtime binary should succeed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "directory\talbums\nfile\tphoto.jpg\n"
     );
 }
 

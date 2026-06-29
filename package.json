@@ -5,11 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.8.0",
   "scripts": {
-    "dev": "vite",
-    "dev:https:setup": "node tools/dev/setup-https-dev.mjs",
-    "dev:https": "node tools/dev/run-https-dev.mjs",
-    "runtime:cli": "cargo run -p fauplay-runtime --",
-    "runtime:serve": "cargo run -p fauplay-runtime -- serve 127.0.0.1:3211",
+    "start": "cargo run -p fauplay-runtime --bin fauplay --",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node --test tests/runtime-api/*.test.mjs tests/preview/*.test.mjs tests/workspace/*.test.mjs tests/faces/*.test.mjs tests/explorer/*.test.mjs",

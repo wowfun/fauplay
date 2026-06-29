@@ -34,9 +34,7 @@ export function getSameOriginRuntimeBaseUrl(): string {
 }
 
 export function getLocalRuntimeBaseUrl(): string {
-  return resolveLocalRuntimeBaseUrl({
-    VITE_FAUPLAY_RUNTIME_BASE_URL: import.meta.env.VITE_FAUPLAY_RUNTIME_BASE_URL,
-  }, getCurrentOrigin)
+  return resolveLocalRuntimeBaseUrl(getCurrentOrigin)
 }
 
 export function buildLocalRuntimeUrl(endpointPath: string): string {

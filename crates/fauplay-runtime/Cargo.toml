@@ -9,7 +9,7 @@ name = "fauplay_runtime"
 path = "src/lib.rs"
 
 [[bin]]
-name = "fauplay-runtime"
+name = "fauplay"
 path = "src/main.rs"
 
 [dependencies]

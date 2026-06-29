@@ -28,7 +28,7 @@ export default [
     },
   },
   {
-    files: ['tests/**/*.mjs', 'tools/dev/**/*.mjs'],
+    files: ['tests/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',

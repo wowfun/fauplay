@@ -59,7 +59,9 @@ pub use api::{
     RootTrashListRequest, RootTrashListResponse, RootTrashMutationItem, RootTrashMutationResponse,
     RootTrashRequest, RuntimeError, TextPreviewRequest, TextPreviewResponse, TextPreviewStatus,
 };
-pub use server::{serve_http, serve_one_http_request};
+pub use server::{
+    serve_fauplay_app, serve_http, serve_one_fauplay_app_request, serve_one_http_request,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 

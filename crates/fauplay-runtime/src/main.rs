@@ -1,12 +1,14 @@
 use std::env;
+use std::fs;
 use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::process;
 
-use fauplay_runtime::{
-    DirectoryEntryKind, FauplayRuntime, ListDirectoryRequest, ListingQuery, RootRelativePath,
-    RuntimeError, serve_http, serve_one_http_request,
-};
+use fauplay_runtime::{FauplayRuntime, RuntimeError, serve_fauplay_app};
+
+const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1:3211";
+const DEFAULT_WEB_DIST_PATH: &str = "dist";
+const USAGE: &str = "usage: fauplay [--addr <host:port>]";
 
 fn main() {
     if let Err(error) = run(env::args().skip(1).collect()) {
@@ -17,65 +19,46 @@ fn main() {
 
 fn run(args: Vec<String>) -> Result<(), CliError> {
     match args.as_slice() {
-        [command, root_path] if command == "list" => {
-            list_directory(PathBuf::from(root_path), PathBuf::new())
+        [] => serve(
+            DEFAULT_BIND_ADDRESS
+                .parse()
+                .map_err(CliError::InvalidBindAddress)?,
+        ),
+        [flag] if flag == "--help" || flag == "-h" => {
+            println!("{USAGE}");
+            Ok(())
         }
-        [command, root_path, relative_path] if command == "list" => {
-            list_directory(PathBuf::from(root_path), PathBuf::from(relative_path))
-        }
-        [command, bind_address] if command == "serve-once" => {
-            serve_once(bind_address.parse().map_err(CliError::InvalidBindAddress)?)
-        }
-        [command, bind_address] if command == "serve" => {
+        [flag, bind_address] if flag == "--addr" => {
             serve(bind_address.parse().map_err(CliError::InvalidBindAddress)?)
         }
         _ => Err(CliError::Usage),
     }
 }
 
-fn list_directory(root_path: PathBuf, relative_path: PathBuf) -> Result<(), CliError> {
-    let runtime = FauplayRuntime::new();
-    let root_relative_path = RootRelativePath::try_from(relative_path)?;
-    let response = runtime.list_local_directory(ListDirectoryRequest {
-        root_path,
-        root_relative_path,
-        flattened: false,
-        entry_limit: None,
-        entry_offset: 0,
-        query: ListingQuery::default(),
-    })?;
+fn serve(bind_address: SocketAddr) -> Result<(), CliError> {
+    let web_dist_path = PathBuf::from(DEFAULT_WEB_DIST_PATH);
+    ensure_web_app_build(&web_dist_path)?;
+    let listener = TcpListener::bind(bind_address).map_err(CliError::Bind)?;
+    let local_address = listener.local_addr().map_err(CliError::Bind)?;
+    println!("listening\t{local_address}");
+    println!("open\t{}", open_url_for_address(local_address));
+    serve_fauplay_app(listener, FauplayRuntime::new(), web_dist_path)?;
+    Ok(())
+}
 
-    for entry in response.entries {
-        println!(
-            "{}\t{}",
-            directory_entry_kind_label(entry.kind),
-            entry.root_relative_path
-        );
+fn ensure_web_app_build(web_dist_path: &std::path::Path) -> Result<(), CliError> {
+    let index_path = web_dist_path.join("index.html");
+    if fs::metadata(&index_path).is_ok_and(|metadata| metadata.is_file()) {
+        return Ok(());
     }
 
-    Ok(())
+    Err(CliError::MissingWebAppBuild(index_path))
 }
 
-fn serve_once(bind_address: SocketAddr) -> Result<(), CliError> {
-    let listener = TcpListener::bind(bind_address).map_err(CliError::Bind)?;
-    let local_address = listener.local_addr().map_err(CliError::Bind)?;
-    println!("listening\t{local_address}");
-    serve_one_http_request(listener, FauplayRuntime::new())?;
-    Ok(())
-}
-
-fn serve(bind_address: SocketAddr) -> Result<(), CliError> {
-    let listener = TcpListener::bind(bind_address).map_err(CliError::Bind)?;
-    let local_address = listener.local_addr().map_err(CliError::Bind)?;
-    println!("listening\t{local_address}");
-    serve_http(listener, FauplayRuntime::new())?;
-    Ok(())
-}
-
-fn directory_entry_kind_label(kind: DirectoryEntryKind) -> &'static str {
-    match kind {
-        DirectoryEntryKind::Directory => "directory",
-        DirectoryEntryKind::File => "file",
+fn open_url_for_address(address: SocketAddr) -> String {
+    match address {
+        SocketAddr::V4(address) => format!("http://{}:{}/", address.ip(), address.port()),
+        SocketAddr::V6(address) => format!("http://[{}]:{}/", address.ip(), address.port()),
     }
 }
 
@@ -83,6 +66,7 @@ fn directory_entry_kind_label(kind: DirectoryEntryKind) -> &'static str {
 enum CliError {
     Bind(std::io::Error),
     InvalidBindAddress(std::net::AddrParseError),
+    MissingWebAppBuild(PathBuf),
     Runtime(RuntimeError),
     Usage,
 }
@@ -100,10 +84,13 @@ impl std::fmt::Display for CliError {
             CliError::InvalidBindAddress(error) => {
                 write!(formatter, "invalid bind address: {error}")
             }
-            CliError::Runtime(error) => write!(formatter, "{error}"),
-            CliError::Usage => formatter.write_str(
-                "usage: fauplay-runtime list <root> [relative]\n       fauplay-runtime serve <addr>\n       fauplay-runtime serve-once <addr>",
+            CliError::MissingWebAppBuild(index_path) => write!(
+                formatter,
+                "Web App build not found at {}; run `pnpm run build` before `pnpm run start`",
+                index_path.display()
             ),
+            CliError::Runtime(error) => write!(formatter, "{error}"),
+            CliError::Usage => formatter.write_str(USAGE),
         }
     }
 }

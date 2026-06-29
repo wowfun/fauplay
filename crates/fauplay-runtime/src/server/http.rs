@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 
 use crate::{FauplayRuntime, FileContentRangeRequest, FileContentResponse, RuntimeError};
 
@@ -27,6 +28,33 @@ pub fn serve_http(listener: TcpListener, runtime: FauplayRuntime) -> Result<(), 
     Ok(())
 }
 
+pub fn serve_one_fauplay_app_request(
+    listener: TcpListener,
+    runtime: FauplayRuntime,
+    web_dist_path: impl AsRef<Path>,
+) -> Result<(), RuntimeError> {
+    let (mut stream, _) = listener
+        .accept()
+        .map_err(|source| RuntimeError::network("failed to accept Fauplay request", source))?;
+
+    serve_fauplay_app_stream(&runtime, web_dist_path.as_ref(), &mut stream)
+}
+
+pub fn serve_fauplay_app(
+    listener: TcpListener,
+    runtime: FauplayRuntime,
+    web_dist_path: impl AsRef<Path>,
+) -> Result<(), RuntimeError> {
+    let web_dist_path = web_dist_path.as_ref();
+    for stream_result in listener.incoming() {
+        let mut stream = stream_result
+            .map_err(|source| RuntimeError::network("failed to accept Fauplay request", source))?;
+        serve_fauplay_app_stream(&runtime, web_dist_path, &mut stream)?;
+    }
+
+    Ok(())
+}
+
 fn serve_http_stream(runtime: &FauplayRuntime, stream: &mut TcpStream) -> Result<(), RuntimeError> {
     let request = read_http_request(&mut *stream)?;
     let response = super::handle_http_request(runtime, &request);
@@ -35,6 +63,22 @@ fn serve_http_stream(runtime: &FauplayRuntime, stream: &mut TcpStream) -> Result
     stream
         .write_all(&response_bytes)
         .map_err(|source| RuntimeError::network("failed to write Runtime API response", source))?;
+
+    Ok(())
+}
+
+fn serve_fauplay_app_stream(
+    runtime: &FauplayRuntime,
+    web_dist_path: &Path,
+    stream: &mut TcpStream,
+) -> Result<(), RuntimeError> {
+    let request = read_http_request(&mut *stream)?;
+    let response = super::handle_fauplay_app_request(runtime, web_dist_path, &request);
+    let response_bytes = response.into_bytes();
+
+    stream
+        .write_all(&response_bytes)
+        .map_err(|source| RuntimeError::network("failed to write Fauplay response", source))?;
 
     Ok(())
 }

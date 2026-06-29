@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::{FaceMutationAction, FauplayRuntime, TextPreviewStatus};
@@ -17,8 +18,11 @@ mod remote_published_roots;
 mod request;
 mod root_operations;
 mod runtime_config;
+mod static_files;
 
-pub use http::{serve_http, serve_one_http_request};
+pub use http::{
+    serve_fauplay_app, serve_http, serve_one_fauplay_app_request, serve_one_http_request,
+};
 
 use http::{
     HttpResponse, binary_response, binary_response_with_headers, file_content_response,
@@ -365,6 +369,29 @@ fn handle_http_request(runtime: &FauplayRuntime, request: &str) -> HttpResponse 
         }
         _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
     }
+}
+
+fn handle_fauplay_app_request(
+    runtime: &FauplayRuntime,
+    web_dist_path: &Path,
+    request: &str,
+) -> HttpResponse {
+    let Some((method, target)) = parse_http_request_line(request) else {
+        return http_response(400, "Bad Request", "{\"error\":\"invalid HTTP request\"}");
+    };
+
+    if is_runtime_api_target(target) {
+        return handle_http_request(runtime, request);
+    }
+
+    match method {
+        "GET" => static_files::handle_web_app_request(web_dist_path, target),
+        _ => http_response(404, "Not Found", "{\"error\":\"not found\"}"),
+    }
+}
+
+fn is_runtime_api_target(target: &str) -> bool {
+    target == "/v1" || target.starts_with("/v1/") || target.starts_with("/v1?")
 }
 
 fn handle_detect_assets_job_get(runtime: &FauplayRuntime, target: &str) -> HttpResponse {
