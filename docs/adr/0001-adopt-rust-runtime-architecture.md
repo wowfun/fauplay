@@ -12,7 +12,7 @@ Large folders need controlled filesystem traversal, indexing, metadata storage, 
 
 The frontend should remain TypeScript-first because UI state, interaction, layout, and view composition are still frontend concerns. Rust should own the local runtime because the runtime needs predictable filesystem access, concurrency control, persistent local data, and a path into Tauri without rewriting product logic.
 
-The existing Node gateway under `scripts/` is migration source, not the target architecture.
+The old Node gateway and the old `scripts/` code location were migration artifacts. They are not part of the target architecture.
 
 ## Decision
 
@@ -20,7 +20,9 @@ Fauplay will adopt a required Rust local runtime named `fauplay-runtime`.
 
 `fauplay-runtime` is the core runtime boundary for local filesystem access, indexing, thumbnail derivation, persistence, task orchestration, and plugin/MCP coordination. It is not an optional sidecar.
 
-The TypeScript frontend remains the primary UI layer. It consumes runtime capabilities through a versioned application boundary. The initial boundary is a local HTTP API so browser-based development and the future remote-readonly surface can keep working during the rebuild.
+The TypeScript frontend remains the primary UI layer. It consumes runtime capabilities through a versioned application boundary. The initial boundary is a same-origin local HTTP API so the product can run as one local service.
+
+The Rust runtime owns the local Fauplay app service: the `fauplay` product CLI serves the built Web App from `dist/`, the local Runtime API under `/v1`, and the Remote Access HTTP surface. Build and startup remain separate actions, but startup does not depend on a frontend development server or proxy wrapper.
 
 Future Tauri integration must reuse `fauplay-runtime` library code. Tauri commands may act as host adapters, but they must not reimplement runtime product logic.
 
@@ -30,7 +32,11 @@ Future WebAssembly support is allowed as a frontend acceleration path, but Wasm 
 
 Plugin/MCP integration remains the extension model for optional, replaceable, or externally provided capabilities. The runtime owns shared primitives and the local execution boundary. Plugins own specialized capabilities.
 
-Runtime backend and product logic must not live under `scripts/`. The `scripts/` directory is reserved for development and maintenance helpers.
+Runtime backend and product logic must not live under `scripts/` or any other helper-tooling location.
+
+Fauplay will not reserve a top-level `scripts/` directory as a code location. Plugin/MCP implementations live under `tools/mcp/` unless they later graduate into runtime-owned modules. Helper tooling must not define the product startup model.
+
+The Node legacy gateway is retired from the runtime path and repository command surface. It must not remain as a thin Remote Access proxy, because that would preserve an obsolete runtime identity and make future Tauri integration easier to drift away from the Rust runtime library.
 
 ## Target Repository Layout
 
@@ -46,8 +52,8 @@ docs/
   adr/
     0001-adopt-rust-runtime-architecture.md
 
-scripts/
-  # development and maintenance helpers only
+tools/
+  mcp/              # plugin/MCP capability implementations
 ```
 
 Inside `fauplay-runtime`, use modules before new crates:
@@ -73,9 +79,11 @@ The old Pure Web plus Optional Gateway baseline is superseded. Core browsing, in
 
 The frontend can still run as a TypeScript application, but production-grade local browsing assumes that `fauplay-runtime` is available.
 
-The Node gateway can remain temporarily as migration source. New runtime behavior should be implemented in Rust.
+New runtime behavior should be implemented in Rust. The retired Node gateway may be used only as historical migration reference from archived files or old commits, not as a maintained adapter.
 
-The project accepts a local runtime requirement in exchange for better filesystem performance, a clearer security boundary, shared runtime code for Tauri, and less product logic in scripts.
+The project accepts a local runtime requirement in exchange for better filesystem performance, a clearer security boundary, shared runtime code for Tauri, and no product logic in helper-tooling locations.
+
+Repository command surfaces and tests should not keep legacy gateway entrypoints alive. Runtime interface coverage belongs at the `fauplay-runtime` boundary.
 
 ## Non-goals
 
